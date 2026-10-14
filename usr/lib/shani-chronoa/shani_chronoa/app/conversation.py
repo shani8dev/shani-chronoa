@@ -562,7 +562,10 @@ class ConversationMixin:
         self._clock_token_at_start = self._tool_clock_token
         self._tool_clock_name = name
         self._tool_clock_started = time.monotonic()
-        self.window.set_status(self._tool_clock_text(0))
+        # `set_progress`, not `set_status`: the clock is a running reading and
+        # an aside outranks it. It used to tick straight over the detail
+        # line, so a refusal or a settings toggle was gone within a second.
+        self.window.set_progress(self._tool_clock_text(0))
         self._tool_clock = GLib.timeout_add_seconds(
             1, self._on_tool_clock_tick)
         return GLib.SOURCE_REMOVE
@@ -576,7 +579,7 @@ class ConversationMixin:
         if self._tool_clock_token != self._clock_token_at_start:
             return GLib.SOURCE_REMOVE
         if self.window:
-            self.window.set_status(
+            self.window.set_progress(
                 self._tool_clock_text(time.monotonic() - self._tool_clock_started))
         return GLib.SOURCE_CONTINUE
 
@@ -639,7 +642,13 @@ class ConversationMixin:
                     f"Chronoa could not finish that turn. {result}",
                     "error")
                 self.window.set_orb_state("error")
-                self.window.set_status("Ready")
+                # **Not `set_status("Ready")`.** A failed turn used to write
+                # the idle label onto the detail line, so the window read
+                # "Ready" on both lines at once - and it is a *state* word on
+                # the one line documented as never carrying state. The state
+                # label already says it; what the turn owes the detail line
+                # is the end of a progress reading.
+                self.window.set_progress("")
             self._turn_finished()
             return GLib.SOURCE_REMOVE
 
@@ -655,7 +664,10 @@ class ConversationMixin:
         if self.window:
             self.window.set_response(response)
             self.window.set_state(AssistantState.SPEAKING if speaking else AssistantState.IDLE)
-            self.window.set_status("")
+            # The turn's own clear, so it is the progress lane. Measured: an
+            # aside written in the last second of a turn was erased here
+            # before it had been on screen at all.
+            self.window.set_progress("")
         # A `conversations` call in this turn may have opened another one.
         self._follow_active_conversation()
         self._maybe_title()

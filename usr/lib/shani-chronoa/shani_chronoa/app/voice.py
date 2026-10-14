@@ -159,7 +159,7 @@ class VoiceMixin:
                 GLib.timeout_add(180, self._settle_into_listening)
             else:
                 self.window.set_state(AssistantState.LISTENING)
-            self.window.set_status("")
+            self.window.set_progress("")
         cues.play("listening", self.config)
         self._start_listening()
 

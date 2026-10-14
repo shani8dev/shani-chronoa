@@ -25247,3 +25247,137 @@ did not need either.
 **Not claimed: any render.** The main window still cannot be photographed above
 460px, and this change is to the prompt's *text* rather than its layout, so
 nothing here has a picture behind it.
+
+## The status line: one slot, four jobs, and no ordering between them
+
+The window has one detail line under the state line, and **95 `set_status`
+writers across 11 modules** against **one** reader (the rail). The writers are
+four kinds of thing with four different lifetimes - a refusal, a settings toggle,
+the tool clock, and the turn loop's clear - and nothing said which outranks
+which. `tests/test_window_ux.py` already records that this label once carried
+the *state* too, and the split from the state line is why the collision is now
+visible at all: the fix removed one job from the line and left the other three
+fighting.
+
+Measured 2026-10-14 on the real window, through the real `ConversationMixin`
+clock, before the fix:
+
+| what happened | the line read |
+|---|---|
+| a refusal, nothing else running, 1.6s later | the refusal - survives |
+| **the same refusal, written while a tool ran** | `Generate image... 1s` - **gone** |
+| a settings toggle, then a tool clock | `Write text file... 1s` - **gone** |
+| the clock alone | `Generate image... 1s` - its own job, works |
+| a refusal, then the turn's clear | `""`, hidden - **never shown at all** |
+| **after a failed turn** | `detail='Ready', state='Ready'` |
+
+Three ways one message destroyed another, and a fourth defect: the failed-turn
+path wrote the **idle label onto the detail line**, so the window answered "what
+is Chronoa doing" on both lines at once, on the one line whose docstring says it
+cannot carry state. Neither a refusal nor a settings toggle is toasted -
+`_TOAST_PREFIXES` is `"Asking again", "Attached ", "Kept in", "Saved to",
+"Copied"` - so the detail line was the **only** place either sentence existed.
+
+### Why a precedence rule and not a second lane
+
+The obvious repair is two labels. It is also the one this window cannot afford:
+`set_size_request(380, 571)` is **451px of chrome plus exactly 120px of
+transcript** - zero slack - so a second line would have to be paid for out of
+the conversation. So the two lanes are two fields (`_status_aside`,
+`_status_progress`) behind one writer (`_write_detail`, so the setters cannot
+disagree with the label or with each other) and one rule:
+
+> **An aside outranks a running reading.** The line shows what last happened,
+> until something else happens. The clock says what is happening *while nothing
+> else has*, and steps aside when something has.
+
+The turn loop's three clears moved to `set_progress("")`, so a turn ending takes
+its progress reading and nothing else; `clear_status()` stays the **full** clear
+and wipes both lanes, which `test_window_ux.py` needs and which is why the two
+are deliberately different methods. `_rail_tool` now reads the progress lane: it
+used to read the label, which was correct only while the lanes were one lane,
+and `_fill_now` prints `Running {tool}` - so a rail sent back to the label would
+report *"Running Not done: that was outside what you allowed this time"*. That
+is one of the set's mutations.
+
+The clock is not *discarded* while an aside shows, only *not shown*, and that
+distinction is the reason the rail can still answer "what is running" during a
+refusal. The cost is stated rather than assumed: once an aside has been said, the
+clock is off the line until the next aside. The rail carries it.
+
+### And a long aside was being clipped mid-sentence
+
+The same widget had **no wrap and no ellipsize**. Measured at the window's own
+minimum against the chat column's own allocation - 455px, at 380, 460 and 1024:
+
+| aside | natural width | overruns by |
+|---|---:|---:|
+| a short notice | 73px | 0 |
+| a real refusal (74 characters) | 428px | 0 |
+| **a long refusal (150 characters)** | **854px** | **399px** |
+
+The clipped end is where a refusal names the file and the limit - the part that
+tells the person what to do next. So `set_wrap(True)` +
+`Pango.EllipsizeMode.END` + `set_lines(DETAIL_MAX_LINES)`, and the bound is the
+part that matters, because wrapping unbounded is not the repair either:
+
+| aside | at `DETAIL_MAX_LINES = 2` | at 5 |
+|---|---|---|
+| 150 characters | 33px | 33px |
+| 300 characters | **33px** | 66px |
+| 1200 characters | **33px** | 82px |
+
+Two lines is not a compromise between two costs: it is 33px whether the refusal
+is 150 characters or 1200, and the extra 16px over one line arrives **only** for
+text that needs it, so the empty case keeps the chrome exactly as measured and
+`test_the_window_minimum_is_not_below_the_layouts_floor` (14 passed) stays green.
+
+### Three instruments that could not have failed, and one that was not an instrument
+
+Recorded because each looked like a working test:
+
+- **Comparing a label's natural width against its own allocation.** GTK allocates
+  a label its natural width, so the comparison is 0 by construction. The budget
+  has to be the **container**. The one row that did disagree was a stale
+  allocation read one pump after the text changed.
+- **`measure(VERTICAL, -1)` for a wrapped label.** `-1` is "height with no width
+  constraint", so the text lays out on one line and reports 17px *whatever the
+  bound is*. The height witness passed under a bound of 5. It measures against
+  the column now.
+- **A 150-character aside as a witness for the line bound.** Two lines is two
+  lines whether the bound is 2 or 5, so the mutation that loosened the bound to
+  5 was caught by `get_lines()` and **not** by the height test. Long enough text
+  to bite, or no witness.
+- **Arming the real clock and pumping 1.4s.** `GLib.timeout_add_seconds(1, ...)`
+  is aligned to the wall-clock second; instrumented against the real window the
+  callback **did not run at all** within 1.4s (`ctx.pending()` never true). The
+  two tests for the same rule disagreed - the refusal witness failed and its twin
+  passed 3 of 3 in isolation - which is a fixture that leaked a repeating timer
+  per test and a witness that only bit when something else ran first. The
+  witnesses now call `_on_tool_clock_tick` (which *is* the tick) and the fixture
+  stops the clock on teardown.
+
+### Runs
+
+**12 mutations, 12 caught, 0 survivors, 0 equivalent, 0 unmeasurable, 0 stale
+witnesses, 0 declared-but-unnecessary witnesses**, on a snapshot at
+`/tmp/opencode/snap-i5s`, preflight byte-identical against the whole
+`usr/lib/shani-chronoa` tree and restored byte-identical afterwards (all three
+edited files verified by sha256 before and after). `--check-anchors`: 12 of 12.
+`--check-witnesses`: 19, all resolving.
+
+**16 passed** in `tests/test_the_status_line_has_two_lifetimes.py`. Against
+`HEAD` exported to its own tree: **7 failed, 9 passed** - the seven are the
+reason the defect was real, the nine are guards against over-fixing (a lane that
+is never cleared, an aside that never decays, a rail sent back to the label) and
+cannot fail pre-fix because there was nothing to over-fix. `test_window_ux` 26
+passed / 1 skipped, `test_regenerate` 21 passed,
+`test_the_window_minimum_is_not_below_the_layouts_floor` 14 passed.
+
+**One call site changed is not mutated**: `app/voice.py:162`, the end of a
+listening turn. Reaching it means standing up the whole voice start path and
+this set has no witness for it, so it is recorded rather than counted.
+
+**Not claimed: a picture.** The bound and the two lanes are measured with
+`get_allocation()` off a presented window, which is a measurement and not a
+photograph. The wide-layout blocker recorded above is unchanged.

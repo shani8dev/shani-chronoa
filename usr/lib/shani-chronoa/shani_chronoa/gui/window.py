@@ -55,6 +55,32 @@ logger = logging.getLogger(__name__)
 #: the window opens in, silently broken, and with it every panel's back arrow.
 CHAT_TAG = "chronoa-chat"
 
+#: How many lines the detail line may wrap to, with the last one ellipsised.
+#:
+#: It exists because the alternative was unbounded. The detail line had no wrap
+#: and no ellipsize at all, so a realistic 150-character refusal wanted **854px**
+#: of a **455px** chat column at the window's own minimum - 399px clipped, and
+#: the clipped part is the end, which is where a refusal names the file and the
+#: limit. Wrapping unbounded is not the answer either: a long reason then costs
+#: five lines.
+#:
+#: Measured on the real window at 380, 460 and 1024 wide, with one line being
+#: **17px** and the chat column **455px**:
+#:
+#: | aside | at the bound below | at 5 |
+#: |---|---|---|
+#: | 150 characters (854px) | 33px | 33px |
+#: | 300 characters | **33px** | 66px |
+#: | 1200 characters | **33px** | 82px |
+#:
+#: So two lines is not a compromise between two costs - it costs the same 33px
+#: whether the refusal is 150 characters or 1200, and the extra 16px arrives
+#: **only** for text that needs it. That matters because the window's chrome has
+#: **zero slack**: `set_size_request(380, 571)` is 451 of chrome plus exactly
+#: 120 of transcript, so a permanent extra line would have to be paid for out of
+#: the conversation. A bound that only costs when it wraps is not that.
+DETAIL_MAX_LINES = 2
+
 
 def _surface_title(name: str) -> str:
     """A page's title from its own registry entry, not a hand-kept list.
@@ -1917,7 +1943,26 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._detail_label.add_css_class("cajita-detail")
         self._detail_label.set_halign(Gtk.Align.CENTER)
         self._detail_label.set_visible(False)
+        # **It wraps, and is bounded to two lines.** Measured 2026-10-14: the
+        # line had no wrap and no ellipsize, and a realistic 150-character
+        # refusal wanted 854px of a 455px chat column at the window's own
+        # minimum - 399px of it clipped, so the part that named the file and the
+        # limit was the part that did not fit. Wrapping alone would make a long
+        # reason cost 5 lines, so it is bounded: 2 lines, with the last one
+        # ellipsised, which measures 33px against 17px - and **only** for text
+        # that needs it, so the empty case keeps the chrome exactly as measured.
+        self._detail_label.set_wrap(True)
+        self._detail_label.set_ellipsize(Pango.EllipsizeMode.END)
+        self._detail_label.set_lines(DETAIL_MAX_LINES)
         main_box.append(self._detail_label)
+
+        # The two lanes the line holds, in the order they are consulted. Both
+        # are read by `set_progress` before any setter has run, so they are
+        # declared here rather than relying on a first assignment - the same
+        # `getattr(self, name, None)` discipline the mixins use for exactly this
+        # reason.
+        self._status_aside = ""
+        self._status_progress = ""
 
         # **The empty state's answer to "what can I ask?" is inside the
         # transcript**, not here, and this is where that decision is recorded
@@ -2713,15 +2758,19 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         return report() if callable(report) else None
 
     def _rail_tool(self) -> str:
-        """The tool currently running, as the status line reports it.
+        """The tool currently running - read from the **progress** lane.
 
-        Read out of the detail label rather than kept separately: the detail
-        line is what a person is already looking at for this, and a second
-        record would drift.
+        It used to read the detail label, which was correct only while the two
+        lanes were one lane. Now an aside outranks a running reading on the
+        label, so reading the label here would print *"Running Not done: that
+        was outside what you allowed this time"* in the rail's Now section - the
+        rail claiming a refusal was a tool, which is the shape this file records
+        for two widgets answering one question.
+
+        The progress lane is kept as its own field rather than parsed back out
+        of the label, which is what makes it available here at all.
         """
-        label = getattr(self, "_detail_label", None)
-        text = label.get_label() if label is not None else ""
-        return text.strip()
+        return (getattr(self, "_status_progress", "") or "").strip()
 
     def _on_rail_toggled(self, button: Gtk.ToggleButton) -> None:
         if self._rail is not None:
@@ -2821,21 +2870,64 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
                            exc_info=True)
 
     def set_status(self, status: str) -> None:
-        """Show a transient notice on the detail line.
+        """Record **what last happened**, and show it.
 
         Intentionally cannot change the state line. A notice is an aside; the
         state is the answer to "what is Chronoa doing", and one must not
         overwrite the other.
+
+        **An aside outranks a running reading, and this is the whole rule.**
+        Measured 2026-10-14 on the real window, through the real tool clock: one
+        line, 95 writers across 11 modules, and three ways one message destroyed
+        another - a refusal and a settings toggle were both gone within a second
+        of a running tool, and anything said in the last second of a turn was
+        erased before it was ever on screen. So the line holds two lanes and this
+        is the precedence between them.
+
+        The line therefore shows **the last thing that happened, until something
+        else happens** - it is a notice, not a live reading, and it is not
+        cleared by the turn loop (that is `set_progress("")`). The tool clock is
+        the other lane: it says what is happening *while nothing else has*,
+        which is why `Generate image... 12s` steps aside for a refusal and
+        comes back when the next one arrives.
         """
         text = (status or "").strip()
-        self._detail_label.set_label(text)
-        self._detail_label.set_visible(bool(text))
-        # A notice that matters more than a line of dim text gets a toast as
-        # well, because the detail line is easy to miss on a window that is
-        # busy answering a question. The line stays: a toast disappears, and some
-        # of these are things a person needs to still be able to read.
+        self._status_aside = text
+        self._write_detail(self._status_aside or self._status_progress)
         if text and self._should_toast(text):
             self.toast(text)
+        self._sync_sidebar_toggle()
+
+    def set_progress(self, progress: str) -> None:
+        """Record **what is happening right now**, without outliving the turn.
+
+        The tool clock is the only writer, and the turn loop's three clears now
+        come through here rather than `set_status("")`. That is what fixes the
+        second collision: an end-of-turn clear used to erase whatever had just
+        been said, so a refusal issued in the turn's last second was never shown
+        at all - measured, `""` and hidden, with no window in which it existed.
+
+        It writes nothing while an aside is showing, which is the first
+        collision: a clock ticking once a second used to overwrite a refusal
+        within a second of it being written.
+        """
+        self._status_progress = (progress or "").strip()
+        if self._status_aside:
+            return
+        self._write_detail(self._status_progress)
+
+    def _write_detail(self, text: str) -> None:
+        """The one place the detail label is written, so the two lanes cannot
+        disagree with each other or with the label.
+
+        Two setters and two lanes with a precedence rule between them is three
+        ways to answer "what does this line say"; funnelling the writes through
+        one method is what keeps it one answer.
+        """
+        label = self._detail_label
+        if label.get_label() != text:
+            label.set_label(text)
+        label.set_visible(bool(text))
         self._sync_sidebar_toggle()
 
     #: Notices worth interrupting for. A toast is for something a person would
@@ -2863,7 +2955,19 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._toasts.add_toast(notice)
 
     def clear_status(self) -> None:
-        self.set_status("")
+        """Wipe the line entirely - **both** lanes.
+
+        The full clear, and distinct from the turn loop's `set_progress("")`
+        on purpose: this one is "forget everything you were told", which is what
+        a caller asking for a blank line means. The turn's own clear is "the
+        step finished", and must not take an aside with it.
+
+        `tests/test_window_ux.py` asserts the detail label is hidden after this,
+        so both lanes are cleared here rather than just the visible one.
+        """
+        self._status_aside = ""
+        self._status_progress = ""
+        self._write_detail("")
 
     # ------------------------------------------------------------------
     # Transcript
