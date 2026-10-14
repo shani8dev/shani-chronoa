@@ -25722,3 +25722,87 @@ entries); `test_packaging` **28 passed** after. This file records this trap
 repeatedly and each time says the habit is the only durable answer — and each
 time the source has been a standalone `tools/*.py` or `python3 -c` run, never a
 pytest run, because `tests/conftest.py` sets the flag at module scope.
+
+## The sweep's 34 re-measured: what was actually red, and the class most of it was (2026-10-14)
+
+The ten-chunk sweep reported **69 failures over 34 files**. Each was re-run serially in its
+own process before being believed, and **the belief was worth the trouble**: one file was
+never broken (`test_slash_menu_opens`, which needs **490 s** and my per-file timeout was
+420), and 33 were real. Of those 33, **22 shared one cause** and none of them was a bug in
+the code under test.
+
+### The dominant class: a stand-in that predates the product
+
+**Six fake windows were missing `set_progress`** and one was missing `restore_last_sent` -
+methods the window gained in `802c447` and in the refusals work. Each died with an
+`AttributeError` naming the *fake*, so the message pointed at a broken clock, broken
+dictation or broken queue. `test_a_second_message_waits_its_turn` was the worst of them:
+`_on_response_ready` raises at its own `set_progress("")`, so line 690's `_turn_finished()`
+never runs - **in the worker thread, where the traceback is only printed** - and the test
+saw `answered ['first']` and no explanation. Three more were the same shape: a
+hand-built `_ConversationsView` missing `_day_rows`, an IR camera fixture offering
+`/dev/video9` on a machine where `Path(device).exists()` is false, and a `_engine` patch
+whose arity `8ae9a88` quietly broke.
+
+**The grep cannot tell a missing method that is reached from one that is not** - two of the
+four `set_status` matches pass cleanly. Each was confirmed by running its file.
+
+### The second class: a default or a layout that moved, and the test remembered it
+
+Nine reds asserted something the tree no longer does, and each had a *deliberate* commit
+behind it. **Four were consent defaults** - `cf525453` made a fresh install arrive as the
+`everyday` preset, so `file-edit-enabled`, `vm-control-enabled` and `sound-cues-enabled`
+now ship **on**, and `nfc-enabled` had been flipped on in 2026-09. **Two were refusal
+spelling** (`04316cc` made refusals name the Settings row, not the key). **Two were
+layout** (`5ef5c62` moved Plan off the strip; `8ae9a88` grew `_engine` a parameter).
+**One was a hand-kept count**: `test_readme_numbers`'s negative control rewrote a literal
+`257`, the README had said **256** since `8c92258`, so its `str.replace` matched **0**
+times - the drifted copy was byte-identical and **the control failed looking exactly like
+a broken checker**.
+
+**Attribution is where this got interesting.** `nfc-enabled` reads `true` while its own
+description ends *"Off by default"*, which is a real contradiction - except **31 keys
+match that pattern**, because the phrase is boilerplate. The next reading, that `5be170b`
+flipped it as an unlisted side-effect, was wrong too: measured, that commit flipped **18**
+and listed **18**. The flip was `cf525453`'s, documented, on purpose, and **the test
+encoding the obsolete rule was the stale one**. Reverting the schema there would have
+undone a decision while looking like a product fix.
+
+### Two mutations I wrote and had to take back, recorded so they are not repeated
+
+- **`--check-anchors` said green and the mutation was wrong.** Repairing a rotted anchor
+  by indentation, the needle matched a *suffix* of the target line - eight spaces inside
+  twelve - so it counted 1 occurrence, started mid-line, and applying it would have
+  produced code that does not parse. The verdict was trustworthy and the mutation was not.
+  The post-condition is now about the match: exactly one occurrence, **starting at a line
+  start**, with the mutated form absent.
+- **An ambient PipeWire probe over-skipped 5 of 19 tests** that run perfectly well here,
+  because these tests talk to their *own* private graph while the probe asked the ambient
+  session. A skip is not coverage, and that one cost real checks to save nothing.
+
+Also: **`git show HEAD:file > file` as a mutation restore silently threw away an
+uncommitted edit of my own** in the same file, and I only noticed because the `TypeError`
+came back. Restores snapshot the working file first.
+
+### Not fixed, and why
+
+- **`test_voice_loop_live`: 11 failed.** The arity fix is real and necessary, and every
+  remaining failure is that no audio file was written. The private graph comes up cleanly -
+  `pipewire` and `wireplumber` run, and `wireplumber-1.log`'s only complaint is a missing
+  libcamera SPA plugin, which has nothing to do with loopback audio - so the graph is not
+  the problem. **The data path on this machine is.** Not claimed as fixed.
+- **Four reds belong to another session's work in flight**, all from files untracked at
+  the time: `gui/surfaces/editor.py` declares no `SECTION`, reuses `diff`'s
+  `document-edit-symbolic`, and builds no `StatusRecorder` - the *same two defects
+  `android` and `wearables` had*, caught by the same three guards. And
+  `skills/review_proposals.py` takes the registry to **257** while the README says 256;
+  updating that number now would race them and rot again.
+- **The `.pyc` trap, a fifth time: 342 stray `.pyc` files**, none tracked, from the other
+  session's runs. `test_packaging` goes **28 passed** once they are gone.
+
+### What the sweep does not say
+
+Ten chunks in parallel is how the failure *list* was made. **Nothing above was measured
+that way**: every number in this section comes from one file, one process, one state
+directory - which is the only attribution method that has worked here, and the reason two
+of the four `set_progress` fixes looked like product bugs until they were run alone.
