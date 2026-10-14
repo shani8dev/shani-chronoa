@@ -180,6 +180,11 @@ class TestTheWindowRoutesAFailureHere:
             set_response=lambda text: asked["responses"].append(text),
             set_orb_state=lambda state: asked["states"].append(state),
             set_status=lambda text: asked["statuses"].append(text),
+            # **The second lane `802c447` added.** A failed turn ends by
+            # clearing the *progress* lane, not the label, so a namespace
+            # without this method cannot express the failure path at all -
+            # the test for the failure path dies before it reaches it.
+            set_progress=lambda text: asked["statuses"].append(text),
         )
         mixin = conversation_module.ConversationMixin.__new__(
             conversation_module.ConversationMixin)

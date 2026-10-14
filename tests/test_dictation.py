@@ -73,6 +73,7 @@ class _Window:
     def __init__(self):
         self.states = []
         self.statuses = []
+        self.progress = []
 
     def set_state(self, state):
         self.states.append(state)
@@ -85,6 +86,11 @@ class _Window:
 
     def set_status(self, text):
         self.statuses.append(text)
+
+    # The second lane the real window gained in `802c447`; see
+    # `test_tool_clock.py` for why a fake missing it fails as a defect.
+    def set_progress(self, text):
+        self.progress.append(text)
 
 
 class _Host:
