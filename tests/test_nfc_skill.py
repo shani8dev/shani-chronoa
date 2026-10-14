@@ -224,14 +224,63 @@ class TestATagThatMovedAwayMidRead:
 class TestTheConsentGate:
     def test_the_key_is_in_the_schema_so_a_person_can_turn_it_on(self):
         """A gate that names a switch nobody can set is a permanent refusal
-        wearing the shape of a permission - this repo has shipped that twice."""
+        wearing the shape of a permission - this repo has shipped that twice.
+
+        **The default is asserted against the preset, not against a remembered
+        `false`.** It used to read `assert match.group(1) == "false", "a new
+        consent key must default off"`, and that rule was superseded: `cf525453`
+        ("consent defaults: a fresh install now arrives as the `everyday` preset,
+        not as nothing") flipped 33 keys off->on because *the preset enables
+        them*, and `nfc-enabled` is one of them - `EVERYDAY("nfc-enabled")` is
+        **True** today, and the global invariant holds all 46 action permissions
+        to it.
+
+        Two wrong attributions came before the right one, and both are worth the
+        space. `nfc-enabled` reads `true` while its own description ends *"Off by
+        default"*, so the first reading was that the schema contradicts itself -
+        but **31 keys match that pattern**, including ones deliberately turned
+        on, because the phrase is boilerplate in the descriptions. The second was
+        that `5be170b` ("defaults: 16 more on") flipped it as an unlisted
+        side-effect; measured, that commit flipped **18** and listed **18** (its
+        title says "sixteen"), and did not touch nfc at all. The flip is
+        `cf525453`'s, documented, on purpose.
+
+        **So the test that encodes the obsolete rule is the one that is wrong**,
+        and asserting a remembered `false` here would have reverted a deliberate
+        decision while looking like a product fix.
+        """
         import pathlib
-        import re
+
+        from shani_chronoa import capabilities
+
         schema = pathlib.Path("usr/share/glib-2.0/schemas/org.shani.chronoa.gschema.xml").read_text()
-        match = re.search(rf'<key name="{nfc._CONSENT_KEY}" type="b">\s*<default>(\w+)</default>',
-                          schema)
-        assert match, f"{nfc._CONSENT_KEY} is not in the schema at all"
-        assert match.group(1) == "false", "a new consent key must default off"
+        # Still the test's own first claim: the switch has to exist at all.
+        assert f'<key name="{nfc._CONSENT_KEY}" type="b">' in schema, (
+            f"{nfc._CONSENT_KEY} is not in the schema at all, so nobody can set it")
+
+        # **Read the default the way the app reads it.** GSettings loads
+        # `gschemas.compiled`, which is tracked separately from the `.xml`, so
+        # parsing the XML would pass while the app saw something else - the trap
+        # `cf525453` records, where the flip measured `False` and looked like it
+        # had not worked.
+        gi = pytest.importorskip("gi")
+        gi.require_version("Gio", "2.0")
+        from gi.repository import Gio
+
+        from shani_chronoa.config import SCHEMA_ID
+
+        source = Gio.SettingsSchemaSource.new_from_directory(
+            str(pathlib.Path("usr/share/glib-2.0/schemas")), None, False)
+        found = source.lookup(SCHEMA_ID, True)
+        if found is None:
+            pytest.skip("the %s schema is not readable here" % SCHEMA_ID)
+        default = found.get_key(nfc._CONSENT_KEY).get_default_value().get_boolean()
+
+        every_day = capabilities.PRESETS["everyday"][2](nfc._CONSENT_KEY)
+        assert default is every_day, (
+            f"{nfc._CONSENT_KEY} ships {default} but the everyday preset says "
+            f"{every_day} - the schema and capabilities.PRESETS have drifted, "
+            f"which is the two-files-apart failure this file was written for")
 
     def test_it_is_declared_gated_and_off_by_default(self):
         from shani_chronoa import capabilities
