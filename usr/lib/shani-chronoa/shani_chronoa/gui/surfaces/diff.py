@@ -3,15 +3,24 @@
 World-class diff features:
 - **File list** on the left: all changed files with a summary of +/- lines
 - **Inline unified diff** on the right: +/- lines with line numbers
-- **Accept/Reject** per file or per hunk
 - **Summary**: count of changed files, added/removed lines
 - **Line selection**: click a line to select it (for copy/move actions)
 - **Diff stats**: per-file statistics (lines added/removed)
 - **No scroll jank**: all hunks rendered once
 
-Integrates with the office_document skill: when editing a .docx/.xlsx,
-the diff surface can show which paragraphs/cells changed and offer
-Accept/Reject at file or hunk granularity.
+**This panel decides nothing.** Everything the ring holds is already written, so
+this shows the change and its one action is to get you to the thing that does
+decide - the `undo_last_change` ring itself, which this file deliberately does
+not duplicate a per-file entry point for.
+
+Two capabilities this module used to advertise and does not have, recorded so
+they are not claimed twice. **Accept and Reject** are built and gated on
+`applied=False`; `load_recent_changes` passes `True`, correctly, because the ring
+only holds writes that already happened. Flipping that flag alone would not help
+either - the buttons fire `_accept_file` into `on_accept_file`, and nothing in
+the tree ever assigns it. Two missing links, not one. And an **office-document**
+integration was documented here for months, though that skill is named nowhere
+else in this file.
 """
 
 from __future__ import annotations
