@@ -529,6 +529,24 @@ SERVING_COST = {"fp32": 10.91, "bf16": 23.41, "int8": 2.80}
 GATE_CUTOFFS = (0.0, 0.5, 1.0, 2.0, 3.0, 5.0, 8.0, 12.0, 20.0)
 
 
+def _auroc(scored: list) -> float:
+    """Area under the ROC for `(score, is_positive)` pairs. 0.5 is a coin flip.
+
+    **The score must point the way the decision points.** The gate fires when the
+    top-2 margin is *low*, so the detector's score is the **negated** margin. This
+    is worth writing down because getting it wrong is silent: scoring with the raw
+    margin returns **0.119** where the truth is **0.881** - the same data, the
+    same pairs, an inverted number, and it reads like a catastrophic result rather
+    than a sign error.
+    """
+    pos = [s for s, label in scored if label]
+    neg = [s for s, label in scored if not label]
+    if not pos or not neg:
+        return float("nan")
+    wins = sum(1.0 if p > n else 0.5 if p == n else 0.0 for p in pos for n in neg)
+    return wins / (len(pos) * len(neg))
+
+
 def serve_plan() -> int:
     """What a cascade reranker costs, against what it can still recover.
 
@@ -568,6 +586,27 @@ def serve_plan() -> int:
     wrong = sorted(r[0] for r in rows if not r[1])
     print("  median margin, wrong     %.2f" % (wrong[len(wrong) // 2] if wrong else 0.0))
     print("  fixable by reranking     %d of %d" % (fixable, sum(1 for r in rows if not r[1])))
+    print()
+    # **Is the gate's routing signal any good?** The literature's verdict on this
+    # task shape is pessimistic: arXiv:2610.07760 measures that deciding *when* an
+    # expensive call is worth making "remains difficult to rank (AUROC 0.60)" and
+    # that progress "depends on stronger query-specific benefit estimates". So
+    # this number is the one that decides whether the gate is a plan or a hope.
+    here = _auroc([(-m, not ok) for m, ok, _r in rows])
+    other = []
+    for item in data["train"]:
+        order = [(s, n) for s, n, _h in tool_select.ranked(item["say"], schemas,
+                                                          learned={})]
+        if len(order) > 1:
+            other.append((-(order[0][0] - order[1][0]), order[0][1] != item["positive"]))
+    print("  gate AUROC, held-out      %.3f   (n=%d, %d errors)"
+          % (here, len(rows), sum(1 for r in rows if not r[1])))
+    print("  gate AUROC, train split   %.3f   (n=%d, %d errors)"
+          % (_auroc(other), len(other), sum(1 for _s, l in other if l)))
+    print("  for comparison            0.500 chance, and **0.60** is what")
+    print("                            arXiv:2610.07760 measures for deciding")
+    print("                            when an expensive call is worth making.")
+    print("                            Two independent splits, so it is not noise.")
     print()
     print("Average cost per request, with the gate and the dtype:")
     for variant, per_fire in (("fp32", SERVING_COST["fp32"]),
