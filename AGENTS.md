@@ -25806,3 +25806,65 @@ Ten chunks in parallel is how the failure *list* was made. **Nothing above was m
 that way**: every number in this section comes from one file, one process, one state
 directory - which is the only attribution method that has worked here, and the reason two
 of the four `set_progress` fixes looked like product bugs until they were run alone.
+
+## A correction, and a leak the record above blamed on the wrong thing (2026-10-14)
+
+The entry above says of `test_voice_loop_live` that *"the data path on this machine
+is the problem"*, on the grounds that no audio file was written. **That is wrong, and
+it was inferred from a `FileNotFoundError` instead of measured.** Two measurements
+say the opposite:
+
+```
+pw-play   rc: 0
+pw-record rc: 1 | file bytes: 96246 | recorded frames: 48101
+under pytest, same sequence:  capture exists: True, 84640 bytes, 42298 frames
+```
+
+So the private graph carries audio fine. **A conclusion drawn from a missing output
+file, without asking the pipeline whether the file was ever produced, is the same
+error as reading a failure list nobody re-ran** - and it was in an entry written
+specifically about re-measuring things.
+
+### What it actually was: a fixture leaking the daemons it could not stop
+
+`_PrivateAudio` spawned `pipewire` and `wireplumber` with `Popen` and kept the
+handles. **Both daemonise** - the Popen returns and exits, the real process is
+reparented to `systemd --user` - so `stop()`'s `poll()` said everything had finished
+and nothing reached the daemon, and the next lines `rmtree`'d the runtime directory
+it was still serving.
+
+Found by asking a question the log had already answered: a probe left `pid 198875`
+alive with `XDG_RUNTIME_DIR=/tmp/cwa.3k1fsv00`, and **that directory did not
+exist**. A live PipeWire with its socket path deleted under it, still holding
+Bluetooth's `sco_listen` socket - which is the `Address already in use` and
+`org.bluez.Error.NotPermitted` in the next graph's `wireplumber-1.log`. **Each run
+poisoned the next**, which is why the file was *flaky* rather than consistently red,
+and why "no audio server" was such a plausible story.
+
+Two fixes, both killing **by pid** and matching on `XDG_RUNTIME_DIR` rather than on
+the name `pipewire` - a name would also match the real desktop session's:
+
+- `stop()` now finds the daemonised processes and `SIGTERM`s, waits five seconds,
+  then `SIGKILL`s. Verified: **0 leaked test graphs after two consecutive runs**,
+  where there was one or more per run before.
+- **`__init__` now stops the graph it half-built** when `_wait_for_nodes` gives up.
+  By then four daemons are already running and the caller's `except` has no object
+  to call `stop()` on. Measured: two runs that skipped left exactly two orphans, and
+  the run after them could not start a graph at all.
+
+### Still not fixed, and the numbers are the honest ones
+
+Two further runs on a box with no audio hardware, a desktop PipeWire session
+running and another session working beside it: **1 passed / 18 skipped** (the graph
+never came up inside 15 s), then **4 passed / 10 failed**. The second cause is still
+unisolated.
+
+**And a claim of mine withdrawn.** I read the leak fix as taking this file from 3
+passed to 10 passed. That was **variance, not an improvement** - the runs above are
+the real numbers. A single before/after pair on a box that produces both `1 passed`
+and `10 passed` on consecutive runs is not a measurement, and the run that looked
+like the fix was the run that got lucky.
+
+Also recorded because it nearly cost the same work twice: **`git show HEAD:file >
+file` as a mutation restore silently discards an uncommitted edit of your own in
+that same file.** Snapshot the working file first, every time.
