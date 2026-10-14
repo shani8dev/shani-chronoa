@@ -4,13 +4,13 @@
   "seed": 20261013,
   "counts": {
     "requests": 220,
-    "pairs": 1662,
+    "pairs": 1659,
     "train": 165,
     "held_out": 55
   },
   "recall": {
-    "offered": 212,
-    "not_offered": 8,
+    "offered": 215,
+    "not_offered": 5,
     "with_args": 111
   },
   "train": [
@@ -391,6 +391,18 @@
           "desc": "lookup_wikipedia: Who or what something is - a person, place, thing or event - from Wikipedia's summary. Requires the web sense and privacy mode off. (arguments: topic)"
         },
         {
+          "tool": "bandwidth_to_host",
+          "desc": "bandwidth_to_host: Measure how fast this machine can send data to another machine over the network, using a controlled iperf3 transfer. Use for 'why is my NAS slow', 'how fast is my network to the server', 'is the bottleneck the network or the disk'. Needs iperf3 running on the other machine - ask for loopback to measure this machine against itself. Read-only: it transfers data and writes nothing. (arguments: host, port, seconds)"
+        },
+        {
+          "tool": "scan_network",
+          "desc": "scan_network: Find which devices are on the local network, with their names, addresses and hardware vendors. Local addresses only. Requires the network sense to be enabled. (arguments: range, resolve_names)"
+        },
+        {
+          "tool": "ping_host",
+          "desc": "ping_host: Ping a named host or IP address and report whether it answers, how long the replies take and how many were lost. Use this when a specific host is slow or unreachable; 'check_internet' only answers whether the internet works at all. (arguments: host, count)"
+        },
+        {
           "tool": "network_activity",
           "desc": "network_activity: Report what this machine's network is doing right now, per program: which processes are sending and receiving, and how fast each interface is moving. Use for 'what is using my bandwidth', 'why is the network slow', 'what is uploading', 'is something downloading right now'. Interface rates come from /proc/net/dev and always work; per-program rates need nethogs and can only name programs this user owns. Says which half it could not measure and why, and reports an unattributed socket as unattributed rather than guessing at a program. Read-only; nothing is changed or blocked."
         },
@@ -401,35 +413,19 @@
         {
           "tool": "lab_network_create",
           "desc": "lab_network_create: Build an isolated lab network on this machine: a network namespace holding a bridge, with named subnets in namespaces of their own. A public subnet can reach the internet through the uplink; a private one can reach this network and nothing beyond it. Returns the exact plan and changes nothing unless apply=true, which needs your system password. (arguments: name, cidr, subnets, internet, apply)"
-        },
-        {
-          "tool": "lab_network_destroy",
-          "desc": "lab_network_destroy: Remove a lab network built by lab_network_create, and everything in it. Only ever removes networks this tool built. Returns the plan unless apply=true. (arguments: name, apply)"
-        },
-        {
-          "tool": "lab_network_status",
-          "desc": "lab_network_status: What a lab network can actually reach: a real ping from inside each subnet, not just what the routing table says. (arguments: name)"
-        },
-        {
-          "tool": "list_wifi_networks",
-          "desc": "list_wifi_networks: Scan for and list the WiFi networks in range, with signal strength and whether this machine is joined to one. Scans the radio, so it requires the 'network-sense-enabled' consent. (arguments: rescan)"
-        },
-        {
-          "tool": "scan_network",
-          "desc": "scan_network: Find which devices are on the local network, with their names, addresses and hardware vendors. Local addresses only. Requires the network sense to be enabled. (arguments: range, resolve_names)"
         }
       ],
       "offered": [
+        "discover_hosts",
         "lookup_wikipedia",
+        "bandwidth_to_host",
+        "scan_network",
+        "ping_host",
         "network_activity",
         "lab_network_list",
-        "lab_network_create",
-        "lab_network_destroy",
-        "lab_network_status",
-        "list_wifi_networks",
-        "scan_network"
+        "lab_network_create"
       ],
-      "recall_hit": false
+      "recall_hit": true
     },
     {
       "say": "What changed in a git repository.",
@@ -641,6 +637,18 @@
           "desc": "random_pick: Flip a coin, roll dice ('2d6'), pick a random number in a range, or choose one of a list of options. (arguments: kind, dice, low, high, options)"
         },
         {
+          "tool": "backup_status",
+          "desc": "backup_status: Whether this machine's files are actually backed up off it: how many restic snapshots exist, when the most recent was taken, what it covered, and whether the repository still passes restic's own integrity check. Use for 'is my backup working', 'when did I last back up', 'do I have a copy of my files'. A machine with no repository configured says so plainly, because that means there is no backup. Read-only: it never writes to the repository. (arguments: repository)"
+        },
+        {
+          "tool": "compression_savings",
+          "desc": "compression_savings: How much space btrfs compression is saving on this machine: the uncompressed size of the data, how much disk it actually occupies, and which compressor is doing it. Use for 'how much is compression saving me', 'why is my disk less full than the files suggest'. Read-only; nothing is changed."
+        },
+        {
+          "tool": "process_cost",
+          "desc": "process_cost: What each running program is COSTING this machine right now, measured over the last second rather than as a snapshot: percent CPU split into user and system time, how much memory it holds, page faults (including the major ones that mean it is thrashing), and how many kB a second it is reading and writing. Answers 'what is using my CPU', 'what is making my computer slow', 'what is writing to my disk all the time', 'which program is swapping', 'why did everything freeze'. Use this when the machine feels slow; use list_processes to see what is running and disk_activity to see whether the disk itself is busy. Read-only; nothing is started, stopped or changed."
+        },
+        {
           "tool": "browse",
           "desc": "browse: Open a website and do things on it for the person: find information, fill in forms, click through. Drive a web browser: navigate, read the page's text (get_text), click, type, select options, scroll, move through history, take screenshots and wait for conditions. While Chronoa's window is open this is the in-app browser the user can watch: there it opens only http(s) pages the egress policy allows, and key, hover, drag, upload_file, tabs and evaluate are not available. Otherwise it is a headless Chromium with all actions. Requires the web sense to be enabled and privacy mode to be off. (arguments: action, url, selector, text, key, value, label, files, x, y, to_x, to_y, to_selector, delta_x, delta_y, steps, repeat, tab_id, path, wait_for, timeout, settle)"
         },
@@ -651,29 +659,17 @@
         {
           "tool": "generate_password",
           "desc": "generate_password: Generate a strong random password, or a passphrase of random words, and copy it to the clipboard (it is never said or shown in the reply). (arguments: kind, length, symbols)"
-        },
-        {
-          "tool": "backup_status",
-          "desc": "backup_status: Whether this machine's files are actually backed up off it: how many restic snapshots exist, when the most recent was taken, what it covered, and whether the repository still passes restic's own integrity check. Use for 'is my backup working', 'when did I last back up', 'do I have a copy of my files'. A machine with no repository configured says so plainly, because that means there is no backup. Read-only: it never writes to the repository. (arguments: repository)"
-        },
-        {
-          "tool": "dns_lookup",
-          "desc": "dns_lookup: Look a hostname or address up in DNS and report what came back: the addresses, or the mail servers, name servers, TXT records, certificate records or other records a name publishes, and whether the answer is DNSSEC-signed and valid. Distinguishes 'this name does not exist' from 'the resolver did not answer', because those have different fixes. Obeys privacy mode, since the query goes to a resolver outside this machine. Read-only. (arguments: name, type)"
-        },
-        {
-          "tool": "driver_build",
-          "desc": "driver_build: Build a scaffolded out-of-tree kernel module with Kbuild, then read the resulting .ko back off disk. Needs the 'driver-build-enabled' consent key. Refuses with the missing package named when this machine has no toolchain. (arguments: name, path)"
         }
       ],
       "offered": [
-        "random_pick",
         "snapshot_status",
+        "random_pick",
+        "backup_status",
+        "compression_savings",
+        "process_cost",
         "browse",
         "machine_capabilities",
-        "generate_password",
-        "backup_status",
-        "dns_lookup",
-        "driver_build"
+        "generate_password"
       ],
       "recall_hit": true
     },
@@ -1754,6 +1750,10 @@
           "desc": "open_settings: Open the system Settings app at a specific page, e.g. 'wifi', 'bluetooth', 'display', 'sound', 'power', 'privacy', 'keyboard', 'mouse', 'touchpad', 'printers', 'users', 'about', 'date_time', 'region', 'notifications', 'background', 'accessibility'. GNOME and KDE Plasma. Use open_application for Settings without a page. (arguments: page)"
         },
         {
+          "tool": "media_control",
+          "desc": "media_control: Control music and video players: play, pause, toggle, next track, previous track, stop, restart (current track from the beginning), seek (skip ahead or go back by 'seconds'; negative goes back), or 'status' to say what is playing. (arguments: action, seconds)"
+        },
+        {
           "tool": "check_units",
           "desc": "check_units: Check whether systemd unit files are valid and say what is wrong with them - a missing ExecStart binary, an unknown key, a dependency that does not exist - by running systemd-analyze verify on just the units you name. With no unit named, lists the services this machine has. This is a static check of the file: it does not know whether a dependency is down or a path is mounted, so a clean report does not promise the service will start. Reading only; nothing is started, stopped or changed. (arguments: unit)"
         },
@@ -1764,21 +1764,17 @@
         {
           "tool": "stopwatch",
           "desc": "stopwatch: A stopwatch: start, lap, read the time so far, or stop. (arguments: action)"
-        },
-        {
-          "tool": "open_files",
-          "desc": "open_files: Find which programs have a file, directory or network socket open. Use for 'what is using this file', 'why can't I delete this', 'what has my disk open', 'which process is holding that socket'. Names the holding program with its full command line, and flags deleted files whose space cannot be reclaimed. Reads only this user's processes unless run as root. Read-only: it lists open handles and never closes one. (arguments: path, pid, limit)"
         }
       ],
       "offered": [
-        "open_application",
         "control_service",
+        "open_application",
         "open_file",
         "open_settings",
+        "media_control",
         "check_units",
         "screen_to_phone",
-        "stopwatch",
-        "open_files"
+        "stopwatch"
       ],
       "recall_hit": true
     },
@@ -1933,6 +1929,10 @@
       "positives_desc": "get_battery_status: Get the current battery charge percentage and charging state.",
       "negatives": [
         {
+          "tool": "backup_status",
+          "desc": "backup_status: Whether this machine's files are actually backed up off it: how many restic snapshots exist, when the most recent was taken, what it covered, and whether the repository still passes restic's own integrity check. Use for 'is my backup working', 'when did I last back up', 'do I have a copy of my files'. A machine with no repository configured says so plainly, because that means there is no backup. Read-only: it never writes to the repository. (arguments: repository)"
+        },
+        {
           "tool": "set_power_profile",
           "desc": "set_power_profile: Switch the machine between its power profiles - typically power-saver, balanced and performance - and report which one is active now. The profile list is read from the machine rather than assumed, because which profiles exist depends on the CPU driver: switching to one the machine does not have is refused with the valid names listed. Changes the CPU and platform power behaviour, not a per-application setting. (arguments: profile)"
         },
@@ -1945,31 +1945,27 @@
           "desc": "power_action: Suspend (sleep), hibernate, restart or shut down this computer, or cancel a scheduled restart/shutdown. Restart and shutdown happen after one minute and can be cancelled. Requires the 'power-control-enabled' consent key. (arguments: action)"
         },
         {
-          "tool": "click_pointer",
-          "desc": "click_pointer: Click a mouse button at the current pointer position. Requires the 'input-control-enabled' consent key (separate from the vision sense) to be enabled. (arguments: button, count)"
-        },
-        {
-          "tool": "charger_info",
-          "desc": "charger_info: Report what is powering this machine: on battery or plugged in, AC adapter or USB-C, whether USB Power Delivery is in use, and the charger's wattage when the firmware reports it, plus battery charge and rate."
-        },
-        {
-          "tool": "manage_triggers",
-          "desc": "manage_triggers: Arm, list, or remove automatic rules that run a Chronoa action when a perception matches - for example, notify when the battery sense reports low. A rule names one already-whitelisted skill; it cannot run an arbitrary command or an LLM-authored prompt. Listing needs no permission; arming or disarming requires the 'trigger-control-enabled' consent key. (arguments: action, name, sense, match_mode, substring, keywords, actuator, arguments, cooldown_seconds, event_type, source, params, ask_first, retry_policy, debounce_seconds)"
-        },
-        {
           "tool": "vm",
           "desc": "vm: Run a virtual machine with QEMU and drive it like a browser: launch it with a visible window on the desktop and a QMP control socket beside it, photograph its screen, send key combinations, type text into it, move and click its pointer (percentages of its screen), check its power state, and stop it. Requires the 'vm-control-enabled' consent key, off by default. Listing the VMs already running is `list_vms` (virsh) or this skill's list action; this one starts and drives them. (arguments: action, name, memory_mb, iso, disk, display, firmware, tpm, keys, text, x, y, button)"
+        },
+        {
+          "tool": "set_timer",
+          "desc": "set_timer: Set a countdown timer that sends a desktop notification when it finishes; list pending timers, say how much time is left, add or take off time, pause, resume, reset to the original length, and cancel. With one timer pending, 'my timer' needs no id. The countdown is owned by systemd, so it fires even if the assistant is closed. It is refused rather than silently accepted when systemd is unavailable, because a timer recorded as pending that will never fire is the same lie as a camera reported as disabled when it is not. (arguments: action, seconds, label, id)"
+        },
+        {
+          "tool": "click_pointer",
+          "desc": "click_pointer: Click a mouse button at the current pointer position. Requires the 'input-control-enabled' consent key (separate from the vision sense) to be enabled. (arguments: button, count)"
         }
       ],
       "offered": [
-        "set_power_profile",
         "get_battery_status",
+        "backup_status",
+        "set_power_profile",
         "desktop_setting",
         "power_action",
-        "click_pointer",
-        "charger_info",
-        "manage_triggers",
-        "vm"
+        "vm",
+        "set_timer",
+        "click_pointer"
       ],
       "recall_hit": true
     },
@@ -3138,6 +3134,10 @@
           "desc": "file_locks: Show who holds a file lock, and on what - the answer to \"why won't this file save\" and \"why did my write fail with EAGAIN\". A WRITE lock blocks another writer; a READ lock is shared and usually harmless. Use for 'who has this file locked', 'what is holding a lock', 'why can't I write this file', 'is this file locked'. Give a path to check one file; omit it for every lock on the machine. Reads the kernel's own lock table (/proc/locks), so it needs no binary and no privilege. Read-only; nothing is polled, changed or broken. (arguments: path)"
         },
         {
+          "tool": "set_sleep_inhibit",
+          "desc": "set_sleep_inhibit: Report what is currently holding the machine awake, or take a bounded hold so it does not sleep for a while, or release ours. Use for 'keep it awake while I...' - a long install, a backup, a test run. Scoped and self-lapsing; to change the machine's idle timeout permanently use set_screensaver instead. Gated by 'sleep-inhibit-enabled' consent key; reporting needs no such permission. (arguments: action, reason, seconds)"
+        },
+        {
           "tool": "screen_to_phone",
           "desc": "screen_to_phone: Show this computer's screen on a paired phone, over the Bluetooth network. 'status': could this be shared here at all, and what is missing if not. 'start': ask the desktop to share the screen and serve it to the phone - the desktop shows its own 'Share screen' dialog, which only the person can answer. 'stop': end it and close the portal session. The picture goes over Bluetooth, so it is not on Wi-Fi, but it is the whole screen - which is why this needs the 'screen-share-enabled' consent key. (arguments: action)"
         },
@@ -3148,21 +3148,17 @@
         {
           "tool": "set_wallpaper",
           "desc": "set_wallpaper: Report or change the GNOME desktop wallpaper, setting the light and dark variants together. Refuses a path that does not exist, rather than leaving a blank desktop with no error. KDE is not supported and will say so. Requires the 'appearance-control-enabled' consent key; reporting needs no such permission. (arguments: action, image)"
-        },
-        {
-          "tool": "manage_triggers",
-          "desc": "manage_triggers: Arm, list, or remove automatic rules that run a Chronoa action when a perception matches - for example, notify when the battery sense reports low. A rule names one already-whitelisted skill; it cannot run an arbitrary command or an LLM-authored prompt. Listing needs no permission; arming or disarming requires the 'trigger-control-enabled' consent key. (arguments: action, name, sense, match_mode, substring, keywords, actuator, arguments, cooldown_seconds, event_type, source, params, ask_first, retry_policy, debounce_seconds)"
         }
       ],
       "offered": [
+        "set_screensaver",
         "lock_screen",
         "set_privacy",
-        "set_screensaver",
         "file_locks",
+        "set_sleep_inhibit",
         "screen_to_phone",
         "undo_last_change",
-        "set_wallpaper",
-        "manage_triggers"
+        "set_wallpaper"
       ],
       "recall_hit": true
     },
@@ -3183,35 +3179,35 @@
           "desc": "get_volume: Get the current volume and mute state of an audio output, or the default one. On a machine with more than one output - several monitors, headphones and a dock - 'the volume' is ambiguous, so pass the device exactly as `wpctl status` prints it to ask about a specific one. (arguments: device)"
         },
         {
-          "tool": "phone_remote",
-          "desc": "phone_remote: Press keys on the paired phone as a Bluetooth keyboard: 'press' the camera 'shutter' (takes a photo in the camera app), play_pause, next, previous, volume_up/down, mute; or 'type' text into whatever field is focused on the phone. The phone must have paired 'Chronoa Remote'. Requires the 'phone-remote-enabled' consent key. (arguments: action, key, text)"
+          "tool": "audio_output",
+          "desc": "audio_output: List the speakers/headphones (outputs) and microphones (inputs) and which one is the default, or switch the default output or input - 'play through my headphones', 'use the USB microphone', 'send sound to the HDMI monitor'. Pick a device by its number or part of its name. (arguments: action, device, kind)"
         },
         {
-          "tool": "set_volume",
-          "desc": "set_volume: Set the system output volume to an exact percentage. (arguments: percent, device)"
+          "tool": "edit_audio",
+          "desc": "edit_audio: Edit a sound file and save the result as a new file next to it (never overwriting the original): trim between times, raise or lower the volume, normalize loudness, change speed, or convert to an audio format. End times accept seconds or 'MM:SS'/'HH:MM:SS'. (arguments: path, start, end, volume, normalize, speed, to)"
+        },
+        {
+          "tool": "recording",
+          "desc": "recording: Make subtitles or a transcript of a video or audio file, tell speakers apart, or remove background noise. Works on the sound, on this computer. text: what was said; subtitles: save an .srt beside it; speakers: who said what, turn by turn; clean: a copy with background noise removed; sounds: what can be heard in it (music, a dog, traffic...); listen: what can be heard around the computer right now (the microphone, a few seconds); streams: which applications are carrying audio right now, and the name to capture one by (a call in a browser is one); capture: record one of those for 5-600 seconds and transcribe it - which records the room, so it needs the sound consent like the microphone does. (arguments: action, path, language, people, seconds)"
         },
         {
           "tool": "set_privacy",
           "desc": "set_privacy: Control the machine's privacy: mute or unmute the microphone, enable or disable a camera, or blank the screen. Muting the microphone is a user-level stream mute that any new application can override, and the reply says so rather than implying the hardware is off. Disabling a camera needs root and is only possible on drivers that expose a disable control, so a device with no such control is reported as unsupported rather than disabled. Blanking works on X11; under Wayland it would need a permission prompt, so the idle timeout is offered instead. Every action says how to undo it. (arguments: action, device)"
         },
         {
-          "tool": "edit_video",
-          "desc": "edit_video: Edit a video and save the result as a new file next to it (never overwriting the original): trim between times, resize to a width, rotate, mute or keep only the audio, or change the speed. End times accept seconds ('95'), or 'MM:SS' / 'HH:MM:SS'. (arguments: path, start, end, width, rotate, mute, audio_only, speed, output)"
-        },
-        {
-          "tool": "edit_audio",
-          "desc": "edit_audio: Edit a sound file and save the result as a new file next to it (never overwriting the original): trim between times, raise or lower the volume, normalize loudness, change speed, or convert to an audio format. End times accept seconds or 'MM:SS'/'HH:MM:SS'. (arguments: path, start, end, volume, normalize, speed, to)"
+          "tool": "phone_remote",
+          "desc": "phone_remote: Press keys on the paired phone as a Bluetooth keyboard: 'press' the camera 'shutter' (takes a photo in the camera app), play_pause, next, previous, volume_up/down, mute; or 'type' text into whatever field is focused on the phone. The phone must have paired 'Chronoa Remote'. Requires the 'phone-remote-enabled' consent key. (arguments: action, key, text)"
         }
       ],
       "offered": [
+        "set_mute",
         "set_mic_mute",
         "get_volume",
-        "set_mute",
-        "phone_remote",
-        "set_volume",
+        "audio_output",
+        "edit_audio",
+        "recording",
         "set_privacy",
-        "edit_video",
-        "edit_audio"
+        "phone_remote"
       ],
       "recall_hit": true
     },
@@ -3473,39 +3469,39 @@
           "desc": "scheduled_tasks: What is scheduled to run on this machine: your crontab, the system crontab and /etc/cron.d, and both the system and your systemd timers. Each source is reported separately and one that cannot be read says so, because a machine can have no user crontab and still have nine timers. Reading what the machine has scheduled describes the machine rather than the person's world, so it needs no permission. Nothing is scheduled, changed or removed by asking. (arguments: source)"
         },
         {
-          "tool": "autostart_entries",
-          "desc": "autostart_entries: Report everything on this machine that starts automatically: the autostart .desktop files in this user's home and /etc/xdg, the enabled systemd user units and timers, and the crontab. Use for 'what starts automatically', 'what runs at login', 'what is scheduled', 'why does this thing keep running', 'what did I set to start on its own'. Honours Hidden, OnlyShowIn and NotShowIn, and says 'cannot tell' rather than guessing when the desktop is unknown - which is the normal state outside a login session. Read-only; nothing is enabled, disabled or changed."
-        },
-        {
-          "tool": "check_units",
-          "desc": "check_units: Check whether systemd unit files are valid and say what is wrong with them - a missing ExecStart binary, an unknown key, a dependency that does not exist - by running systemd-analyze verify on just the units you name. With no unit named, lists the services this machine has. This is a static check of the file: it does not know whether a dependency is down or a path is mounted, so a clean report does not promise the service will start. Reading only; nothing is started, stopped or changed. (arguments: unit)"
-        },
-        {
-          "tool": "list_services",
-          "desc": "list_services: List system services with their load and active state, optionally filtered by name, newest state first for anything running. Reports UNKNOWN on a machine that is not systemd-managed. (arguments: name_filter, failed_only)"
-        },
-        {
           "tool": "set_sleep_inhibit",
           "desc": "set_sleep_inhibit: Report what is currently holding the machine awake, or take a bounded hold so it does not sleep for a while, or release ours. Use for 'keep it awake while I...' - a long install, a backup, a test run. Scoped and self-lapsing; to change the machine's idle timeout permanently use set_screensaver instead. Gated by 'sleep-inhibit-enabled' consent key; reporting needs no such permission. (arguments: action, reason, seconds)"
         },
         {
-          "tool": "binary_hardening",
-          "desc": "binary_hardening: Report whether a binary is hardened: PIE, RELRO, full RELRO (BIND_NOW), stack canary and no-execute stack, each with what it stops. Use for 'is /path/to/this safe to run', 'is this binary hardened', 'does this have a stack canary', 'is this ASLR enabled'. Works on executables and shared libraries alike, and says 'not applicable' where a property genuinely has no answer rather than reporting it as missing. Read-only; nothing is loaded or written. (arguments: path)"
+          "tool": "autostart_entries",
+          "desc": "autostart_entries: Report everything on this machine that starts automatically: the autostart .desktop files in this user's home and /etc/xdg, the enabled systemd user units and timers, and the crontab. Use for 'what starts automatically', 'what runs at login', 'what is scheduled', 'why does this thing keep running', 'what did I set to start on its own'. Honours Hidden, OnlyShowIn and NotShowIn, and says 'cannot tell' rather than guessing when the desktop is unknown - which is the normal state outside a login session. Read-only; nothing is enabled, disabled or changed."
         },
         {
-          "tool": "list_containers",
-          "desc": "list_containers: List this machine's containers: distroboxes (by name, with their image and whether they are running) and podman/docker containers, including any that exited because they ran out of memory, plus how much disk the images use. Use for 'what distroboxes do I have', 'is my container running', 'why did my container die'. The podman details use the 'containers-sense-enabled' switch. Read-only."
+          "tool": "set_power_profile",
+          "desc": "set_power_profile: Switch the machine between its power profiles - typically power-saver, balanced and performance - and report which one is active now. The profile list is read from the machine rather than assumed, because which profiles exist depends on the CPU driver: switching to one the machine does not have is refused with the valid names listed. Changes the CPU and platform power behaviour, not a per-application setting. (arguments: profile)"
+        },
+        {
+          "tool": "print_queue",
+          "desc": "print_queue: Show the printers, which one is the default, the print jobs still waiting, and what this machine can print to even when nothing is configured; or cancel a waiting job by its id. Use for 'what's printing', 'why isn't my printer there', 'what can I print to', 'cancel that print'. Cancelling requires the 'print-control-enabled' consent key; listing does not. (arguments: action, job, printer, option)"
+        },
+        {
+          "tool": "set_brightness",
+          "desc": "set_brightness: Get or set screen brightness as a percentage. With no level, reports the current brightness of each panel. With a level, sets it. Writing needs root - the backlight node is root-owned - and a permission failure is reported as such rather than as success. (arguments: level)"
+        },
+        {
+          "tool": "set_clipboard",
+          "desc": "set_clipboard: Write text to the system clipboard. (arguments: text)"
         }
       ],
       "offered": [
-        "scheduled_tasks",
         "set_timer",
-        "autostart_entries",
-        "check_units",
-        "list_services",
+        "scheduled_tasks",
         "set_sleep_inhibit",
-        "binary_hardening",
-        "list_containers"
+        "autostart_entries",
+        "set_power_profile",
+        "print_queue",
+        "set_brightness",
+        "set_clipboard"
       ],
       "recall_hit": true
     },
@@ -3758,43 +3754,43 @@
       "positives_desc": "search_file_contents: Search inside text files under a directory for a literal string, and report which files contain it and on which lines. Skips binary files and very large files, and says how many it skipped. (arguments: text, path, file_pattern, case_sensitive, max_matches)",
       "negatives": [
         {
-          "tool": "search_my_files",
-          "desc": "search_my_files: Search your own files by meaning - documents, notes, code - in a directory you choose, or your home if you name none. 'search': what matches a few words. 'reindex': read the directory and build or refresh the index (needed before the first search). 'status': what would be indexed and whether this machine can search by meaning. Needs the 'file-index-enabled' consent key. (arguments: action, query, path, limit)"
-        },
-        {
           "tool": "search_documents",
           "desc": "search_documents: Search inside the user's files by their contents, using the desktop's own search index (LocalSearch on GNOME, Baloo on Plasma). Requires the 'document-search-enabled' consent key. (arguments: query, kind, limit)"
         },
         {
-          "tool": "cloud_files",
-          "desc": "cloud_files: See what is in this machine's configured cloud storage remotes - which remotes rclone knows, how many objects and bytes each holds, and what is at the top level of one. Use for 'what is in my cloud drive', 'is anything in the bucket', 'how big is my remote'. Read-only: it never copies, syncs or deletes anything. A machine with no remotes says so, because that means there is nowhere off-machine for anything to go. (arguments: remote, path)"
-        },
-        {
-          "tool": "duplicate_files",
-          "desc": "duplicate_files: Find files with identical content under a directory, and how much space the copies waste. Use for 'why is my disk full', 'are there duplicates in my Downloads', 'where is my space going'. Reports verified groups only - same size is evidence, a matching hash is proof - and never marks one copy as the original. Read-only: it hashes and lists, and deletes nothing. (arguments: path, limit)"
+          "tool": "search_my_files",
+          "desc": "search_my_files: Search your own files by meaning - documents, notes, code - in a directory you choose, or your home if you name none. 'search': what matches a few words. 'reindex': read the directory and build or refresh the index (needed before the first search). 'status': what would be indexed and whether this machine can search by meaning. Needs the 'file-index-enabled' consent key. (arguments: action, query, path, limit)"
         },
         {
           "tool": "files_by_name",
           "desc": "files_by_name: Find every file with a given name under a directory, with sizes and modification dates, so you can see whether they are copies. Use for 'where are all my report.docx', 'how many copies of this do I have', 'which is the newest'. Reports the newest and whether the sizes agree, and does NOT claim the contents match - duplicate_files answers that. Deletes nothing. (arguments: name, path, case_sensitive)"
         },
         {
-          "tool": "find_files",
-          "desc": "find_files: Find files and folders by name under a directory, using a wildcard pattern such as '*.log' or 'report*'. Matches on the name only and never opens the files. To see what is in one folder, use list_directory. (arguments: pattern, path, include_hidden, max_results)"
+          "tool": "duplicate_files",
+          "desc": "duplicate_files: Find files with identical content under a directory, and how much space the copies waste. Use for 'why is my disk full', 'are there duplicates in my Downloads', 'where is my space going'. Reports verified groups only - same size is evidence, a matching hash is proof - and never marks one copy as the original. Read-only: it hashes and lists, and deletes nothing. (arguments: path, limit)"
         },
         {
           "tool": "stale_files",
           "desc": "stale_files: Find files that are both large and untouched for a long time - the deletion candidates a disk-usage answer only gestures at. Use for 'what can I delete', 'what is safe to clean up', 'what in here is old and big'. Reports candidates only: it claims nothing is safe to delete, removes nothing, and says that an untouched timestamp is not proof a file is unused. Read-only. (arguments: path, older_than_days, limit)"
+        },
+        {
+          "tool": "temp_files",
+          "desc": "temp_files: Find junk, temporary and leftover files by NAME - editor swap and lock files (*.tmp, *.swp, *~, .#*, ~$*, .goutputstream-*), OS metadata (.DS_Store, Thumbs.db, desktop.ini), unfinished downloads (*.crdownload, *.part, *.filepart), merge leftovers (*.orig, *.rej) and core dumps. Use for 'what junk is in here', 'what can I clean up', 'what temporary files do I have'. A name is a guess and the answer says so: nothing is deleted, moved or changed, and a file this cannot read is reported rather than counted as clean. Core dumps are confirmed by reading the ELF header, because a name like `core` is usually a source directory or a JavaScript module. Read-only. (arguments: path, limit)"
+        },
+        {
+          "tool": "cloud_files",
+          "desc": "cloud_files: See what is in this machine's configured cloud storage remotes - which remotes rclone knows, how many objects and bytes each holds, and what is at the top level of one. Use for 'what is in my cloud drive', 'is anything in the bucket', 'how big is my remote'. Read-only: it never copies, syncs or deletes anything. A machine with no remotes says so, because that means there is nowhere off-machine for anything to go. (arguments: remote, path)"
         }
       ],
       "offered": [
-        "search_my_files",
-        "search_documents",
         "search_file_contents",
-        "cloud_files",
-        "duplicate_files",
+        "search_documents",
+        "search_my_files",
         "files_by_name",
-        "find_files",
-        "stale_files"
+        "duplicate_files",
+        "stale_files",
+        "temp_files",
+        "cloud_files"
       ],
       "recall_hit": true
     },
@@ -3805,49 +3801,45 @@
       "positives_desc": "charger_info: Report what is powering this machine: on battery or plugged in, AC adapter or USB-C, whether USB Power Delivery is in use, and the charger's wattage when the firmware reports it, plus battery charge and rate.",
       "negatives": [
         {
-          "tool": "network_activity",
-          "desc": "network_activity: Report what this machine's network is doing right now, per program: which processes are sending and receiving, and how fast each interface is moving. Use for 'what is using my bandwidth', 'why is the network slow', 'what is uploading', 'is something downloading right now'. Interface rates come from /proc/net/dev and always work; per-program rates need nethogs and can only name programs this user owns. Says which half it could not measure and why, and reports an unattributed socket as unattributed rather than guessing at a program. Read-only; nothing is changed or blocked."
+          "tool": "get_battery_status",
+          "desc": "get_battery_status: Get the current battery charge percentage and charging state."
         },
         {
           "tool": "manage_triggers",
           "desc": "manage_triggers: Arm, list, or remove automatic rules that run a Chronoa action when a perception matches - for example, notify when the battery sense reports low. A rule names one already-whitelisted skill; it cannot run an arbitrary command or an LLM-authored prompt. Listing needs no permission; arming or disarming requires the 'trigger-control-enabled' consent key. (arguments: action, name, sense, match_mode, substring, keywords, actuator, arguments, cooldown_seconds, event_type, source, params, ask_first, retry_policy, debounce_seconds)"
         },
         {
-          "tool": "bandwidth_to_host",
-          "desc": "bandwidth_to_host: Measure how fast this machine can send data to another machine over the network, using a controlled iperf3 transfer. Use for 'why is my NAS slow', 'how fast is my network to the server', 'is the bottleneck the network or the disk'. Needs iperf3 running on the other machine - ask for loopback to measure this machine against itself. Read-only: it transfers data and writes nothing. (arguments: host, port, seconds)"
+          "tool": "set_power_profile",
+          "desc": "set_power_profile: Switch the machine between its power profiles - typically power-saver, balanced and performance - and report which one is active now. The profile list is read from the machine rather than assumed, because which profiles exist depends on the CPU driver: switching to one the machine does not have is refused with the valid names listed. Changes the CPU and platform power behaviour, not a per-application setting. (arguments: profile)"
         },
         {
-          "tool": "machine_capabilities",
-          "desc": "machine_capabilities: Report what this machine can actually do: which of the commands Chronoa knows how to use are really present, which Python modules import here, and which services are enabled. Asks the live machine rather than reading the shipped inventory, which describes the image it was built from and not necessarily this one. Use it before offering to convert a file, edit an image, read a document or capture audio, to find out whether that is even possible here."
+          "tool": "power_action",
+          "desc": "power_action: Suspend (sleep), hibernate, restart or shut down this computer, or cancel a scheduled restart/shutdown. Restart and shutdown happen after one minute and can be cancelled. Requires the 'power-control-enabled' consent key. (arguments: action)"
         },
         {
-          "tool": "get_battery_status",
-          "desc": "get_battery_status: Get the current battery charge percentage and charging state."
+          "tool": "network_activity",
+          "desc": "network_activity: Report what this machine's network is doing right now, per program: which processes are sending and receiving, and how fast each interface is moving. Use for 'what is using my bandwidth', 'why is the network slow', 'what is uploading', 'is something downloading right now'. Interface rates come from /proc/net/dev and always work; per-program rates need nethogs and can only name programs this user owns. Says which half it could not measure and why, and reports an unattributed socket as unattributed rather than guessing at a program. Read-only; nothing is changed or blocked."
         },
         {
-          "tool": "edit_video",
-          "desc": "edit_video: Edit a video and save the result as a new file next to it (never overwriting the original): trim between times, resize to a width, rotate, mute or keep only the audio, or change the speed. End times accept seconds ('95'), or 'MM:SS' / 'HH:MM:SS'. (arguments: path, start, end, width, rotate, mute, audio_only, speed, output)"
+          "tool": "calculate",
+          "desc": "calculate: Evaluate arithmetic and percentages ('15% of 2400'), or convert between units. Handles the four operations, powers, parentheses, factorial, permutations and combinations (perm/nPr, comb/nCr), gcd, lcm, sqrt, exp, log, ln, trig and inverse trig, and pi/e/tau - exact for whole numbers. For algebra with variables, derivatives, integrals, limits or equations, use solve_math. Converts length, mass, volume, time, data, pressure, frequency, power, energy and temperature, in the units a person actually meets - say '200 km to miles' or '70kg in lb'. Runs entirely on this machine with no network call. Refuses to guess: a percentage needs a number to apply to, and converting between quantities that measure different things is an error rather than a number. (arguments: expression)"
         },
         {
-          "tool": "speed_test",
-          "desc": "speed_test: Measure this internet connection: latency, download speed and upload speed, against Cloudflare's speed-test servers. Moves real data (default 10 MB down, 2 MB up), so it requires the 'speed-test-enabled' consent key and privacy mode off. Use for 'how fast is my internet', 'is my connection slow'. (arguments: download_mb, upload_mb)"
-        },
-        {
-          "tool": "temperatures",
-          "desc": "temperatures: Current CPU, GPU, disk and board temperatures, fan speeds and fan control, read from the kernel's hardware sensors. Use for 'is my laptop overheating', 'how hot is the CPU', 'how fast is the fan'. Uses the 'hwmon-sense-enabled' switch. Read-only."
+          "tool": "list_percepts",
+          "desc": "list_percepts: Show what Chronoa is currently perceiving - every fact held about this machine and the user right now, with its age, what expires it, and whether it would be included in the next reply. Use this to check what the assistant actually knows rather than what it says. (arguments: sense_filter, include_expired)"
         }
       ],
       "offered": [
-        "network_activity",
-        "manage_triggers",
-        "bandwidth_to_host",
-        "machine_capabilities",
+        "charger_info",
         "get_battery_status",
-        "edit_video",
-        "speed_test",
-        "temperatures"
+        "manage_triggers",
+        "set_power_profile",
+        "power_action",
+        "network_activity",
+        "calculate",
+        "list_percepts"
       ],
-      "recall_hit": false
+      "recall_hit": true
     },
     {
       "say": "Press buttons, fill fields and open menus in other apps.",
@@ -4000,6 +3992,18 @@
           "desc": "web_search: Look something up on the web and return what the pages actually say: facts, prices, how-tos, anything no more specific tool covers. Give a search query, a specific URL, or both. For a scholarly question - a paper, a preprint, prior work, 'what does the research say' - set source=arxiv and it searches the arXiv preprint archive instead of the web. For news headlines use news; to click, fill in or book something on a site use browse. Requires the web sense to be enabled and privacy mode to be off. (arguments: query, url, source)"
         },
         {
+          "tool": "bandwidth_to_host",
+          "desc": "bandwidth_to_host: Measure how fast this machine can send data to another machine over the network, using a controlled iperf3 transfer. Use for 'why is my NAS slow', 'how fast is my network to the server', 'is the bottleneck the network or the disk'. Needs iperf3 running on the other machine - ask for loopback to measure this machine against itself. Read-only: it transfers data and writes nothing. (arguments: host, port, seconds)"
+        },
+        {
+          "tool": "download_file",
+          "desc": "download_file: Download a file from a web address and save it to disk, reporting the size and how long it took. Use for 'download that file', 'get this installer', 'save that page'. Only http and https; a site that answers with an error page reports that rather than saving the error as if it were the file. (arguments: url, destination)"
+        },
+        {
+          "tool": "network_activity",
+          "desc": "network_activity: Report what this machine's network is doing right now, per program: which processes are sending and receiving, and how fast each interface is moving. Use for 'what is using my bandwidth', 'why is the network slow', 'what is uploading', 'is something downloading right now'. Interface rates come from /proc/net/dev and always work; per-program rates need nethogs and can only name programs this user owns. Says which half it could not measure and why, and reports an unattributed socket as unattributed rather than guessing at a program. Read-only; nothing is changed or blocked."
+        },
+        {
           "tool": "check_internet",
           "desc": "check_internet: Check whether the internet is working and, if not, which step fails: network connection, router, internet, DNS, or websites. Also reports the delay to the router and to the internet."
         },
@@ -4010,29 +4014,17 @@
         {
           "tool": "search_file_contents",
           "desc": "search_file_contents: Search inside text files under a directory for a literal string, and report which files contain it and on which lines. Skips binary files and very large files, and says how many it skipped. (arguments: text, path, file_pattern, case_sensitive, max_matches)"
-        },
-        {
-          "tool": "search_my_files",
-          "desc": "search_my_files: Search your own files by meaning - documents, notes, code - in a directory you choose, or your home if you name none. 'search': what matches a few words. 'reindex': read the directory and build or refresh the index (needed before the first search). 'status': what would be indexed and whether this machine can search by meaning. Needs the 'file-index-enabled' consent key. (arguments: action, query, path, limit)"
-        },
-        {
-          "tool": "my_ip_address",
-          "desc": "my_ip_address: This computer's IP addresses: local (LAN) addresses per network interface, and the public internet address when the web sense is on."
-        },
-        {
-          "tool": "news",
-          "desc": "news: News headlines only (title, source, age), from Google News (or BBC) RSS feeds - not facts or what a page says, which is web_search. With no topic: the top stories. A topic can be a section - world, business, tech, science, health, sports, entertainment - or anything to search for, e.g. 'ISRO'. Requires the web sense to be enabled and privacy mode to be off. (arguments: topic, source, limit)"
         }
       ],
       "offered": [
-        "web_search",
         "speed_test",
+        "web_search",
+        "bandwidth_to_host",
+        "download_file",
+        "network_activity",
         "check_internet",
         "search_documents",
-        "search_file_contents",
-        "search_my_files",
-        "my_ip_address",
-        "news"
+        "search_file_contents"
       ],
       "recall_hit": true
     },
@@ -4293,6 +4285,10 @@
           "desc": "space_by_type: Break disk usage down by kind of file - video, audio, image, document, archive, code and so on - across all directories, rather than per directory. Use for 'what is eating my disk', 'is it the photos or the documents', 'what takes up the space in here'. Names the largest category, and reports files whose type it could not tell as a visible `other` bucket rather than dropping them. Read-only. (arguments: path)"
         },
         {
+          "tool": "data_usage",
+          "desc": "data_usage: How much internet data this computer has used today and this month, per network interface (from vnStat)."
+        },
+        {
           "tool": "cleanup_apply",
           "desc": "cleanup_apply: Actually free the disk space cleanup_report measured: empty your cache folder, or remove Flatpak runtimes no app uses. Both are recoverable or provably unused. Requires the 'cleanup-enabled' consent key. The system log is not here - that needs root, which Chronoa cannot ask for from inside a tool call. (arguments: target)"
         },
@@ -4311,21 +4307,17 @@
         {
           "tool": "disk_layout",
           "desc": "disk_layout: Show how this machine's disks are partitioned: every physical disk, each partition with its size, filesystem and purpose (EFI, Linux root, /home, LUKS, LVM, swap), and where each one is mounted. Use for 'how is my disk partitioned', 'what partitions are on this machine', 'which partition is my home directory on', 'is my disk GPT or plain', 'what is this LUKS partition for'. Follows the storage sense's consent switch, because it reports the same machine. Read-only; nothing is changed. Loop devices (the immutable snap images) are hidden unless show_hidden is set, and their count is always stated. (arguments: show_hidden)"
-        },
-        {
-          "tool": "compression_savings",
-          "desc": "compression_savings: How much space btrfs compression is saving on this machine: the uncompressed size of the data, how much disk it actually occupies, and which compressor is doing it. Use for 'how much is compression saving me', 'why is my disk less full than the files suggest'. Read-only; nothing is changed."
         }
       ],
       "offered": [
-        "space_by_type",
         "disk_usage",
+        "space_by_type",
+        "data_usage",
         "cleanup_apply",
         "cleanup_report",
         "disk_activity",
         "disk_health",
-        "disk_layout",
-        "compression_savings"
+        "disk_layout"
       ],
       "recall_hit": true
     },
@@ -4340,6 +4332,10 @@
           "desc": "find_recently_modified: List files under a directory whose recorded modification time is within the last N days, newest first. Use this to answer 'what did I change today'. This is a timestamp, so a tool that preserves or sets times (tar, rsync, cp -p) can move an entry without the content changing. (arguments: path, within_days, pattern, limit)"
         },
         {
+          "tool": "system_history",
+          "desc": "system_history: What this machine's CPU, disk, memory or paging was doing earlier, from the sysstat accounting records rather than a live reading. Use for 'was this busy last night', 'what was using the disk at lunchtime', 'why was the fan loud earlier'. Says plainly when no history has been recorded, because that is not the same as the machine having been idle. Read-only. (arguments: topic)"
+        },
+        {
           "tool": "log_files",
           "desc": "log_files: See which log files under /var/log are largest, whether they are still being written to right now, and whether anything rotates them. Use for 'why is my disk full', 'what is filling up the disk', 'is that log growing'. Also reports logrotate configuration errors, which silently stop a rotation. Read-only: it runs logrotate in debug mode, which rotates nothing. (arguments: limit)"
         },
@@ -4348,37 +4344,29 @@
           "desc": "read_logs: Read recent log output from a named system service, or from the kernel when no service is named. Returns the most recent lines first-context-last, and says how much it did not show. (arguments: unit, lines, priority, since)"
         },
         {
-          "tool": "crash_report",
-          "desc": "crash_report: Programs that crashed recently on this machine (core dumps recorded by systemd-coredump): which program, when, and the signal that killed it. Use for 'what crashed', 'why did that app close'. Uses the 'coredumps-sense-enabled' switch. Read-only."
-        },
-        {
-          "tool": "calculate",
-          "desc": "calculate: Evaluate arithmetic and percentages ('15% of 2400'), or convert between units. Handles the four operations, powers, parentheses, factorial, permutations and combinations (perm/nPr, comb/nCr), gcd, lcm, sqrt, exp, log, ln, trig and inverse trig, and pi/e/tau - exact for whole numbers. For algebra with variables, derivatives, integrals, limits or equations, use solve_math. Converts length, mass, volume, time, data, pressure, frequency, power, energy and temperature, in the units a person actually meets - say '200 km to miles' or '70kg in lb'. Runs entirely on this machine with no network call. Refuses to guess: a percentage needs a number to apply to, and converting between quantities that measure different things is an error rather than a number. (arguments: expression)"
-        },
-        {
-          "tool": "cleanup_apply",
-          "desc": "cleanup_apply: Actually free the disk space cleanup_report measured: empty your cache folder, or remove Flatpak runtimes no app uses. Both are recoverable or provably unused. Requires the 'cleanup-enabled' consent key. The system log is not here - that needs root, which Chronoa cannot ask for from inside a tool call. (arguments: target)"
-        },
-        {
-          "tool": "cleanup_report",
-          "desc": "cleanup_report: Report what could be cleaned up to free disk space - trash, caches, the system log, unused Flatpak runtimes - with sizes. Reads only; deletes nothing."
+          "tool": "autostart_entries",
+          "desc": "autostart_entries: Report everything on this machine that starts automatically: the autostart .desktop files in this user's home and /etc/xdg, the enabled systemd user units and timers, and the crontab. Use for 'what starts automatically', 'what runs at login', 'what is scheduled', 'why does this thing keep running', 'what did I set to start on its own'. Honours Hidden, OnlyShowIn and NotShowIn, and says 'cannot tell' rather than guessing when the desktop is unknown - which is the normal state outside a login session. Read-only; nothing is enabled, disabled or changed."
         },
         {
           "tool": "container",
           "desc": "container: Run containers on this machine with podman (run an image, run a command inside a running container, stop it, read its logs, list what is running, list local images, pull one) and start/stop nspawn machines with machinectl. A container started with display=x11 draws on this desktop, and the ui_elements tool is what drives it by name with a visible cursor; this tool starts it, and stops it. Needs 'container-control-enabled', off by default. (arguments: action, image, name, command, detach, display, share_bus, publish, all, tail)"
+        },
+        {
+          "tool": "crash_report",
+          "desc": "crash_report: Programs that crashed recently on this machine (core dumps recorded by systemd-coredump): which program, when, and the signal that killed it. Use for 'what crashed', 'why did that app close'. Uses the 'coredumps-sense-enabled' switch. Read-only."
         }
       ],
       "offered": [
+        "login_history",
         "find_recently_modified",
+        "system_history",
         "log_files",
         "read_logs",
-        "crash_report",
-        "calculate",
-        "cleanup_apply",
-        "cleanup_report",
-        "container"
+        "autostart_entries",
+        "container",
+        "crash_report"
       ],
-      "recall_hit": false
+      "recall_hit": true
     },
     {
       "say": "Watch the packets crossing an interface.",
@@ -5806,27 +5794,27 @@
           "desc": "usb_devices: What is plugged into this machine's USB ports (mice, phones, webcams, sticks, with their speed), and every Thunderbolt/USB4 device with whether it is authorised to work. Use for 'what's plugged in', 'why doesn't my dock work', 'is my webcam connected'. The USB list uses the 'usb-sense-enabled' switch. Read-only."
         },
         {
-          "tool": "toggle_bluetooth",
-          "desc": "toggle_bluetooth: Turn the Bluetooth adapter on or off, or report its state and the paired devices. Requires the 'bluetooth-control-enabled' consent key; reporting needs no such permission. (arguments: action)"
+          "tool": "find_device",
+          "desc": "find_device: Make a paired Bluetooth watch, band or tag buzz or ring so the person can find it - 'where is my watch', 'find my band'. Works on devices with the standard Immediate Alert service and on MoYoung (Da Fit) watches; anything else is refused rather than sent an unknown command. The device must be in range. Requires the 'bluetooth-gatt-enabled' consent key. (arguments: device)"
         },
         {
-          "tool": "connect_wifi",
-          "desc": "connect_wifi: Join a WiFi network by name, or leave the current one. Open networks only - this never handles a password, because a password passed through a chat or an MCP client is in a transcript. Requires the 'wifi-connect-enabled' consent key. (arguments: ssid)"
+          "tool": "android_device",
+          "desc": "android_device: An Android phone connected with USB debugging (adb). devices: which are connected; info: model, Android version, battery, storage; screenshot: save the phone's screen as a PNG; apps: installed apps (query filters); push: copy a file to the phone (to, default /sdcard/Download); pull: copy a file from the phone; open_url: open a web link on the phone. Requires 'phone-control-enabled'. (arguments: action, serial, path, to, url, query, output)"
         },
         {
-          "tool": "recording",
-          "desc": "recording: Make subtitles or a transcript of a video or audio file, tell speakers apart, or remove background noise. Works on the sound, on this computer. text: what was said; subtitles: save an .srt beside it; speakers: who said what, turn by turn; clean: a copy with background noise removed; sounds: what can be heard in it (music, a dog, traffic...); listen: what can be heard around the computer right now (the microphone, a few seconds); streams: which applications are carrying audio right now, and the name to capture one by (a call in a browser is one); capture: record one of those for 5-600 seconds and transcribe it - which records the room, so it needs the sound consent like the microphone does. (arguments: action, path, language, people, seconds)"
+          "tool": "get_volume",
+          "desc": "get_volume: Get the current volume and mute state of an audio output, or the default one. On a machine with more than one output - several monitors, headphones and a dock - 'the volume' is ambiguous, so pass the device exactly as `wpctl status` prints it to ask about a specific one. (arguments: device)"
         }
       ],
       "offered": [
+        "audio_output",
         "bluetooth_devices",
         "bluetooth_gatt",
         "bluetooth_call",
-        "audio_output",
         "usb_devices",
-        "toggle_bluetooth",
-        "connect_wifi",
-        "recording"
+        "find_device",
+        "android_device",
+        "get_volume"
       ],
       "recall_hit": true
     },
@@ -6221,39 +6209,39 @@
           "desc": "airplane_mode: Report which radios (Wi-Fi, Bluetooth, mobile broadband) are on, or turn airplane mode on (all radios off) or off. Changing requires the 'radio-control-enabled' consent key. (arguments: action)"
         },
         {
-          "tool": "fm_radio",
-          "desc": "fm_radio: FM and AM broadcast radio. Five actions: 'hardware' for whether this computer can receive anything at all (a laptop usually cannot, and that is a true answer rather than a failure - it needs an RTL2832U USB dongle), 'bands' for the coverage, 'tune' to a frequency, 'decode' to demodulate a recorded IQ capture, and 'scan' to look for carriers in one. A frequency is given in MHz, e.g. 98.6. rtl_fm is narrowband and retunes per channel, so it cannot scan - scanning needs a wideband recording. No station names are guessed: a carrier gives a frequency, and naming it would need a table for your region. Requires the 'fm-radio-enabled' consent key. (arguments: action, frequency, seconds, file, centre_mhz, out, deemphasis_us)"
+          "tool": "toggle_bluetooth",
+          "desc": "toggle_bluetooth: Turn the Bluetooth adapter on or off, or report its state and the paired devices. Requires the 'bluetooth-control-enabled' consent key; reporting needs no such permission. (arguments: action)"
         },
         {
-          "tool": "lan_phone",
-          "desc": "lan_phone: Find phones on the SAME Wi-Fi network, using the KDE Connect protocol directly - so it works without KDE Connect or GSConnect installed. 'devices': what announced itself on this network in the last few seconds (phones, tablets, other computers). 'announce': make this computer findable by a phone's KDE Connect app. 'status': what this computer can and cannot do on the LAN. 'pair': what the pairing half of the protocol is and why it is not here. Needs the 'lan-phone-enabled' consent key. (arguments: action, seconds)"
+          "tool": "toggle_night_light",
+          "desc": "toggle_night_light: Report or turn on/off the blue-light filter (GNOME night light), reporting the schedule separately from the on/off state, because a filter that is enabled with its schedule off is not currently doing anything. KDE is not supported and will say so. Requires the 'appearance-control-enabled' consent key; reporting needs no such permission. (arguments: action)"
+        },
+        {
+          "tool": "list_wifi_networks",
+          "desc": "list_wifi_networks: Scan for and list the WiFi networks in range, with signal strength and whether this machine is joined to one. Scans the radio, so it requires the 'network-sense-enabled' consent. (arguments: rescan)"
+        },
+        {
+          "tool": "fm_radio",
+          "desc": "fm_radio: FM and AM broadcast radio. Five actions: 'hardware' for whether this computer can receive anything at all (a laptop usually cannot, and that is a true answer rather than a failure - it needs an RTL2832U USB dongle), 'bands' for the coverage, 'tune' to a frequency, 'decode' to demodulate a recorded IQ capture, and 'scan' to look for carriers in one. A frequency is given in MHz, e.g. 98.6. rtl_fm is narrowband and retunes per channel, so it cannot scan - scanning needs a wideband recording. No station names are guessed: a carrier gives a frequency, and naming it would need a table for your region. Requires the 'fm-radio-enabled' consent key. (arguments: action, frequency, seconds, file, centre_mhz, out, deemphasis_us)"
         },
         {
           "tool": "qr_code",
           "desc": "qr_code: read: decode every QR code and barcode in a picture (path) or on the screen (screen=true, needs the vision consent). create: make a QR code PNG of text (a URL, Wi-Fi details, a note) at output. (arguments: action, path, screen, text, output)"
         },
         {
-          "tool": "screen_to_phone",
-          "desc": "screen_to_phone: Show this computer's screen on a paired phone, over the Bluetooth network. 'status': could this be shared here at all, and what is missing if not. 'start': ask the desktop to share the screen and serve it to the phone - the desktop shows its own 'Share screen' dialog, which only the person can answer. 'stop': end it and close the portal session. The picture goes over Bluetooth, so it is not on Wi-Fi, but it is the whole screen - which is why this needs the 'screen-share-enabled' consent key. (arguments: action)"
-        },
-        {
-          "tool": "accessibility",
-          "desc": "accessibility: Turn an accessibility feature on or off, or report them all: screen reader, on-screen keyboard, magnifier (zoom), large text, high contrast, reduce motion (animations), sticky keys. (arguments: feature, enabled)"
-        },
-        {
-          "tool": "container",
-          "desc": "container: Run containers on this machine with podman (run an image, run a command inside a running container, stop it, read its logs, list what is running, list local images, pull one) and start/stop nspawn machines with machinectl. A container started with display=x11 draws on this desktop, and the ui_elements tool is what drives it by name with a visible cursor; this tool starts it, and stops it. Needs 'container-control-enabled', off by default. (arguments: action, image, name, command, detach, display, share_bus, publish, all, tail)"
+          "tool": "connect_wifi",
+          "desc": "connect_wifi: Join a WiFi network by name, or leave the current one. Open networks only - this never handles a password, because a password passed through a chat or an MCP client is in a transcript. Requires the 'wifi-connect-enabled' consent key. (arguments: ssid)"
         }
       ],
       "offered": [
-        "airplane_mode",
         "toggle_wifi",
+        "airplane_mode",
+        "toggle_bluetooth",
+        "toggle_night_light",
+        "list_wifi_networks",
         "fm_radio",
-        "lan_phone",
         "qr_code",
-        "screen_to_phone",
-        "accessibility",
-        "container"
+        "connect_wifi"
       ],
       "recall_hit": true
     },
@@ -6597,39 +6585,39 @@
           "desc": "web_search: Look something up on the web and return what the pages actually say: facts, prices, how-tos, anything no more specific tool covers. Give a search query, a specific URL, or both. For a scholarly question - a paper, a preprint, prior work, 'what does the research say' - set source=arxiv and it searches the arXiv preprint archive instead of the web. For news headlines use news; to click, fill in or book something on a site use browse. Requires the web sense to be enabled and privacy mode to be off. (arguments: query, url, source)"
         },
         {
-          "tool": "search_documents",
-          "desc": "search_documents: Search inside the user's files by their contents, using the desktop's own search index (LocalSearch on GNOME, Baloo on Plasma). Requires the 'document-search-enabled' consent key. (arguments: query, kind, limit)"
+          "tool": "check_port",
+          "desc": "check_port: Check whether a specific port on a specific host accepts connections from this machine, and say why it does not - refused (the host is up, nothing is listening), timed out (a firewall, or a host that is off), or the name does not resolve. Use for 'is my server reachable', 'why can nothing connect to it', 'is port 443 open on that box'. Opens exactly one connection and sends nothing; it is not a scan. (arguments: host, port)"
         },
         {
-          "tool": "search_file_contents",
-          "desc": "search_file_contents: Search inside text files under a directory for a literal string, and report which files contain it and on which lines. Skips binary files and very large files, and says how many it skipped. (arguments: text, path, file_pattern, case_sensitive, max_matches)"
-        },
-        {
-          "tool": "search_my_files",
-          "desc": "search_my_files: Search your own files by meaning - documents, notes, code - in a directory you choose, or your home if you name none. 'search': what matches a few words. 'reindex': read the directory and build or refresh the index (needed before the first search). 'status': what would be indexed and whether this machine can search by meaning. Needs the 'file-index-enabled' consent key. (arguments: action, query, path, limit)"
-        },
-        {
-          "tool": "my_ip_address",
-          "desc": "my_ip_address: This computer's IP addresses: local (LAN) addresses per network interface, and the public internet address when the web sense is on."
+          "tool": "check_updates",
+          "desc": "check_updates: Check whether this machine has package updates waiting, without installing anything and without needing root. Works on Arch and other pacman systems."
         },
         {
           "tool": "ping_host",
           "desc": "ping_host: Ping a named host or IP address and report whether it answers, how long the replies take and how many were lost. Use this when a specific host is slow or unreachable; 'check_internet' only answers whether the internet works at all. (arguments: host, count)"
         },
         {
-          "tool": "trace_route",
-          "desc": "trace_route: Trace the network path to a host: every router along the way, how much of the traffic each one dropped, and how many milliseconds it took. Use when something specific is slow or unreachable, which is different from whether the internet works at all. (arguments: host, probes)"
+          "tool": "check_units",
+          "desc": "check_units: Check whether systemd unit files are valid and say what is wrong with them - a missing ExecStart binary, an unknown key, a dependency that does not exist - by running systemd-analyze verify on just the units you name. With no unit named, lists the services this machine has. This is a static check of the file: it does not know whether a dependency is down or a path is mounted, so a clean report does not promise the service will start. Reading only; nothing is started, stopped or changed. (arguments: unit)"
+        },
+        {
+          "tool": "search_documents",
+          "desc": "search_documents: Search inside the user's files by their contents, using the desktop's own search index (LocalSearch on GNOME, Baloo on Plasma). Requires the 'document-search-enabled' consent key. (arguments: query, kind, limit)"
+        },
+        {
+          "tool": "search_file_contents",
+          "desc": "search_file_contents: Search inside text files under a directory for a literal string, and report which files contain it and on which lines. Skips binary files and very large files, and says how many it skipped. (arguments: text, path, file_pattern, case_sensitive, max_matches)"
         }
       ],
       "offered": [
-        "web_search",
         "check_internet",
-        "search_documents",
-        "search_file_contents",
-        "search_my_files",
-        "my_ip_address",
+        "web_search",
+        "check_port",
+        "check_updates",
         "ping_host",
-        "trace_route"
+        "check_units",
+        "search_documents",
+        "search_file_contents"
       ],
       "recall_hit": true
     },
@@ -7296,8 +7284,8 @@
         }
       ],
       "offered": [
-        "list_wifi_networks",
         "connect_wifi",
+        "list_wifi_networks",
         "toggle_wifi",
         "solve_math",
         "lab_network_list",
@@ -7553,43 +7541,43 @@
       "positives_desc": "list_processes: List the processes running on this machine, with their pid, name, owner, CPU and memory use, sorted by CPU unless sort_by says otherwise. Use this to find what is using the machine - pass sort_by='memory' for the RAM question, which CPU order does not answer - or the pid of something you want to stop. (arguments: name_filter, sort_by, limit)",
       "negatives": [
         {
-          "tool": "cpu_frequency",
-          "desc": "cpu_frequency: What the processor is doing right now: which speed governor it is in, roughly what speed it is running at, and the range its hardware allows. Use after setting a power mode, to see whether the machine actually took it up - 'why is my fan so loud', 'is my CPU being throttled', 'did performance mode do anything'. Read-only; changes nothing."
-        },
-        {
-          "tool": "cpu_per_core",
-          "desc": "cpu_per_core: Which individual processor cores are busy right now, and how much of each is user time versus waiting on disk. Use when the machine feels slow but nothing looks busy - a single process pinning one core looks idle in every system-wide average. Read-only; starts nothing."
-        },
-        {
           "tool": "process_cost",
           "desc": "process_cost: What each running program is COSTING this machine right now, measured over the last second rather than as a snapshot: percent CPU split into user and system time, how much memory it holds, page faults (including the major ones that mean it is thrashing), and how many kB a second it is reading and writing. Answers 'what is using my CPU', 'what is making my computer slow', 'what is writing to my disk all the time', 'which program is swapping', 'why did everything freeze'. Use this when the machine feels slow; use list_processes to see what is running and disk_activity to see whether the disk itself is busy. Read-only; nothing is started, stopped or changed."
+        },
+        {
+          "tool": "cpu_frequency",
+          "desc": "cpu_frequency: What the processor is doing right now: which speed governor it is in, roughly what speed it is running at, and the range its hardware allows. Use after setting a power mode, to see whether the machine actually took it up - 'why is my fan so loud', 'is my CPU being throttled', 'did performance mode do anything'. Read-only; changes nothing."
         },
         {
           "tool": "thread_activity",
           "desc": "thread_activity: Show the individual THREADS of a process - or of the whole machine - with the CPU each is using right now and the kernel function it is blocked in. Use for 'which thread is using the CPU', 'this program is at 300 percent', 'what is this thread waiting on', 'why is this stuck', 'which of these threads is busy'. Goes one level below process_detail and list_processes, which report one figure for the whole process and cannot tell a program with one hot thread from one using every core evenly. Read-only; nothing is sampled with a tool, attached to or changed. (arguments: pid)"
         },
         {
-          "tool": "system_history",
-          "desc": "system_history: What this machine's CPU, disk, memory or paging was doing earlier, from the sysstat accounting records rather than a live reading. Use for 'was this busy last night', 'what was using the disk at lunchtime', 'why was the fan loud earlier'. Says plainly when no history has been recorded, because that is not the same as the machine having been idle. Read-only. (arguments: topic)"
+          "tool": "cpu_per_core",
+          "desc": "cpu_per_core: Which individual processor cores are busy right now, and how much of each is user time versus waiting on disk. Use when the machine feels slow but nothing looks busy - a single process pinning one core looks idle in every system-wide average. Read-only; starts nothing."
         },
         {
-          "tool": "network_activity",
-          "desc": "network_activity: Report what this machine's network is doing right now, per program: which processes are sending and receiving, and how fast each interface is moving. Use for 'what is using my bandwidth', 'why is the network slow', 'what is uploading', 'is something downloading right now'. Interface rates come from /proc/net/dev and always work; per-program rates need nethogs and can only name programs this user owns. Says which half it could not measure and why, and reports an unattributed socket as unattributed rather than guessing at a program. Read-only; nothing is changed or blocked."
+          "tool": "open_files",
+          "desc": "open_files: Find which programs have a file, directory or network socket open. Use for 'what is using this file', 'why can't I delete this', 'what has my disk open', 'which process is holding that socket'. Names the holding program with its full command line, and flags deleted files whose space cannot be reclaimed. Reads only this user's processes unless run as root. Read-only: it lists open handles and never closes one. (arguments: path, pid, limit)"
         },
         {
-          "tool": "click_pointer",
-          "desc": "click_pointer: Click a mouse button at the current pointer position. Requires the 'input-control-enabled' consent key (separate from the vision sense) to be enabled. (arguments: button, count)"
+          "tool": "process_detail",
+          "desc": "process_detail: What one running process is doing right now: its state (running, sleeping, stopped, zombie), and the kernel function it is waiting on if it is blocked. Answers 'why is that window frozen', 'what is this program stuck on', 'is this process hung'. Read-only: it attaches to nothing, runs nothing, and never needs root for your own processes. (arguments: pid)"
+        },
+        {
+          "tool": "list_percepts",
+          "desc": "list_percepts: Show what Chronoa is currently perceiving - every fact held about this machine and the user right now, with its age, what expires it, and whether it would be included in the next reply. Use this to check what the assistant actually knows rather than what it says. (arguments: sense_filter, include_expired)"
         }
       ],
       "offered": [
-        "cpu_frequency",
-        "cpu_per_core",
-        "process_cost",
-        "thread_activity",
         "list_processes",
-        "system_history",
-        "network_activity",
-        "click_pointer"
+        "process_cost",
+        "cpu_frequency",
+        "thread_activity",
+        "cpu_per_core",
+        "open_files",
+        "process_detail",
+        "list_percepts"
       ],
       "recall_hit": true
     },
