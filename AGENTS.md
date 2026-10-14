@@ -23186,6 +23186,36 @@ are **median 85 tokens, max 114**, against a 384 cap - **22% of the budget in
 use**. There is no length to cut, because the sequences were never long. Applying
 that paper here would have been reading it rather than measuring it.
 
+### The remaining errors are a flat tail, so there is no rule left to find
+
+The phrase list transfers at a third, which raises the obvious question: the
+misses *looked* systematic - a generic hub beating a specific tool
+(`set_mic_mute` over `set_mute`, `web_search` over `speed_test`,
+`space_by_type` over `disk_usage`) - and a **rule** would generalise where a
+**phrase** does not. So: which tools actually win when the request wanted
+something else?
+
+| | |
+|---|---:|
+| wrong picks across the 220 | 28 |
+| spread over **distinct** tools | **24** |
+| tools responsible for 3 or more errors | **1** |
+| most common wrong-picker accounts for | **3 of 28 = 11%** |
+
+**It is a flat tail.** Twenty-four tools for twenty-eight errors, and the busiest
+one is wrong 3 times. There is no hub to penalise and no systematic cause to
+target - most of the top wrong-pickers are wrong about **half** the time they
+appear, which is a coin flip on the cases where they are relevant rather than a
+defect.
+
+So the inference from a sample of misses was wrong, and the honest conclusion is
+**there is no rule-shaped lever left on this axis.** Which also explains the
+phrase list's behaviour: each remaining error is idiosyncratic, so a phrase fixes
+exactly that request and nothing else - which is precisely what the 5x
+in-sample/out-of-sample gap measured. The vocabulary work is near its ceiling,
+and the rest would need a model - which the next section says is worse than the
+dict lookup.
+
 ### The decision, settled by a model that needed no training at all
 
 `arXiv:2607.18152` said a **0.6B purpose-trained listwise reranker** matches a 4B
