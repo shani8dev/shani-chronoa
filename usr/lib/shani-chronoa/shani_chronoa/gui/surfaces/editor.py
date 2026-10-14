@@ -73,6 +73,14 @@ TITLE = "Editor"
 #: taking this string's word for it.
 ICON = "text-editor-symbolic"
 
+#: The health line's own summary per state, as `wearables` and `android` carry.
+#: The recorder row says the word; this says the count-shaped thing beside it, and
+#: the empty state below it keeps the prose.
+HEALTH_SUMMARY = {
+    common.STATUS_OK: "ready",
+    common.STATUS_ATTENTION: "needs attention",
+}
+
 #: Extension -> `code_hl` language. Only the languages this module's own table
 #: knows how to colour; anything else opens uncoloured, which `tokenize()`
 #: guarantees is *unchanged* rather than half-coloured.
@@ -284,13 +292,20 @@ class _Page:
 
     def __init__(self):
         self.stack = Gtk.Stack()
-        self.status = common.empty_state(
-            ICON, "No file open",
-            "Open a file to edit it. Saving goes through the same consent gate "
-            "and the same undo ring an assistant-driven edit would.")
+        # **The recorder is the panel's health, written once and read twice.** The
+        # row drawn here and the dot on the sidebar row are the same statement, so
+        # they are made once rather than derived twice - which is the whole point
+        # of `common.StatusRecorder`, and what `tests/test_surface_health_status.py`
+        # enforces. Without it this panel's sidebar row carries no dot at all.
+        self.recorder = common.StatusRecorder()
+        self.status = Gtk.Box()
         self.editor: Optional[_Editor] = None
         self._widgets: Dict[str, Gtk.Widget] = {}
         self._list_page: Optional[Gtk.Widget] = None
+        self._show_status(
+            common.STATUS_OK, "No file open",
+            "Open a file to edit it. Saving goes through the same consent gate "
+            "and the same undo ring an assistant-driven edit would.")
 
     # -- file list -------------------------------------------------------
     def _build_list(self, on_open) -> Gtk.Widget:
@@ -383,15 +398,35 @@ class _Page:
             return
         self.editor = _Editor(path, text, read_only=size > MAX_EDIT_BYTES)
         self._mount()
+        # **Ready, recorded without a row** - the file view is showing, not the
+        # status page, so there is nothing to draw the row on. `set()` is the
+        # half of `StatusRecorder` that exists for exactly this.
+        self.recorder.set(common.STATUS_OK)
         self.stack.set_visible_child_name("file")
 
-    def _set_status(self, title: str, description: str) -> None:
+    def _show_status(self, word: str, title: str, description: str) -> None:
+        """The status page: a health row, then the prose.
+
+        **The row is built through the recorder**, so the word the sidebar dot
+        draws is the word whose CSS class is on screen. Drawing an
+        `empty_state` alone left `page.status` with nothing to answer, which is
+        what `test_the_dot_agrees_with_the_row_the_panel_shows` catches.
+        """
         page = self.status
-        # `common.empty_state` returns a bare widget; rebuild it rather than
-        # assume an Adw.StatusPage it does not guarantee.
         self.stack.remove(page) if page.get_parent() is not None else None
-        self.status = common.empty_state(ICON, title, description)
+        column = common.page_body(18)
+        column.set_margin_top(12)
+        column.append(self.recorder.row(word, HEALTH_SUMMARY[word], title))
+        column.append(common.empty_state(ICON, title, description))
+        self.status = column
         self.stack.add_named(self.status, "status")
+
+    def _set_status(self, title: str, description: str) -> None:
+        # **Attention, not unknown.** Every caller of this is a thing that did
+        # not work - a save refused, a file that would not parse, a path that has
+        # gone - and "could not determine" would understate a refusal that has
+        # already explained itself.
+        self._show_status(common.STATUS_ATTENTION, title, description)
 
     def _header(self) -> Tuple[Gtk.Widget, Dict[str, Gtk.Widget]]:
         title = Gtk.Label(label="")
@@ -503,7 +538,14 @@ def build(app: Any) -> Gtk.Widget:
         page.stack.set_vexpand(True)
         page.stack.add_named(page.status, "status")
         page.show_list()
-        return Adw.NavigationPage(child=page.stack, title=TITLE)
+        navigation = Adw.NavigationPage(child=page.stack, title=TITLE)
+        # **The sidebar dot reads this.** `window._panel_status` is duck-typed on
+        # purpose, so the convention is that a panel's `status` is a *callable*
+        # answering with a word from `common.STATUS_WORDS` - and `page.status`
+        # above is a widget, on a different object. Attaching the recorder here
+        # is what puts a dot on this panel's sidebar row.
+        navigation.status = page.recorder.status
+        return navigation
     except Exception:  # noqa: BLE001 - a surface that raises loses a sidebar row
         logger.warning("The editor surface could not be built", exc_info=True)
         return Adw.NavigationPage(
