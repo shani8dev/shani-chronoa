@@ -238,6 +238,14 @@ def test_the_conversations_list_carries_it_too(store_root):
         conversations_surface._ConversationsView)
     view._group = Adw.PreferencesGroup()
     view._row_widgets = []
+    # **`_day_rows` is the third field `_add_row` reads**, so a stub built with
+    # `__new__` has to carry it: day headings were added to this view after this
+    # test was written, and `_add_row` now ends by appending to
+    # `self._day_rows[-1][1]` when there is a heading open. Without it the call
+    # raised `AttributeError: '_ConversationsView' object has no attribute
+    # '_day_rows'` and the test failed before reaching the tooltip it is about -
+    # the same stale-stand-in shape as the fake windows missing `set_progress`.
+    view._day_rows = []
 
     view._add_row({"id": sid, "title": "cut short", "updated": 0, "active": True},
                   "haystack",
