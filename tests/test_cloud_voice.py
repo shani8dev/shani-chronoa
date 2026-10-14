@@ -434,9 +434,35 @@ def test_the_capability_table_matches_the_recorded_probe():
         "kilo": (True, False), "llm7": (True, False), "blockrun": (False, False),
         "google": (False, False), "opencode-zen": (False, False),
     }
+    #: **Added after the probe above, and saying so is the point.**
+    #: `anthropic` joined `PROVIDERS` because it was already in
+    #: `BYOK_PROVIDER_ORDER`, so the engine built an `AnthropicLLM` from a saved
+    #: key while every UI in the tree iterated `PROVIDERS` and showed no row for
+    #: it. Its (route, 401) answer is **not invented here** - that would be
+    #: exactly the "a table in a docstring is a claim" defect this file exists to
+    #: prevent, written by the very hand that is checking. It stays unmeasured
+    #: until somebody runs `probe_capabilities()` against it with network access.
+    not_probed = {"anthropic"}
+
     from shani_chronoa import cloud_llm
-    assert set(measured) == set(cloud_llm.PROVIDERS), (
-        "the measured table and the provider table have drifted apart")
+
+    #: **`custom` is excluded by its own shape, not by an exception.** Its
+    #: `base_url` is empty *by design* - the address is whatever the person typed
+    #: into Settings - so there is nothing for this probe to send a request to,
+    #: and it can never be covered by a table of live endpoints. Deriving the
+    #: exclusion means that if anyone ever gives it a real URL, the next run
+    #: demands a measurement instead of quietly staying exempt.
+    probeable = {name for name, provider in cloud_llm.PROVIDERS.items()
+                 if provider.base_url}
+    unprobeable = set(cloud_llm.PROVIDERS) - probeable
+    assert unprobeable == {"custom"}, (
+        "a provider with no base_url cannot be probed, and that is only "
+        f"legitimate while it is the hand-typed one: {sorted(unprobeable)}")
+
+    assert set(measured) | not_probed == probeable, (
+        "the measured table and the provider table have drifted apart: "
+        f"unaccounted for {sorted(probeable - set(measured) - not_probed)}, "
+        f"no longer a provider {sorted(set(measured) - probeable)}")
     for pid, (stt, tts) in measured.items():
         assert (pid in cloud_voice.STT_ROUTES) is stt, (
             f"{pid} speech recognition: recorded {stt}, table says "
