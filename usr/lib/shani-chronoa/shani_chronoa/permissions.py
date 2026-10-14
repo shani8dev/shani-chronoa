@@ -66,6 +66,26 @@ class Decision:
     FEEDBACK = "feedback"
     #: No rule matched. Defer to whatever already decides - the consent keys.
     FALL_THROUGH = "fall_through"
+    #: **Nobody answered.** A dismissal, a timeout, no presenter, a presenter
+    #: that returned the wrong type - every way of not answering, kept apart
+    #: from the ways of answering "no".
+    #:
+    #: It refuses, because that is the safe direction and it always was. What it
+    #: does not do is become a *decision the user made*: `decide()` records
+    #: nothing for it, so it leaves no rule behind and the next attempt asks
+    #: again. Measured before the split, a two-minute timeout wrote
+    #: `(action, path, deny_session)` - so a person who got up for two minutes
+    #: found the tool refused for the rest of the session, with a Settings row
+    #: reading "refused" that they had never pressed, and a `permits()` sentence
+    #: telling the model *"a rule ... says deny_session"* about a rule no rule
+    #: made.
+    #:
+    #: The re-ask that this gives up is bounded elsewhere and was already there:
+    #: `DEFAULT_TOOL_ATTEMPTS_PER_ROUND = LOOP_THRESHOLD` (5), and "limit" is in
+    #: every tool's allowed failure types, so the tool loop stops calling it. The
+    #: guard was never the record - the record was suppressing *this turn's*
+    #: retries, and it cost a session.
+    NO_ANSWER = "no_answer"
 
 
 #: Decisions that persist for the rest of the session when granted, as opposed
@@ -343,6 +363,16 @@ def permits(action: str, resource: str) -> Tuple[bool, Optional[str]]:
     decision = evaluate(action, resource)
     if decision in (Decision.ALLOW_ONCE, Decision.ALLOW_SESSION):
         return True, None
+    if decision == Decision.NO_ANSWER:
+        # `decide()` writes none of these, so reaching it means somebody called
+        # `add_rule()` by hand. It still refuses - the safe direction is not
+        # conditional - and it says what it is rather than claiming a denial
+        # somebody gave.
+        return False, (
+            f"Permission for {action} on {resource} was not answered, so it is "
+            f"not allowed this time and nothing was recorded against {action}. "
+            "Ask the user what to do instead."
+        )
     if decision in (Decision.DENY_ONCE, Decision.DENY_SESSION, Decision.CANCEL):
         scope = ("for the rest of this session" if decision in _SESSION_SCOPED
                  else "this time")
@@ -459,22 +489,58 @@ class Reply(NamedTuple):
 
     @property
     def is_refusal(self) -> bool:
+        """Whether this answer says no - **including `NO_ANSWER`**.
+
+        A caller may only treat `None` as no, and `NO_ANSWER` is one of the ways
+        to reach it. It is a refusal of *this call* rather than a decision about
+        the action, which is why it is listed here and not folded into the
+        session-scoped bucket: the two differ in what they leave behind, not in
+        whether the thing runs.
+        """
         return self.reply in (Decision.DENY_ONCE, Decision.DENY_SESSION,
-                              Decision.CANCEL)
+                              Decision.CANCEL, Decision.NO_ANSWER)
+
+    @property
+    def was_answered(self) -> bool:
+        """Whether a person actually chose something.
+
+        The distinction `NO_ANSWER` exists for. `is_refusal` is about the call;
+        this is about the session - only an answered refusal may leave a rule
+        behind.
+        """
+        return self.reply != Decision.NO_ANSWER
 
 
 def parse_reply(answer: str) -> Reply:
     """Turn whatever the presenter handed back into a decision and a reason.
 
-    Anything unrecognised is a rejection - including the empty string, which is
-    what a dismissal, a timeout and a missing presenter all resolve to. Escape
-    therefore takes the same path as pressing "no", and this is the only place
-    that mapping exists: "is there a path where an unknown answer becomes an
-    allow" has to have one answer.
+    **Two different things land here, and keeping them apart is the fix.**
+
+    - **Nothing** - the empty string, or a non-string, which is what a
+      dismissal, a timeout, no presenter and a presenter that returned the
+      wrong type all resolve to. That is `NO_ANSWER`: it refuses the call and
+      records nothing, so the next attempt asks again. It used to read as
+      `DENY_SESSION`, which meant a two-minute timeout left a session-wide rule
+      the user had never made.
+    - **Something that is not one of the answers** - a word, a sentence, a
+      dict printed by a broken presenter. That is a refusal *and the words are
+      the reason*, so they are kept. They used to be discarded into a `message`
+      that was only ever filled after a newline, which is why
+      `permissions.reasons()` was `{}` after every real refusal in the shipped
+      app: the prompt invites a reason, the presenter is buttons and a text
+      box, and a free-typed or spoken reason reached here and was thrown away.
+
+    Still no path where an unknown answer becomes an allow - that is the whole
+    contract, and it is what both branches above preserve.
     """
     text = answer if isinstance(answer, str) else ""
     head, separator, message = text.partition(REASON_SEPARATOR)
     head, message = head.strip(), message.strip()
+    if not head and not message:
+        # No answer at all. `str(None)`, a bare `42` and a closed window all
+        # reach the same place, and all of them mean the same thing.
+        if not isinstance(answer, str) or not answer.strip():
+            return Reply(Decision.NO_ANSWER, "")
     if head == ALLOW_ONCE_CHOICE:
         return Reply(Decision.ALLOW_ONCE, message)
     if head == ALLOW_SESSION_CHOICE:
@@ -483,8 +549,22 @@ def parse_reply(answer: str) -> Reply:
         return Reply(Decision.CANCEL, message)
     if head == FEEDBACK_CHOICE:
         return Reply(Decision.FEEDBACK, message)
-    # DENY_CHOICE and every non-answer land here together, on purpose.
-    return Reply(Decision.DENY_SESSION, message)
+    if head == DENY_CHOICE:
+        # A button. The reason is only what came after the separator, and an
+        # empty one is the honest answer for a click - "No, don't allow" must
+        # not become a reason saying "No, don't allow".
+        return Reply(Decision.DENY_SESSION, message)
+    # **Anything else that carries words is a refusal, and the words are the
+    # reason** - including the part before any separator.
+    #
+    # That is the whole reason field: `ApprovalRequest.reject_line` promises
+    # that declining "tells Chronoa why if you add a reason", the window's
+    # composer is the only place a sentence can be typed (the presenter is
+    # buttons), and `gui.questions.match_spoken_option` deliberately returns the
+    # raw words when they are not an option - so both a typed and a spoken reason
+    # arrive here as `head` and were being dropped on the floor. This is the one
+    # seam where that happened.
+    return Reply(Decision.DENY_SESSION, message or head)
 
 
 def always_patterns(action: str, resource: Optional[str]) -> List[Tuple[str, str]]:
@@ -560,13 +640,35 @@ class ApprovalRequest:
 
     @property
     def reject_line(self) -> str:
+        """How to give a reason, which is where the promise is kept.
+
+        **It names the composer**, because the window's question row is buttons
+        and a button cannot carry a sentence - the composer at the bottom of the
+        main window is the one place a reason can be typed, and it is what the
+        question puts its own placeholder up for ("Say or type your answer").
+        Saying so is not decoration: measured through the real window, a refusal
+        left `permissions.reasons()` as `{}` every single time, because the
+        reason reached `parse_reply()` and was dropped there. The prompt
+        promised a reason and offered no place to give one.
+        """
         return ("Saying no tells Chronoa why if you add a reason, so it can do "
-                "something else instead. It does not end the conversation.")
+                "something else instead - type or say it instead of tapping an "
+                "answer. It does not end the conversation.")
 
     @property
     def escape_line(self) -> str:
+        """What a dismissal does, stated exactly.
+
+        **Closing is no, never yes** - unchanged and load-bearing. What changed
+        is the second half: it now says that closing leaves *nothing recorded*,
+        so a dismissal cannot become a standing refusal. That sentence used to
+        be true of the permission and false of the session, and the false half is
+        the one that bit: a 120-second timeout wrote a `deny_session` rule, so
+        walking away from the machine for two minutes cost the tool for the rest
+        of the session.
+        """
         return ("Closing this question without answering counts as no, never as "
-                "yes.")
+                "yes - and nothing is remembered, so the next time asks again.")
 
     @property
     def options(self) -> List[str]:
@@ -700,12 +802,16 @@ def decide(action: str, resource: "str | None", consent_key: str,
     `parse_reply()`'s, so Escape, a timeout and a nonsense answer all take the
     refusal path rather than falling through to an allow by omission.
 
-    A refusal is recorded as a *session* denial rather than simply returning
-    None. Otherwise the model could retry, be refused, and be asked again on
-    the next attempt - the same question four times inside one turn is how a
-    prompt becomes something people click through without reading. The reason the
-    user gave rides along in `reasons()` so the model can adapt instead of
-    retrying the thing they objected to.
+    **Refusing and recording are now two different acts**, and the split is the
+    fix. A *refusal the user gave* is recorded as a session denial, so the model
+    cannot retry, be refused and be asked again on the next attempt - the same
+    question four times inside one turn is how a prompt becomes something people
+    click through without reading. A *prompt nobody answered* records nothing at
+    all. Both return None, so the call is refused identically; only the session
+    remembers. The reason the user gave rides along in `reasons()` so the model
+    can adapt instead of retrying the thing they objected to - and it now
+    actually arrives, because `parse_reply()` keeps words that are not one of
+    the options.
 
     `offer_cancel` adds codex's Cancel as a fourth answer, which is what writes
     a `Decision.CANCEL` that `cancel_requested()` can then report. It is opt-in
@@ -727,7 +833,8 @@ def decide(action: str, resource: "str | None", consent_key: str,
     # four times inside a single turn. A prompt people click through without
     # reading is worse than no prompt.
     on_record = evaluate(action, resource or "*")
-    if on_record in (Decision.DENY_ONCE, Decision.DENY_SESSION, Decision.CANCEL):
+    if on_record in (Decision.DENY_ONCE, Decision.DENY_SESSION, Decision.CANCEL,
+                     Decision.NO_ANSWER):
         logger.info("Permission for %s %s already refused this session",
                     action, resource)
         return None
@@ -794,13 +901,35 @@ def decide(action: str, resource: "str | None", consent_key: str,
                         action, resource, feedback_text[:50] + "..." if len(feedback_text) > 50 else feedback_text)
             return Decision.ALLOW_ONCE
         else:
-            # User dismissed or timed out - treat as a denial
+            # The feedback box was dismissed or timed out, so the guidance never
+            # arrived. **The refusal is still recorded**, and the reason this is
+            # not the `NO_ANSWER` case below is that a person *did* choose:
+            # they pressed "Provide feedback", which is an option. An empty text
+            # box is our bug, not their absence, and the rule this change draws
+            # is "no option chosen -> record nothing", not "no words reached
+            # `_reasons` -> record nothing" - a click on "No, don't allow"
+            # collects no reason either and is still recorded.
             add_rule(action, pattern, Decision.DENY_SESSION, session_only=True)
             logger.info("Permission for %s %s refused (feedback dismissed)",
                         action, resource)
             return None
 
     pattern = resource or "*"
+    if reply.reply == Decision.NO_ANSWER:
+        # **Refuse the call and record nothing.** This is the whole of the
+        # "a timeout is not a session denial" half: `decide` returns None, so the
+        # call is refused exactly as before, and no rule is written, so the next
+        # attempt asks again rather than finding a refusal the user never gave.
+        #
+        # The cost is bounded and was measured before the split, not assumed:
+        # the tool loop's per-tool budget is `LOOP_THRESHOLD` (5) and "limit" is
+        # in every tool's allowed failure types, so this cannot become an
+        # unbounded re-ask - and the alternative is a tool that stays dead for
+        # the session because somebody went to make coffee.
+        logger.info("Permission for %s %s refused: nobody answered, so nothing "
+                    "was recorded and the next attempt asks again", action,
+                    resource)
+        return None
     if reply.reply == Decision.CANCEL:
         add_rule(action, pattern, Decision.CANCEL, session_only=True)
     else:

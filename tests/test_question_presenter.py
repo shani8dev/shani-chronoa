@@ -578,6 +578,65 @@ def _gated_tools() -> list:
     return out
 
 
+#: The gated tools that gate inline in `_run` rather than through a `_consent`
+#: helper - they consult `config.sense_allowed(...)` or a sense property
+#: directly, which is the documented precedent (`screenshot.py` does the same).
+#: Each is called with arguments that would otherwise *act* - a Ctrl+C, a real
+#: capture, a real notification, a real outbound request - so a gate that had
+#: quietly stopped working would do the thing instead of refusing it.
+#:
+#: This has to be completed whenever a skill starts gating inline: an unlisted
+#: one is reported as "no _consent() gate and no probe", which reads as a missing
+#: gate rather than a missing entry here.
+_PROBES = {
+    "list_wifi_networks": {},
+    "notify": {"summary": "consent sweep probe"},
+    "press_key": {"key": "ctrl+c"},
+    "screenshot": {},
+    "maps": {"action": "find", "place": "the consent sweep probe"},
+    "news": {"topic": "the consent sweep probe"},
+    "take_photo": {},
+}
+
+
+def _names_the_switch(key: str, reason: str) -> bool:
+    """Whether a refusal names the switch a person could actually turn on.
+
+    **Either spelling counts, and that is deliberate.** What this has to catch
+    is a refusal degrading into a bare *"the user did not allow"*, leaving the
+    person with nothing to act on. Which of the two spellings is the right one is
+    the subject of the conversion counted by the test beside it, and this sweep
+    must not be what silently decides it: **87 of the 92 gated refusals still
+    name the raw key and pass this**, so asserting the label here would turn a
+    green test out of work that has not been done.
+    """
+    from shani_chronoa.capabilities import gate_label
+
+    return key in reason or gate_label(key) in reason
+
+
+class TestNamesTheSwitchCanTell:
+    """The control for the sweep, because either-spelling-counts is permissive.
+
+    A helper that accepts two spellings and is only ever asked about one of them
+    is a helper that cannot fail - the same class this file's own history
+    records for a body-inheritance guard that returns False for every input
+    supplied. So it is asked about all four cases here, including the one the
+    sweep exists to catch.
+    """
+
+    KEY = "web-sense-enabled"
+
+    def test_it_separates_a_refusal_that_names_nothing(self):
+        assert not _names_the_switch(self.KEY, "Refusing: nothing was done.")
+        assert not _names_the_switch(self.KEY, "The user did not allow it.")
+
+    def test_it_accepts_either_spelling(self):
+        assert _names_the_switch(self.KEY, "turn it off (enable 'web-sense-enabled')")
+        assert _names_the_switch(
+            self.KEY, "Switch on “Web search” in Settings to use it.")
+
+
 class TestNobodyToAskSaysNobodyIsThere:
     """`can_ask()`'s contract, which is what makes its False case harmless.
 
@@ -614,26 +673,6 @@ class TestNobodyToAskSaysNobodyIsThere:
 
         config = ChronoaConfig()
         gated = _gated_tools()
-        # The ones that gate inline in `_run` rather than through a `_consent`
-        # helper - they consult `config.sense_allowed(...)` or a sense property
-        # directly, which is the documented precedent (`screenshot.py` does the
-        # same). Each is called with arguments that would otherwise *act* - a
-        # Ctrl+C, a real capture, a real notification, a real outbound request
-        # - so a gate that had quietly stopped working would do the thing
-        # instead of refusing it, which is the failure this is looking for.
-        #
-        # This list has to be completed whenever a skill starts gating inline:
-        # an unlisted one is reported as "no _consent() gate and no probe",
-        # which reads as a missing gate rather than a missing entry here.
-        probes = {
-            "list_wifi_networks": {},
-            "notify": {"summary": "consent sweep probe"},
-            "press_key": {"key": "ctrl+c"},
-            "screenshot": {},
-            "maps": {"action": "find", "place": "the consent sweep probe"},
-            "news": {"topic": "the consent sweep probe"},
-            "take_photo": {},
-        }
 
         problems = []
         for name, key, handler in gated:
@@ -642,19 +681,73 @@ class TestNobodyToAskSaysNobodyIsThere:
             gate = getattr(module, "_consent", None)
             if gate is not None:
                 allowed, reason = gate(config)
-                if allowed or key not in reason:
+                if allowed or not _names_the_switch(key, reason):
                     problems.append(f"{name}: {reason!r}")
                 continue
-            probe = probes.get(name)
+            probe = _PROBES.get(name)
             if probe is None:
                 problems.append(f"{name}: no _consent() gate and no probe")
                 continue
             reason = module._run(probe)
-            if key not in reason:
+            if not _names_the_switch(key, reason):
                 problems.append(f"{name}: {reason!r}")
 
         assert problems == [], (
             "with nobody to ask, these tools did not produce a refusal naming "
-            "the consent key the user could turn on:\n  "
+            "the switch the user could turn on:\n  "
             + "\n  ".join(problems)
+        )
+
+    def test_how_many_gated_refusals_still_name_the_raw_key(self, gsettings_env):
+        """**The count, because "which spelling" is a conversion that has not
+        happened.**
+
+        Measured 2026-10-14 over all gated tools with nobody to ask:
+        **92 gated, 5 name the Settings row's label only, 20 name both, 67 name
+        only the raw key, 0 name neither.** So the sweep above goes green for 87
+        of them while 67 still send a person after a switch no screen spells that
+        way - the defect `04316cc` fixed for the senses and deliberately did not
+        fix across 67 skill files, which is a change with its own review rather
+        than a footnote to it.
+
+        So this is the standing witness for that work, and **it is a count rather
+        than a flag for exactly the reason the file records about `skills_total`
+        and `KV_CACHE_MEASUREMENTS`**: a boolean cannot notice a conversion
+        landing, and a hand-kept count is the only thing here that does. It fails
+        when the number moves - in either direction, because a drop and a rise
+        are different events.
+        """
+        import importlib
+
+        from shani_chronoa.capabilities import gate_label
+        from shani_chronoa.config import ChronoaConfig
+
+        ask_bridge.set_presenter(None)
+        config = ChronoaConfig()
+        counts = {"label_only": 0, "both": 0, "key_only": 0, "neither": 0}
+        for name, key, handler in _gated_tools():
+            config.set(key, "false")
+            module = importlib.import_module(handler.__module__)
+            gate = getattr(module, "_consent", None)
+            if gate is not None:
+                allowed, reason = gate(config)
+                assert not allowed, f"{name} was allowed with nobody to ask"
+            else:
+                probe = _PROBES.get(name)
+                assert probe is not None, f"{name} has no probe in this sweep"
+                reason = module._run(probe)
+            labels = gate_label(key) in reason
+            keys = key in reason
+            counts["both" if labels and keys else
+                   "label_only" if labels else
+                   "key_only" if keys else "neither"] += 1
+
+        assert counts["neither"] == 0, (
+            "a refusal named neither the key nor the row, so the person is "
+            f"told nothing they can turn on: {counts}"
+        )
+        assert counts["key_only"] == 67, (
+            f"the raw-key count moved from 67 to {counts['key_only']} - either a "
+            "skill now names the Settings row (update this, and the sweep "
+            "beside it still holds), or a gate stopped naming anything at all"
         )

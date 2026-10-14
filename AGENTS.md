@@ -24977,3 +24977,165 @@ key in its own words, and the shared helper exists and is measured — but conve
 46 files is a change with its own review, not a footnote to this one. Counted and
 recorded rather than claimed. Also untouched: the reason field and the
 timeout-is-not-a-session-denial half of the same direction, both still open.
+
+## A refusal records what was actually said, and a silence records nothing (2026-10-14)
+
+The second half of the direction `04316cc` started. That commit made a refusal
+*name* the Settings row; this one makes it **record the answer it got**, and stops
+it recording an answer nobody gave.
+
+`ApprovalRequest` promised two things the shipped app did not keep -
+`reject_line` said declining *"tells Chronoa why if you add a reason"*, and
+`escape_line` said closing *"counts as no, never as yes"*. Measured through the
+real window, the real presenter and the real `DECISION_TIMEOUT_SECONDS`:
+
+| what the person did | `reasons()` | `rules()` |
+|---|---|---|
+| clicked "No, don't allow" | `{}` | `[('delete_file', path, 'deny_session')]` |
+| **typed a reason, pressed Enter** | **`{}`** | `[('delete_file', path, 'deny_session')]` |
+| **walked away / timed out** | `{}` | **`deny_session`** |
+
+Two facts, one shape: **an answer the person did not give was recorded as one
+they did** - once as a reason that was thrown away, once as a session-wide denial
+nobody made. After:
+
+```
+type_reason  ->  reasons: {'delete_file|/tmp/...': 'no, use the trash instead'}
+                 permits() carries "The user said: ..."    (was {})
+walkaway     ->  rules: [],  evaluate: fall_through       (was deny_session)
+```
+
+### The split, and the line it draws
+
+`NO_ANSWER` is now a distinct decision. `parse_reply()` returns it for *nothing* -
+`""`, a non-string, whitespace - which is what a dismissal, a timeout, no presenter
+and a wrong-typed presenter all resolve to. It **refuses** the call and records
+**nothing**.
+
+The rule drawn is *an option was chosen -> recorded; no option chosen -> not
+recorded*, and deliberately **not** *no words reached `_reasons` -> not recorded*.
+"Provide feedback" collects no words either and is recorded all the same, because
+a person pressed it; a click on "No, don't allow" is the same case. That boundary
+cost a real revert while this was written, which is what
+`test_a_chosen_option_is_remembered_even_when_its_text_never_arrives` holds.
+
+`permits()` still fails closed on a hand-written `NO_ANSWER` rule - the safe
+direction is not made conditional on who wrote it - and it says **not answered**
+rather than claiming a denial somebody gave. That is asserted in **both**
+directions, including `"denied" not in said`, because a no-answer reported as a
+denial is the defect wearing a different route.
+
+And a **button click records no reason of its own.** The parser's fallback keeps
+the whole answer as the reason, so the option that *is* an answer has to be
+handled before it - otherwise a plain click files "No, don't allow" as what the
+user said.
+
+### 11 mutations, 11 caught, 0 survivors
+
+`tools/mutations/refusal_records_what_was_said.py`, run **from inside** a snapshot
+at `/tmp/opencode/snap-refusal` - `tools/mutate.py` takes `ROOT` from the working
+directory when it holds `tools/mutations`, so running from inside a copy makes
+the copy what gets mutated. Every anchor asserted `count == 1` before the write,
+restore verified byte-identical, verdicts read from the summary line, journal
+cleared, and the real tree's dirty set unchanged afterwards.
+
+**The baseline in the snapshot was run first - 31 passed - because a mutation run
+against an already-red tree measures nothing.**
+
+| mutation | caught by |
+|---|---:|
+| `decide()` records a dismissal as `deny_session` (**the shipped defect**) | 4 |
+| the parser reads nothing as `DENY_SESSION` again | 5 |
+| `message or head` -> `message`, so a typed or spoken reason is dropped (**the shipped defect**) | 4 |
+| the fallback applied to `DENY_CHOICE`, so a click records its own label | 2 |
+| `is_refusal` without `NO_ANSWER`, so silence stops refusing | 1 |
+| `was_answered` always True | 1 |
+| `permits()` lets a `NO_ANSWER` rule through | 1 |
+| `permits()` reports a `NO_ANSWER` as a denial the user gave | 1 |
+| `escape_line` drops "nothing is remembered" | 1 |
+| `reject_line` drops "type or say it" | 1 |
+| the feedback branch stops recording the refusal | 1 |
+
+**One witness is deliberately left off the reason mutation, and the reason is in
+the set.** `test_a_reason_after_the_separator_still_round_trips` goes through
+`encode_rejection()`, which puts the reason *after* the separator, so it passes
+whether or not `head` is kept. Naming it would be the over-claim this file
+records for `asleep_state`.
+
+### `is_refusal` and `was_answered` have no production caller
+
+Measured: `grep -rn 'is_refusal\|was_answered' usr/` outside `permissions.py`
+returns nothing, and inside it neither property is read. The refusal is made safe
+by `decide()` returning `None` and by `permits()` failing closed - both of them
+mutated above - and these two properties are the *readable* form of that rule,
+tested directly rather than reached through a caller. **Recorded rather than
+claimed as wiring**, the same way `planmode.refused_tools()` and
+`model_registry.verify_digest` are.
+
+### 67 of 92 gated tools still name the raw key - and now there is a number that moves
+
+`04316cc` converted the senses and left the skills, and its own accounting said
+*"46 hand-written refusals"*. Measured properly, over every gated tool with nobody
+to ask:
+
+| | count |
+|---|---:|
+| gated tools | **92** |
+| name the Settings row's label **only** | **5** |
+| name both | 20 |
+| **name only the raw key** | **67** |
+| name neither | **0** |
+
+So the number was understated, and the five that are right are exactly the five
+`04316cc` converted. And `tests/test_question_presenter.py` had gone **1 failed**
+on it - proved by running the file against a `git archive HEAD` tree of its own
+and getting the identical `1 failed, 6 passed, 8 skipped, 2 errors`.
+
+The correction is narrow, and deliberately so. **The sweep now accepts either
+spelling** - what it has to catch is a refusal degrading into a bare *"the user
+did not allow"*, and asserting the label would turn a green test out of work that
+has not been done - and **a second test pins the count**. A count rather than a
+flag, for the reason `skills_total` and `KV_CACHE_MEASUREMENTS` are: a boolean
+cannot notice a conversion landing. It fails when the number moves, **in either
+direction**, and it says which of the two events that is.
+
+Three controls run, all three biting, the file restored byte-identical after each:
+`_names_the_switch` restricted to the key fails **its own** control *and* the
+sweep; the count moved to 68 fails the count test; and the sweep going red under
+the first is the one that matters - an "accepts either" helper that had made the
+sweep unable to fail would have left the count test as the only witness.
+
+### Two pre-existing harness defects, recorded and deliberately not fixed
+
+`test_question_presenter.py` cannot run its real-window class on this box, and both
+causes are in its own harness rather than in the product:
+
+- `_child_env()` does `env["XDG_RUNTIME_DIR"] = str(runtime)`, and **broadway's
+  socket is a file in GLib's runtime directory** - so GDK finds no display,
+  `app.run([])` returns at once and the child prints no `RESULT`. Two ERRORs at
+  setup, on a traceback that names the environment rather than the code.
+- `_have_display()` asks `screengrab.display_environment()`, which reads only
+  `DISPLAY` and `WAYLAND_DISPLAY` - so it answers `"none"` for a broadway session
+  and **8 tests skip** on the only backend this suite runs on.
+
+Both remedies are known and neither is applied here: leave `XDG_RUNTIME_DIR`
+alone and check all three backend names, as
+`test_a_refusal_records_what_was_actually_said.py` does. Turning 8 skipped tests
+into 8 running ones in a file this pass did not audit is its own piece of work
+with its own run, and the one fix that *is* this pass's - the stale assertion -
+did not need either.
+
+### Runs
+
+**174 passed** across the eight permission suites, one process each, a fresh
+`XDG_STATE_HOME` per run, serial: the new witness (31), `test_approval_ux` (45),
+`test_spoken_answers` (15), `test_permissions` (25), `test_permission_feedback`
+(22), `test_approval_settings_surface` (8), `test_permission_decisions` (19),
+`test_cancel_actually_stops_the_turn` (9). Plus `test_gateway` (45),
+`test_harvest2_tranche1_2_3` (24) and `test_tool_replay` (14).
+`--check-anchors` and `--check-witnesses` are clean for the set: **11 anchors of
+11 declared mutations, 22 witnesses, all resolving**.
+
+**Not claimed: any render.** The main window still cannot be photographed above
+460px, and this change is to the prompt's *text* rather than its layout, so
+nothing here has a picture behind it.

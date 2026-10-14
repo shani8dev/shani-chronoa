@@ -27,11 +27,35 @@ class TestMatchSpokenOption:
     def test_an_option_said_is_that_option(self, said, chosen):
         assert match_spoken_option(said, PERM) == chosen
 
-    @pytest.mark.parametrize("said", ["allow", "yes", "sure, go ahead", "allow this", "", "once"])
+    @pytest.mark.parametrize("said", ["allow", "yes", "sure, go ahead", "allow this", "once"])
     def test_anything_less_than_a_whole_option_is_not_an_allow(self, said):
         got = match_spoken_option(said, PERM)
         assert got not in (permissions.ALLOW_ONCE_CHOICE, permissions.ALLOW_SESSION_CHOICE)
-        assert permissions.parse_reply(got).reply == permissions.Decision.DENY_SESSION
+        reply = permissions.parse_reply(got)
+        assert reply.reply == permissions.Decision.DENY_SESSION
+        # And the words are kept, because this is how a spoken reason reaches
+        # `reasons()`: `match_spoken_option` deliberately returns the raw words
+        # when they are not an option, so anything not on this list is a
+        # candidate reason and dropping it is the reason field's defect.
+        assert said.strip() in reply.message
+
+    def test_silence_is_not_a_refusal_the_user_gave(self):
+        """`""` is kept in the population above's shape, and it means something else.
+
+        A spoken nothing is not a person saying "no" - it is nobody saying
+        anything, which is `NO_ANSWER`: still a refusal of the call, never an
+        allow, but nothing recorded, so the next attempt asks again. It is
+        listed separately rather than dropped from the list above, because
+        "the empty case still refuses" is the property and "it is refused the
+        same way a word is" is not.
+        """
+        got = match_spoken_option("", PERM)
+        assert got not in (permissions.ALLOW_ONCE_CHOICE,
+                           permissions.ALLOW_SESSION_CHOICE)
+        reply = permissions.parse_reply(got)
+        assert reply.reply == permissions.Decision.NO_ANSWER
+        assert reply.is_refusal, "silence must still refuse the call"
+        assert not reply.was_answered
 
     def test_the_mapped_answer_is_what_permissions_reads_as_allow(self):
         got = match_spoken_option("Allow this once.", PERM)

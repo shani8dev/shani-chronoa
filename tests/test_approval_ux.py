@@ -298,25 +298,86 @@ class TestStageThreeCarriesAReason:
 
 
 class TestDismissalIsNeverConsent:
-    """The stage that has no button."""
+    """The stage that has no button.
+
+    **Two populations, because "not consent" and "a decision the user made" are
+    different claims and this class used to assert only the first and mean the
+    second.** Every input below refuses, and none of them can become an allow -
+    that is unchanged and is the whole of the class's name. What is new is that
+    the ones carrying no words say so, so `decide()` can refuse without writing
+    a rule the user never gave.
+    """
 
     @pytest.mark.parametrize("answer", [
         "",                     # dismissed, timed out, or no presenter at all
         "   ",
-        "close",
-        "cancelled_by_window",
         None,
-        42,
+        42,                     # a presenter returning the wrong type
         object(),
     ])
-    def test_anything_unrecognised_is_a_refusal(self, answer):
+    def test_no_answer_is_a_refusal_but_not_a_decision(self, answer):
+        """A dismissal refuses the call and records nothing.
+
+        **This is the "a timeout is not a session denial" half.** Measured
+        through the real window with the real 120s `DECISION_TIMEOUT_SECONDS`:
+        nobody answered, and the app wrote
+        `('delete_file', '/tmp/...', 'deny_session')` - so walking away for two
+        minutes cost the tool for the rest of the session, with a Settings row
+        reading "refused" that was never pressed.
+        """
+        reply = permissions.parse_reply(answer)
+        assert reply.reply == permissions.Decision.NO_ANSWER, (
+            f"{answer!r} was read as {reply.reply!r}"
+        )
+        # Still a refusal of the call, and still never an allow - the safe
+        # direction did not move.
+        assert reply.is_refusal
+        assert not reply.was_answered
+        assert reply.reply not in (permissions.Decision.ALLOW_ONCE,
+                                   permissions.Decision.ALLOW_SESSION)
+
+    @pytest.mark.parametrize("answer", [
+        "close",
+        "cancelled_by_window",
+        "later",
+        "no, use the trash instead",
+    ])
+    def test_words_that_are_not_an_answer_are_a_refusal_carrying_them(self,
+                                                                     answer):
+        """A person who typed or said something *has* answered.
+
+        This is the reason field's half. `match_spoken_option` deliberately
+        returns the raw words when they are not one of the options, so a spoken
+        or typed reason arrives here as the whole answer - and it used to be
+        dropped, which is why `reasons()` was `{}` after every real refusal in
+        the shipped app while the prompt promised one.
+        """
         reply = permissions.parse_reply(answer)
         assert reply.reply == permissions.Decision.DENY_SESSION, (
             f"{answer!r} was read as {reply.reply!r}"
         )
         assert reply.is_refusal
-        assert reply.reply not in (permissions.Decision.ALLOW_ONCE,
-                                   permissions.Decision.ALLOW_SESSION)
+        assert reply.was_answered, (
+            "words the user actually said must count as an answer, or they "
+            "cannot be kept as a reason"
+        )
+        assert answer in reply.message, (
+            f"the words {answer!r} were not kept as the reason: "
+            f"{reply.message!r}"
+        )
+
+    def test_a_click_on_no_carries_no_reason_of_its_own(self):
+        """The over-fix: "No, don't allow" must not become a reason.
+
+        The fallback keeps the whole answer as the reason, so the option that
+        *is* an answer has to be handled before it - otherwise a plain click
+        records the button's own label as what the user said.
+        """
+        reply = permissions.parse_reply(permissions.DENY_CHOICE)
+        assert reply.reply == permissions.Decision.DENY_SESSION
+        assert reply.message == "", (
+            f"a button press recorded {reply.message!r} as the user's reason"
+        )
 
     def test_a_dismissed_prompt_denies_rather_than_allowing(self):
         ask_bridge.set_presenter(_presenter(""))
@@ -324,16 +385,79 @@ class TestDismissalIsNeverConsent:
         assert "did not allow" in out
         assert "Screenshot saved" not in out
 
-    def test_a_dismissal_is_recorded_so_it_is_not_re_asked(self):
+    def test_a_dismissal_records_nothing_so_the_next_time_asks_again(self):
+        """The shipped defect, asserted in the shape it had.
+
+        Was `test_a_dismissal_is_recorded_so_it_is_not_re_asked`, and it was
+        **right about the re-ask and wrong about the fix for it**: recording the
+        refusal is what stopped the re-ask, and it also left a session-wide rule
+        behind for a prompt nobody answered. The re-ask is bounded elsewhere and
+        was already there - `DEFAULT_TOOL_ATTEMPTS_PER_ROUND = LOOP_THRESHOLD`
+        (5), with "limit" in every tool's allowed failure types - so the record
+        was never the only guard, only the one that cost a session.
+        """
         ask_bridge.set_presenter(_presenter(""))
         execute_tool_outcome("screenshot", {})
         assert permissions.evaluate("screenshot", "*") == \
+            permissions.Decision.FALL_THROUGH, (
+            "a dismissal left a rule behind, so the tool stays refused for the "
+            "session on the strength of an answer nobody gave"
+        )
+        assert permissions.rules() == []
+        assert permissions.reasons() == {}
+
+    def test_a_refusal_the_user_gave_is_still_recorded(self):
+        """The half that must survive, so the split cannot be over-applied.
+
+        A blank refusal records nothing; a *click* on "No, don't allow" is a
+        decision and is recorded exactly as before. Without this, a blanket
+        "stop recording refusals" would pass the test above and delete the
+        property that stops the same question being put four times in a turn.
+        """
+        ask_bridge.set_presenter(_presenter(permissions.DENY_CHOICE))
+        execute_tool_outcome("screenshot", {})
+        assert permissions.evaluate("screenshot", "*") == \
             permissions.Decision.DENY_SESSION
+
+    def test_a_timeout_still_refuses_the_call_and_leaves_nothing(self,
+                                                                monkeypatch):
+        """The real `decide()` timeout path, not just the parser.
+
+        `test_a_timeout_is_a_refusal` below already proves a held prompt cannot
+        resolve to an allow. This is the other half - that the hold also leaves
+        no rule - and it is the case the real 120-second measurement above came
+        from, driven here through the same call rather than the parser alone.
+        """
+        def hanging(question, options):
+            return ask_bridge.make_event()[0]
+        ask_bridge.set_presenter(hanging)
+        # `decide()` passes `timeout=` explicitly, so the constant is what has
+        # to be shortened - patching `ask.__defaults__` changes nothing here.
+        monkeypatch.setattr(permissions, "DECISION_TIMEOUT_SECONDS", 0.05)
+        execute_tool_outcome("screenshot", {})
+        assert permissions.rules() == [], (
+            "a prompt that timed out left a rule behind: "
+            f"{permissions.rules()}"
+        )
 
     def test_the_prompt_states_that_dismissal_means_no(self):
         ask = permissions.approval_request("delete_file", "/tmp/x",
                                            "file-delete-enabled")
         assert "counts as no" in ask.escape_line and "never as" in ask.escape_line
+
+    def test_and_that_it_says_a_dismissal_is_not_remembered(self):
+        """The escape line's second half is the one that used to be false.
+
+        It claimed "counts as no" and said nothing about the session, while a
+        timeout wrote a `deny_session` - so the prompt was accurate about the
+        permission and silent about the part that cost a session.
+        """
+        ask = permissions.approval_request("delete_file", "/tmp/x",
+                                           "file-delete-enabled")
+        assert "nothing is remembered" in ask.escape_line, (
+            f"the prompt does not say a dismissal is forgotten: "
+            f"{ask.escape_line!r}"
+        )
 
     def test_a_timeout_is_a_refusal(self, monkeypatch):
         """A held prompt nobody answers must not resolve to an allow."""
