@@ -363,7 +363,13 @@ _SYNONYMS: Dict[str, str] = {
     "sunset": "weather", "sunrise": "weather", "humid": "weather", "wind": "weather",
     "route": "web search", "train": "web search", "flight": "web search",
     "look": "search", "google": "web search",
-    "louder": "volume", "quieter": "volume", "sound": "volume", "loud": "volume",
+    # **`"sound"` was here and is removed, because it never ran.** The same table
+    # carries `"sound": "mute volume audio speaker"` a few lines below, and Python
+    # resolves a repeated dict key to the **last** one - so this entry was dead
+    # from the day it was written, exactly as a duplicate label in `_GROUPS` was.
+    # It is removed rather than the live one, and removing a dead key cannot move
+    # a selection: it was already being skipped.
+    "louder": "volume", "quieter": "volume", "loud": "volume",
     "dim": "brightness", "brighter": "brightness", "darker": "brightness",
     "wifi": "wifi network", "internet connection": "wifi",
     "time": "datetime clock", "date": "datetime", "day": "datetime", "today": "datetime",
