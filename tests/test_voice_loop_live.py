@@ -125,7 +125,20 @@ class _PrivateAudio:
         self._spawn(["pw-loopback", "-n", "demo-speaker",
                      "--capture-props=media.class=Audio/Sink node.name=demo_speaker node.description=demo_speaker",
                      "--playback-props=media.class=Audio/Source node.name=speaker_tap node.description=speaker_tap"], 0)
-        self._wait_for_nodes(("mic_feed", "demo_mic", "demo_speaker", "speaker_tap"))
+        # **A graph that fails to come up cleans up after itself.** Everything
+        # above this line has already spawned `dbus-daemon`, `pipewire`,
+        # `wireplumber` and two `pw-loopback`s, and the failure arrives 15 seconds
+        # later. If `__init__` simply raised, the caller's `except` would have no
+        # object to call `stop()` on - so four daemons survive, holding Bluetooth's
+        # `sco_listen` socket and a runtime dir somebody later `rmtree`s from under
+        # them. Measured: two runs that skipped left exactly two orphaned graphs,
+        # and the run after them could not start one.
+        try:
+            self._wait_for_nodes(("mic_feed", "demo_mic", "demo_speaker",
+                                  "speaker_tap"))
+        except BaseException:
+            self.stop()
+            raise
 
     def _spawn(self, argv, settle: float) -> None:
         log = open(self.root / f"{argv[0]}-{len(self.procs)}.log", "w")
@@ -149,6 +162,46 @@ class _PrivateAudio:
         return subprocess.Popen(["pw-record", "--target", "speaker_tap", "--rate", "16000",
                                  "--channels", "1", path], env=self.env)
 
+    def _daemons_of_this_graph(self) -> "list[int]":
+        """Every live process whose runtime directory is **this graph's**.
+
+        `pipewire` and `wireplumber` **daemonise**: the `Popen` returns and exits,
+        and the real process is reparented to `systemd --user`. So `self.procs`
+        holds handles that are already dead, `stop()`'s `poll()` says they are
+        finished, and nothing reaches the daemon.
+
+        Measured, and the consequences are not theoretical:
+
+        - the orphan keeps serving a socket directory that `stop()` has already
+          `rmtree`'d - a live daemon whose `XDG_RUNTIME_DIR` no longer exists;
+        - it keeps holding Bluetooth's `sco_listen` socket, so the **next** graph's
+          `wireplumber` logs `sco_listen: listen(): Address already in use` and
+          `org.bluez.Error.NotPermitted`, and the capture that follows is empty.
+
+        So each run leaked a daemon that quietly poisoned the next one, which is
+        the reason this file was flaky rather than consistently red - and the
+        reason "no audio server on this machine" was the wrong conclusion to draw
+        from it.
+
+        Matched on `XDG_RUNTIME_DIR` rather than on a name, because a name matches
+        whatever else happens to be called `pipewire` - including the real desktop
+        session's, which this must never touch.
+        """
+        mine = str(self.run)
+        found = []
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                environ = (entry / "environ").read_bytes().split(b"\0")
+            except OSError:
+                continue                      # gone, or not ours to read
+            for item in environ:
+                if item == b"XDG_RUNTIME_DIR=" + mine.encode():
+                    found.append(int(entry.name))
+                    break
+        return found
+
     def stop(self) -> None:
         for proc in reversed(self.procs):
             if proc.poll() is None:
@@ -157,6 +210,24 @@ class _PrivateAudio:
                     proc.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     proc.kill()
+        # **And the ones that daemonised away from their Popen.** Found by runtime
+        # directory and killed by pid, which is the only addressing that reaches
+        # a process whose handle is already spent.
+        for pid in self._daemons_of_this_graph():
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                continue
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if not self._daemons_of_this_graph():
+                break
+            time.sleep(0.2)
+        for pid in self._daemons_of_this_graph():
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
         try:
             os.kill(self.bus_pid, signal.SIGTERM)
         except ProcessLookupError:
