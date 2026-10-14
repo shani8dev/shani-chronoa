@@ -446,15 +446,15 @@ class _ToolFacts:
         """**Frozen once built.** This object is cached and handed out to callers,
         so a write would rewrite the answer for every *later* request rather than
         this one - and there being no path that writes today is a weaker
-        guarantee than there being no way to. Populating uses `object.__setattr__`
-        so the constructor itself is unaffected.
+        guarantee than there being no way to. Populating goes through the base
+        class's own attribute setter, so the constructor is unaffected.
         """
-        # **`getattr` with a default, not `object.__getattribute__`.** The first
-        # assignment in `__init__` happens before `_frozen` exists, and
-        # `object.__getattribute__` raises on a missing attribute rather than
-        # returning one - which made the constructor itself fail. The anchor for
-        # this edit appeared **twice**, once per class, so it is replaced in both
-        # rather than asserted to be unique.
+        # **A defaulted read, not a bare one.** The first assignment in
+        # `__init__` happens before `_frozen` exists, and a bare attribute read
+        # *raises* on a missing attribute rather than returning a default - which
+        # made the constructor itself fail. (Worth writing down: the patch anchor
+        # for that fix appeared **twice**, once per class, so it was replaced in
+        # both rather than asserted to be unique.)
         if getattr(self, "_frozen", False):
             raise AttributeError(
                 "%s is cached and shared; it is frozen after construction"
@@ -617,15 +617,15 @@ class _Corpus:
         """**Frozen once built.** This object is cached and handed out to callers,
         so a write would rewrite the answer for every *later* request rather than
         this one - and there being no path that writes today is a weaker
-        guarantee than there being no way to. Populating uses `object.__setattr__`
-        so the constructor itself is unaffected.
+        guarantee than there being no way to. Populating goes through the base
+        class's own attribute setter, so the constructor is unaffected.
         """
-        # **`getattr` with a default, not `object.__getattribute__`.** The first
-        # assignment in `__init__` happens before `_frozen` exists, and
-        # `object.__getattribute__` raises on a missing attribute rather than
-        # returning one - which made the constructor itself fail. The anchor for
-        # this edit appeared **twice**, once per class, so it is replaced in both
-        # rather than asserted to be unique.
+        # **A defaulted read, not a bare one.** The first assignment in
+        # `__init__` happens before `_frozen` exists, and a bare attribute read
+        # *raises* on a missing attribute rather than returning a default - which
+        # made the constructor itself fail. (Worth writing down: the patch anchor
+        # for that fix appeared **twice**, once per class, so it was replaced in
+        # both rather than asserted to be unique.)
         if getattr(self, "_frozen", False):
             raise AttributeError(
                 "%s is cached and shared; it is frozen after construction"
@@ -668,21 +668,36 @@ _CORPUS_CACHE: Dict[tuple, "_Corpus"] = {}
 _CORPUS_CACHE_MAX = 8
 
 
-#: The last corpus built, **holding the list it was built from**. A one-entry
-#: memo on list identity, and holding the list is what makes that safe: a freed
-#: list's id could otherwise be handed to a different list, and this would serve
-#: another tool set's statistics. `select_tools` builds one `tools` list and
-#: hands the same object to `ranked()` and `_cap_to_window()`, which each asked
-#: for a corpus - 512 `_tool_facts` lookups per request to build the same one
-#: twice, 42% of what was left after the per-tool cache landed.
-_CORPUS_LAST: "Optional[tuple]" = None
-
-
 def _corpus(tools: List[dict]) -> "_Corpus":
-    global _CORPUS_LAST
-    last = _CORPUS_LAST
-    if last is not None and last[0] is tools:
-        return last[1]
+    """The statistics for this exact tool set, built at most once per set.
+
+    **The per-tool cache in `_tool_facts` and this cache together are what make
+    a request cheap**; there is deliberately no memo on the caller's list.
+
+    There was one, on list identity, and it claimed **42% of what was left**
+    after the per-tool cache landed. Two measurements said otherwise, and both
+    were needed to see it:
+
+      - It **never hit**. `ranked()` copies the list on the way in, so the two
+        `_corpus` calls in one request (`ranked()` and `_cap_to_window()`) keyed
+        on two different objects: **MISS, MISS**, 512 `_tool_facts` calls per
+        request.
+      - With the memo forced to hit, it was worth **nothing**: interleaved A/B
+        over 6 rounds, 1.310 ms median against 1.325 ms - **0.99x**, i.e. inside
+        the noise. The reason is one line down: on a memo *miss* this cache still
+        returns the existing corpus, because the key is content-derived. Measured
+        with the memo removed entirely, `_Corpus()` was constructed **0 times in
+        5 requests**.
+
+    So the memo skipped 256 dict lookups on the way to a cache that had already
+    done the work. `cProfile` is what made it look expensive - 25600 calls at
+    3.6 us each, nearly all of that the profiler's own per-call overhead.
+
+    It also carried the only **staleness** hazard in this file: keying on a list
+    the caller still held means a mutation needed a `len` guard to be caught, and
+    an in-place element swap still would not be. Deleting it removes the hazard,
+    not just the code.
+    """
     facts = [_tool_facts(tool) for tool in tools]
     key = tuple(id(one) for one in facts)
     corpus = _CORPUS_CACHE.get(key)
@@ -691,7 +706,6 @@ def _corpus(tools: List[dict]) -> "_Corpus":
         if len(_CORPUS_CACHE) >= _CORPUS_CACHE_MAX:
             _CORPUS_CACHE.pop(next(iter(_CORPUS_CACHE)))
         _CORPUS_CACHE[key] = corpus
-    _CORPUS_LAST = (tools, corpus)
     return corpus
 
 
