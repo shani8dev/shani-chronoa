@@ -185,10 +185,75 @@ CORE = ("ask_user", "get_datetime", "web_search")
 #: small talk gets eight tools again, which is what this path was built to stop.
 CONVERSATION_YIELD = 11.0
 
+#: How many **distinct request words** a tool must match before it can outrank a
+#: conversational turn. `CONVERSATION_YIELD` alone lets a one-word coincidence
+#: through; measured over the whole conversational population, every legitimate
+#: outrank matched three or four words and the only one-word case was a miss.
+#:
+#: **Two, and the corpus cannot distinguish it from three.** The measured
+#: population jumps straight from one word to three - **no conversational request
+#: in `eval_cases.json` sits at breadth 2** - so raising this to 3 changes
+#: nothing observable today and a mutation doing so leaves the suite green. That
+#: is recorded rather than papered over with a fixture invented to sit on a
+#: boundary the data never reaches. Two is chosen because "more than one distinct
+#: request word" is the rule, and one is the only measured value on the wrong
+#: side of it.
+#:
+#: See `_outranks_conversation`.
+CONVERSATION_MIN_HITS = 2
 
-def _outranks_conversation(scored: "List[tuple]") -> bool:
-    """Whether the best match is strong enough to beat the conversation path."""
-    return bool(scored) and scored[0][0] >= CONVERSATION_YIELD
+
+def _match_breadth(request: str, tools: Iterable[dict], tool_name: str) -> int:
+    """How many **distinct request words** `tool_name` matched, counting its name,
+    its description and its option values.
+
+    A separate function because `ranked()`'s third element is a **documented
+    different thing** - request words in the tool's *own name* - and that field is
+    not what this question is about: `usb_devices` scores 0 there for "What is
+    plugged in, and Thunderbolt docks." while matching three words in its
+    description. Reshaping a documented tuple to carry this would be the wrong
+    trade for the one caller that needs it.
+    """
+    query = set(_query_words(request))
+    if not query:
+        return 0
+    for tool in tools:
+        if _name(tool) != tool_name:
+            continue
+        facts = _tool_facts(tool)
+        return len(query & (set(facts.name) | set(facts.body) | set(facts.options)))
+    return 0
+
+
+def _outranks_conversation(request: str, tools: Iterable[dict],
+                           scored: "List[tuple]") -> bool:
+    """Whether the best match is strong enough to beat the conversation path.
+
+    **A score alone is not enough; the match has to have breadth.** Measured over
+    every conversational request in `eval_cases.json` that outranks at all,
+    bucketed by how many distinct request words the winning tool matched:
+
+        1 word -> 1 case     3 words -> 2 cases     4 words -> 1 case
+
+    The single one-word case is **"explain what a black hole is in two
+    sentences"**, which scored 14.579 on the strength of the one word **"explain"**
+    and sent `explain_command` - the matcher counting its own conversation signal
+    back as evidence for a tool. "Explain a command." matches that same tool on
+    **three** words (`command`, `explain`, `manual`), and it is the case this
+    escape hatch exists for.
+
+    **No threshold separates them.** The cases that must outrank score 13.209
+    (`usb_devices` for "What is plugged in, and Thunderbolt docks.") and 11.828
+    (`get_world_time` for "What time is it"), while the one that must not scores
+    **14.579** - 1.37 apart, and in the wrong order. So the threshold is left
+    alone and the breadth is what discriminates.
+    """
+    if not scored:
+        return False
+    _score, name, _name_hits = scored[0]
+    if _score < CONVERSATION_YIELD:
+        return False
+    return _match_breadth(request, tools, name) >= CONVERSATION_MIN_HITS
 
 _STOP = set("""a an the is are was were be been am i me my you your it its this that these those
 to of in on at for from by with and or but if then so as do does did can could would should
@@ -815,7 +880,8 @@ def select_tools(request: str, tools: Iterable[dict], limit: int = DEFAULT_LIMIT
     # correct tool ranked **first** and each was answered with a single
     # `ask_user` schema. The cue cannot see that `explain_command` is what
     # "explain a command" asks for, so it threw away the answer.
-    if wants_a_conversation(request) and not _outranks_conversation(scored):
+    if wants_a_conversation(request) and not _outranks_conversation(
+            request, tools, scored):
         return [t for t in tools if _name(t) in {"ask_user"} | set(in_use or ())]
     # a tool matching only a generic word ("set", "file") beside a strong
     # match is noise that costs tokens

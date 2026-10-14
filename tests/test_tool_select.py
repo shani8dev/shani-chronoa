@@ -498,3 +498,64 @@ class TestTheCorpusIsBuiltOnceAndOnlyForThisToolSet:
         after = tool_select._tool_facts(tool)
         assert "original" in before.body and "original" not in after.body
         assert before is not after
+
+
+class TestAOneWordMatchDoesNotOutrankAConversation:
+    """A score alone must not take a conversational turn to a tool.
+
+    The whole population was measured before this rule was written - every
+    conversational request in `eval_cases.json` that outranks at all, bucketed by
+    how many distinct request words the winning tool matched:
+
+        1 word -> 1 case     3 words -> 2 cases     4 words -> 1 case
+
+    The one-word case is a miss. **No threshold separates it from the cases that
+    must outrank**: it scores 14.579 against `usb_devices`' 13.209 and
+    `get_world_time`'s 11.828, so it is the breadth that discriminates, not the
+    score.
+    """
+
+    def _sent(self, request):
+        return _names(select_tools(request, TOOLS))
+
+    def test_a_knowledge_question_is_answered_in_words_not_with_a_tool(self):
+        """"explain" is the only word `explain_command` and this question share.
+
+        It is also the word that made `wants_a_conversation` true, so the matcher
+        was counting its own conversation signal back as evidence for a tool.
+        """
+        assert self._sent("explain what a black hole is in two sentences") == {"ask_user"}
+
+    def test_the_phrase_beside_the_same_word_still_reaches_the_tool(self):
+        """The control, and the reason the rule is a breadth and not a blocklist.
+
+        One more word - "command", which is the tool's subject rather than its
+        verb - and the same tool is offered, which is what this escape hatch is
+        for.
+        """
+        assert "explain_command" in self._sent("Explain a command.")
+
+    def test_a_body_match_counts_even_though_no_name_word_matched(self):
+        """`usb_devices` scores 0 on `ranked()`'s name-hit field for this.
+
+        Its name is `usb` + `devices` and the request says "plugged" and
+        "Thunderbolt", so a rule keyed on name hits - the obvious thing to use
+        here - drops the tool for a question it answers exactly.
+        """
+        assert "usb_devices" in self._sent("What is plugged in, and Thunderbolt docks.")
+
+    def test_the_threshold_is_not_what_did_the_work(self):
+        """Pin the numbers, so a retune of `CONVERSATION_YIELD` is deliberate.
+
+        This is a **measurement pin, not a guard**: it says the one-word miss
+        scores *above* the cases that must outrank, so nobody "fixes" this by
+        lowering the threshold and silently losing two correct answers.
+        """
+        assert _SCORES["explain what a black hole is in two sentences"] > _SCORES[
+            "What is plugged in, and Thunderbolt docks."]
+
+
+_SCORES = {case: ranked(case, TOOLS)[0][0] for case in (
+    "explain what a black hole is in two sentences",
+    "What is plugged in, and Thunderbolt docks.",
+)}
