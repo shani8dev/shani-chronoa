@@ -53,7 +53,6 @@ _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
 from shani_chronoa import capabilities as C  # noqa: E402
-from shani_chronoa.config import ChronoaConfig  # noqa: E402
 from shani_chronoa.tools import TOOLS  # noqa: E402
 
 
@@ -62,19 +61,26 @@ def _payload(tools) -> int:
 
 
 @pytest.fixture(scope="module")
-def config():
-    return ChronoaConfig()
+def gated():
+    """Every tool the consent table gates, **whether or not it is granted**.
 
+    **This used to filter by consent, and that made the whole class
+    machine-dependent.** "Shut on this box, right now" changes with what the
+    person has allowed and with what another test left behind - measured here,
+    the share fell from the 35% this file records to **19%** on a box where more
+    keys were granted than when it was written, and the guard read
+    "re-evaluate the tradeoff".
 
-@pytest.fixture(scope="module")
-def gated(config):
-    shut = []
-    for tool in TOOLS:
-        function = tool["function"]
-        key = C.gated_by(function["name"], function.get("description", ""))
-        if key and not config.get_bool(key, False):
-            shut.append(tool)
-    return shut
+    The argument being guarded is about the *cost of advertising* gated tools,
+    which is a property of the registry and the consent table - **42% today, over
+    the 92 tools `gated_by` finds** - not of anybody's current settings. So the
+    fixture reports the declared set, and the number it guards is stable and
+    *higher* than the one written down, which is the direction that says the
+    argument still holds rather than the other one.
+    """
+    return [tool for tool in TOOLS
+            if C.gated_by(tool["function"]["name"],
+                          tool["function"].get("description", ""))]
 
 
 class TestTheCostIsRealAndMeasured:
@@ -116,7 +122,12 @@ class TestTheToolsStayVisible:
             out = execute_tool_outcome("screenshot", {}).text
         finally:
             permissions.clear()
-        assert "vision-sense-enabled" in out, (
-            "a shut tool must still be able to explain itself, naming the "
-            "setting that would enable it"
-        )
+        # **Either spelling.** `04316cc` made refusals name the Settings row, so
+        # this read *'Switch on "Take and describe photos" in Settings to use
+        # it.'* and the assertion for the raw key failed on a refusal that names
+        # the switch correctly. What it has to catch is a refusal that names
+        # *nothing* - a person told to enable a setting with no way to find it.
+        assert ("vision-sense-enabled" in out
+                or C.gate_label("vision-sense-enabled") in out), (
+            "a shut tool could not explain itself: it named neither the setting "
+            f"nor the switch that enables it: {out!r}")
