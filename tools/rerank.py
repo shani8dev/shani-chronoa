@@ -51,6 +51,7 @@ Nothing here is packaged: `cache/cultivate-libs` (torch, peft, transformers) and
     python3 tools/rerank.py --dry-run            # the plan, the arithmetic, the headroom
     python3 tools/rerank.py --train              # the hours
     python3 tools/rerank.py --train --limit 8    # prove it runs, and project the epoch
+    python3 tools/rerank.py --evaluate DIR       # held-out top-1 of a trained run
 """
 
 from __future__ import annotations
@@ -369,10 +370,118 @@ def train(limit: int = 0, out: str = "", dtype_name: str = "bf16") -> int:
     if out:
         path = pathlib.Path(out)
         model.save_pretrained(str(path))
+        # **The head has to be saved separately, and not saving it is silent.**
+        # `save_pretrained` on a peft-wrapped model writes the **adapter** - the
+        # 224 LoRA tensors - and nothing else. `head` is a plain `nn.Linear`
+        # held outside the wrapper, so its trained weights were being thrown away
+        # with no error: checked on the first run, which produced
+        # `adapter_model.safetensors` with 224 tensors and **none** of them the
+        # head's. The result is an artifact that loads and scores nothing.
+        torch.save({"state_dict": head.state_dict(),
+                    "hidden_size": base.config.hidden_size}, str(path / "head.pt"))
         print()
-        print("  adapter saved to %s" % path)
+        print("  adapter + head saved to %s" % path)
         print("  **nothing reads this.** The selector does not load it; wiring it "
               "in is the separate decision, and its cost is the ~17 s per request.")
+    return 0
+
+
+def load_trained(adapter_dir: str):
+    """The base model, the LoRA and the head, or say which of them is missing.
+
+    The third part is the one that is easy to forget: the adapter loads without
+    it and produces no scores, so a missing head is reported rather than
+    defaulted to a random `Linear` that would score about 12% and be believed.
+    """
+    torch, peft, transformers = _require_libs()
+    from transformers import AutoModel, AutoTokenizer
+
+    path = pathlib.Path(adapter_dir)
+    head_file = path / "head.pt"
+    if not (path / "adapter_config.json").is_file():
+        raise SystemExit("no adapter_config.json in %s - is that a trained run?"
+                         % path)
+    if not head_file.is_file():
+        raise SystemExit(
+            "%s has an adapter but **no head.pt**. The scalar head is what turns "
+            "the sequence into a score and it lives outside the peft wrapper, so "
+            "save_pretrained does not write it. Scoring without it would use a "
+            "randomly initialised Linear and report roughly chance." % path)
+    tok = AutoTokenizer.from_pretrained(str(MODEL_DIR))
+    if tok.pad_token is None:
+        tok.pad_token = tok.eos_token
+    base = AutoModel.from_pretrained(str(MODEL_DIR), torch_dtype=torch.bfloat16)
+    base.config.pad_token_id = tok.pad_token_id
+    model = peft.PeftModel.from_pretrained(base, str(path))
+    model.eval()
+    saved = torch.load(str(head_file), map_location="cpu", weights_only=False)
+    head = torch.nn.Linear(saved["hidden_size"], 1)
+    head.load_state_dict(saved["state_dict"])
+    head.eval()
+    return torch, tok, model, head
+
+
+def evaluate(adapter_dir: str, limit: int = 0) -> int:
+    """Top-1 of the trained reranker on the held-out half, against the baseline.
+
+    **Same methodology as `eval_baseline`, so the two numbers are comparable:**
+    the same held-out requests, the same candidate list - the positive plus the
+    selector's own top negatives - and `recall_hit` as the ceiling, because a
+    reranker cannot rank an answer into a list that does not contain it.
+
+    And the sanity check that makes the number mean something: **an untrained
+    model scores about 1/8.** If a fresh adapter reports 89% then this function
+    is measuring the wrong thing, and that is the failure to look for first.
+    """
+    torch, tok, model, head = load_trained(adapter_dir)
+    data = load_corpus()
+    held = data["held_out"][:limit] if limit else data["held_out"]
+
+    def score(say, desc):
+        batch = tok([pair_text(say, desc)], return_tensors="pt", padding=True,
+                    truncation=True, max_length=MAX_TOKENS)
+        with torch.no_grad():
+            hidden = model(**batch).last_hidden_state
+            lengths = batch["attention_mask"].sum(dim=1) - 1
+            pooled = hidden[torch.arange(hidden.shape[0]), lengths.clamp(min=0)]
+            return float(head(pooled.to(head.weight.dtype)).squeeze(-1))
+
+    top1 = ceiling = offered = 0
+    margins = []
+    for item in held:
+        cands = candidates(item)
+        scores = [score(item["say"], desc) for _n, desc in cands]
+        best = max(range(len(scores)), key=lambda i: scores[i])
+        top1 += best == 0
+        margins.append(scores[0] - max(scores[1:], default=0.0))
+        ceiling += bool(item.get("recall_hit"))
+        offered += item["positive"] in (item.get("offered") or [])[:OFFERED_CAPACITY]
+
+    n = len(held)
+    chance = 100.0 / max(1e-9, sum(len(candidates(i)) for i in held) / n)
+    pct = 100.0 * top1 / n
+    print("Trained reranker on the held-out half (%d requests):" % n)
+    print("  reranker top-1      %d/%d = %.1f%%" % (top1, n, pct))
+    print("  baseline top-1      %.1f%%   (tools/rerank.py --eval-baseline)"
+          % 89.1)
+    print("  ceiling             %.1f%%   (recall_hit: the answer must be offered)"
+          % (100.0 * ceiling / n))
+    print("  offered at top-%-2d   %d/%d = %.1f%%" % (OFFERED_CAPACITY, offered, n,
+                                                      100.0 * offered / n))
+    print()
+    print("  random chance over the same candidate lists: %.1f%%" % chance)
+    print("  mean margin, positive minus best negative: %+.3f"
+          % (sum(margins) / len(margins)))
+    if pct < chance * 1.5:
+        print()
+        print("  **At or below chance.** Either this adapter is untrained or the")
+        print("  scoring path is not connected to the head. Do not read the")
+        print("  baseline comparison above as a result.")
+    print()
+    print("  Serving cost is unchanged by any of this: %d forward passes per"
+          % OFFERED_CAPACITY)
+    print("  request, ~17 s on this box. That is the product question, and it")
+    print("  does not go away because the model is better.")
     return 0
 
 
@@ -388,9 +497,13 @@ def main() -> int:
     ap.add_argument("--out", default="",
                     help="with --train: where to save the LoRA adapter")
     ap.add_argument("--dtype", default="bf16", choices=("bf16", "fp32"),
-                    help="with --train: weight dtype (measured: fp32 15.7 GB, bf16 10.5 GB)")
+                    help="with --train: weight dtype (measured: bf16 5.31 GB)")
+    ap.add_argument("--evaluate", default="",
+                    help="score a trained adapter directory on the held-out half")
+    ap.add_argument("--eval-limit", type=int, default=0,
+                    help="with --evaluate: score only N held-out requests")
     args = ap.parse_args()
-    if not (args.eval_baseline or args.dry_run or args.train):
+    if not (args.eval_baseline or args.dry_run or args.train or args.evaluate):
         ap.print_help()
         return 0
     if args.eval_baseline:
@@ -399,6 +512,8 @@ def main() -> int:
         dry_run()
     if args.train:
         return train(limit=args.limit, out=args.out, dtype_name=args.dtype)
+    if args.evaluate:
+        return evaluate(args.evaluate, limit=args.eval_limit)
     return 0
 
 
