@@ -57,7 +57,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gtk  # noqa: E402
 
 from shani_chronoa import verification  # noqa: E402
 from shani_chronoa.gui import code_hl  # noqa: E402
@@ -126,7 +126,11 @@ def _read(path: pathlib.Path) -> Tuple[Optional[str], str]:
     not do and lets the caller say so.
     """
     try:
-        size = path.stat().st_size
+        # **The stat is the check, not the number.** A path that cannot be read
+        # is an answer the caller has to be able to give, and the size itself is
+        # never used - so this is a bare call on purpose, not a discarded
+        # assignment.
+        path.stat()
     except OSError as exc:  # noqa: BLE001 - a vanished file is an answer
         return None, f"it could not be read ({exc})"
     try:

@@ -686,7 +686,10 @@ class TestTheRecordReachesTheCard:
         ]
 
         def _handler(request):
-            body = _json.loads(request.content)
+            # **The parse is the check; the body is not read.** A malformed
+            # request body would raise here and fail the test rather than
+            # quietly returning a canned reply, which is the point of parsing it.
+            _json.loads(request.content)
             return httpx.Response(
                 200, json=replies.pop(0) if replies else _reply("done"))
 
@@ -791,7 +794,6 @@ class TestTheRecordReachesTheCard:
         gi.require_version("Gtk", "4.0")
 
         from shani_chronoa.app import conversation as conversation_mod
-        from shani_chronoa.gui import widgets
 
         from gi.repository import GLib
 
