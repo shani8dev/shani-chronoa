@@ -123,8 +123,8 @@ MUTATIONS = [
     },
     {
         "file": _WS,
-        "old": "        if found:\n            return found, \"\", []\n",
-        "new": "        if False:\n            return found, \"\", []\n",
+        "old": "            if found:\n                return found, \"\", []\n",
+        "new": "            if False:\n                return found, \"\", []\n",
         "label": "an answer is discarded and the search reported as a refusal",
         "expect": ["test_the_narrow_scope_is_tried_first",
                    "test_the_widening_runs_only_when_the_first_found_nothing",

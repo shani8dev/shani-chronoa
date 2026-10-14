@@ -113,7 +113,9 @@ MUTATIONS = [
         "file": _G,
         "old": '        legal = declared.get("enum") if isinstance(declared, dict) else None\n',
         "new": '        legal = declared.get("enum")\n',
-        "label": "EQUIVALENT, and measured rather than argued. The `isinstance` "
+        "label": "the `isinstance` guard on the enum lookup is dropped, so a "
+                 "non-dict property node would take the dict branch",
+        "why": "EQUIVALENT, and measured rather than argued. The `isinstance` "
                  "guard on this line defends against a **property node that is "
                  "not a dict**, and that shape is already broken *above* this "
                  "line: `_type_of()` does `schema.get(\"type\")` on the same "
