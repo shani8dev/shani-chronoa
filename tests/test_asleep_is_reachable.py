@@ -374,6 +374,7 @@ def _brain_with(choice):
     class _Win:
         def __init__(self):
             self.said = []
+            self.restored = []
 
         def set_orb_state(self, _s):
             pass
@@ -383,6 +384,14 @@ def _brain_with(choice):
 
         def set_status(self, _s):
             pass
+
+        # `brain._explain_no_model` puts a refused question back in the composer
+        # through this - the window gained it when refusals stopped consuming
+        # what you asked. A fake without it raises inside the branch the test is
+        # driving, so the refusal path fails for a reason that has nothing to do
+        # with the Asleep choice it is named for.
+        def restore_last_sent(self, text):
+            self.restored.append(text)
 
     class _App(brain.BrainMixin):
         def __init__(self):

@@ -120,6 +120,7 @@ class _Window:
         self.responses = []
         self.notices = []
         self.orb = []
+        self.progress = []
 
     def set_status(self, text):
         self.statuses.append(text)
@@ -138,6 +139,15 @@ class _Window:
 
     def get_state(self):
         return None
+
+    # **The second lane `802c447` added.** Without it `_on_response_ready`
+    # raises at its own `set_progress("")`, line 690's `_turn_finished()` never
+    # runs, and the queue silently strands every message behind the first -
+    # which is what all four failures in this file were. The raise happens in
+    # the worker thread and is only printed there, so the test sees
+    # `answered ['first']` and no traceback naming the window.
+    def set_progress(self, text):
+        self.progress.append(text)
 
 
 def _mixin(fail_on=None):
