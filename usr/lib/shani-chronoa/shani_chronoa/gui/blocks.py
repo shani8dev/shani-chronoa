@@ -964,6 +964,43 @@ class ArtifactBlock(Gtk.Box):
             logger.warning("could not save a copy of %s: %s", source, exc)
 
 
+def _why_block(selection, name: str) -> Optional[Gtk.Box]:
+    """The "why this tool" block, built from the record\'s own sentences.
+
+    **Every word here comes from `Selection.why`.** The sentences are the part
+    that can mislead - a number that does not match the decision, a line
+    claiming something the turn did not do - and they are built and tested in
+    `tool_select` with no display attached. This function only puts lines in a
+    box; a sentence written here would be a sentence nothing can check without
+    a window, which is the state this file has twice found a panel green and
+    wrong.
+
+    **`selection.why` is called, not sniffed for.** A stand-in that does not
+    implement it is a test that should be corrected, not defended against here:
+    a guard that exists so a fake can pass is a guard that stops saying what the
+    product does.
+    """
+    lines = selection.why(name)
+    if not lines:
+        return None
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+    heading = Gtk.Label(label="Why this tool")
+    heading.set_xalign(0.0)
+    box.append(heading)
+    for line in lines:
+        one = Gtk.Label(label=line)
+        one.add_css_class("dim-label")
+        # Wrapped on a character boundary: a folded revealer still lends the
+        # card its child\'s minimum width, so one long path here pushes the
+        # whole card off the right of the column - which is the same reason the
+        # argument grid below wraps.
+        one.set_wrap(True)
+        one.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        one.set_xalign(0.0)
+        box.append(one)
+    return box
+
+
 class ToolCallCard(Gtk.Box):
     """What a skill did, with the arguments it was given and what came back.
 
@@ -977,7 +1014,8 @@ class ToolCallCard(Gtk.Box):
     def __init__(self, name: str, arguments: Optional[dict] = None,
                  result: str = "", ok: bool = True, on_open: Optional[Callable] = None,
                  artifacts: tuple = (),
-                 on_show_diff: Optional[Callable[[], None]] = None) -> None:
+                 on_show_diff: Optional[Callable[[], None]] = None,
+                 selection=None) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self.add_css_class("tool-card")
         self._on_show_diff = on_show_diff
@@ -986,6 +1024,13 @@ class ToolCallCard(Gtk.Box):
         self.arguments = dict(arguments or {})
         self.result = result
         self.ok = ok
+        #: What the turn offered and why, from the round that made this call.
+        #: **Passed in, not looked up.** A transcript holds cards for every turn
+        #: at once, so "the selection in force" would answer about the wrong one
+        #: - and the card for a tool called in round 1 would be explained by
+        #: round 3\'s offer set, which is a different question that happens to
+        #: have a confident answer. `None` renders no block at all.
+        self.selection = selection
 
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         icon = Gtk.Image.new_from_icon_name(
@@ -1069,6 +1114,14 @@ class ToolCallCard(Gtk.Box):
                              2 | 1)          # BIDIRECTIONAL | SYNC_CREATE
 
         inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        if selection is not None:
+            # Above the arguments, because "why this tool" is the context the
+            # arguments are read in - and a person checking whether a tool was
+            # the right one should not have to scroll past the payload to find
+            # out what it was chosen for.
+            why = _why_block(selection, name)
+            if why is not None:
+                inner.append(why)
         grid = Gtk.Grid(column_spacing=10, row_spacing=2)
         for index, (key, value) in enumerate(self.arguments.items()):
             key_label = Gtk.Label(label=key)

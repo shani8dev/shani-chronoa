@@ -29,7 +29,8 @@ class EventSink:
     result, ok, artifacts)` - the last being the files that dispatch
     **declared** it produced, never a path parsed out of `result` -
     `on_text(delta)` for streamed prose, `on_state(state)`
-    for lifecycle edges ("thinking", "tool_call", "speaking"). A sink that
+    for lifecycle edges ("thinking", "tool_call", "speaking"),
+    `on_selection(record)` for what this round offered and why. A sink that
     does not implement a field simply does not get that event.
     """
 
@@ -46,6 +47,11 @@ class EventSink:
     #: something a person has to be told, not something they have to infer from
     #: a settings key they may have forgotten.
     on_cloud_turn: Optional[Callable[[str], None]] = None
+    #: Fired once per round with the `tool_select.Selection` that round decided
+    #: on - what was offered, with scores, and why. A tool card reads the record
+    #: in force when it was built rather than re-asking a question whose answer
+    #: may since have changed.
+    on_selection: Optional[Callable[[object], None]] = None
 
     def __post_init__(self) -> None:
         """Refuse a field that is not a callable and not None, at construction.

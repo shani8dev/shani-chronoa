@@ -499,7 +499,25 @@ class ConversationMixin:
             on_text=self._on_reply_text,
             on_compaction=self._on_compaction,
             on_cloud_turn=self._on_cloud_turn,
+            on_selection=self._on_selection,
         )
+
+    #: What the last round offered and why, for the cards being built now.
+    #: **Assigned on first use** like every other `_turn_*` here: this is a
+    #: mixin and nothing runs an initialiser, so a plain attribute would raise
+    #: on the first turn of a fresh process.
+    _selection = None
+
+    def _on_selection(self, record) -> None:
+        """Keep the selection in force until the next one replaces it.
+
+        **No reset per turn, deliberately.** A tool call can only come from a
+        model reply, and every reply is generated from a message built after
+        that round\'s selection - so a card can never reach for the previous
+        turn\'s record. Clearing it on turn start would be a guard against
+        something the loop makes impossible.
+        """
+        self._selection = record
 
     #: The running tool's clock. `None` when nothing is running.
     _tool_clock = None
@@ -600,13 +618,18 @@ class ConversationMixin:
         # First, so a clock still ticking cannot overwrite the status the card
         # is about to leave behind.
         self._stop_tool_clock()
+        # The record rides in with the rest rather than being read off `self`
+        # on the main thread: it is written on this worker thread, and every
+        # other field already crosses the same boundary this way.
         GLib.idle_add(self._add_tool_card, name, arguments, result, ok,
-                      artifacts)
+                      artifacts, self._selection)
 
     def _add_tool_card(self, name: str, arguments: dict, result: str,
-                       ok: bool, artifacts: tuple = ()) -> bool:
+                       ok: bool, artifacts: tuple = (),
+                       selection=None) -> bool:
         if self.window:
-            self.window.add_tool_call(name, arguments, result, ok, artifacts)
+            self.window.add_tool_call(name, arguments, result, ok, artifacts,
+                                      selection=selection)
         return GLib.SOURCE_REMOVE
 
     def _on_tool_result(self, name: str, arguments: dict, result: str,

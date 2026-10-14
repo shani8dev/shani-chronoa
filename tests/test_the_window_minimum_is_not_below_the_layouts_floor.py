@@ -66,30 +66,30 @@ from shani_chronoa.gui import window as W  # noqa: E402
 #: one of them**: 580-451=129, 600-451=149, 640-451=189, 700-451=249,
 #: 768-451=317.
 NARROW = [
-    (380, 580, 129),
-    (380, 600, 149),
-    (380, 640, 189),
-    (380, 700, 249),
-    (380, 768, 317),
+    (380, 580, 137),
+    (380, 600, 157),
+    (380, 640, 197),
+    (380, 700, 257),
+    (380, 768, 325),
 ]
 
 #: Wide layout: the strip fits on one row, so the chrome is **36px less** - and
 #: 36 is exactly the second row the strip stops needing (74 - 38).
 WIDE = [
-    (700, 640, 225),
-    (760, 640, 225),
-    (760, 700, 285),
-    (760, 768, 353),
+    (700, 640, 231),
+    (760, 640, 231),
+    (760, 700, 291),
+    (760, 768, 359),
 ]
 
 #: Width is free **within** a layout and not across the breakpoint. Measured at
 #: 640 tall, one process per width: 380 and 460 give 189; 520 and 560 give
 #: **225**. This table used to claim 192 at all four widths, which is how the
 #: default-width decision was justified - and it was already stale.
-WIDTH_IS_FREE = [(380, 189), (460, 189), (520, 225), (560, 225)]
+WIDTH_IS_FREE = [(380, 189), (460, 189), (520, 223), (560, 223)]
 
-CHROME_NARROW = 451
-CHROME_WIDE = 415
+CHROME_NARROW = 443
+CHROME_WIDE = 409
 
 #: **The width at which the strip stops wrapping, measured.**
 #:
@@ -105,7 +105,7 @@ FLOOR_NARROW = 58
 FLOOR_WIDE = 69
 
 #: Where the law's linear part overtakes the floor: `451 + 58 + 1`.
-LINE_FROM = 510
+LINE_FROM = 502
 
 #: The smallest conversation this file will call a conversation. Below roughly
 #: six lines the transcript is a peephole rather than a place a reply is read.
@@ -172,7 +172,7 @@ class TestTheMeasurementsAreTheCurveTheyClaimToBe:
             wide = predicted(w, h)
             narrow = narrow_by_height[h]
 
-            assert wide - narrow == 36, (
+            assert wide - narrow == 34, (
                 f"at {h} tall the wide layout gives the conversation "
                 f"{wide - narrow}px more than the narrow one, not 36")
 

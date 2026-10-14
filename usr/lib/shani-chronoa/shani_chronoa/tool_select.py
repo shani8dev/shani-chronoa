@@ -23,7 +23,8 @@ any tool the conversation has already used this turn.
 import json
 import math
 import re
-from typing import Dict, Iterable, List, Optional, Set
+from dataclasses import dataclass
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 #: How many scored tools to send, besides the core and the ones in use.
 DEFAULT_LIMIT = 8
@@ -868,12 +869,240 @@ def protected_for(request: str, keep: Set[str],
     return protected
 
 
-def select_tools(request: str, tools: Iterable[dict], limit: int = DEFAULT_LIMIT,
-                 in_use: Optional[Iterable[str]] = None) -> List[dict]:
-    """The schemas to send for `request`, in the order `tools` lists them."""
-    tools = list(tools)
+#: The reasons an inspector can state, in the words a person would use. Each
+#: is a **rule in the function below**, so the list cannot describe a decision
+#: the selection does not make - and a rule with no name here is a rule nobody
+#: can be shown.
+REASON_IN_USE = "already in use this turn"
+REASON_CORE = "always offered"
+REASON_CONVERSATION = "nothing to call"
+REASON_CUE = "the request carries its cue"
+REASON_DRIVE = "driving an app\'s controls"
+REASON_SCORE = "matched the request"
+REASON_DISTILLED = "a learned router chose it"
+REASON_BROWSER = "the request names a site"
+#: The four ways a tool that had matched was taken back out. Each is here
+#: because each has been a real, measured defect: the `log ?in` cue matching
+#: inside "login" is the reason `REASON_NO_SITE` exists as a *sentence* and not
+#: only as a line of code.
+REASON_NO_CUE = "the request does not ask for it"
+REASON_SMALL_TALK = "this is conversation"
+REASON_FILES_APP = "the file manager is an app, not a file"
+REASON_NO_SITE = "a website request displaced it"
+REASON_BUDGET = "did not fit the tool budget"
+
+
+def _clip_words(text: str, width: int) -> str:
+    """`text` shortened to `width` characters, cutting on a word.
+
+    A request is a person's own words and may hold any grapheme an emoji is
+    made of, so this is not `text[:width]`: it cuts where a space is, and says
+    so with an ellipsis. A cut that leaves half a word reads as a typo in
+    something the person typed.
+    """
+    one = " ".join((text or "").split())
+    if len(one) <= width:
+        return one
+    cut = one[:width]
+    if " " in cut:
+        cut = cut[:cut.rindex(" ")]
+    return cut.rstrip(",.;:") + "..."
+
+
+@dataclass(frozen=True)
+class Offered:
+    """One tool the selection actually touched, and what it decided about it.
+
+    **Only tools it touched.** `ranked()` scores all 256 schemas and records
+    every one that shares a word with the request; carrying 256 records per
+    turn to answer a question about the 12 that were candidates is how a
+    diagnostic becomes the slow path. `Selection.scored_total` carries the
+    denominator instead, so "1 of 12 offered matched" is answerable without
+    being 256 objects long.
+    """
+    name: str
+    #: `ranked()`\'s own matcher score, before learning.
+    score: float
+    #: How many request words are in the tool\'s **name**. `ranked()`\'s third
+    #: tuple element is a documented different thing - this is copied from it
+    #: rather than re-derived, because a second count is a second answer.
+    hits: int
+    #: What learning did to the score. `reorder` multiplies by this and sorts
+    #: again, so 1.0 is "learned nothing here" and not "no learning exists".
+    multiplier: float
+    reason: str
+    sent: bool
+
+
+@dataclass(frozen=True)
+class Selection:
+    """What a request was offered, and why - the record a card reads.
+
+    Built by the same function that builds the selection, so it cannot describe
+    a decision the turn did not make. Nothing here recomputes anything: every
+    number is the one the cap and the matcher used.
+    """
+    request: str
+    #: How many tools `ranked()` scored at all, out of the whole registry.
+    scored_total: int
+    budget_tokens: int
+    #: The request was a conversational one and the set was cut to `ask_user`.
+    conversation: bool = False
+    #: A tool the person named by hand, which bypasses selection entirely.
+    forced: str = ""
+    considered: Tuple[Offered, ...] = ()
+    #: The names actually sent, in the order they were sent.
+    sent: Tuple[str, ...] = ()
+    protected: Tuple[str, ...] = ()
+
+    def offered(self, name: str) -> Optional[Offered]:
+        """The record for `name`, or `None` if the selection never touched it."""
+        for one in self.considered:
+            if one.name == name:
+                return one
+        return None
+
+    def why(self, name: str) -> Tuple[str, ...]:
+        """The lines a tool card shows for `name`, in reading order.
+
+        **Pure text, built here and rendered there.** The sentences are the part
+        that can be wrong - a number that does not match the decision, a line
+        that claims something the turn did not do - and putting them in the GUI
+        module would mean checking them with a display attached and a widget in
+        the way, which is the state this repository has twice found a panel
+        green and wrong.
+
+        **Every line is absent when it has nothing to say.** A learning weight
+        of 1.00 is not worth a line, and a turn where nothing was dropped by
+        the budget gets no sentence about the budget: three lines on a typical
+        turn, five when there is a fifth thing to say.
+        """
+        one = self.offered(name)
+        if one is None:
+            return ("%s was not part of this turn\'s selection." % name,)
+        lines = ["You asked: %s" % _clip_words(self.request, 70)]
+        if one.sent:
+            place = self.sent.index(name) + 1
+            lines.append("Sent %d of %d - %s."
+                         % (place, len(self.sent), one.reason))
+            words = ("1 word of your request is in its name"
+                     if one.hits == 1 else
+                     "%d words of your request are in its name" % one.hits)
+            lines.append("Score %.2f. %s. Budget %d tokens."
+                         % (one.score, words, self.budget_tokens))
+        else:
+            lines.append("Not sent: %s." % one.reason)
+        if one.multiplier != 1.0:
+            lines.append("Learning multiplied its score by %.2f."
+                         % one.multiplier)
+        dropped = [o for o in self.considered
+                   if not o.sent and o.reason == REASON_BUDGET]
+        if dropped:
+            lines.append("%d other tool%s matched but did not fit the budget: %s."
+                         % (len(dropped), "" if len(dropped) == 1 else "s",
+                            ", ".join(sorted(o.name for o in dropped))))
+        return tuple(lines)
+
+    def says(self, name: str) -> str:
+        """One sentence saying why `name` was sent. Never an exception.
+
+        A card asks about a tool that ran, so a miss here is a defect rather
+        than an empty case - and raising out of a tooltip is how a diagnostic
+        takes the turn down with it. An unknown name says so.
+        """
+        one = self.offered(name)
+        if one is None:
+            return "not part of this turn\'s selection"
+        if not one.sent:
+            return f"dropped: {one.reason}"
+        return one.reason
+
+
+def _record(request: str, sent: List[str], scored_total: int,
+            scored_by_name: Dict[str, Tuple[float, int]],
+            learned: Dict[str, float], reasons: Dict[str, str],
+            budget_tokens: int, protected: Iterable[str],
+            conversation: bool = False, forced: str = "") -> Selection:
+    """Assemble a `Selection` from a decided set and the reasons gathered.
+
+    Kept out of `_select` so the conversational early return and the full
+    decision cannot build the record two ways - which is the defect this whole
+    record exists to prevent, in miniature.
+    """
+    rank = {name: i for i, name in enumerate(sent)}
+
+    def where(name: str):
+        if name in rank:
+            return (0, rank[name], name)
+        return (1, -scored_by_name.get(name, (0.0, 0))[0], name)
+
+    kept = set(sent)
+    considered = tuple(
+        Offered(name=name,
+                score=scored_by_name.get(name, (0.0, 0))[0],
+                hits=scored_by_name.get(name, (0.0, 0))[1],
+                multiplier=float(learned.get(name, 1.0)),
+                reason=reasons.get(name, REASON_SCORE),
+                sent=name in kept)
+        for name in sorted(reasons, key=where))
+    return Selection(request=request, scored_total=scored_total,
+                     budget_tokens=budget_tokens, conversation=conversation,
+                     forced=forced, considered=considered, sent=tuple(sent),
+                     protected=tuple(sorted(protected)))
+
+
+def _select(request: str, tools: List[dict], limit: int,
+            in_use: Optional[Iterable[str]]) -> Tuple[Set[str], Selection]:
+    """The schemas to send for `request`, and the record of how it decided.
+
+    **One implementation, two doors.** `select_tools` hands back the schemas
+    and `explain` hands back the record, and both come from here - so the
+    sentence a person reads and the decision the turn made cannot disagree. A
+    record built by a second function explaining a first is how an inspector
+    ends up confidently describing a selection that never happened.
+    """
     keep: Set[str] = set(CORE) | set(in_use or ())
-    scored = ranked(request, tools)
+    held = set(in_use or ())
+    known = {t["function"]["name"] for t in tools}
+    # Read the learned weights **once** and hand the same dict to `ranked()`.
+    # Left to itself `ranked()` reads them for its own re-sort while the record
+    # below reads them again for the multipliers - two reads of a value that
+    # changes when a call is logged, which can straddle the write and quote a
+    # multiplier the turn was not actually sorted by.
+    learned = learned_weights()
+    scored = ranked(request, tools, learned=learned)
+    scored_by_name = {n: (float(s), int(h)) for s, n, h in scored}
+    reasons: Dict[str, str] = {}
+
+    def say(names: Iterable[str], reason: str) -> None:
+        """First reason wins - the earliest rule that kept a tool is its reason.
+
+        A tool can be kept by several (`get_datetime` is core *and* matched
+        *and* already in use) and the one a person can act on is the earliest,
+        because that is the one that would still hold on the next request.
+        """
+        for name in names:
+            reasons.setdefault(name, reason)
+
+    def unsay(names: Iterable[str], reason: str) -> None:
+        """A later rule took it back out, so that is now the whole story.
+
+        Only names actually in `keep` are recorded: subtracting one that was
+        never there is a no-op, and recording it would invent a candidate the
+        selection never had - which is the absence-shaped wrong answer this
+        record is in the business of not giving.
+        """
+        # `difference_update` rather than `-=`: an augmented assignment makes
+        # the name **local to this function**, so the read on the line above
+        # would be an unbound local. A method call only reads it.
+        gone = set(names) & keep
+        keep.difference_update(gone)
+        for name in gone:
+            reasons[name] = reason
+
+    say(held, REASON_IN_USE)
+    say((n for n in CORE if n in known), REASON_CORE)
+    budget = int(WINDOW_TOKENS * SELECTION_SHARE)
     # A turn that is conversation gets the smallest honest set: there is nothing
     # to call, and sending eight tools to "thanks!" is what produced two of the
     # five eval misses (2026-10-09). `in_use` still wins, so a turn mid-task is
@@ -888,7 +1117,22 @@ def select_tools(request: str, tools: Iterable[dict], limit: int = DEFAULT_LIMIT
     # "explain a command" asks for, so it threw away the answer.
     if wants_a_conversation(request) and not _outranks_conversation(
             request, tools, scored):
-        return [t for t in tools if _name(t) in {"ask_user"} | set(in_use or ())]
+        keep = {"ask_user"} | held
+        reasons = {}
+        # **First reason wins here too, and the two sentences are different.**
+        # `ask_user` is sent because there is nothing to call; a tool already in
+        # use is sent because the turn is mid-task. Calling both "nothing to
+        # call" puts a wrong sentence on the one card a person reads in the
+        # middle of a task - and it read as right, because the *set* is right.
+        say((n for n in held if n in known), REASON_IN_USE)
+        say(keep, REASON_CONVERSATION)
+        sent = [t["function"]["name"] for t in tools if t["function"]["name"] in keep]
+        # `protected` is `()`, not `keep`: nothing here was protected from a
+        # budget, because no budget was applied on this path. Reporting the
+        # kept set as the protected one would be a claim about the cap that
+        # never ran.
+        return keep, _record(request, sent, len(scored), scored_by_name, learned,
+                             reasons, budget, (), conversation=True)
     # a tool matching only a generic word ("set", "file") beside a strong
     # match is noise that costs tokens
     floor = scored[0][0] / 3 if scored else 0
@@ -900,30 +1144,34 @@ def select_tools(request: str, tools: Iterable[dict], limit: int = DEFAULT_LIMIT
     # the container itself, so a second tool here would be tokens spent on
     # nothing this turn uses.
     if wants_to_drive_an_app(request):
-        known = {t["function"]["name"] for t in tools}
-        keep |= {n for n in ("ui_elements",) if n in known}
+        say((n for n in ("ui_elements",) if n in known), REASON_DRIVE)
     keep |= {name for score, name, _hits in scored[:limit] if score >= floor}
+    say((name for score, name, _hits in scored[:limit] if score >= floor),
+        REASON_SCORE)
     # A distilled router may add a skill the word matcher scored zero. That is
     # the point of having one: "increase the sound" shares no word with
     # `set_volume`, and the human still meant the volume. It cannot add a skill
     # that is not already in `tools`, so this widens what is *sent*, never what
     # may be *run* - which is the guarantee this function already makes.
-    keep |= set(distilled(request, tools))
-    held = set(in_use or ())
+    routed = set(distilled(request, tools))
+    keep |= routed
+    say((n for n in routed if n in known), REASON_DISTILLED)
     lowered = (request or "").lower()
-    keep -= {name for name, cue in _CUES.items() if name not in held and not cue.search(lowered)}
+    unsay((name for name, cue in _CUES.items()
+           if name not in held and not cue.search(lowered)), REASON_NO_CUE)
     # `browse` is ~850 tokens; it comes in through `wants_a_browser` below, never
     # through a stray verb that happens to be one of its actions.
     if "browse" not in held:
-        keep.discard("browse")
+        unsay({"browse"}, REASON_NO_CUE)
     if _SMALL_TALK.search(lowered):
-        keep -= {"web_search"} - held
+        unsay({"web_search"} - held, REASON_SMALL_TALK)
     # "the file manager" is an app, not a file: at temperature 0 Qwen3-1.7B
     # opened an invented path with `open_file` every time (2026-10-08).
     if _FILES_APP.search(lowered):
-        keep -= {"open_file"} - held
+        unsay({"open_file"} - held, REASON_FILES_APP)
     if wants_a_browser(request):
         keep.add("browse")
+        say(("browse",), REASON_BROWSER)
         # **`_FILE_OR_APP` decides both halves, and the two were split apart.**
         # A request about a file or an app keeps its file tools even when it
         # also names a site - "download the file from example.com to my
@@ -937,13 +1185,60 @@ def select_tools(request: str, tools: Iterable[dict], limit: int = DEFAULT_LIMIT
         # budget - so protecting it starved `open_file` on exactly the request
         # whose whole subject is a file. Two tests, one budget, and the rule has
         # to say which of them wins.
-        about_files = bool(_FILE_OR_APP.search(request or ""))
-        if not about_files:
-            keep -= _DISPLACED_BY_A_SITE - set(in_use or ())
+        if not _FILE_OR_APP.search(request or ""):
+            unsay(_DISPLACED_BY_A_SITE - held, REASON_NO_SITE)
     protected = protected_for(request, keep, in_use)
-    keep = _cap_to_window(keep, tools, scored,
-                          int(WINDOW_TOKENS * SELECTION_SHARE), protected)
-    return [t for t in tools if _name(t) in keep]
+    before = set(keep)
+    keep = _cap_to_window(keep, tools, scored, budget, protected)
+    for name in before - keep:
+        reasons[name] = REASON_BUDGET
+    sent = [t["function"]["name"] for t in tools if t["function"]["name"] in keep]
+    return keep, _record(request, sent, len(scored), scored_by_name, learned,
+                         reasons, budget, protected)
+
+
+def select_with_reason(request: str, tools: Iterable[dict],
+                       limit: int = DEFAULT_LIMIT,
+                       in_use: Optional[Iterable[str]] = None
+                       ) -> Tuple[List[dict], Selection]:
+    """The schemas to send **and** the record of how they were chosen.
+
+    **This is the door the assistant uses**, and the reason it exists is a
+    cost. Asking `select_tools` and then `explain` would run the whole selection
+    twice - 3 ms a turn - and the two runs could straddle a change and
+    disagree, which is precisely the defect the record exists to prevent,
+    reintroduced by the act of collecting it.
+    """
+    tools = list(tools)
+    keep, record = _select(request, tools, limit, in_use)
+    return [t for t in tools if _name(t) in keep], record
+
+
+def select_tools(request: str, tools: Iterable[dict], limit: int = DEFAULT_LIMIT,
+                 in_use: Optional[Iterable[str]] = None) -> List[dict]:
+    """The schemas to send for `request`, in the order `tools` lists them."""
+    return select_with_reason(request, tools, limit, in_use)[0]
+
+
+def explain(request: str, tools: Iterable[dict], limit: int = DEFAULT_LIMIT,
+            in_use: Optional[Iterable[str]] = None,
+            forced: str = "") -> Selection:
+    """Why `request` was offered what it was - the record, without the schemas.
+
+    `forced` names a tool the person asked for by hand, which never goes
+    through selection at all. Carrying it here is what stops the inspector
+    explaining a mechanism that did not run, which is the sentence this whole
+    record exists to be able to avoid.
+    """
+    tools = list(tools)
+    if forced:
+        reasons = {forced: "the person named it"}
+        return _record(request, [forced] if forced in {t["function"]["name"]
+                                                        for t in tools} else [],
+                       0, {}, {}, reasons,
+                       int(WINDOW_TOKENS * SELECTION_SHARE), (), forced=forced)
+    _, record = _select(request, tools, limit, in_use)
+    return record
 
 
 _TLDS = r"(?:com|org|net|io|dev|in|co|ai|app|uk|de|edu|gov)"

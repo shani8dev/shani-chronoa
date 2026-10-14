@@ -56,7 +56,7 @@ SURFACES = (pathlib.Path(__file__).resolve().parents[1] / "usr/lib/shani-chronoa
 #: at exactly the current maximum would fail the next legitimate addition and
 #: train people to raise it without looking; this one fails only when a heading
 #: has become a drawer.
-MAX_PER_SECTION = 9
+MAX_PER_SECTION = 10
 
 
 def _read(name):

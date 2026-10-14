@@ -4,7 +4,7 @@
   "seed": 20261013,
   "counts": {
     "requests": 220,
-    "pairs": 1659,
+    "pairs": 1660,
     "train": 165,
     "held_out": 55
   },
@@ -1602,6 +1602,10 @@
           "desc": "browse: Open a website and do things on it for the person: find information, fill in forms, click through. Drive a web browser: navigate, read the page's text (get_text), click, type, select options, scroll, move through history, take screenshots and wait for conditions. While Chronoa's window is open this is the in-app browser the user can watch: there it opens only http(s) pages the egress policy allows, and key, hover, drag, upload_file, tabs and evaluate are not available. Otherwise it is a headless Chromium with all actions. Requires the web sense to be enabled and privacy mode to be off. (arguments: action, url, selector, text, key, value, label, files, x, y, to_x, to_y, to_selector, delta_x, delta_y, steps, repeat, tab_id, path, wait_for, timeout, settle)"
         },
         {
+          "tool": "review_proposals",
+          "desc": "review_proposals: Facts Chronoa noticed in a finished conversation and has NOT saved, listed for the user to keep or discard. Nothing here is remembered until it is kept, and a discarded fact is never offered again. Use this when the user asks what Chronoa thinks it learned, or asks to remember or forget something it noticed last night. (arguments: action, session_id, number)"
+        },
+        {
           "tool": "system_history",
           "desc": "system_history: What this machine's CPU, disk, memory or paging was doing earlier, from the sysstat accounting records rather than a live reading. Use for 'was this busy last night', 'what was using the disk at lunchtime', 'why was the fan loud earlier'. Says plainly when no history has been recorded, because that is not the same as the machine having been idle. Read-only. (arguments: topic)"
         },
@@ -1616,21 +1620,17 @@
         {
           "tool": "edit_image",
           "desc": "edit_image: Edit a picture (for faces or backgrounds use photo_video) and save the result as a new file next to it: resize (width and/or height, or percent), compress (quality, or to under a size in KB), crop, upscale (2-4x), rotate, flip, grayscale, a look (sepia, vignette, sketch, paint, enhance), strip metadata (location/camera), or convert format. Several edits can be combined in one call. For effects that depend on what is in the picture (blur faces, blur the background) use photo_video. (arguments: path, width, height, percent, upscale, quality, max_kb, crop, rotate, flip, grayscale, look, strip_metadata, format)"
-        },
-        {
-          "tool": "set_wallpaper",
-          "desc": "set_wallpaper: Report or change the GNOME desktop wallpaper, setting the light and dark variants together. Refuses a path that does not exist, rather than leaving a blank desktop with no error. KDE is not supported and will say so. Requires the 'appearance-control-enabled' consent key; reporting needs no such permission. (arguments: action, image)"
         }
       ],
       "offered": [
         "toggle_night_light",
         "set_theme",
         "browse",
+        "review_proposals",
         "system_history",
         "watch",
         "capture_video",
-        "edit_image",
-        "set_wallpaper"
+        "edit_image"
       ],
       "recall_hit": true
     },
@@ -9403,11 +9403,16 @@
         {
           "tool": "routines",
           "desc": "routines: Save a routine: a short phrase (e.g. 'good morning', 'leaving work') that later runs a whole request, e.g. 'tell me the weather, my calendar today and the top news'. Also list or delete routines. Saving runs nothing; saying the phrase later runs the request. (arguments: action, name, request, phrases)"
+        },
+        {
+          "tool": "review_proposals",
+          "desc": "review_proposals: Facts Chronoa noticed in a finished conversation and has NOT saved, listed for the user to keep or discard. Nothing here is remembered until it is kept, and a discarded fact is never offered again. Use this when the user asks what Chronoa thinks it learned, or asks to remember or forget something it noticed last night. (arguments: action, session_id, number)"
         }
       ],
       "offered": [
         "translate_text",
-        "routines"
+        "routines",
+        "review_proposals"
       ],
       "recall_hit": true
     },

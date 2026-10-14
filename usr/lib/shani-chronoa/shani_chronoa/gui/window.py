@@ -3443,14 +3443,21 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._transcript.scroll_to_turn(hits[self._search_cursor])
 
     def add_tool_call(self, name: str, arguments: dict, result: str = "",
-                      ok: bool = True, artifacts: tuple = ()) -> None:
+                      ok: bool = True, artifacts: tuple = (),
+                      selection=None) -> None:
         """Show a skill's call, its arguments and what it returned.
 
         `artifacts` is what that dispatch **declared** it produced - never a
         path taken out of `result`. The transcript renders only from that field,
         so a reply containing a path cannot put a file on screen.
+
+        `selection` is what the turn offered and why, from the round that made
+        this call. It is passed rather than looked up because the transcript
+        builds cards for every turn at once and "the current selection" would
+        answer about the wrong one.
         """
-        self._transcript.add_tool_call(name, arguments, result, ok, artifacts)
+        self._transcript.add_tool_call(name, arguments, result, ok, artifacts,
+                                      selection=selection)
         # **Collected here, where they are already resolved.** These have been
         # through `tools.artifacts_for`, so they are absolute and present - the
         # rail reads the same list the transcript drew its thumbnails from,

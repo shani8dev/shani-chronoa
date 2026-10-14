@@ -183,6 +183,10 @@ SURFACE_IDS = (
     "goals",
     "activity",
     "workbench",
+    # The editor: open a file, change it, save it. Between `code_hl` (which
+    # could colour code) and `write_text_file` (which could change it) there
+    # was no editable buffer anywhere in the package - see the module docstring.
+    "editor",
     "diff",
     "artifact_store",
     # Other apps and chat channels: the MCP server and the channel bridge,
@@ -260,6 +264,7 @@ DEFAULT_SECTION = {
     "model": "Thinking",
     "privacy": "Health and trust",
     "daemon": "Health and trust",
+    "editor": "Acting",
 }
 
 

@@ -43,7 +43,8 @@ from shani_chronoa import (compression, context_meter, history_repair,
 from shani_chronoa.senses.context import ContextBuilder
 from shani_chronoa.tools import TOOLS, execute_tool
 from shani_chronoa import verification
-from shani_chronoa.tool_select import select_tools
+from shani_chronoa import tool_select
+from shani_chronoa.tool_select import select_with_reason
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, keeps the runtime import out
     from shani_chronoa.senses import Percept
@@ -1060,15 +1061,29 @@ class Assistant:
             if forced:
                 # A tool the person named is the only tool offered. Code mode
                 # does not come between a person and the skill they asked for.
+                # Nothing was *selected*, so the record says exactly that rather
+                # than explaining a mechanism that did not run.
                 sent = [t for t in TOOLS if t["function"]["name"] == forced]
+                selection = tool_select.explain(text, TOOLS, forced=forced)
             else:
                 # **Code mode's file tools ride `in_use`**, which
                 # `select_tools` already treats as "never starve this turn of a
                 # tool it is using" - so they compete with nothing. Additive:
                 # nothing is hidden, and the set outside code mode is unchanged
                 # because `extra_tools()` returns () when it is off.
-                sent = select_tools(text, TOOLS,
-                                    in_use=tuple(in_use) + _build_tools_this_turn())
+                # **One selection, two outputs.** Calling `select_tools` and
+                # then `explain` would run the whole thing twice and could
+                # disagree with itself; this asks once.
+                sent, selection = select_with_reason(
+                    text, TOOLS, in_use=tuple(in_use) + _build_tools_this_turn())
+            # Fired from **both** branches, and read from `sink` - the
+            # parameter `handle` was handed - rather than from `self._sink`.
+            # Reading `self._sink` here would shadow it for the `on_tool_start`
+            # and `on_tool_finish` fires further down, and a caller that passes
+            # a sink without setting that attribute would lose every tool event
+            # **silently**, because both of those are `if sink is not None`.
+            if sink is not None:
+                sink.fire("on_selection", selection)
             self.llm.required_tool = forced if sent else ""
             try:
                 message = await self._ask(self.build_messages(), sent, on_text)

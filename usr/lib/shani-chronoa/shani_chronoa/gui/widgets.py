@@ -1587,7 +1587,8 @@ class TranscriptView(Gtk.ScrolledWindow):
             row._turn_text = text
 
     def add_tool_call(self, name: str, arguments: dict, result: str = "",
-                      ok: bool = True, artifacts: tuple = ()) -> None:
+                      ok: bool = True, artifacts: tuple = (),
+                      selection=None) -> None:
         """Show what a skill did, above the reply it led to.
 
         A card per call, in the order they ran, inside the assistant's turn: the
@@ -1612,7 +1613,8 @@ class TranscriptView(Gtk.ScrolledWindow):
                 return
         card = reply_blocks.ToolCallCard(name, arguments, result, ok,
                                          on_show_diff=self._on_show_diff,
-                                         artifacts=artifacts)
+                                         artifacts=artifacts,
+                                         selection=selection)
         # Above the reply, in the order the skills ran: that order *is* the
         # record, and reversing it to put the newest on top would make a
         # six-call turn unreadable as a sequence of decisions.
