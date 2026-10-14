@@ -1611,6 +1611,11 @@ _HISTORY_CACHE: Dict[str, Tuple[Tuple[int, float], List[dict]]] = {}
 #: evicted, **98 KB retained per distinct path** measured. This one is on the
 #: **per-request** advisory read, so its whole job is to not do work twice for a
 #: log that is not moving - which is one entry, not an unbounded number of them.
+#:
+#: This key carries **no filter**, so one tracker makes exactly one entry and the
+#: bound of four is four times what a running app can reach. The only thing that
+#: produces many is a test run, where each `tmp_path` is a new path - and that is
+#: precisely the unbounded growth this bound exists to stop.
 _HISTORY_CACHE_MAX = 4
 
 
@@ -3608,10 +3613,21 @@ _EXAMPLE_CACHE: Dict[Tuple[str, "str"], Tuple[Tuple[int, float], List["Example"]
 #: temporary logs and holds every one of them to the end of the run, which is the
 #: same shape of problem as an unbounded dict anywhere else.
 #:
-#: Four is generous: one live log, and `only_tools` filters multiply the key by
-#: one each, so a person comparing a couple of filtered runs still hits. Eviction
-#: is oldest-first and the cost of a miss is re-parsing that file, which is what
-#: the caller was going to pay anyway on a changed revision.
+#: Four is generous, and **measured rather than guessed**: the key is
+#: `(path, filter)` and the Learning panel produces exactly **two** filter values
+#: - `None` for "train on everything", and `frozenset(<the names this build
+#: answers to>)` for "train on what is still installed" - so one log path makes
+#: at most two keys and the bound is double what is reachable.
+#:
+#: The bound binds only if callers *alternate* filters, and that does not thrash
+#: at this size: two filters alternating six times cost **0.183 s in total**,
+#: about 30 ms a call, against **0.20 s for one cold parse**. Eviction is
+#: oldest-first, and the cost of a miss is re-parsing a file the caller was going
+#: to re-read anyway on a changed revision.
+#:
+#: **If a third filter mode is ever added, this number is the thing to
+#: revisit** - not because it would break, but because it would start costing a
+#: full re-parse per call.
 _EXAMPLE_CACHE_MAX = 4
 
 #: How many examples to keep resident. 200k is roughly 40 MB of sparse tuples,
