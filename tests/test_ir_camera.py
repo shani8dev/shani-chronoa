@@ -271,13 +271,30 @@ class TestInfraredVideo:
         return capture_video
 
     @staticmethod
-    def _fake_ir_cameras(monkeypatch):
+    def _fake_ir_cameras(monkeypatch, tmp_path):
+        """**A real file standing in for the IR node, not an asserted one.**
+
+        `capture_video` resolves the node from this fake and then asks
+        `Path(device).exists()` (capture_video.py:69). `/dev/video9` is not on this
+        machine, so every call came back *"No camera at /dev/video9. Reading a
+        camera needs the device to be present."* - the test failed one line before
+        the `-input_format y16` assertion it is named for, and the message pointed
+        at the product.
+
+        Mocking `Path.exists` instead is precisely what `_no_op_run`'s docstring
+        warns against: it turned `capture_video`'s filename-collision loop into an
+        eight-minute spin. A real empty file in `tmp_path` satisfies the existence
+        check without changing anything the test is about.
+        """
         import shani_chronoa.camera as camera
+        node = tmp_path / "video9"
+        node.write_bytes(b"")
+        node = str(node)
         monkeypatch.setattr(camera, "collect",
-                            lambda: [{"node": "/dev/video9", "card": "Test IR Cam",
+                            lambda: [{"node": node, "card": "Test IR Cam",
                                       "can_capture": True, "looks_ir": True,
                                       "formats": ["Y16 "]}])
-        monkeypatch.setattr(camera, "ir_nodes", lambda: ["/dev/video9"])
+        monkeypatch.setattr(camera, "ir_nodes", lambda: [node])
 
     @staticmethod
     def _no_op_run(monkeypatch, skill, tmp_path):
@@ -317,7 +334,7 @@ class TestInfraredVideo:
     def test_an_infrared_node_is_chosen_not_assumed(self, monkeypatch, tmp_path):
         skill = self._skill()
         chosen = self._no_op_run(monkeypatch, skill, tmp_path)
-        self._fake_ir_cameras(monkeypatch)
+        self._fake_ir_cameras(monkeypatch, tmp_path)
         out = skill._run({"infrared": True, "seconds": 1})
         assert "Saved" in out
         assert chosen["argv"].count("-input_format") == 1, (
@@ -329,7 +346,7 @@ class TestInfraredVideo:
     def test_a_named_non_infrared_device_is_refused(self, monkeypatch, tmp_path):
         skill = self._skill()
         self._no_op_run(monkeypatch, skill, tmp_path)
-        self._fake_ir_cameras(monkeypatch)
+        self._fake_ir_cameras(monkeypatch, tmp_path)
         out = skill._run({"infrared": True, "device": "/dev/video1", "seconds": 1})
         assert "not an infrared camera" in out
         assert "Test IR Cam" in out
