@@ -504,9 +504,24 @@ def evaluate(adapter_dir: str, limit: int = 0) -> int:
 #: | **int8 dynamic** | **2.80 s** | 14.96 GB |
 #:
 #: **int8 is 3.9x faster than fp32, and bf16 is slower than fp32 on this CPU** -
-#: which is the same finding `lora_timing.py` recorded, now for serving rather
-#: than training. The int8 peak is a *conversion* peak: `quantize_dynamic` holds
-#: the fp32 weights and their int8 copies at once. Steady state is smaller.
+#: the same finding `lora_timing.py` recorded, now for serving rather than
+#: training. The int8 peak is a *conversion* peak: `quantize_dynamic` holds the
+#: fp32 weights and their int8 copies at once. Steady state is smaller.
+#:
+#: ### **This is a latency proxy and it is not portable.**
+#:
+#: `arXiv:2507.06223` makes the point about rerankers specifically: latency and
+#: forward-pass counts "depend on hardware and running-time choices ... often fail
+#: to account for model size", which "obscures the evaluation of the
+#: efficiency-effectiveness tradeoff", and proposes RPP/QPP - quality and queries
+#: per PetaFLOP - as hardware-independent replacements.
+#:
+#: Applied here, the point is sharp: **int8 changes no FLOP count.** At Qwen3-1.7B
+#: and the median 85-token pair, a request's eight candidates cost **2,339
+#: GFLOP, identical in fp32 and int8** - int8 does the same multiply-accumulates
+#: and wins on kernel width and memory bandwidth. So the 3.9x is a property of
+#: *this* CPU. Quote it as "3.9x on this box", and state anything meant to
+#: outlive the box in FLOPs.
 SERVING_COST = {"fp32": 10.91, "bf16": 23.41, "int8": 2.80}
 
 #: Top-2 score margins to gate at. Below the cutoff the baseline is confident
