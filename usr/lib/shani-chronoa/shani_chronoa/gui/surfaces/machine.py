@@ -638,6 +638,124 @@ def _summary_label(recorder: "common.StatusRecorder",
     )
 
 
+#: Filesystems worth a disk meter: real storage, not tmpfs, snaps or overlays.
+_REAL_FS = frozenset({"ext4", "ext3", "btrfs", "xfs", "f2fs", "vfat", "exfat", "ntfs", "ntfs3", "zfs"})
+
+
+def _read(path: str) -> str:
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return fh.read().strip()
+    except OSError:
+        return ""
+
+
+def _battery() -> "Optional[dict]":
+    import glob
+    for base in sorted(glob.glob("/sys/class/power_supply/BAT*")):
+        cap = _read(f"{base}/capacity")
+        if not cap.isdigit():
+            continue
+        full = _read(f"{base}/energy_full") or _read(f"{base}/charge_full")
+        design = _read(f"{base}/energy_full_design") or _read(f"{base}/charge_full_design")
+        health = (int(full) / int(design)) if full.isdigit() and design.isdigit() and int(design) else None
+        return {"percent": int(cap), "status": _read(f"{base}/status") or "", "health": health}
+    return None
+
+
+def _memory_use() -> "Optional[tuple[int, int]]":
+    info = {}
+    for line in _read("/proc/meminfo").splitlines():
+        key, _, rest = line.partition(":")
+        parts = rest.split()
+        if parts and parts[0].isdigit():
+            info[key] = int(parts[0]) * 1024
+    total, free = info.get("MemTotal"), info.get("MemAvailable")
+    return (total - free, total) if total and free is not None else None
+
+
+def _disks() -> "list[tuple[str, int, int]]":
+    import shutil
+    seen, out = set(), []
+    for line in _read("/proc/mounts").splitlines():
+        parts = line.split()
+        if len(parts) < 3 or parts[2] not in _REAL_FS or parts[0] in seen:
+            continue
+        if parts[1].startswith(("/snap", "/boot/efi", "/var/snap")):
+            continue
+        seen.add(parts[0])
+        try:
+            usage = shutil.disk_usage(parts[1])
+        except OSError:
+            continue
+        out.append((parts[1], usage.used, usage.total))
+    return out
+
+
+def _gb(n: int) -> str:
+    return f"{n / 1e9:.1f} GB" if n < 1e12 else f"{n / 1e12:.2f} TB"
+
+
+def _glance(config: Any) -> "Optional[Gtk.Widget]":
+    """Battery, memory, processor and disks as pictures, read straight from
+    /sys and /proc - each card only when its own sense is permitted, so this
+    shows no more than the rows below would.
+
+    The rows read as sentences ("94.5% of last full charge", "nvme0n1 ... 476.9
+    GiB"); a ring and a few meters answer "am I fine?" at a glance.
+    """
+    import os
+    from shani_chronoa.gui import charts
+
+    allowed = lambda *names: any(not _permission(config, n)[0] for n in names)  # noqa: E731
+    cards = []
+    if allowed("power", "battery"):
+        battery = _battery()
+        if battery:
+            card, body = charts.card("Battery", "battery-good-symbolic")
+            ring = charts.Ring(110, 9)
+            ring.set(battery["percent"] / 100, f"{battery['percent']}%",
+                     battery["status"].lower() or "",
+                     colour=charts.level_colour(battery["percent"] / 100, high_is_bad=False))
+            body.append(ring)
+            if battery["health"] is not None:
+                health = charts.Meter("Health", high_is_bad=False)
+                health.set(battery["health"], f"{battery['health']:.0%} of its design capacity")
+                body.append(health)
+            cards.append(card)
+    load_ok, mem = allowed("cpu", "resources"), _memory_use()
+    if load_ok and (mem or hasattr(os, "getloadavg")):
+        card, body = charts.card("Memory and processor", "computer-symbolic")
+        if mem:
+            meter = charts.Meter("Memory in use")
+            meter.set(mem[0] / mem[1], f"{_gb(mem[0])} of {_gb(mem[1])}")
+            body.append(meter)
+        try:
+            load1, _l5, _l15 = os.getloadavg()
+            cores = os.cpu_count() or 1
+            cpu = charts.Meter("Processor load")
+            cpu.set(min(load1 / cores, 1.0), f"{load1:.1f} on {cores} cores")
+            body.append(cpu)
+        except OSError:
+            pass
+        cards.append(card)
+    if allowed("storage", "filesystems"):
+        disks = _disks()
+        if disks:
+            card, body = charts.card("Disks", "drive-harddisk-symbolic")
+            for mount, used, total in disks:
+                meter = charts.Meter(mount)
+                meter.set(used / total if total else 0, f"{_gb(used)} of {_gb(total)} used")
+                body.append(meter)
+            cards.append(card)
+    if not cards:
+        return None
+    grid = Gtk.Grid(column_spacing=12, row_spacing=12, column_homogeneous=True)
+    for i, card in enumerate(cards):
+        grid.attach(card, i % 2, i // 2, 1, 1)
+    return grid
+
+
 def build(app) -> Gtk.Widget:
     """The machine readings for `app` - anything with a `config` will do.
 
@@ -690,6 +808,13 @@ def build(app) -> Gtk.Widget:
         )))
     recorder = common.StatusRecorder()
     body.append(_summary_label(recorder, readings))
+    try:
+        glance = _glance(config)
+    except Exception:  # noqa: BLE001 - a chart that cannot be drawn is not a panel
+        logger.debug("machine glance failed", exc_info=True)
+        glance = None
+    if glance is not None:
+        body.append(glance)
 
     for title, names in SENSE_GROUPS:
         group = common.group(title)

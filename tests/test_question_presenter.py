@@ -98,12 +98,95 @@ _HARNESS = textwrap.dedent(
     quit_seen = []
 
     def box_children(box):
+        '''The widgets a container holds, unwrapping `Gtk.FlowBoxChild`.
+
+        **Single quotes, and that is load-bearing.** This whole harness is one
+        triple-quoted string in the parent file, so a triple-double-quoted
+        docstring in here terminates it early and the rest of the harness is
+        parsed as the parent's own code - which is exactly how the
+        `box_children` fix below shipped as a `SyntaxError: unterminated
+        string literal` on line 118 rather than as a test result. A docstring in
+        here must use three single quotes, and must not spell the other form
+        out even in prose.
+
+        **The unwrap is needed, but it was never the bug.** `append()` wraps
+        each child in a `Gtk.FlowBoxChild`, and `FlowBoxChild` has no
+        `get_label`, so a row read through this helper does need it. What made
+        `stage_two` raise was something else entirely, measured on the running
+        app with this question's own text:
+
+            _question_widgets  ->  Label, Expander, _OptionRow, Label
+            box_children(_question_widgets[1])  ->  [Box]
+            get_label() on that Box  ->  AttributeError
+
+        **Index 1 is the Details expander, not the answers.** The list is
+        append-only and two of its entries are conditional: the expander only
+        when the question has a second paragraph, and the preview only when the
+        tool passed one. So the row sits at 2, 1 or 0 depending on the question
+        asked. An index into it is a rotted literal, and this harness carried
+        one for exactly as long as the FlowBox did.
+        '''
         got = []
         child = box.get_first_child()
         while child is not None:
-            got.append(child)
+            got.append(child.get_child() if isinstance(child, Gtk.FlowBoxChild)
+                       else child)
             child = child.get_next_sibling()
         return got
+
+    def answer_buttons(window):
+        '''The buttons a question is offering, found by what they are.
+
+        **Exactly one of the question's widgets is a `Gtk.FlowBox`, and it is
+        always the answer row.** Measured on the built question: the head is a
+        `Gtk.Label`, the Details expander is a `Gtk.Expander`, the preview is
+        an `InlineDiff` or a `Gtk.Box`, the hint is a `Gtk.Label` - and the row
+        is the one container that wraps. So this is a property, not a position,
+        and it survives the row moving when a question gains a second paragraph
+        or a preview.
+
+        **It returns a list rather than asserting, and that is deliberate.** A
+        `stage_two` that raises aborts the process before `app.run([])` returns,
+        so the harness prints **no `RESULT` line at all** - which is
+        indistinguishable from "the app produced nothing", the way this file has
+        reported four separate defects for a long time. Reporting `[]` instead
+        lets the parent's assertion fail with the labels it actually read, and
+        `gui/questions.py` catching its own failures and answering `""` no longer
+        hides the difference between "the row is not there" and "the answers are
+        empty".
+        '''
+        rows = [w for w in window._question_widgets
+                if isinstance(w, Gtk.FlowBox)]
+        if len(rows) != 1:
+            return []
+        return box_children(rows[0])
+
+    def refuses_an_ambiguous_row():
+        '''Whether the finder declines when there is no single row to pick.
+
+        **The uniqueness guard is a precondition, so it needs an input that
+        breaks it.** A question carries exactly one wrapping container -
+        measured, and printed above - so nothing this harness does naturally
+        can reach the two-row branch. Deleting the guard therefore leaves
+        every other line here green, and the finder quietly reads whichever row
+        came first: a real weakening that no question can expose.
+
+        So the case is built rather than waited for: two flow boxes, the first
+        one holding a button, which is the shape that tells the two behaviours
+        apart. **With the guard the answer is nothing; without it, the answer
+        is that button** - so a fixture of two *empty* flow boxes would report
+        the same `[]` either way and prove nothing, which is why the first one
+        has to carry something.
+
+        Like every other measurement here this reports a fact and the parent
+        asserts it, so a failure is an ordinary test failure rather than an
+        abort inside a GTK idle callback.
+        '''
+        probe = type("_TwoRows", (), {})()
+        first, second = Gtk.FlowBox(), Gtk.FlowBox()
+        first.append(Gtk.Button(label="the wrong one"))
+        probe._question_widgets = [first, second]
+        return answer_buttons(probe) == []
 
     def pump(predicate, timeout=15.0):
         ctx = GLib.MainContext.default()
@@ -129,8 +212,9 @@ _HARNESS = textwrap.dedent(
         shown = pump(lambda: window._pending_question is not None)
         out["prompt_shown"] = shown
         out["row_visible"] = window._question_row.get_visible()
-        buttons = box_children(window._question_widgets[1]) if shown else []
+        buttons = answer_buttons(window) if shown else []
         out["button_labels"] = [b.get_label() for b in buttons]
+        out["refuses_an_ambiguous_row"] = refuses_an_ambiguous_row()
         out["blocked_before_click"] = answers == []
         if len(buttons) == 3:
             buttons[1].emit("clicked")        # "Allow for this session"
@@ -177,7 +261,7 @@ _HARNESS = textwrap.dedent(
 )
 
 
-def _child_env(runtime: pathlib.Path) -> dict:
+def _child_env() -> dict:
     """The child's environment, with the parent's importable paths preserved.
 
     The harness runs under a fixture that replaces HOME, and a fresh interpreter
@@ -186,19 +270,53 @@ def _child_env(runtime: pathlib.Path) -> dict:
     cannot be imported at all. That is why the other subprocess harnesses here
     pass PYTHONPATH explicitly. This forwards every existing entry instead of
     hardcoding a Python version.
+
+    **It takes no arguments on purpose, and used to take a `runtime` directory
+    it then put in `XDG_RUNTIME_DIR`.** That override is what made this file
+    report *"the real app produced no result"* with two errors at setup:
+
+        Gtk-CRITICAL: gtk_icon_theme_get_for_display:
+        assertion 'GDK_IS_DISPLAY (display)' failed
+
+    GDK resolves broadway's socket through GLib's **runtime** directory, so
+    pointing `XDG_RUNTIME_DIR` at a private temp directory hides the display
+    from the child - and `app.run([])` returns at once, so the harness printed
+    no `RESULT` line and the fixture read that as `{}`. The child inherited a
+    working `XDG_RUNTIME_DIR` before this overrode it, and inherits a working
+    one again now. Nothing here needs a runtime directory of its own; a child
+    that wants one sets its own for its own children.
     """
     env = dict(os.environ)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
-    env["XDG_RUNTIME_DIR"] = str(runtime)
     existing = [p for p in sys.path if p and pathlib.Path(p).is_dir()]
     env["PYTHONPATH"] = os.pathsep.join([str(_PKG), *existing])
     return env
 
 
 def _have_display() -> bool:
-    from shani_chronoa import screengrab
+    """Whether this machine can name a display backend at all.
 
-    return screengrab.display_environment() != "none"
+    **It used to ask `screengrab.display_environment()`, which reads only
+    `DISPLAY` and `WAYLAND_DISPLAY`** - so under broadway, where neither is
+    set and `BROADWAY_DISPLAY` is the whole story, it answered `"none"` and
+    **eight tests skipped on the only backend this suite can run on**. A skip
+    reads as coverage and is not: the assertions are about a real allocated
+    window, and there is nothing to assert without one.
+
+    This asks all three names, which is `tests/conftest.py`'s
+    `_has_display_backend()` - deliberately the *same* predicate, so the
+    `pytest_ignore_collect` hook that guards window-building files and this
+    skipif cannot answer the question two different ways.
+
+    **And it is deliberately not `Gdk.Display.get_default()`**: that returns
+    `None` until GTK is initialised, and initialising GTK in the pytest process
+    is a side effect an autouse fixture should not have. Verified on this box
+    while fixing it: `BROADWAY_DISPLAY=:77` gives a real `GdkBroadwayDisplay`,
+    while `:78` gives `init_check() == True` *and* `display is None` - so a
+    probe on `init_check` passes on a machine that cannot build a widget at all.
+    """
+    return any(os.environ.get(k, "").strip()
+               for k in ("DISPLAY", "WAYLAND_DISPLAY", "BROADWAY_DISPLAY"))
 
 
 needs_display = pytest.mark.skipif(
@@ -207,17 +325,31 @@ needs_display = pytest.mark.skipif(
 )
 
 
+#: The child's own budget. **It used to be 600 s, which is longer than the
+#: per-file cap `tools/run_tests_per_file.sh` puts on this file (420 s)**, so a
+#: hung child produced `TIMEOUT/NO OUTPUT` from the runner - no name, no
+#: stderr, no assertion - instead of the real failure with the child's stderr
+#: attached. A budget the outer harness can outlast is a budget that reports
+#: nothing.
+#:
+#: Measured 2026-10-14, three consecutive runs on this box: **3.1 s**, with the
+#: child's own `quit_seconds` reporting **0.004-0.01**. The harness deliberately
+#: quits with a question still on screen, and it is `do_shutdown`'s
+#: `abandon_pending_question()` that makes that cheap - so the blocked-ask
+#: timeout is *not* what this budget has to cover, and a budget chosen for it
+#: would be thirty times too large for a different reason. 120 s is ~39x the
+#: measured cost and still well inside the runner's cap.
+CHILD_TIMEOUT_SECONDS = 120
+
+
 @pytest.fixture(scope="module")
 def started_app(tmp_path_factory):
     """The real application, started the real way, reported from inside itself."""
     work = tmp_path_factory.mktemp("presenter")
-    runtime = work / "runtime"
-    runtime.mkdir()
-    os.chmod(runtime, 0o700)
     proc = subprocess.run(
         [sys.executable, "-c", _HARNESS],
-        capture_output=True, text=True, timeout=600,
-        env=_child_env(runtime), cwd=str(work),
+        capture_output=True, text=True, timeout=CHILD_TIMEOUT_SECONDS,
+        env=_child_env(), cwd=str(work),
     )
     payload = None
     for line in proc.stdout.splitlines():

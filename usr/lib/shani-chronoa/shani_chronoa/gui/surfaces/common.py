@@ -96,8 +96,23 @@ def adw_ready() -> bool:
     return True
 
 
+#: Widest a panel's content is laid out, in pixels. Measured on the real
+#: window at 1000px: rows ran the full width while the subtitle above them
+#: wrapped at ~270px, so the page had two left edges' worth of line lengths
+#: and status sentences 900px long. Centred and capped, every panel reads at one
+#: measure; below the cap nothing changes.
+PANEL_READING_PX = 820
+
+
+def _clamped(child: Gtk.Widget, width: int = PANEL_READING_PX) -> Gtk.Widget:
+    clamp = Adw.Clamp(maximum_size=width, tightening_threshold=width)
+    clamp.set_child(child)
+    return clamp
+
+
 def surface(title: str, subtitle: str = "",
-            back: Optional[Callable[[], None]] = None
+            back: Optional[Callable[[], None]] = None,
+            max_width: int = PANEL_READING_PX,
             ) -> "tuple[Gtk.Widget, Callable[[Gtk.Widget], None]]":
     """A titled, scrollable page and the function that puts a child in it.
 
@@ -158,7 +173,7 @@ def surface(title: str, subtitle: str = "",
             shell.append(note)
             shell._inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
             shell.append(shell._inner)
-            toolbar.set_content(shell)
+            toolbar.set_content(_clamped(shell, max_width))
         else:
             shell = None
             page = Adw.NavigationPage(child=toolbar, title=title)
@@ -186,7 +201,7 @@ def surface(title: str, subtitle: str = "",
             if inner is not None:
                 inner.append(child)
             else:
-                toolbar.set_content(child)
+                toolbar.set_content(_clamped(child, max_width))
 
         return page, set_content
 
@@ -338,6 +353,31 @@ class StatusRecorder:
         return self._status
 
 
+def home_paths(text: Any) -> str:
+    """`text` with this person's home folder written `~` (MAIN-UI-TODO 10h).
+
+    `/home/<name>/.config/shani-chronoa/triggers.json` is a line of chrome
+    around the one word that matters; `~/.config/shani-chronoa/triggers.json`
+    is what a person types. Only a whole leading folder is replaced -
+    `/home/<name>2/` is somebody else's. The rows that shorten a path keep the
+    full one as their tooltip, so nothing is lost.
+    """
+    import os
+    import re as _re
+    text = "" if text is None else str(text)
+    home = os.path.expanduser("~").rstrip("/")
+    if not home or home == "/" or home not in text:
+        return text
+    return _re.sub(_re.escape(home) + r"(?=/|$|[\s'\"),.;:])", "~", text)
+
+
+def _hover_full(widget: Gtk.Widget, *texts: str) -> None:
+    """The unshortened text as `widget`'s tooltip, when `home_paths` changed it."""
+    full = " - ".join(t for t in texts if t)
+    if full and home_paths(full) != full and not widget.get_tooltip_text():
+        widget.set_tooltip_text(full)
+
+
 def status_row(status: str, summary: str, detail: str = "") -> Gtk.Widget:
     """One row that says whether this panel is healthy, before its contents.
 
@@ -365,7 +405,8 @@ def status_row(status: str, summary: str, detail: str = "") -> Gtk.Widget:
             "uncoloured dot, which is the failure this row exists to prevent"
         )
     word = STATUS_WORDS[status]
-    spoken = summary if not detail else f"{summary} - {detail}"
+    full = summary if not detail else f"{summary} - {detail}"
+    spoken = home_paths(full)
 
     if adw_ready():
         row = Adw.ActionRow()
@@ -378,6 +419,7 @@ def status_row(status: str, summary: str, detail: str = "") -> Gtk.Widget:
         label = _first_label(row)
         if label is not None:
             label.add_css_class(STATUS_WORD_CSS)
+        _hover_full(row, full)
         return row
 
     box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -543,6 +585,8 @@ def row(title: str, subtitle: str = "", suffix: Optional[Gtk.Widget] = None,
     `True`: escaping is the safe answer for every caller that leaves the row as
     libadwaita builds it, and the opt-out is named at the one site that needs it.
     """
+    full_title, full_subtitle = title, subtitle
+    title, subtitle = home_paths(title), home_paths(subtitle)
     if adw_ready():
         # `escape=False` is for a caller that switches markup off on the row
         # afterwards. Escaping is correct for markup that will be *parsed*;
@@ -556,6 +600,7 @@ def row(title: str, subtitle: str = "", suffix: Optional[Gtk.Widget] = None,
             widget.add_suffix(suffix)
         if activatable:
             widget.set_activatable(True)
+        _hover_full(widget, full_title, full_subtitle)
         return widget
     box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
     box.set_margin_top(6)
@@ -587,6 +632,24 @@ def switch_row(title: str, subtitle: str = "", active: bool = False,
         widget.set_activatable_widget(toggle)
     widget.update_property([Gtk.AccessibleProperty.LABEL], [title])
     return widget
+
+
+def connect_button(app: Any, route: str = "", label: str = "Connect a device") -> Gtk.Button:
+    """A button that opens Connect a device, on `route` if given.
+
+    For the empty states that used to end at "nothing is paired": the page that
+    can tell a device is missing offers the way to add one.
+    """
+    button = Gtk.Button(label=label, halign=Gtk.Align.CENTER)
+    button.add_css_class("pill")
+    button.add_css_class("suggested-action")
+
+    def clicked(*_a) -> None:
+        activate = getattr(app, "activate_action", None)
+        if callable(activate):
+            activate("connect-device", GLib.Variant("s", route))
+    button.connect("clicked", clicked)
+    return button
 
 
 def empty_state(icon: str, title: str, description: str = "",
@@ -663,7 +726,7 @@ def empty_state(icon: str, title: str, description: str = "",
     return scrolled(box)
 
 
-def open_setup(app: Any, widget: "Gtk.Widget | None" = None) -> None:
+def open_setup(app: Any, widget: "Gtk.Widget | None" = None, page: str = "") -> None:
     """Open the setup wizard - the only thing in the app that installs a model.
 
     Routed through `app.activate_action("setup", None)`, the same door the header
@@ -684,14 +747,18 @@ def open_setup(app: Any, widget: "Gtk.Widget | None" = None) -> None:
     that does nothing and says nothing is the dead end this whole change is
     about.
     """
+    # `page` lands on that model's page ("ears", "eyes", ...) through the
+    # `setup-page` action; the tooltip on every "Set up" button promised it,
+    # and this used to ignore it and open Welcome.
+    name, value = ("setup-page", GLib.Variant("s", page)) if page else ("setup", None)
     activate = getattr(app, "activate_action", None)
     if callable(activate):
-        activate("setup", None)
+        activate(name, value)
         return
     window = getattr(app, "window", None)
     gtk_app = window.get_application() if window is not None else None
     if gtk_app is not None and hasattr(gtk_app, "activate_action"):
-        gtk_app.activate_action("setup", None)
+        gtk_app.activate_action(name, value)
         return
     if widget is not None and adw_ready():
         overlay = _toast_overlay(widget)
@@ -700,6 +767,49 @@ def open_setup(app: Any, widget: "Gtk.Widget | None" = None) -> None:
                 Adw.Toast.new("Set Chronoa up from the header, or Ctrl+Shift+S"))
             return
     logger.warning("no route to the setup wizard")
+
+
+def model_banner(app: Any, kind: str, needed_for: str = "") -> "Optional[Gtk.Widget]":
+    """A "not downloaded - Download" banner for model `kind`, or None when it is there.
+
+    `kind` is a `model_status.KINDS` key ("stt", "vision", "memory", ...). The
+    button opens Setup **on that model's page**, where its size and the one
+    download consent are shown - Setup stays the only place that downloads.
+    `needed_for` names what *this page* loses without it, when that is more
+    specific than the kind's general sentence.
+    """
+    from shani_chronoa import model_status
+    if model_status.installed(kind) is not False:
+        return None
+    info = model_status.KINDS[kind]
+    why = needed_for or info.enables
+    return banner(f"{info.label} is not downloaded yet, so Chronoa cannot {why}.",
+                  "Download", lambda: open_setup(app, page=info.setup_page),
+                  f"Opens Setup on its page, where the download size is shown")
+
+
+def with_model_banners(app: Any, content: Gtk.Widget, kinds) -> Gtk.Widget:
+    """`content` with a Download banner above it for each missing model.
+
+    `kinds` is a list of kind keys, or of `(kind, needed_for)` pairs naming
+    what *this* page cannot do without it. Nothing missing returns `content`
+    unchanged, so a machine with everything sees no extra chrome.
+    """
+    banners = []
+    for item in kinds:
+        kind, needed_for = item if isinstance(item, tuple) else (item, "")
+        widget = model_banner(app, kind, needed_for)
+        if widget is not None:
+            banners.append(widget)
+    if not banners:
+        return content
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+    for widget in banners:
+        widget.set_margin_top(6)
+        box.append(widget)
+    content.set_vexpand(True)
+    box.append(content)
+    return box
 
 
 def _toast_overlay(widget: Gtk.Widget) -> "Adw.ToastOverlay | None":
@@ -762,6 +872,100 @@ def wire_page_button(button: Gtk.Widget, app: Any, target: str) -> Gtk.Widget:
     """Connect an `open_settings_button` to the app it was built beside."""
     button.connect("clicked", lambda _b: open_page(app, target))
     return button
+
+
+def consent_name(key: str) -> str:
+    """The switch's name as Settings shows it ("Let Chronoa record a whole
+    meeting"), or the key itself when no name is registered."""
+    try:
+        from shani_chronoa.capabilities import GATE_NAMES
+    except Exception:  # noqa: BLE001 - a missing table must not break a panel
+        return key
+    return GATE_NAMES.get(key, key)
+
+
+def consent_banner(app: Any, key: str, why: str,
+                   on_change: Optional[Callable[[], None]] = None) -> Gtk.Widget:
+    """"<switch> is off. <why>" with a **Turn on** button that turns it on here.
+
+    **The panels printed the config key and stopped** - "Turn on
+    'meeting-enabled' in Settings to allow it" - which names a setting by a word
+    Settings never shows and then sends the person to find it. The switch's own
+    label comes from `capabilities.GATE_NAMES`, the table the Settings rows are
+    built from, and pressing the button is the same single, labelled act as
+    flipping that switch: it writes the same key, through the same config.
+    """
+    name = consent_name(key)
+
+    def turn_on() -> None:
+        config = getattr(app, "config", None)
+        if config is None:
+            logger.warning("no config to turn on %s with", key)
+            return
+        try:
+            config.set(key, "true")
+        except Exception:  # noqa: BLE001 - a refused write must not take the panel down
+            logger.warning("could not turn on %s", key, exc_info=True)
+            return
+        if on_change is not None:
+            on_change()
+
+    return banner(f"“{name}” is off. {why}", "Turn on", turn_on,
+                  f"Turns on “{name}”, the same switch as in Settings")
+
+
+def reload_surface(app: Any, name: str) -> None:
+    """Rebuild panel `name` from scratch (after its switch was turned on)."""
+    window = getattr(app, "window", None)
+    reload = getattr(window, "reload_surface", None)
+    if callable(reload):
+        reload(name)
+
+
+def gate_banner(app: Any, key: "Optional[str]", surface: str,
+                label: str, target: str) -> Gtk.Widget:
+    """The banner for a panel whose gate is shut.
+
+    A consent switch (`key`) gets `consent_banner`: its Settings name and
+    **Turn on**, then the panel rebuilds itself with the switch open. Anything
+    else - a missing package, a setup step - keeps its route to the page that
+    fixes it. Replaces "This is a setting on this machine, not a fault" over an
+    "Open Privacy settings" button, which named no switch and sent the person
+    away to find it.
+    """
+    if key:
+        return consent_banner(app, key, "Nothing on this page was read while it is off.",
+                              on_change=lambda: reload_surface(app, surface))
+    return banner("This is a setting on this machine, not a fault.", label,
+                  lambda: open_page(app, target))
+
+
+def read_banner(on_reload: Callable[[], None]) -> Gtk.Widget:
+    """"Read at 08:52 - not live. Reload for the latest." with its Reload.
+
+    Replaces three 30-word versions of "read once, when this panel was built,
+    nothing here is polled, press Reload to read X, Y and Z again": the time
+    says *when* and "not live" says it will not update itself, which is all
+    the long sentences were for. `restamp(banner)` after a reload.
+    """
+    widget = banner(_read_text(), "Reload", lambda: (on_reload(), restamp(widget)),
+                    "Read everything on this page again")
+    return widget
+
+
+def _read_text() -> str:
+    import time
+    return f"Read at {time.strftime('%H:%M')} - not live. Reload for the latest."
+
+
+def restamp(widget: Gtk.Widget) -> None:
+    """Put the current time on a `read_banner`."""
+    node = widget.get_first_child() if widget is not None else None
+    while node is not None:
+        if isinstance(node, Gtk.Label) and node.get_label().startswith("Read at "):
+            node.set_label(_read_text())
+            return
+        node = node.get_next_sibling()
 
 
 def banner(text: str, button_label: str = "",
@@ -900,7 +1104,7 @@ def paths_markup(text: Any) -> str:
     # Coerced, not assumed: the values reaching this come out of probes, and a
     # `None` or an int in a string helper is normal here - `paths_markup(12345)`
     # raised `TypeError: expected string or bytes-like object` before this line.
-    text = "" if text is None else str(text)
+    text = home_paths(text)
     out = []
     at = 0
     for match in _PATH_RE.finditer(text):

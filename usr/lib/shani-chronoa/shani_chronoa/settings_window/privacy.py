@@ -479,6 +479,17 @@ class PrivacyPage:
              "Off: find-and-replace runs as a dry run and only lists what it "
              "would change. Writing one named file still works without this.",
              "find_and_replace refuses to write while this is off"),
+            ("Let Chronoa use tools from MCP servers", "mcp-client-enabled",
+             "Off: each call to a tool from a server you added (Connections) is "
+             "asked about first. On: they run without asking. A server is a "
+             "program you chose; what its tools can do is up to it.",
+             "MCP tools ask before every call while this is off"),
+            ("Let Chronoa run commands in your project", "run-command-enabled",
+             "Off: it can edit files but not run anything to check them. On, it "
+             "can run one program at a time - the tests, the build, a linter - "
+             "in the project folder, and with Ask first every command is shown "
+             "to you before it runs. No shell: no pipes or redirections.",
+             "run_command refuses while this is off"),
             ("Let Chronoa record commits and branches", "git-write-enabled",
              "Off: Chronoa can still report what changed in a repository, the diff, "
              "and how far the branch is from its upstream - it just cannot record "

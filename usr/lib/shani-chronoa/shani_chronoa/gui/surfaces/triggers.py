@@ -270,7 +270,9 @@ def _tooltip(rule: Any) -> str:
     arguments = _arguments_text(rule)
     if arguments:
         bits.append(f"arguments: {arguments}")
-    bits.append("Read-only here: arm or disarm it with the manage_triggers skill.")
+    # The page arms and removes rules (see SUBTITLE); this line used to say
+    # "Read-only here", contradicting the subtitle above it on the same page.
+    bits.append("Remove it with the button on this row; arm new rules with the form below.")
     return "\n".join(bits)
 
 
@@ -361,8 +363,8 @@ class _TriggersSurface:
         self.empty_state: Gtk.Widget = common.empty_state(
             ICON,
             "No trigger rules armed",
-            "Nothing here can act on its own. Ask Chronoa to arm one, or run "
-            "shani-chronoa-sense trigger list to see this from the command line.",
+            "Nothing here can act on its own yet. Arm one with the form below, "
+            "or ask Chronoa - \u201cwhen my battery is low, tell me\u201d.",
             inline=True,
         )
         # **"Ask Chronoa to arm one" now has a way to be asked.** That sentence

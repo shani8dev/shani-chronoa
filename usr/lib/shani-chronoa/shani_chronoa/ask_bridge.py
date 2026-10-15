@@ -95,8 +95,24 @@ def has_presenter() -> bool:
     return _presenter is not None
 
 
-def ask(question: str, options: list, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> str:
+#: What a question is about, shown beside it while it is asked: a file write's
+#: `(path, before, after)` or a command's `{"command": ...}`. Keyed by the
+#: question text, so the presenter chain - three layers that each take
+#: `(question, options)` - did not have to change shape to carry it.
+_previews: "dict[str, object]" = {}
+
+
+def preview_for(question: str):
+    """The preview `ask()` was given for `question`, or None."""
+    return _previews.get(question)
+
+
+def ask(question: str, options: list, timeout: float = DEFAULT_TIMEOUT_SECONDS,
+        preview=None) -> str:
     """Put `question` to the user and return the chosen option.
+
+    `preview` is what the answer is about, drawn under the question - so "may
+    it edit greet.py?" is asked with the edit on screen, not after it.
 
     Returns "" when there is nobody to answer, when the user dismisses the
     prompt, or when the wait times out - all three are "no answer was given",
@@ -111,6 +127,8 @@ def ask(question: str, options: list, timeout: float = DEFAULT_TIMEOUT_SECONDS) 
                 "most a person can read at once", len(_pending))
             return ""
         _pending.append(question)
+        if preview is not None:
+            _previews[question] = preview
     try:
         done = _presenter(question, list(options))
     except Exception as exc:  # noqa: BLE001 - a broken presenter is not a choice
@@ -120,6 +138,19 @@ def ask(question: str, options: list, timeout: float = DEFAULT_TIMEOUT_SECONDS) 
         with _pending_lock:
             if question in _pending:
                 _pending.remove(question)
+    try:
+        return _answer_of(done, timeout)
+    finally:
+        # **Kept until the answer, not until the presenter returns.** The
+        # presenter only *queues* the widget for the GTK thread and returns at
+        # once, so dropping the preview there removed it before the window
+        # drew the question - measured: the approval appeared with no diff.
+        with _pending_lock:
+            _previews.pop(question, None)
+
+
+def _answer_of(done, timeout: float) -> str:
+    """The chosen option once `done` is set, or "" for anything else."""
     if not isinstance(done, threading.Event):
         # A presenter that returns the wrong type used to raise AttributeError
         # out of the tool call, taking the turn with it. Anything that is not a

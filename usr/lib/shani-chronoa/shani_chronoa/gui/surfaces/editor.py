@@ -538,7 +538,12 @@ def build(app: Any) -> Gtk.Widget:
         page.stack.set_vexpand(True)
         page.stack.add_named(page.status, "status")
         page.show_list()
-        navigation = Adw.NavigationPage(child=page.stack, title=TITLE)
+        # **Through `common.surface`**, which gives it a header bar - title and
+        # back button. A bare `NavigationPage` has neither, so this was the one
+        # panel (with App audio) you could open and only leave with Escape.
+        # Wide, like the Diff panel: it shows code.
+        navigation, set_content = common.surface(TITLE, max_width=1400)
+        set_content(page.stack)
         # **The sidebar dot reads this.** `window._panel_status` is duck-typed on
         # purpose, so the convention is that a panel's `status` is a *callable*
         # answering with a word from `common.STATUS_WORDS` - and `page.status`

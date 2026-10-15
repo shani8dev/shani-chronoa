@@ -45,7 +45,8 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Pango", "1.0")
-from gi.repository import GLib, Gtk, Pango  # noqa: E402
+gi.require_version("Adw", "1")
+from gi.repository import Adw, Gdk, GLib, Gtk, Pango  # noqa: E402
 
 from shani_chronoa import markdown_lite  # noqa: E402
 from shani_chronoa import phone as ph  # noqa: E402
@@ -255,7 +256,10 @@ class PhonePanel:
             self.set_status(common.STATUS_OFF, "Using your phone is turned off",
                             "Nothing was asked of your phone. In Settings, under "
                             f"Privacy: \"{GATE_NAMES[CONTROL_KEY]}\".")
-            body.append(self._route_button())
+            # The switch by name, turned on here, and the panel rebuilds.
+            body.append(common.consent_banner(
+                self.app, CONTROL_KEY, "Nothing was asked of your phone.",
+                on_change=lambda: common.reload_surface(self.app, "phone")))
             set_content(common.scrolled(body))
             return page
         self.set_status(common.STATUS_UNKNOWN, "Looking for your phone...")
@@ -292,7 +296,10 @@ class PhonePanel:
             dev, battery, which = result
             self.device = dev
             if dev is None:
-                self.set_status(common.STATUS_ATTENTION, "No phone is paired")
+                self.set_status(common.STATUS_ATTENTION, "No phone is paired",
+                                "Pair it over Bluetooth for calls and texts")
+                self.status_box.append(common.connect_button(
+                    self.app, "bluetooth", "Pair a phone"))
                 return
             how = {"bluetooth": "Bluetooth", "gsconnect": "GSConnect",
                    "kdeconnect": "KDE Connect"}.get(str(which), str(which))
@@ -307,46 +314,192 @@ class PhonePanel:
 
     # --- calls ---------------------------------------------------------------
 
+    #: The dialer's look, installed once per display by `calls_tab`. Here,
+    #: not in the window's stylesheet, so the panel looks the same wherever it
+    #: is shown (a lone render showed square grey keys without it).
+    DIALER_CSS = b"""
+/* The Phone panel's dialer, shaped like a car's: one big number,
+   round keys a thumb can hit, one green call and one red end. */
+.dialer-number {
+    font-size: 30px;
+    font-weight: 300;
+    letter-spacing: 2px;
+    background: none;
+    border: none;
+    box-shadow: none;
+    min-height: 48px;
+}
+.dialer-match { font-size: 14px; }
+.dialer-key {
+    min-width: 68px;
+    min-height: 68px;
+    border-radius: 9999px;
+    padding: 0;
+}
+.dialer-key .digit { font-size: 24px; font-weight: 500; }
+.dialer-key .letters { font-size: 10px; letter-spacing: 1px; opacity: 0.6; }
+.dialer-call, .dialer-end, .dialer-answer {
+    min-width: 64px;
+    min-height: 64px;
+    border-radius: 9999px;
+    padding: 0;
+    color: white;
+}
+.dialer-call, .dialer-answer { background: #26a269; }
+.dialer-call:hover, .dialer-answer:hover { background: #2ec27e; }
+.dialer-end { background: #c01c28; }
+.dialer-end:hover { background: #e01b24; }
+.dialer-call image, .dialer-end image, .dialer-answer image { -gtk-icon-size: 28px; }
+.dialer-incall {
+    padding: 12px 18px;
+    border-radius: 18px;
+}
+"""
+
+    #: Letters under each key, as on every phone keypad.
+    KEY_LETTERS = {"2": "ABC", "3": "DEF", "4": "GHI", "5": "JKL", "6": "MNO",
+                   "7": "PQRS", "8": "TUV", "9": "WXYZ", "0": "+", "1": "", "*": "", "#": ""}
+
     def calls_tab(self) -> Gtk.Widget:
-        box = common.page_body(10)
-        dial = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        self.number = Gtk.Entry(hexpand=True, placeholder_text="Number to call",
-                                input_purpose=Gtk.InputPurpose.PHONE)
-        self.number.connect("activate", lambda _e: self.call(self.number.get_text()))
-        dial.append(self.number)
-        dial.append(_button("Call", lambda: self.call(self.number.get_text()), suggested=True))
-        box.append(dial)
-        keys = Gtk.Grid(column_spacing=6, row_spacing=6, halign=Gtk.Align.CENTER)
-        for i, k in enumerate("123456789*0#"):
-            b = Gtk.Button(label=k, width_request=56)
-            b.connect("clicked", lambda _b, k=k: self.number.set_text(self.number.get_text() + k))
-            keys.attach(b, i % 3, i // 3, 1, 1)
-        box.append(keys)
-        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, halign=Gtk.Align.CENTER)
-        actions.append(_button("Answer", lambda: self.call_action("answer")))
-        actions.append(_button("Hang up", lambda: self.call_action("hangup")))
-        actions.append(_button("Call status", lambda: self.call_action("status")))
-        box.append(actions)
-        route = Gtk.Box(spacing=6, halign=Gtk.Align.CENTER)
-        route.append(_label("Call audio:", wrap=False))
+        """A dialer shaped like a car's: one big number, round keys, one green call.
+
+        **Why this shape.** The old tab was an entry, a grid of 56px square
+        buttons and a row of three text buttons ("Answer", "Hang up", "Call
+        status") that looked identical whether a call was ringing or not. In a
+        car - the other place a computer dials for you - the screen is read at
+        a glance and hit with a thumb: the number is the biggest thing on it,
+        the keys are round and large, the only colours are green to call and
+        red to end, and typing digits shows the contact they match. The call
+        controls are one card, shown as a call bar, with the audio route
+        beside them where it matters.
+        """
+        display = Gdk.Display.get_default()
+        if display is not None and not getattr(PhonePanel, "_css_installed", False):
+            provider = Gtk.CssProvider()
+            provider.load_from_data(self.DIALER_CSS, len(self.DIALER_CSS))
+            Gtk.StyleContext.add_provider_for_display(
+                display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+            PhonePanel._css_installed = True
+        outer = Adw.Clamp(maximum_size=420)
+        box = common.page_body(14)
+        outer.set_child(box)
+
+        # The in-call bar: answer / end, and where the audio goes.
+        incall = Gtk.Box(spacing=12, halign=Gtk.Align.CENTER)
+        incall.add_css_class("card")
+        incall.add_css_class("dialer-incall")
+        self.answer_button = self._round_button("call-start-symbolic", "Answer",
+                                                "dialer-answer", lambda: self.call_action("answer"))
+        self.end_button = self._round_button("call-stop-symbolic", "Hang up",
+                                             "dialer-end", lambda: self.call_action("hangup"))
+        incall.append(self.answer_button)
+        incall.append(self.end_button)
+        route = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, valign=Gtk.Align.CENTER)
+        route.append(_label("Call audio", dim=True, wrap=False))
+        toggles = Gtk.Box(spacing=0)
+        toggles.add_css_class("linked")
         self.on_pc = Gtk.ToggleButton(label="This PC")
         self.on_phone = Gtk.ToggleButton(label="Phone", group=self.on_pc)
         self.on_pc.connect("toggled", lambda b: b.get_active() and self.route("pc"))
         self.on_phone.connect("toggled", lambda b: b.get_active() and self.route("phone"))
-        route.append(self.on_pc)
-        route.append(self.on_phone)
-        box.append(route)
-        self.devices_note = _label("", dim=True)
-        box.append(self.devices_note)
+        toggles.append(self.on_pc)
+        toggles.append(self.on_phone)
+        route.append(toggles)
+        incall.append(route)
+        status = Gtk.Button(icon_name="view-refresh-symbolic", valign=Gtk.Align.CENTER,
+                            tooltip_text="Call status")
+        status.add_css_class("flat")
+        status.add_css_class("circular")
+        status.connect("clicked", lambda _b: self.call_action("status"))
+        status.update_property([Gtk.AccessibleProperty.LABEL], ["Call status"])
+        incall.append(status)
+        box.append(incall)
+
+        # The number: as big as the screen allows, with backspace beside it.
+        display = Gtk.Box(spacing=6)
+        self.number = Gtk.Entry(hexpand=True, placeholder_text="Number to call",
+                                input_purpose=Gtk.InputPurpose.PHONE, xalign=0.5)
+        self.number.add_css_class("dialer-number")
+        self.number.connect("activate", lambda _e: self.call(self.number.get_text()))
+        self.number.connect("changed", lambda _e: self._show_match())
+        backspace = Gtk.Button(icon_name="edit-clear-symbolic", valign=Gtk.Align.CENTER,
+                               tooltip_text="Delete the last digit")
+        backspace.add_css_class("flat")
+        backspace.add_css_class("circular")
+        backspace.connect("clicked", lambda _b: self.number.set_text(self.number.get_text()[:-1]))
+        backspace.update_property([Gtk.AccessibleProperty.LABEL], ["Delete the last digit"])
+        spacer = Gtk.Box()
+        spacer.set_size_request(34, -1)
+        display.append(spacer)
+        display.append(self.number)
+        display.append(backspace)
+        box.append(display)
+        self.match = _label("", dim=True, wrap=False)
+        self.match.set_xalign(0.5)
+        self.match.add_css_class("dialer-match")
+        box.append(self.match)
+
+        keys = Gtk.Grid(column_spacing=18, row_spacing=12, halign=Gtk.Align.CENTER)
+        for i, k in enumerate("123456789*0#"):
+            keys.attach(self._dial_key(k), i % 3, i // 3, 1, 1)
+        box.append(keys)
+
+        call = Gtk.Box(halign=Gtk.Align.CENTER, margin_top=4)
+        self.call_button = self._round_button("call-start-symbolic", "Call", "dialer-call",
+                                              lambda: self.call(self.number.get_text()))
+        call.append(self.call_button)
+        box.append(call)
+
         self.call_note = _label("", dim=True)
+        self.call_note.set_xalign(0.5)
+        self.call_note.set_justify(Gtk.Justification.CENTER)
         self._call_note_row, self._call_note_btn = self._note_row()
+        self._call_note_row.set_halign(Gtk.Align.CENTER)
         self._call_note_row.append(self.call_note)
         box.append(self._call_note_row)
+        self.devices_note = _label("", dim=True)
+        self.devices_note.add_css_class("caption")
+        box.append(self.devices_note)
         self.show_route()
-        box.append(_label("Recent calls"))
+        head = _label("Recent calls")
+        head.add_css_class("heading")
+        box.append(head)
         self.history = common.page_body(0)
         box.append(self.history)
-        return box
+        return outer
+
+    @staticmethod
+    def _round_button(icon: str, label: str, css: str, on_click: Callable[[], None]) -> Gtk.Button:
+        button = Gtk.Button(icon_name=icon, tooltip_text=label, valign=Gtk.Align.CENTER)
+        button.add_css_class(css)
+        button.update_property([Gtk.AccessibleProperty.LABEL], [label])
+        button.connect("clicked", lambda _b: on_click())
+        return button
+
+    def _dial_key(self, key: str) -> Gtk.Button:
+        face = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0, valign=Gtk.Align.CENTER)
+        digit = Gtk.Label(label=key)
+        digit.add_css_class("digit")
+        letters = Gtk.Label(label=self.KEY_LETTERS.get(key, "") or " ")
+        letters.add_css_class("letters")
+        face.append(digit)
+        face.append(letters)
+        button = Gtk.Button(child=face)
+        button.add_css_class("dialer-key")
+        button.update_property([Gtk.AccessibleProperty.LABEL], [key])
+        button.connect("clicked", lambda _b: self.number.set_text(self.number.get_text() + key))
+        # Hold 0 for "+", as every phone does.
+        if key == "0":
+            hold = Gtk.GestureLongPress()
+            hold.connect("pressed", lambda *_: self.number.set_text(self.number.get_text() + "+"))
+            button.add_controller(hold)
+        return button
+
+    def _show_match(self) -> None:
+        """The contact the typed digits belong to, under the number."""
+        typed = "".join(ch for ch in self.number.get_text() if ch.isdigit() or ch == "+")
+        name = self.name_for(typed) if len(typed) >= 6 else ""
+        self.match.set_text(name)
 
     def _route_button(self, visible: bool = True) -> Gtk.Button:
         """A wired route to the one page that writes all three gates."""
@@ -364,12 +517,29 @@ class PhonePanel:
         button is created once and shown only when the gate is actually off.
         """
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        button = common.wire_page_button(
-            common.open_settings_button("Open Privacy settings", GATE_TARGET),
-            self.app, GATE_TARGET)
+        # **"Turn on", for the switch the note names** - set by `_say_gate`,
+        # since one note row reports whichever gate the last action hit.
+        button = Gtk.Button(label="Turn on")
+        button.add_css_class("suggested-action")
+        button._gate_key = ""
+        button.connect("clicked", self._turn_on_gate)
         button.set_visible(False)
         row.append(button)
         return row, button
+
+    def _turn_on_gate(self, button: Gtk.Button) -> None:
+        key = getattr(button, "_gate_key", "")
+        config = getattr(self.app, "config", None)
+        if not key or config is None:
+            return
+        config.set(key, "true")
+        button.set_visible(False)
+        parent = button.get_parent()
+        note = parent.get_first_child() if parent is not None else None
+        while note is not None and not isinstance(note, Gtk.Label):
+            note = note.get_next_sibling()     # the note follows the button
+        if note is not None:
+            note.set_text(f"\"{GATE_NAMES.get(key, key)}\" is on - try again.")
 
     def _say_gate(self, note: Gtk.Label, button: Gtk.Button, key: str,
                   what: str) -> None:
@@ -381,9 +551,10 @@ class PhonePanel:
         sentence it replaced.
         """
         name = GATE_NAMES.get(key, key)
-        note.set_text(f"{what} turned off. In Settings, under Privacy: "
-                      f"\"{name}\".")
+        note.set_text(f"{what} turned off (\"{name}\").")
         off = not self.ok(key)
+        button._gate_key = key
+        button.set_tooltip_text(f"Turn on \"{name}\", the same switch as in Settings")
         button.set_visible(off)
 
     def call(self, number: str) -> None:

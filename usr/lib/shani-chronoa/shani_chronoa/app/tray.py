@@ -141,7 +141,9 @@ def _menu(app: Any) -> Gio.Menu:
     ask.set_action_and_target_value("app.quick-ask", None)
     menu.append_item(ask)
     settings = Gio.MenuItem.new("Settings", None)
-    settings.set_action_and_target_value("app.settings", None)
+    # `app.open-settings` - there is no `app.settings`, so this item did
+    # nothing at all: GIO drops an activation of an unregistered action.
+    settings.set_action_and_target_value("app.open-settings", None)
     menu.append_item(settings)
     quit_item = Gio.MenuItem.new("Quit", None)
     quit_item.set_action_and_target_value("app.quit", None)

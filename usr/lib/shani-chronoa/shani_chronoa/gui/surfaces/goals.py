@@ -147,9 +147,11 @@ def _grant_route(app: Any) -> Optional[Gtk.Widget]:
     except Exception:  # noqa: BLE001 - an unreadable gate is not a granted one
         logger.debug("reading %s raised", GOALS_KEY, exc_info=True)
         return None
-    return common.wire_page_button(
-        common.open_settings_button("Open Privacy settings", "settings:privacy"),
-        app, "settings:privacy")
+    # The switch by name, turned on here - it was a full-width "Open Privacy
+    # settings" with no word on why goals had anything to do with privacy.
+    return common.consent_banner(
+        app, GOALS_KEY, "A saved goal cannot run while it is off.",
+        on_change=lambda: common.reload_surface(app, "goals"))
 
 
 class _GoalsSurface:

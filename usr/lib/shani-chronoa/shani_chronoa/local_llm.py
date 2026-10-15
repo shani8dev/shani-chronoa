@@ -2029,8 +2029,21 @@ class LocalLLM:
                 return fit_to_context(normalize_messages(messages), context_tokens(),
                                       reserved_chars=getattr(self, "_tools_chars", 0))
 
-            def _payload_extra(self, **more):
-                extra = {"chat_template_kwargs": {"enable_thinking": False}}
+            def _thinking_fields(self):
+                # Qwen3 takes its switch through the chat template, below, and
+                # llama-server would refuse `reasoning_effort` on top of it.
+                return {}
+
+            def _payload_extra(self, think=None, **more):
+                """`think=None` follows the person's choice (`self.thinking`).
+
+                Qwen3 has no levels, so every level above "off" turns it on. The
+                JSON helpers pass `think=False`: a title or a tool pick is a
+                schema-bound answer, and thinking there is wait with no reader.
+                """
+                if think is None:
+                    think = self.thinking != "off"
+                extra = {"chat_template_kwargs": {"enable_thinking": bool(think)}}
                 if TEMPERATURE is not None:
                     extra["temperature"] = TEMPERATURE
                 extra.update(more)
@@ -2049,7 +2062,7 @@ class LocalLLM:
                 more = {"temperature": temperature} if temperature is not None else {}
                 if enforce:
                     more["response_format"] = _json_format(schema)
-                self.extra_payload = self._payload_extra(**more)
+                self.extra_payload = self._payload_extra(think=False, **more)
                 try:
                     reply = await super().chat_message(messages, tools=None)
                 finally:

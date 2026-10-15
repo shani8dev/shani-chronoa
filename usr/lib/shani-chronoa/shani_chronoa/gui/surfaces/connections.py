@@ -146,6 +146,94 @@ def mcp_client_config(binary: str) -> str:
             f'      "command": "{binary}"\n    }}\n  }}\n}}')
 
 
+def _mcp_servers_group(app: Any) -> Gtk.Widget:
+    """The client half: servers whose tools Chronoa itself may use.
+
+    The group above offers Chronoa *to* other apps; nothing let Chronoa use
+    a tool another program serves. Paste servers in the same `mcpServers`
+    shape Claude Desktop uses (a whole config works), save, and each server's
+    tools join Chronoa's as `mcp_<server>_<tool>` - gated by "Let Chronoa use
+    tools from MCP servers", so they ask first until that is on.
+    """
+    import json
+    from gi.repository import GLib
+    from shani_chronoa import mcp_client
+
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+    group = common.group(
+        "Use other MCP servers in Chronoa",
+        "Tools from servers you add here appear beside Chronoa's own. Same JSON "
+        "as Claude Desktop's mcpServers; a whole config can be pasted.")
+    box.append(group)
+    rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+    box.append(rows)
+
+    def draw_status() -> None:
+        common.clear(rows)
+        found = mcp_client.status()
+        configured = mcp_client.servers()
+        if not configured:
+            rows.append(common.row("No servers yet", "Add one below and save."))
+        for name in configured:
+            rows.append(common.row(name, found.get(name, "not checked yet")))
+
+    config = getattr(app, "config", None)
+    current = config.get(mcp_client.SETTING, "") if config is not None else ""
+    try:
+        current = json.dumps(json.loads(current), indent=2) if current.strip() else ""
+    except ValueError:
+        pass
+    editor = Gtk.TextView()
+    editor.add_css_class("monospace")
+    editor.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+    editor.get_buffer().set_text(current or
+                                 '{\n  "example": {"command": "npx", "args": ["-y", "some-mcp-server"]}\n}')
+    editor.update_property([Gtk.AccessibleProperty.LABEL], ["MCP servers, as JSON"])
+    frame = Gtk.Frame()
+    frame.set_child(common.scrolled(editor, max_content_height=220))
+    box.append(frame)
+    note = Gtk.Label(label="", xalign=0.0, wrap=True)
+    note.add_css_class("dim-label")
+    save = Gtk.Button(label="Save and reload")
+    save.add_css_class("suggested-action")
+    save.set_halign(Gtk.Align.START)
+
+    def on_save(_button) -> None:
+        buffer = editor.get_buffer()
+        text = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
+        try:
+            if text.strip():
+                json.loads(text)
+        except ValueError as exc:
+            note.set_label(f"Not saved - that is not valid JSON: {exc}")
+            return
+        if config is None:
+            note.set_label("Not saved - there is no settings store here.")
+            return
+        config.set(mcp_client.SETTING, text.strip())
+        note.set_label("Saved. Asking each server for its tools…")
+        app.activate_action("reload-mcp", None)
+        before = mcp_client.status()
+        tries = [0]
+
+        def poll() -> bool:
+            tries[0] += 1
+            if mcp_client.status() != before or tries[0] > 60:
+                draw_status()
+                note.set_label("Done." if mcp_client.status() else
+                               "No servers answered.")
+                return False
+            return True
+
+        GLib.timeout_add(500, poll)
+
+    save.connect("clicked", on_save)
+    box.append(save)
+    box.append(note)
+    draw_status()
+    return box
+
+
 def build(app: Any) -> Gtk.Widget:
     page, set_content = common.surface(TITLE, SUBTITLE)
     body = common.page_body()
@@ -189,6 +277,7 @@ def build(app: Any) -> Gtk.Widget:
                                 mcp_client_config(mcp_bin)))
 
     # --- channel bridge --------------------------------------------------------
+    body.append(_mcp_servers_group(app))
     bridge_group = common.group(
         "Chat channels (Telegram, WhatsApp)",
         "A separate bridge program carries messages into Chronoa. It reads its "

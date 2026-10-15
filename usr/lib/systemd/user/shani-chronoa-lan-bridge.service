@@ -1,0 +1,16 @@
+[Unit]
+Description=Shani Chronoa phone bridge (ask Chronoa from a paired KDE Connect phone)
+Documentation=file:///usr/lib/shani-chronoa/shani_chronoa/lan_bridge.py
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+# Talks only to the phone stored by pairing (lan_link._link pins it), and hands
+# its text to the "phone" gateway, which is ask-only unless granted :execute.
+ExecStart=/usr/bin/shani-chronoa-lan-bridge
+Restart=on-failure
+RestartSec=30
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=graphical-session.target

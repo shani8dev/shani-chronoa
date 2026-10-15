@@ -36,7 +36,7 @@ rather than implying the rest works.
 **One handshake in this module, not two.** An earlier version also carried a
 119-line `identity_exchange()` that hand-drove the same TCP + TLS + identity
 exchange over a `MemoryBIO`. It had no caller and no test, and `Link` does the
-job better: it keeps the peer's whole identity body in `_peer_reply_body`, and
+job better: it keeps the peer's whole identity body in `peer_identity`, and
 it has the `expect_peer` pinning defence that the standalone copy had no way to
 express. It was removed rather than given a caller, because the one thing that
 made it look like a missing capability - "it returns the capability list" - is
@@ -405,7 +405,8 @@ def _our_certificate(directory=None):
     return cert, key
 
 
-def pair(host: str, accept: bool = True, timeout: float = 120.0):
+def pair(host: str, accept: bool = True, timeout: float = 120.0,
+         tcp_port: int = UDP_PORT):
     """Pair with a peer: `(state, why-not)` where state is a sentence.
 
     **The handshake has a step that is easy to miss and that this function
@@ -428,9 +429,10 @@ def pair(host: str, accept: bool = True, timeout: float = 120.0):
     a `("waiting", ...)` state means nobody has answered yet, which is a normal
     outcome and not a failure. `("paired", ...)` means it completed.
     """
-    link, why = _link(host, timeout=timeout)
+    link, why = _link(host, timeout=timeout, tcp_port=tcp_port, expect_peer=None)
     if link is None:
         return "failed", why
+    identity = dict(link.peer_identity or {})
     request = {
         "id": int(time.time() * 1000),
         "type": "kdeconnect.pair",
@@ -455,16 +457,22 @@ def pair(host: str, accept: bool = True, timeout: float = 120.0):
         return "rejected", "the device refused the pairing request"
 
     # We got a yes. Now say so back, so *both* sides have said it.
-    confirm, why = _send_pair_true(host, timeout=timeout)
+    # The confirmation must reach the phone that said yes, not whichever
+    # machine answers the address now.
+    confirm, why = _send_pair_true(host, timeout=timeout, tcp_port=tcp_port,
+                                   expect_peer=identity.get("deviceId"))
     if confirm is None:
         return "failed", f"the device accepted but the confirmation failed: {why}"
-    return "paired", ("the device accepted, and both sides have confirmed - "
-                      "certificates are now pinned by fingerprint")
+    _remember_pairing(identity, host, tcp_port)
+    return "paired", (f"{identity.get('deviceName') or 'the device'} accepted, and "
+                      f"both sides have confirmed - every later link must be "
+                      f"this device")
 
 
-def _send_pair_true(host: str, timeout: float = 60.0):
+def _send_pair_true(host: str, timeout: float = 60.0, tcp_port: int = UDP_PORT,
+                    expect_peer: "Optional[str]" = None):
     """Open the link and say `pair: true`, the missing half of the handshake."""
-    link, why = _link(host, timeout=timeout)
+    link, why = _link(host, timeout=timeout, tcp_port=tcp_port, expect_peer=expect_peer)
     if link is None:
         return None, why
     try:
@@ -503,14 +511,20 @@ class Link:
     """
 
     def __init__(self, host: str, timeout: float = 20.0,
-                 tcp_port: int = UDP_PORT):
+                 tcp_port: int = UDP_PORT,
+                 expect_peer: "Optional[str]" = None):
         self.host = host
         self.timeout = timeout
         self.tcp_port = tcp_port
         #: The device id this link must be talking to, or None for the pairing
         #: flow where nothing is pinned yet and a person is comparing terminals.
-        self.expect_peer: "str | None" = None
+        #: **A parameter, and it was not**: `_link` passed it and every link -
+        #: pair, send_file, the bridge - died on a TypeError before opening a
+        #: socket (run against `tools/fake_kdeconnect.py`, 2026-10-14).
+        self.expect_peer: "str | None" = expect_peer
         self._peer_reply_body: "dict | None" = None
+        #: The peer's whole identity body, once `connect` has read it.
+        self.peer_identity: dict = {}
         #: Set by `connect` once the peer has proved to be who we asked for. The
         #: bridge checks this before turning a packet into a turn.
         self.peer_id: "str | None" = None
@@ -606,9 +620,18 @@ class Link:
         than merely declining a message: a peer claiming to be somebody else is
         not a peer whose next packet is worth reading.
         """
-        reply = self.reply_packet(timeout=self.timeout)
+        # **The identity itself, not the next packet after it.** This read
+        # through `reply_packet`, which skips identity packets by design - so
+        # it waited past the one packet it needed and every real link failed
+        # "the peer sent no identity" (run against `tools/fake_kdeconnect.py`,
+        # 2026-10-14). The stubbed tests below never reached the wire.
+        reply = self.reply_packet(timeout=self.timeout, identity=True)
         body = (reply or {}).get("body") or {}
-        self._peer_reply_body = body
+        # Kept as `peer_identity`, not in the stub slot: putting it back in
+        # `_peer_reply_body` made the *next* `reply_packet` - pairing's wait for
+        # the phone's answer - return this identity again, so every pair
+        # "answered with 'kdeconnect.identity'".
+        self.peer_identity = body
         peer_id = body.get("deviceId")
         if not peer_id:
             raise RuntimeError("the peer sent no identity, so it cannot be "
@@ -630,7 +653,8 @@ class Link:
         out["body"] = body
         self._flush((json.dumps(out, separators=(", ", ": ")) + "\n").encode())
 
-    def reply_packet(self, timeout: "Optional[float]" = None) -> "Optional[dict]":
+    def reply_packet(self, timeout: "Optional[float]" = None,
+                     identity: bool = False) -> "Optional[dict]":
         """The next packet the peer sends, or the canned one a test installed.
 
         `_peer_reply_body` exists so the identity check can be exercised without
@@ -642,7 +666,7 @@ class Link:
         a caller asking about pairing or a plugin gets the answer rather than the
         conversation leading up to it.
         """
-        if getattr(self, "_peer_reply_body", None) is not None:
+        if identity and getattr(self, "_peer_reply_body", None) is not None:
             body, self._peer_reply_body = self._peer_reply_body, None
             return {"id": 1, "type": "kdeconnect.identity", "body": body}
         deadline = time.monotonic() + (self.timeout if timeout is None else timeout)
@@ -652,7 +676,7 @@ class Link:
                     packet = json.loads(line)
                 except ValueError:
                     continue
-                if isinstance(packet, dict) and packet.get("type") != IDENTITY_TYPE:
+                if isinstance(packet, dict) and (packet.get("type") == IDENTITY_TYPE) == identity:
                     return packet
         return None
 
@@ -844,14 +868,63 @@ def _human(size: int) -> str:
     return f"{size:.1f} GB"
 
 
+#: `_link`'s default: talk only to the phone `pair` stored.
+PINNED = object()
+
+
+def _paired_file() -> pathlib.Path:
+    from shani_chronoa import files
+    return files.state_home() / "kdeconnect" / "paired.json"
+
+
+def paired_device() -> dict:
+    """The phone this computer paired with - `deviceId`, `deviceName`,
+    `address`, `tcpPort` - or `{}`."""
+    try:
+        data = json.loads(_paired_file().read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) and data.get("deviceId") else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _remember_pairing(identity: dict, host: str, tcp_port: int) -> None:
+    path = _paired_file()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({
+            "deviceId": identity.get("deviceId", ""),
+            "deviceName": identity.get("deviceName", ""),
+            "deviceType": identity.get("deviceType", ""),
+            "address": host, "tcpPort": tcp_port}), encoding="utf-8")
+        path.chmod(0o600)
+    except OSError as exc:
+        logger.warning("paired, but could not remember the phone: %s", exc)
+
+
+def forget_pairing() -> None:
+    try:
+        _paired_file().unlink()
+    except OSError:
+        pass
+
+
 def _link(host: str, timeout: float = 20.0,
           tcp_port: int = UDP_PORT,
-          expect_peer: "Optional[str]" = None) -> "tuple[Optional[Link], str]":
+          expect_peer=PINNED) -> "tuple[Optional[Link], str]":
     """A connected Link, or (None, why-not). The one entry point everything uses.
 
     `expect_peer` is what makes the link safe to call with: without it the link
-    accepts any peer that completes a handshake.
+    accepts any peer that completes a handshake. **So the default is the
+    paired phone** (`paired_device`), and no stored pairing is a refusal, not
+    an open link: the bridge turns a peer's clipboard into a turn, and it used
+    to accept whichever machine on the Wi-Fi answered. Only `pair` itself
+    passes `None`, because pairing is the moment nothing is pinned yet.
     """
+    if expect_peer is PINNED:
+        expect_peer = paired_device().get("deviceId")
+        if not expect_peer:
+            return None, ("no phone is paired yet - pair one first "
+                          "(Connect a device, or lan_phone pair)")
     link = Link(host, timeout=timeout, tcp_port=tcp_port, expect_peer=expect_peer)
     try:
         link.connect()
@@ -930,14 +1003,18 @@ def _exchange(host: str, packet: dict, timeout: float):
 
 
 def pairing_status() -> "tuple[str, str]":
-    """(state, why) for the pairing half - which is deliberately absent.
+    """(state, why): "paired" with the stored phone, or "not paired".
 
-    The pairing and TLS half of the spec is not implemented, and this is the
-    sentence that says so rather than a half-written client that would pair
-    wrongly. See the module docstring for why.
+    This said "not implemented" long after `pair` was written and run against
+    a real phone - and nothing could tell, because `_link` raised a TypeError
+    and `connect` could not read an identity, so no link of any kind had
+    worked since. Both are fixed and run against `tools/fake_kdeconnect.py`.
+    What is still unverified is any plugin packet beyond pairing, clipboard
+    and notification.
     """
-    return ("not implemented",
-            "pairing, the TLS upgrade and the plugin packets are specified but "
-            "not written: there is no KDE Connect phone on any network this "
-            "code has been able to run against, so they could only be written "
-            "from the spec and never run. Discovery is real and is tested.")
+    device = paired_device()
+    if device:
+        return ("paired", f"with {device.get('deviceName') or 'a phone'} at "
+                          f"{device.get('address')}; only that device is accepted")
+    return ("not paired", "no phone is paired yet; a phone running KDE Connect on "
+                          "the same Wi-Fi can be paired with Connect a device")

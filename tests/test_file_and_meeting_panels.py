@@ -421,11 +421,14 @@ class TestTheSearchPanel:
 
     def test_consent_off_names_the_switch_and_refuses(self, broadway, tmp_path):
         out = _run(broadway, "my_files_consent_off", tmp_path)
-        assert "file-index-enabled" in shown(out), shown(out)
+        # Named as Settings names it, and turned on from here (2026-10-14):
+        # the raw key and a trip to Settings were the dead end.
+        assert "Let Chronoa index and search your own files" in shown(out), shown(out)
+        assert "file-index-enabled" not in shown(out), shown(out)
         assert "Nothing has been read" in shown(out), shown(out)
-        assert "Open Settings" in clicked(out), (
-            "a switch nobody can find is the dead-control class; the row names "
-            "the key and the page offers the place to turn it on")
+        assert "Turn on" in clicked(out), (
+            "a switch nobody can find is the dead-control class; the banner "
+            "names it and turns it on in place")
 
     def test_consent_off_does_not_claim_the_files_are_absent(self, broadway, tmp_path):
         """**The direction that reads as a fact.** "Nothing is indexed" under a
@@ -452,7 +455,8 @@ class TestTheMeetingsPanel:
 
     def test_consent_off_names_the_switch(self, broadway, tmp_path):
         out = _run(broadway, "meetings_consent_off", tmp_path)
-        assert "meeting-enabled" in shown(out), shown(out)
+        assert "Let Chronoa record a whole meeting" in shown(out), shown(out)
+        assert "meeting-enabled" not in shown(out), shown(out)
         assert "microphone will not be opened" in shown(out), shown(out)
 
     def test_consent_off_says_the_shelf_is_still_readable(self, broadway, tmp_path):
@@ -634,7 +638,8 @@ class TestTheRecordButtonSaysBeforeItRefuses:
         out = _run(broadway, "meetings_record_gate_off", tmp_path)
         assert not out["record_sensitive"], (
             "Record was live with meeting-enabled off; it refuses only on click")
-        assert "meeting-enabled" in out["record_tooltip"], out["record_tooltip"]
+        # Names the switch as Settings shows it, not its config key.
+        assert "Let Chronoa record a whole meeting" in out["record_tooltip"], out["record_tooltip"]
 
     def test_the_shelf_still_works_with_consent_off(self, broadway, tmp_path):
         """**The trap in fixing the first one.** Gating everything that touches a

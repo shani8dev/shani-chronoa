@@ -210,19 +210,21 @@ def _this_name():
         return "this computer"
 
 
-class TestPairingIsHonestlyAbsent:
-    def test_it_says_so_rather_than_claiming_to_pair(self):
-        state, why = lan_link.pairing_status()
-        assert state == "not implemented"
-        assert "spec" in why and "never run" in why, (
-            f"the refusal must say why it is absent, not just that it is: {why!r}")
+class TestPairingStatusIsTheStoredPairing:
+    """It said "not implemented" while `pair` existed; now it reports the
+    stored pairing (`tests/test_lan_pairing.py` drives the pairing itself)."""
 
-    def test_the_skill_answers_pair_with_the_same_truth(self):
-        from shani_chronoa.skills import lan_phone
-        config = type("C", (), {"get_bool": lambda s, k, d=False: True})()
-        answer = lan_phone._run({"action": "pair", "_config": config})
-        assert "not implemented" in answer or "not written" in answer
-        assert "devices" in answer, "the refusal must point at what *does* work"
+    def test_not_paired_points_at_connect_a_device(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(lan_link, "_paired_file", lambda: tmp_path / "paired.json")
+        state, why = lan_link.pairing_status()
+        assert state == "not paired" and "Connect a device" in why
+
+    def test_paired_names_the_phone(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(lan_link, "_paired_file", lambda: tmp_path / "paired.json")
+        lan_link._remember_pairing({"deviceId": "f" * 32, "deviceName": "Pixel"},
+                                   "10.0.0.5", 1716)
+        state, why = lan_link.pairing_status()
+        assert state == "paired" and "Pixel" in why and "10.0.0.5" in why
 
 
 class TestTheSkillSurface:
@@ -243,7 +245,8 @@ class TestTheSkillSurface:
         from shani_chronoa.skills import lan_phone
         out = lan_phone._run({"action": "status", "_config": self._config()})
         assert str(lan_link.UDP_PORT) in out
-        assert "not implemented" in out or "not written" in out
+        state, _why = lan_link.pairing_status()
+        assert f"Pairing: {state}" in out, "status must report the stored pairing"
 
 
 

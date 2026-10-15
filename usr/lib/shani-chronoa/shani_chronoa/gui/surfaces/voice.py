@@ -81,7 +81,8 @@ from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gtk  # noqa: E402
+gi.require_version("Adw", "1")
+from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from shani_chronoa import sherpa, stt, stt_provision, tts, voices  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
@@ -95,9 +96,8 @@ logger = logging.getLogger(__name__)
 TITLE = "Speaking voice"
 ICON = "audio-volume-high-symbolic"
 SECTION = "Sensing"
-SUBTITLE = ("Read from this computer: the engine that would speak the next reply, "
-            "the voice it would use, and what else is installed to replace it. "
-            "Nothing on this page downloads anything or changes a setting.")
+SUBTITLE = ("Pick the voice Chronoa speaks with, hear it, and set its speed and pitch. "
+            "Downloads open Setup on its Voice page.")
 
 #: The row vocabulary, borrowed from `model.py` so no panel here can invent a
 #: fourth word for the same three states.
@@ -817,12 +817,7 @@ class _VoiceSurface(Gtk.Box):
         #
         # It stays above the content rather than in the header because
         # `common.surface()` builds that bar and offers no slot for a button.
-        self._reload_button = common.banner(
-            "Read once, when this panel was built. Nothing here is polled - press "
-            "Reload to read the engines, the voice, the timbre settings and the "
-            "speech-input model from this computer again.",
-            "Reload",
-            lambda: self.refresh())
+        self._reload_button = common.read_banner(lambda: self.refresh())
         self.append(self._reload_button)
 
         # The panel's own health, above the content: can anything speak, and can
@@ -1166,11 +1161,200 @@ _FORWARDED = ("speaking_row", "speaking_title", "speaking_detail", "cost_row", "
               "summary", "reload_button")
 
 
+def _hear(config: Any, button: Gtk.Button, *, piper: str = "", kokoro: str = "") -> None:
+    """Speak the sample sentence - with the configured voice, or a trial one."""
+    import threading
+    from shani_chronoa.setup_wizard import sample_sentence
+
+    button.set_sensitive(False)
+
+    def speak():
+        try:
+            from shani_chronoa.audio import AudioPlayer
+            from shani_chronoa.tts import PiperTTS
+            if kokoro:
+                tts = PiperTTS(config=config)
+                tts.kokoro_trial_voice = kokoro
+            elif piper:
+                tts = PiperTTS(voice=piper, config=config)
+                tts.piper_trial = True
+            else:
+                tts = PiperTTS(voice=getattr(config, "piper_voice", "") or "en_US-lessac-medium",
+                               config=config)
+            audio = tts.synthesize_to_bytes(sample_sentence())
+            if audio:
+                AudioPlayer().play_bytes(audio)
+        except Exception:  # noqa: BLE001 - a voice that will not play is not a page
+            logger.info("voice preview failed", exc_info=True)
+        GLib.idle_add(button.set_sensitive, True)
+    threading.Thread(target=speak, daemon=True).start()
+
+
+def _scale_row(config: Any, title: str, subtitle: str, key: str, low: float,
+               high: float, step: float, default: float, marks) -> Adw.ActionRow:
+    row = Adw.ActionRow(title=title, subtitle=subtitle)
+    value = default
+    try:
+        value = config.get_double(key, default) if config is not None else default
+    except Exception:  # noqa: BLE001
+        pass
+    scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, low, high, step)
+    scale.set_value(value)
+    scale.set_size_request(220, -1)
+    scale.set_draw_value(False)
+    for at, label in marks:
+        scale.add_mark(at, Gtk.PositionType.BOTTOM, label)
+    scale.set_valign(Gtk.Align.CENTER)
+    if config is not None:
+        scale.connect("value-changed", lambda w: config.set(key, f"{w.get_value():.2f}"))
+    row.add_suffix(scale)
+    return row
+
+
+def _voice_top(app: Any) -> Gtk.Widget:
+    """What a person decides here: which voice, how fast, how high - and hearing it.
+
+    **Why this exists (2026-10-15).** The page opened on engine chains,
+    real-time factors and package names, and the controls a person wants -
+    pick a voice, hear it, change its speed - were not on it at all: the voice
+    was a free-text name in Settings and speed was two sliders in two places.
+    That reading moved under Details, unchanged.
+    """
+    from shani_chronoa import model_status, voices
+    config = getattr(app, "config", None)
+    box = common.page_body(18)
+    for side in ("top", "start", "end"):
+        getattr(box, f"set_margin_{side}")(18)
+
+    kokoro_ready = False
+    try:
+        kokoro_ready = bool(voices.kokoro_installed())
+    except Exception:  # noqa: BLE001
+        pass
+    piper_ready = bool(voices.piper_binary())
+    chosen_kokoro = (config.get("kokoro-voice", voices.KOKORO_DEFAULT_VOICE)
+                     if config is not None else voices.KOKORO_DEFAULT_VOICE)
+    chosen_piper = getattr(config, "piper_voice", "") or "en_US-lessac-medium"
+    if kokoro_ready:
+        now = f"Kokoro, {voices.KOKORO_VOICES.get(chosen_kokoro, voices.KOKORO_VOICES[voices.KOKORO_DEFAULT_VOICE]).label}"
+    elif piper_ready and voices.voice_installed(chosen_piper):
+        now = f"Piper, {voices.VOICES[chosen_piper].label}" if chosen_piper in voices.VOICES else chosen_piper
+    else:
+        now = "the robotic fallback voice (espeak-ng)"
+
+    hero = Gtk.Box(spacing=14)
+    hero.append(Gtk.Image(icon_name="audio-speakers-symbolic", pixel_size=48))
+    words = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER, hexpand=True)
+    title = Gtk.Label(label="How Chronoa sounds", xalign=0.0)
+    title.add_css_class("title-2")
+    words.append(title)
+    current = Gtk.Label(label=f"Speaking with {now}", xalign=0.0, wrap=True)
+    current.add_css_class("dim-label")
+    words.append(current)
+    hero.append(words)
+    hear = Gtk.Button(label="Hear it", valign=Gtk.Align.CENTER)
+    hear.add_css_class("pill")
+    hear.add_css_class("suggested-action")
+    hear.connect("clicked", lambda b: _hear(config, b))
+    hero.append(hear)
+    box.append(hero)
+
+    def setup_voice(*_a) -> None:
+        common.open_setup(app, box, page="voice")
+
+    def voice_group(title: str, description: str, entries, ready: bool, chosen: str,
+                    key: str, trial: str) -> Adw.PreferencesGroup:
+        group = Adw.PreferencesGroup(title=title, description=description)
+        if not ready:
+            download = Gtk.Button(label="Download", valign=Gtk.Align.CENTER)
+            download.add_css_class("suggested-action")
+            download.connect("clicked", setup_voice)
+            group.set_header_suffix(download)
+        head = None
+        for voice_key, label in entries:
+            installed = ready and (voices.voice_installed(voice_key) if key == "piper-voice" else True)
+            row = Adw.ActionRow(title=GLib.markup_escape_text(label.split(" - ")[0]),
+                                subtitle=GLib.markup_escape_text(" - ".join(label.split(" - ")[1:])
+                                                                 or label))
+            radio = Gtk.CheckButton(valign=Gtk.Align.CENTER, sensitive=installed)
+            if head is None:
+                head = radio
+            else:
+                radio.set_group(head)
+            radio.set_active(voice_key == chosen)
+            if config is not None:
+                radio.connect("toggled", lambda b, k=voice_key: b.get_active() and config.set(key, k))
+            row.add_prefix(radio)
+            if installed:
+                play = Gtk.Button(icon_name="media-playback-start-symbolic", valign=Gtk.Align.CENTER,
+                                  tooltip_text="Hear this voice")
+                play.add_css_class("flat")
+                play.connect("clicked", lambda b, k=voice_key: _hear(config, b, **{trial: k}))
+                row.add_suffix(play)
+                row.set_activatable_widget(radio)
+            else:
+                row.set_subtitle(row.get_subtitle() + " · not downloaded")
+            group.add(row)
+        return group
+
+    box.append(voice_group(
+        "Natural voices", "Kokoro - the best-sounding; used whenever it is installed.",
+        [(k, v.label) for k, v in voices.KOKORO_VOICES.items()], kokoro_ready,
+        chosen_kokoro, "kokoro-voice", "kokoro"))
+    box.append(voice_group(
+        "Piper voices", "Lighter and quick; used when Kokoro is not installed.",
+        [(k, v.label) for k, v in voices.VOICES.items()], piper_ready,
+        chosen_piper, "piper-voice", "piper"))
+
+    speaking = Adw.PreferencesGroup(title="Speaking")
+    speaking.add(_scale_row(config, "Speed", "How fast replies are spoken", "speech-rate",
+                            0.5, 2.0, 0.05, 1.0, ((1.0, "normal"),)))
+    speaking.add(_scale_row(config, "Pitch", "Lower or higher, keeping the same speed", "tts-pitch",
+                            -6.0, 6.0, 1.0, 0.0, ((0.0, "natural"),)))
+    box.append(speaking)
+
+    listening = Adw.PreferencesGroup(title="Listening")
+    ears = Adw.ActionRow(title="Speech recognition")
+    if model_status.installed("stt"):
+        ears.set_subtitle("Ready - Chronoa can hear you on this computer")
+        ears.add_prefix(Gtk.Image(icon_name="object-select-symbolic"))
+    else:
+        ears.set_subtitle("Not downloaded - Chronoa cannot hear you yet")
+        download = Gtk.Button(label="Download", valign=Gtk.Align.CENTER)
+        download.add_css_class("suggested-action")
+        download.connect("clicked", lambda *_: common.open_setup(app, box, page="ears"))
+        ears.add_suffix(download)
+    listening.add(ears)
+    box.append(listening)
+    return box
+
+
 def build(app: Any) -> Gtk.Widget:
-    """Build the voice page for `app`. Reads state; writes nothing."""
+    """Build the voice page for `app`: the choices first, the reading under Details."""
     content = _VoiceSurface(app)
     page, set_content = common.surface(TITLE, SUBTITLE)
-    set_content(common.scrolled(content))
+    body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+    # The "read at - not live" banner stays on screen, not inside the collapsed
+    # Details: when a reading was taken is the one thing a stale page must say.
+    reload_banner = getattr(content, "_reload_button", None)
+    if reload_banner is not None and reload_banner.get_parent() is not None:
+        reload_banner.get_parent().remove(reload_banner)
+        reload_banner.set_margin_top(12)
+        body.append(reload_banner)
+    body.append(_voice_top(app))
+    # A Revealer, not a Gtk.Expander: a collapsed expander unparents its child,
+    # so the engine reading left the widget tree - screen readers and the
+    # panel's own accessors could not reach it.
+    toggle = Gtk.ToggleButton(label="Show details - engines, speeds and costs",
+                              halign=Gtk.Align.START, margin_start=18)
+    toggle.add_css_class("flat")
+    details = Gtk.Revealer(child=content, reveal_child=False, margin_bottom=18)
+    toggle.connect("toggled", lambda b: (details.set_reveal_child(b.get_active()),
+                                         b.set_label(("Hide" if b.get_active() else "Show")
+                                                     + " details - engines, speeds and costs")))
+    body.append(toggle)
+    body.append(details)
+    set_content(common.scrolled(body))
     for name in _FORWARDED:
         setattr(page, name, getattr(content, name))
     # What this panel says about itself, for the sidebar's health dot, from the

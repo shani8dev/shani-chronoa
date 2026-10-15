@@ -544,12 +544,14 @@ def build(app) -> Gtk.Widget:
         route = ROUTES.get(state.state)
         if route is not None:
             label, target = route
-            column.append(common.banner(
-                "This is a setting on this machine, not a fault.",
-                label,
-                lambda _l=label, _t=target: common.open_page(app, _t)))
-        column.append(common.empty_state(ICON, _text(state.headline),
-                                         _text(state.body)))
+            # The switch by its Settings name, turned on here - see
+            # `common.gate_banner`.
+            column.append(common.gate_banner(
+                app, CONSENT_KEY if state.state == STATE_REFUSED else None,
+                "devices", label, target))
+        column.append(common.empty_state(
+            ICON, _text(state.headline), _text(state.body),
+            child=(common.connect_button(app) if state.state != STATE_REFUSED else None)))
         return common.scrolled(column)
 
     refusal = _permission(_app_config(app))

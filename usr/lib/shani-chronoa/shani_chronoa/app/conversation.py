@@ -47,6 +47,11 @@ class ConversationMixin:
         declined something the user had explicitly permitted.
         """
         now_on = planmode.set_enabled(not planmode.is_enabled())
+        # Keep the radio pair (`app.answer-plan`) in step with a toggle fired
+        # from anywhere else - Ctrl+K, the old action name, a test.
+        choice = self.lookup_action("answer-plan") if hasattr(self, "lookup_action") else None
+        if choice is not None:
+            choice.set_state(GLib.Variant("s", "plan" if now_on else "working"))
         if self.window:
             if now_on:
                 self.window.set_status(
@@ -589,7 +594,8 @@ class ConversationMixin:
         return GLib.SOURCE_REMOVE
 
     def _tool_clock_text(self, seconds: float) -> str:
-        said = self._tool_clock_name.replace("_", " ").capitalize()
+        from shani_chronoa.gui.blocks import tool_words
+        said = tool_words(self._tool_clock_name).capitalize()
         return f"{said}... {int(seconds)}s" if seconds >= 1 else f"{said}..."
 
     def _on_tool_clock_tick(self) -> bool:

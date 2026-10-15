@@ -269,6 +269,11 @@ _READ = re.compile(r"Characteristic value/descriptor: ((?:[0-9a-f]{2} ?)+)", re.
 _CHAR = re.compile(r"char value handle\s*[:=]\s*(0x[0-9a-f]+),\s*uuid\s*[:=]\s*0000([0-9a-f]{4})-", re.I)
 
 
+#: Bytes per write when the link's ATT MTU is not known (gatttool): the LE
+#: default MTU of 23, less the 3-byte ATT header - Gadgetbridge's `mtu=20`.
+DEFAULT_WRITE_SIZE = 20
+
+
 class Watch:
     """`with Watch(mac) as w: w.request(...)` - one gatttool session, held open.
 
@@ -422,8 +427,9 @@ class Watch:
                 return False
             return valid_at < 0 or (len(body) > valid_at and body[valid_at] not in (0, 0xFF))
         packet = frame(command, payload)
-        for i in range(0, len(packet), 20):
-            self._write(packet[i:i + 20])
+        size = max(20, int(getattr(self, "write_size", 20) or 20))
+        for i in range(0, len(packet), size):
+            self._write(packet[i:i + size])
         end = time.monotonic() + seconds
         while time.monotonic() < end:
             self._pump(0.2)
@@ -518,6 +524,7 @@ class BluezWatch(Watch):
             self._subs.append(self.bus.signal_subscribe(
                 self._BLUEZ, "org.freedesktop.DBus.Properties", "PropertiesChanged", None, None,
                 Gio.DBusSignalFlags.NONE, self._on_props))
+            self._ensure_known()
             if not self._prop(self.device, self._DEV, "Connected"):
                 try:
                     self._call(self.device, self._DEV, "Connect", timeout=self.timeout)
@@ -530,6 +537,14 @@ class BluezWatch(Watch):
                                      "services resolved - its pairing keys may be stale; pair it again")
                 self._pump(0.2)
             self._connected = True
+            # Trusted, so bluez keeps the watch after this link ends. It never
+            # bonds, so without this its object is dropped a few minutes after
+            # the last scan and the next `Connect` hits an object that is gone.
+            try:
+                self._call(self.device, "org.freedesktop.DBus.Properties", "Set",
+                           GLib.Variant("(ssv)", (self._DEV, "Trusted", GLib.Variant("b", True))))
+            except Exception:  # noqa: BLE001 - remembered or not, the link is up
+                pass
             self.paths = self._find_characteristics()
             if OUT not in self.paths or IN not in self.paths:
                 raise WatchError("the watch has no MoYoung command channel (0xFEE2/0xFEE3)")
@@ -538,11 +553,52 @@ class BluezWatch(Watch):
                     self._call(self.paths[uuid], self._CHAR, "StartNotify")
                     self._notifying.append(self.paths[uuid])
             self.handles = {u: i for i, u in enumerate(self.paths)}   # the protocol code only tests membership
+            # **One write per packet, as large as the link allows.** Measured
+            # 2026-10-14 on the FB BGS002 (bluez negotiates ATT MTU 517): a
+            # 62-byte now-playing packet cut into 20-byte writes rebooted the
+            # watch ~7s later - paced 60ms apart too - while the same packet in
+            # one write did not; the four weather packets the same. This is the
+            # "syncing weather or music restarts the watch" bug, and why a
+            # 6-character place name (a 20-byte packet, one write) survived
+            # where 8 (22 bytes, two writes) did not. `tools/watch_probe.py`.
+            mtu = self._prop(self.paths[OUT], self._CHAR, "MTU")
+            self.write_size = max(DEFAULT_WRITE_SIZE, int(mtu) - 3) if mtu else DEFAULT_WRITE_SIZE
             self._pump(0.3)
             return self
         except BaseException:
             self.close()
             raise
+
+    def _ensure_known(self, seconds: float = 15.0) -> None:
+        """Make bluez know the watch again, by scanning until it is seen.
+
+        **Measured 2026-10-14:** a watch that is neither bonded nor trusted is
+        only an object while a scan has recently seen it; afterwards `Connect`
+        fails with "UnknownObject" and the watch looked unreachable while it
+        sat on the desk advertising. A short LE discovery brings it back.
+        """
+        if self._prop(self.device, self._DEV, "Address") is not None:
+            return
+        adapter = self.device.rsplit("/", 1)[0]
+        GLib = self._GLib
+        try:
+            self._call(adapter, "org.bluez.Adapter1", "SetDiscoveryFilter",
+                       GLib.Variant("(a{sv})", ({"Transport": GLib.Variant("s", "le")},)))
+            self._call(adapter, "org.bluez.Adapter1", "StartDiscovery")
+        except Exception as exc:  # noqa: BLE001
+            raise WatchError(f"bluez does not know the watch and could not scan for it ({exc})") from exc
+        try:
+            end = time.monotonic() + seconds
+            while self._prop(self.device, self._DEV, "Address") is None:
+                if time.monotonic() > end:
+                    raise WatchError("the watch was not seen nearby - is it on, close, and not "
+                                     "connected to a phone's Da Fit app?")
+                self._pump(0.3)
+        finally:
+            try:
+                self._call(adapter, "org.bluez.Adapter1", "StopDiscovery")
+            except Exception:  # noqa: BLE001
+                pass
 
     def _call(self, path, iface, method, args=None, timeout: float = 10.0):
         return self.bus.call_sync(self._BLUEZ, path, iface, method, args, None, 0, int(timeout * 1000), None)
@@ -676,6 +732,25 @@ def health_summary(mac: str) -> dict:
     out: dict = {}
     with connect(mac) as w:
         out["steps_today"] = w.read_steps_now()
+        # Battery and the watch's own step goal, for the dashboard's header
+        # and ring - same connection, two short reads.
+        battery = getattr(w, "battery", None)
+        try:
+            out["battery"] = battery() if callable(battery) else None
+        except Exception:  # noqa: BLE001 - a missing battery is not a failed read
+            out["battery"] = None
+        read = getattr(w, "read_char", None)
+        info = {}
+        for uuid, key in DEVICE_INFO.items():
+            try:
+                raw = read(uuid) if callable(read) else None
+            except Exception:  # noqa: BLE001
+                raw = None
+            if raw:
+                info[key] = raw.decode("utf-8", "replace").strip("\x00 ")
+        out["device"] = info
+        query, _set, kind, values = SETTINGS["step_goal"]
+        out["step_goal"] = _decode_setting(kind, values, w.request(query, seconds=3) or b"")
         for arg, key in ((ARG_YESTERDAY_STEPS, "steps_yesterday"), (ARG_DAY_BEFORE_STEPS, "steps_2_days_ago")):
             body = w.request(CMD_SYNC_PAST, bytes([arg]), prefix=bytes([arg]))
             out[key] = decode_steps(body[1:]) if body else None
@@ -732,6 +807,13 @@ CMD_QUERY_DND, CMD_SET_DND = 0x81, 113
 CMD_SYNC_TIME, CMD_SEND_MESSAGE = 49, 65
 CMD_SET_MUSIC_INFO, CMD_SET_MUSIC_STATE = 68, 123
 CMD_SET_USER_INFO = 18
+#: Make the watch buzz and ring. Gadgetbridge's `onFindDevice`; empty payload,
+#: no reply. Measured 2026-10-14 on the FB BGS002: it rang. The generic
+#: `find_device` uses the Immediate Alert service (0x1802), which this watch
+#: does not have - so Find had never worked on it.
+CMD_FIND_MY_WATCH = 97
+#: Device Information (0x180A), read on the summary's connection.
+DEVICE_INFO = {"2a29": "manufacturer", "2a26": "firmware", "2a28": "software", "2a25": "serial"}
 #: A set is not answered; the watch needs this long before a query reports the
 #: new value (measured: read back after 0.5 s, nothing; after 2 s, the new goal).
 SET_SETTLE = 2.0
@@ -911,6 +993,15 @@ CMD_SET_WEATHER_LOCATION, CMD_SET_SUNRISE_SUNSET = 69, 0xB5
 
 #: How much of the place name goes into the two location-bearing weather packets.
 #:
+#: **SOLVED 2026-10-14 - read this before the history below.** The restart was
+#: the 20-byte write split, not any packet's content: bluez negotiates ATT MTU
+#: 517 with this watch, and a packet cut into 20-byte writes reboots it ~7s
+#: later (paced or not), while the same packet in one write does not. A 6-char
+#: label made the sunrise packet exactly 20 bytes - one write - which is the
+#: whole of the "6 survives, 8 dies" table below. `Watch.request` now writes up
+#: to `write_size` (MTU - 3); `tools/watch_probe.py` holds the measurements.
+#: The notes below are kept as the record of how it was misread.
+#:
 #: **This is cosmetic. It prevents nothing, and an earlier version of this
 #: comment claimed it fixed the watch restarting. It does not - that claim was
 #: wrong twice over and is withdrawn here.**
@@ -1026,3 +1117,9 @@ def weather_packets(current: dict, daily: dict, label: str, updated: datetime) -
                              _temp(day("temperature_2m_min", i))])
     return [(CMD_SET_WEATHER_TODAY, today), (CMD_SET_SUNRISE_SUNSET, sunrise),
             (CMD_SET_WEATHER_LOCATION, location), (CMD_SET_WEATHER_FUTURE, future)]
+
+
+def find_watch(mac: str) -> None:
+    """Make the watch ring (`CMD_FIND_MY_WATCH`)."""
+    with connect(mac) as w:
+        w.request(CMD_FIND_MY_WATCH, b"", seconds=0.2)

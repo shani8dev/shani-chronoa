@@ -144,9 +144,11 @@ renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
 **{n} skills in {g} groups.** Each is a named, schema-typed module; the model
-calls them by name. There is deliberately **no** generic shell-exec tool — the
-whitelist *is* the design, so a new capability is a new named skill rather than
-a way to run anything at all.
+calls them by name. The whitelist *is* the design, so a new capability is a
+new named skill. The one exception is `run_command`, for running a project's
+tests and builds: off by default, sandboxed (no network, nothing outside the
+project writable), one program per call and no shell syntax, and it asks before
+every command.
 
 Three things are not skills and are not here:
 

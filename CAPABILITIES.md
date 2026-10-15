@@ -4,10 +4,12 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**257 skills in 24 groups.** Each is a named, schema-typed module; the model
-calls them by name. There is deliberately **no** generic shell-exec tool — the
-whitelist *is* the design, so a new capability is a new named skill rather than
-a way to run anything at all.
+**259 skills in 24 groups.** Each is a named, schema-typed module; the model
+calls them by name. The whitelist *is* the design, so a new capability is a
+new named skill. The one exception is `run_command`, for running a project's
+tests and builds: off by default, sandboxed (no network, nothing outside the
+project writable), one program per call and no shell syntax, and it asks before
+every command.
 
 Three things are not skills and are not here:
 
@@ -35,7 +37,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**93 of 257 are consent-gated and 16 are destructive.**
+**94 of 259 are consent-gated and 17 are destructive.**
 
 ## System
 
@@ -201,6 +203,7 @@ The small things a person asks for most.
 | `calculate` | Calculation | — |
 | `convert_color` | Colour codes | — |
 | `convert_units` | Convert units | — |
+| `delegate` | Hand a long task to a helper and get back its summary | — |
 | `download_file` | Download a file from a web address | — |
 | `encode_text` | Encode or decode text | — |
 | `explain_command` | Explain a command | — |
@@ -246,6 +249,7 @@ Inspect repositories and work through files.
 | `manage_triggers` | Arm an automatic rule | **asks first, always** · needs `trigger-control-enabled` |
 | `project_outline` | Outline a code project: files, classes and functions | — |
 | `resolve_conflict` | What is conflicting in a git repository, and resolve it | needs `git-sense-enabled` |
+| `run_command` | Run a project's tests, build or linter | **asks first, always** · needs `run-command-enabled` |
 | `todo_list` | Keep a list of tasks to do | needs `todo-list-enabled` |
 | `vcs_status` | State of a git, subversion or mercurial checkout | — |
 

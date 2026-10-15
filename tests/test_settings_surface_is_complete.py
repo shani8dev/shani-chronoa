@@ -48,6 +48,14 @@ CONTROLLED = {
     # the Voice output group: the neural voice's opt-in switch and SoX's three
     # timbre controls, all built by `_build_voice_output`
     "kokoro-tts-enabled", "tts-pitch", "tts-tempo", "tts-rate",
+    # The two voice-cloning keys, rows in the same group. Hand-listed for the
+    # reason the comment above this set gives for the GAction keys, and for a
+    # second reason worth naming: `voice-clone-voice` is written through
+    # `tts.PiperTTS.CLONE_VOICE_KEY`, so the GSettings key never appears as a
+    # literal beside its row and a source scan cannot reach it. A key reachable
+    # only through a constant is the same shape as one reached only through an
+    # action name.
+    "voice-clone-enabled", "voice-clone-voice",
     "model-download-enabled",   # toggle-model-download
     # switches, reached through a GAction - the action name is what the window
     # calls, so the GSettings key never appears in the file next to it

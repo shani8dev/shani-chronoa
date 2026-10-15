@@ -62,10 +62,13 @@ Gtk = pytest.importorskip("gi.repository.Gtk", reason="GTK 4 is not installed")
 
 from gi.repository import Adw, GLib  # noqa: E402
 
-#: `.organ { padding: 2px 6px }` - the cell's own padding, not the strip's.
-ORGAN_PADDING = 12
-#: `.mode-chip { padding: 1px 7px }`.
-MODE_CHIP_PADDING = 14
+#: `.organ { padding: 3px 4px }` - the cell's own padding, not the strip's.
+#: Was 2px 6px (12) until the 2026-10-14 strip/chip row had to fit one line at
+#: 460px; see MAIN-UI-TODO.md section 8.
+ORGAN_PADDING = 8
+#: `.mode-chip { padding: 1px 2px }` - was 1px 7px (14); the outer padding is
+#: drawn transparent around the inner button, so it read as a 14px gap.
+MODE_CHIP_PADDING = 4
 #: `organs.ORGANS` has eight; a walk that finds fewer is a broken instrument
 #: and must not read as "nothing to complain about".
 ORGAN_CELLS = 8
@@ -213,8 +216,13 @@ def _organ_padding(window):
             labels = _walk(cell, "organ-label")
             if labels:
                 found += 1
-                widths.add(cell.get_allocation().width
-                           - labels[0].get_allocation().width)
+                # **The widest visible child, not the label.** An idle light is
+                # icon-only since 2026-10-14 - its label is hidden and allocated
+                # 0px - so `cell - label` would measure the icon as padding.
+                inner = [c.get_allocation().width
+                         for c in (cell.get_first_child(), labels[0])
+                         if c is not None and c.get_visible()]
+                widths.add(cell.get_allocation().width - max(inner))
         child = child.get_next_sibling()
     if found != ORGAN_CELLS:
         pytest.fail(f"measured {found} organ cells, expected {ORGAN_CELLS}: "

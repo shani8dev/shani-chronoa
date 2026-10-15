@@ -21,7 +21,7 @@ them, and `parse_identity` returns them. `tests/test_lan_link.py` asserts
 So the advertised capabilities were always one `rglob` away from being readable.
 
 And `Link` subsumes the rest. It keeps the peer's **whole** identity body in
-`_peer_reply_body` (an earlier reading of `connect()` suggested it kept only
+`peer_identity` (an earlier reading of `connect()` suggested it kept only
 `deviceId` — it does not), and it carries the `expect_peer` pinning defence that
 the standalone copy had no way to express:
 

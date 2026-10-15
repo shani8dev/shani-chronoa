@@ -26,6 +26,8 @@ logger = logging.getLogger(__name__)
 
 _lock = threading.Lock()
 _enabled = False
+#: The project folder, or "". Set from the `project-dir` setting by the app.
+_project = ""
 
 #: The tools a code turn always has. **Named from what exists** rather than from
 #: what a coding assistant ought to have: `select_tools` ignores a name that is
@@ -39,6 +41,9 @@ BUILD_TOOLS = (
     "write_text_file",
     "edit_file",
     "find_and_replace",
+    # Closing the loop: run the tests the edit was for. Gated by its own key.
+    "run_command",
+    "git_inspect",
 )
 
 
@@ -52,6 +57,35 @@ def set_enabled(on: bool) -> bool:
     with _lock:
         _enabled = bool(on)
     return _enabled
+
+
+def set_project(path: str) -> str:
+    """Set the project folder ("" for none). Returns what is in force."""
+    global _project
+    with _lock:
+        _project = str(path or "").strip()
+    return _project
+
+
+def project() -> str:
+    """The project folder while Build mode is on, else "".
+
+    **Only in Build mode.** A project chosen once must not quietly redirect
+    "open notes.txt" in a general conversation into a code folder.
+    """
+    with _lock:
+        return _project if _enabled else ""
+
+
+def prompt_clause() -> str:
+    """What the model is told about the project, or "" without one."""
+    folder = project()
+    if not folder:
+        return ""
+    return (f"You are working on the project in {folder}. Relative paths are "
+            "inside it. After changing code, check it: run the project's tests "
+            "or build with run_command and read the result before saying it is "
+            "done.")
 
 
 def extra_tools() -> "tuple":

@@ -155,12 +155,32 @@ class TestTheRailShowsRealState:
         widget = _rail(tmp_path, monkeypatch, get_state=lambda: "Ready",
                        get_tool=lambda: "")
         text = "\n".join(_labels(widget))
-        for heading in ("Now", "Timers", "Changed", "Tasks", "Posture"):
+        for heading in ("Now", "Timers", "Changed", "Tasks", "Safety"):
             assert heading in text, f"the rail has no {heading} section: {text!r}"
         assert "Ready" in text
         # Empty states are sentences, not blanks: a section with nothing must
         # still answer, or the rail looks broken rather than quiet.
         assert "No timers pending" in text
+
+    def test_a_timer_can_be_extended_and_cancelled_from_the_rail(self, tmp_path, monkeypatch):
+        """Both used to need a chat request; they are buttons on the row now."""
+        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+        from shani_chronoa.skills import timer
+        monkeypatch.setattr(timer, "_schedule", lambda *a, **k: (True, ""))
+        monkeypatch.setattr(timer, "_unschedule", lambda *a, **k: (True, ""))
+        monkeypatch.setattr(timer, "_systemd_available", lambda: True)
+        timer.set_timer(95, "kettle")
+        widget = _rail(tmp_path, monkeypatch)
+        widget.refresh()
+        tips = {(b.get_tooltip_text() or ""): b for b in _buttons(widget)}
+        assert "Five more minutes" in tips and "Cancel this timer" in tips, list(tips)
+        tips["Five more minutes"].emit("clicked")
+        left = timer.active_timers()[0][2]
+        assert left > 300, f"+5 min did not extend the timer ({left}s left)"
+        tips = {(b.get_tooltip_text() or ""): b for b in _buttons(widget)}
+        tips["Cancel this timer"].emit("clicked")
+        assert timer.active_timers() == [], "Cancel left the timer running"
+        assert "No timers pending" in "\n".join(_labels(widget))
 
     def test_a_real_timer_is_shown_with_the_time_left(self, tmp_path, monkeypatch):
         monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
@@ -187,12 +207,28 @@ class TestTheRailShowsRealState:
         widget.refresh()
         text = "\n".join(_labels(widget))
         assert "notes.md" in text
-        assert "line(s) added" in text
+        assert "+1 -0" in text, text
+
 
         clicked = [b for b in _buttons(widget) if "diff" in (b.get_tooltip_text() or "")]
         assert clicked, "the changed row cannot be opened, so the rail only reports"
         clicked[0].emit("clicked")
         assert opened == ["diff"]
+
+    def test_a_file_edited_many_times_is_one_row(self, tmp_path, monkeypatch):
+        """The ring has one entry per write; the card has one row per file."""
+        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+        target = tmp_path / "greet.py"
+        from shani_chronoa.skills import undo_last_change
+        content = "a\n"
+        for n in range(5):
+            undo_last_change.record_preimage(target, content.encode())
+            content += f"line{n}\n"
+            target.write_text(content, encoding="utf-8")
+        widget = _rail(tmp_path, monkeypatch)
+        widget.refresh()
+        text = "\n".join(_labels(widget))
+        assert text.count("greet.py") == 1, text
 
     def test_tasks_appear_only_when_the_consent_key_is_on(self, tmp_path,
                                                          monkeypatch):

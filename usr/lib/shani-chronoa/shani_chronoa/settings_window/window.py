@@ -519,7 +519,8 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
             self._presence_row.set_subtitle(chosen.detail())
 
     def _model_choices(self, group, title: str, subtitle: str, keys,
-                       installed, on_pick, config=None) -> None:
+                       installed, on_pick, config=None, setup_page: str = "model-picker",
+                       current: "str | None" = None) -> None:
         """Pick a model from the ones that exist, rather than only typing one.
 
         **This row exists because the entries above accept any string.** Typing
@@ -539,11 +540,20 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
         row = Adw.ActionRow(
             title=title,
             subtitle=(subtitle if present else
-                      f"{subtitle} Nothing is downloaded yet - open setup."))
+                      f"{subtitle} Nothing is downloaded yet."))
         row._in_use_key = ""
+        if not present:
+            # **A button where the sentence said "open setup"** - on the page
+            # that downloads this kind (`setup_page`, default the model picker).
+            download = Gtk.Button(label="Download", valign=Gtk.Align.CENTER)
+            download.add_css_class("suggested-action")
+            download.connect("clicked", lambda *_: self.app.activate_action(
+                "setup-page", GLib.Variant("s", setup_page)))
+            row.add_suffix(download)
         if present:
             picked = Gtk.DropDown.new_from_strings(present)
-            current = local_llm.active() or ((config.model if config else "") or "")
+            if current is None:
+                current = local_llm.active() or ((config.model if config else "") or "")
             if current in present:
                 picked.set_selected(present.index(current))
             picked.connect("notify::selected", lambda w, *_: on_pick(
@@ -752,12 +762,29 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
             config=config)
         self._entry(group, "Vision model", "Blank = hardware tier decides",
                     config.vision_model, lambda t: config.set("vision-model", t.strip()))
+        # Pickers beside the free-text boxes (MAIN-UI-TODO 9p): a typed name
+        # that is not on disk is how "no model is answering" happens.
+        from shani_chronoa import local_vision, voices
+        self._model_choices(
+            group, "Vision model, from what is installed",
+            "Describes pictures and the screen.",
+            [tier.key for tier in local_vision.TIERS],
+            lambda key: local_vision.verify(key),
+            lambda key: config.set("vision-model", key),
+            config=config, setup_page="eyes", current=local_vision.active())
         self._entry(group, "Whisper model (speech to text)", "Blank = hardware tier decides",
                     config.whisper_model, lambda t: config.set("whisper-model", t.strip()))
         self._entry(group, "Ollama host", "Where the local model server is",
                     config.ollama_host, lambda t: config.set("ollama-host", t.strip()))
         self._entry(group, "Piper voice", "TTS voice name",
                     config.piper_voice, lambda t: config.set("piper-voice", t.strip()))
+        self._model_choices(
+            group, "Piper voice, from what is installed",
+            "The natural voice Chronoa speaks with.",
+            list(voices.VOICES),
+            lambda key: bool(voices.piper_binary()) and voices.voice_installed(key),
+            lambda key: config.set("piper-voice", key),
+            config=config, setup_page="voice", current=config.piper_voice)
 
         # **Quality, measured.** `local_llm.perplexity()` and
         # `quality_verdict()` were written to run `llama-perplexity` - which is

@@ -17318,6 +17318,79 @@ answers plus a `reason` for every file, so the wiring wants a decision about whi
 of those a person sees. Recorded with the measurement so it is a five-minute job
 for whoever makes that call.
 
+> **CORRECTED 2026-10-15 - the headline above is a stale *dead* label, which
+> this file records as the more dangerous direction.** `f401a1a` ("gui/models: a
+> shared or imported model was rendered as 'no model is loaded'") wired
+> `active_entry()` into the Models panel: a **"Loaded:"** status row naming the
+> file and carrying a `vouched` sentence. So the *active* model is named. What is
+> still unwired is `scan()` - the **other** models - and it is the half with the
+> larger number. Re-measured below rather than trusting either entry.
+
+### The half that is still unwired: `scan()` sees 7 runnable models, `installed()` names 2 (2026-10-15)
+
+Asked to map every model kind - how each is detected installed, how each is
+downloaded. Measuring the real model directory rather than the registries:
+
+| | measured |
+|---|---|
+| `local_llm.installed()` | `['qwen3-1.7b', 'qwen3-8b']` |
+| `model_registry.scan()["models"]` | **7** |
+| **runnable models with no tier key, so no card and no menu row** | **5** |
+
+The five are `Qwen3-0.6B-Base`, `Qwen3-0.6B-heretic`, `SmolVLM2-500M-Video-Instruct`
+and two purpose-built fine-tunes (`tool-q4_k_m`, `toolcall-q5_k_m`). The three
+`lumen-*-lora.gguf` adapters are **correctly** excluded - that is the one thing
+`scan()` does that `installed()` never did.
+
+**And the defect reproduced end to end, by pointing the symlink** (backed up and
+restored, never a path operation):
+
+| `current.gguf` -> | `active()` | `active_entry()` |
+|---|---|---|
+| `Qwen3-1.7B-Q4_K_M.gguf` | `qwen3-1.7b` | names it, `vouched=True` |
+| `tool-q4_k_m.gguf` | **`''`** | names it, `vouched=False` |
+| `toolcall-q5_k_m.gguf` | **`''`** | names it, `vouched=False` |
+
+So the fix landed for the file that is *loaded* and not for the files that are
+*offered*: the Models panel's cards come from `local_llm.TIERS`, so an imported
+model gets a "Loaded:" row and **no card to select**. The five-minute job above
+was therefore half done, and this is the half with a number attached.
+
+**`scan()["unreadable"]` was always `[]`, which the docstring denies.** It says
+the three returns are separate "on purpose" because an unreadable file is a
+*permissions* problem and reporting it as a format problem is a confident wrong
+answer - and every unreadable entry was appended to **`excluded`** with
+`kind="unreadable"` instead, so the third list was empty on every input. Measured
+on a mode-000 file beside a real model: `models=1 excluded=1 unreadable=0`. A
+caller reading that list took it as *nothing was unreadable*, which is the reading
+the docstring exists to prevent - **in the module whose own docstring argues
+against it.** Fixed; `tests/test_an_unreadable_model_is_not_a_rejected_one.py`
+(6), 4 mutations all caught.
+
+**And the header's `general.type` was consulted for exactly one value.** `classify()`
+asked about `adapter` and nothing else, so a file whose own header says it is
+`vocab` - which `modelfmt.kind_of` refuses on the *filename* alone, with the
+reason "tokenizer data, not weights" - was offered as a loadable model when its
+name did not give it away. Two answers to one question from one source, which is
+the `wpctl`-three-copies shape. Now derived from `modelfmt._TYPE_SUFFIXES` rather
+than a new tuple.
+
+**What that fix deliberately does not do:** add `tokenizer` to the vocabulary.
+`gguf` defines no enum for `general.type` - it is a free string, and the only
+value checked anywhere in this tree is `"adapter"` (`adapter.py:65`). A header
+declaring some third type this table has never heard of is still offered, and
+**inventing the value because it reads like the right word is the thing this
+module exists to avoid.** The table is named in the code as the one place to add
+it.
+
+**A third stale claim, in a test this file's own doctrine applies.** `tests/
+test_a_lora_is_not_a_language_model.py` opens an "end to end" case with *"`use()`
+picks from `scan()["models"]`, so an adapter reaching that list is *selectable*,
+not merely displayed"*. `local_llm.use(key)` reads `SPECS[key]` and raises
+`KeyError` on anything else - so `scan()` has **no path to selection at all**, and
+the test's assertions are sound while the sentence justifying them is false.
+Measured by reading the function, not the docstring.
+
 ### And the method, because it is the part that generalises
 
 The differential that found this was: **run both scanners, then triage the
@@ -26068,3 +26141,294 @@ fall through into a pass tally.
 
 **A sweep must assert that it ran something.** `passed > 0` is the cheapest such check
 and it would have caught this on the first file.
+
+## Photograph the real main window: `tools/live_window.sh` (2026-10-14)
+
+`tools/live_window.sh [-s WxH] [-e] [-t EXPR] OUT.png` runs the **real**
+`ChronoaApplication` on a headless gnome-shell (virtual monitor) inside a private
+D-Bus session with a throwaway keyring and its own XDG dirs, seeds a short
+conversation, and has the window snapshot itself through its own renderer.
+`-t win._mode_strip` prints that subtree with x / content width. Use it for any
+claim about how the main window looks or measures; the script header records
+what each piece prevents. Three earlier routes lied, measured:
+
+- `render_ui.py main` above 460px photographed a zoomed sidebar search field.
+- The live desktop: the window took keyboard focus, the person's keystroke
+  landed in the composer and was **saved as a draft** that appeared in every
+  later capture.
+- A private bus *without* a keyring: each secret lookup blocks the loop 25s, so
+  the window mapped in its pre-layout state (split 665px wide in a 460px window)
+  - which looked exactly like a clipping bug in the product. It is not one.
+
+**`get_width()` is the content box.** Two chips reported `w=36` at x=26 and x=78:
+they were touching, and the "gap" was the outer `.mode-chip` padding drawn
+transparent around the inner button that carries the pill. A CSS margin change
+moved nothing because there was no margin.
+
+`tools/run_tests_per_file.sh REGEX [SECONDS]` runs one pytest per file with a
+cap each: one pytest over 38 files hung 25 minutes and printed nothing.
+
+The redesign these were built for is section 8 of `MAIN-UI-TODO.md`.
+
+## The confined sandbox levels had never run a real command (2026-10-14)
+
+`run_command` is the first skill to run at `LEVEL_2_ISOLATED_DEV`. Running it
+found three defects that every Level 1/2 call would have hit, unseen because no
+caller used those levels (`_get_sandbox_config` only ever returns 0, 3 or 4):
+
+- **Landlock's write set had no `MAKE_REG`** (or `MAKE_SYM`, `REFER`,
+  `TRUNCATE`): `WRITE_FILE` opens an existing file, creating one is its own
+  right. Measured on ABI 8: `open(new, "w")` was EACCES everywhere, the
+  sandbox's own workspace included. Fixed in `get_default_allowed_paths`;
+  ABI-dependent bits are dropped on older kernels, other unknown bits still
+  raise.
+- **`/dev` was read-only**, so `subprocess.DEVNULL` (O_RDWR) and every
+  `> /dev/null` failed. `/dev/null` alone is now read-write (a file rule).
+- **The bwrap path every confined call takes ignored `allow_network=False`**
+  - only the unused `_run_bwrap` added `--unshare-net`.
+
+Also: the confined child never got `GSETTINGS_*`, so it could not read its own
+consent; `isolated_dir` is the sandbox's private workspace (chmod 0700, wrapper
+written into it) and must never be a user's folder - `writable_dirs` /
+`readable_dirs` exist for that. `tests/test_run_command.py` measures all of it
+through the real executor; each fix was reverted once to see its test fail.
+
+**Harness lesson, recorded so nobody repeats it:** `tools/live_window.sh` once
+compiled the real settings schema to make captures "more real". The defaults
+then started real services from inside a capture - an OBEX session to the
+person's paired phone and a BLE advertisement as "Chronoa Remote" - and a run
+that stopped waiting on a traceback left the app alive. Reverted; the script now
+kills its whole `setsid` process group on exit. Captures run on Python defaults.
+
+**And the IPC layer, which the confined path never had** (same day, asked for
+explicitly). From inside a confined `run_command`, before the fix: it connected
+to the session bus, and `systemd-run --user touch <file>` **wrote a file on the
+host outside every write rule** - a full escape; it saw 485 host pids and could
+signal one; it shared SysV IPC; it saw the Wayland and X11 sockets and the
+host's hostname. Path rules cannot see any of that. Now: `--unshare-pid/ipc/uts`
+(+cgroup), `--hostname chronoa-sandbox`, an empty tmpfs over `/run/user/<uid>`
+(bus, Wayland, PipeWire, keyring), a private `/tmp` (X11), and Landlock
+`scoped = ABSTRACT_UNIX_SOCKET | SIGNAL` on ABI >= 6 - which is what still
+refuses X11's abstract socket when `network` is true and the netns is shared
+(measured: EPERM with scoping, reachable without). Tests in
+`tests/test_run_command.py`, each mutation-checked; one (`host processes`) was
+vacuous until it was made to require that the command actually ran.
+
+## Remote turns need the desk (2026-10-14)
+
+Gateways (`channel_bridge` for Telegram/WhatsApp, `lan_bridge`, anything on the
+`Submit` bus method) turn a remote message into an ordinary turn, and the
+channel name reached the assistant only to scope memory - the tool layer never
+knew the person was not here. With a channel granted `execute` and a switch like
+"Let Chronoa run commands" on (a decision made *at the desk*), a phone message
+could run commands, edit or delete files, or call external MCP tools unseen.
+
+Now `assistant.handle` publishes the channel (`tools.set_current_channel`,
+cleared beside the turn label) and the dispatcher, for a remote turn, asks on
+screen for every destructive tool (`DESTRUCTIVE_CONSENT_KEYS`) and every `mcp_`
+tool - switch on or not - with the preview, a title naming the channel, and
+`decide(fresh=True)`: no earlier session grant answers it and "this session" is
+not offered. "Allow for this turn" still works. Nobody at the desk: refused.
+`tests/test_remote_turns_need_the_desk.py` (7), every guard mutation-checked;
+the first version's session-grant test stubbed `decide()` and so could not see
+`decide`'s own session shortcut - a real-`decide` test was added for it.
+
+Checked and left: the BLE peripheral's only inbound write is Immediate Alert
+(rings the computer); its HID is outbound. The standalone MCP server process has
+no presenter, so a call whose switch is off is refused there - its documented
+"same consent switches" contract.
+
+## Subagents: `delegate` (2026-10-14)
+
+`skills/delegate.py` is the schema; the work is `Assistant._delegate`, called
+from the tool loop in place of the skill sandbox because a subagent needs the
+model and the window. The child is a fresh `Assistant` on the same `llm` with
+no saved session, its task prefixed by `_DELEGATE_PREAMBLE`, and the parent
+gets back one tool result: the tally of what the child called plus its final
+reply - never the child's tool output.
+
+What keeps it from being a way around anything: the child sets
+`_inherited_turn` to the parent's label, so `handle()` labels its calls with the
+parent's turn (turn grants, Revert, the footer's file list all cover them),
+skips `planmode.begin_turn()`, and on exit **restores** the parent's label and
+channel instead of clearing them. The channel is passed through, so a remote
+turn's subagent is still remote. Depth is one (`MAX_DELEGATE_DEPTH`), and the
+child's time is what the parent has left minus `DELEGATE_RESERVE_SECONDS`.
+`compression.HAS_DELEGATION_TOOL` is now True. Cards and the progress clock say
+"subagent" (`gui.blocks.tool_words`).
+
+The skill's own `run` only refuses - it is reached only by a dispatcher with no
+assistant behind it (the MCP server). Tests: `tests/test_delegate_subagent.py`,
+mutation-checked (dropping the inherited label, dropping the depth guard).
+
+A sweep for "unwired" actions that greps only `app.<name>` is wrong here:
+Settings and Setup activate actions by bare name (`_app_toggle("toggle-…")`,
+`activate("toggle-privacy")`). All eight such actions turned out wired.
+
+## Connect a device, and the LAN link that could not open (2026-10-14)
+
+`gui/connect_device.py` is one Setup-shaped window with three routes, each on
+its own backend and fake:
+
+- **Bluetooth** - `bt_pair.py`, BlueZ over D-Bus on a *private* connection with
+  our own `Agent1` registered there and **never** `RequestDefaultAgent`, so it
+  only gets the prompts for pairings this window started. Prompts (`confirm`,
+  `enter-pin`, `show-passkey`, ...) are answered by the person; nothing
+  self-confirms. `connect_only` is the GATT path for wearables that refuse to
+  bond (Connect + Trusted), and `bluetooth_gatt.paired()` /
+  `bluetooth_devices.paired()` now list Trusted as well as Paired so such a
+  device is visible. Fake: `tools/fake_bluez.py` (owns `org.bluez` on a
+  `Gio.TestDBus`, calls back into the registered agent).
+- **Android** - `adb_pair.py`: USB (watch `adb devices -l`, say the next step),
+  Wi-Fi by QR (`WIFI:T:ADB;S:<name>;P:<pw>;;`, wait for that mDNS pairing
+  service) or by pairing code; then `connect_after_pairing` by IP. Fake:
+  `tools/fake_adb.py` linked as `adb` first on PATH, state in `FAKE_ADB_STATE`.
+- **KDE Connect** - `lan_link.pair`. **No LAN link had opened since
+  `expect_peer` was added**: `_link` passed it to a constructor without the
+  parameter (TypeError), and once fixed, `_check_peer_identity` read through
+  `reply_packet`, which skips identity packets, so every link failed "no
+  identity"; and the identity it stored went into the test-stub slot, so
+  `pair`'s wait for the answer got the identity back. All three only showed
+  against a real handshake - `tools/fake_kdeconnect.py` (TLS roles reversed as
+  the protocol requires). `_link` now **pins by default** to the phone `pair`
+  stored (`kdeconnect/paired.json`); only `pair` passes `expect_peer=None`, so
+  the bridge cannot be fed by any other machine on the Wi-Fi. The done page's
+  "Let this phone ask Chronoa" is `lan_bridge.set_enabled` (gateway `phone`,
+  ask-only, + `shani-chronoa-lan-bridge.service`).
+
+Tests: `test_bt_pair.py`, `test_adb_pair.py`, `test_lan_pairing.py`, and
+`test_connect_device_window.py`, which clicks through every route on a private
+Broadway display. Mutation-checked: auto-confirming agent, dropped Trusted.
+
+## The watch restart was the 20-byte write split (2026-10-14)
+
+"Syncing weather or music restarts the watch" (FB BGS002, MoYoung, JieLi chip,
+software MOY-7OT4-2.0.1). Measured with `tools/watch_probe.py` on the real watch,
+the person confirming each reboot on its screen:
+
+| condition | result |
+|---|---|
+| idle, nothing sent, 60s | no drop |
+| 62-byte now-playing packet as 20-byte writes, back to back | reboot at ~7s |
+| same, writes paced 60ms | reboot at ~7s |
+| same packet in **one** write | no drop (45s) |
+| 4 weather packets, each one write | no drop |
+| through the fixed `Watch.request`, music and weather | no drop (60s each) |
+
+bluez negotiates ATT MTU 517; `Watch.request` always cut at 20 (Gadgetbridge's
+MTU-23 assumption) and the watch takes a write starting `FE EA` as a whole
+packet. Fix: `write_size = MTU - 3` from the characteristic's `MTU` property
+(`BluezWatch`), 20 when unknown (gatttool). The 2026-10-08 notes blaming the
+watch "rebooting on a schedule" are corrected in place.
+
+Also found on the way: an untrusted, unbonded watch is dropped from bluez a few
+minutes after the last scan, so `Connect` hit "UnknownObject" -
+`BluezWatch._ensure_known` scans until it is seen and sets Trusted on connect;
+`bluetooth_gatt.paired()` lists Trusted devices too. Find never worked on this
+watch (`find_device` uses Immediate Alert 0x1802, absent) - MoYoung's own
+`CMD_FIND_MY_WATCH` (97) rings it, measured. The Wearables card is now
+`gui/surfaces/watch_dashboard.py` (Gsk snapshot drawing - no cairo, which
+`python3-gi-cairo`-less machines cannot use); `render_ui.py watch[:summary.json]`
+photographs it.
+
+Capability audit against the watch's GATT table and Gadgetbridge's
+`MoyoungConstants`: unused today - heart-rate history 53/54 (answers, 73 bytes;
+decoder unwritten until there is worn data to check it against), workouts v2
+0xB2, alarms 33/17 (no reply on this firmware), watch face 41/25, language
+43/27, quick-view time, move-reminder period, battery notify (2a19), the JieLi
+RCSP service 0xAE00 (watch faces / files / OTA), WeChat pedometer 0xFEE7.
+
+## Every page that needs a model offers its download (2026-10-15)
+
+`model_status.KINDS` is the one table: llm, stt, voice, vision, imagine, memory,
+photos, sounds, speakers - each with its label, what it enables, its Setup page
+and its existing installed check (file-system only, wrapped: a raising check is
+"missing"). `common.model_banner(app, kind, needed_for)` turns a missing one
+into a banner whose **Download** opens Setup on that page;
+`common.with_model_banners(app, content, kinds)` stacks them above a page and
+returns `content` unchanged when nothing is missing. Wired: Voice (stt, voice),
+Meetings (stt, speakers, llm), Learning and My files (memory), and a Download on
+every missing extra row of the Model page. Setup stays the only downloader
+(sizes, `model-download-enabled`, progress).
+
+Fixed on the way: `common.open_setup` took no page and the "setup" action
+always opened Welcome - now `open_setup(app, widget, page=)` uses the new
+`setup-page` action; `brain._open_setup(page)` registers its wizard with
+`pages.note_window("setup", ...)`, so `show-page setup:<tag>` and the header
+button are one window (they were two, and the `pages` one had no
+`on_finished`, so its installs were not picked up until a restart). Models
+panel: Piper cards were hard-coded `installed: False`; every "Set up" was
+insensitive (`installed and not in_use`) - now only the in-use card is; cards
+open Setup on their kind's page (`SETUP_PAGE_FOR_KIND`).
+Tests: `tests/test_model_download_on_each_page.py`.
+
+## Tests no longer reach the real Bluetooth adapter (2026-10-15)
+
+Any test that builds the app (`_in_a_live_window` and friends) started every
+device service against the **real system bus**: BLE advertising, AVRCP, MAP,
+OBEX receive, incoming calls, and the watch companion connecting to the
+person's real watch. It surfaced once the watch was Trusted (so listed):
+`test_show_page_lands_on_the_page` hung past its cap, the stack inside
+`gatttool` on the GTK main thread. Two fixes:
+
+- `conftest.py` points `DBUS_SYSTEM_BUS_ADDRESS` at a socket nothing listens on
+  (opt out: `CHRONOA_TESTS_REAL_SYSTEM_BUS=1`) and sets RLIMIT_CORE=0, because
+  bluetoothctl aborts on it (0.16s - fast, which is the point) and would dump
+  core each time. Tests needing a bus bring their own (fake BlueZ address).
+- Wearables `_device_detail` read services, characteristics and values with
+  gatttool **on the main loop**; it now reads on a thread and draws on the loop
+  (`_readable_row(preread=)`). With a real watch nearby the window froze.
+
+Result: show_page 7 passed in 63s (was hanging), setup button 12, sidebar 8.
+
+## Charts, home board, README, and a .deb that could not be built (2026-10-15)
+
+- `gui/charts.py` - Ring, Bars, HBars, Meter, Line, StackedBar, stat/card -
+  drawn with `Gsk.PathBuilder` (no cairo: `python3-gi-cairo` is not on every
+  machine, measured blank charts). Used by Activity (success ring, calls/day,
+  most-used tools coloured by success), Machine (battery ring + health, memory,
+  CPU load, disk meters - each gated on its own sense), Privacy (bytes per host,
+  local vs elsewhere), and the watch dashboard. `Spark.set` must call
+  `charts.Line.set`, not `self.set_times` (that recursed - found by a render).
+- The main window's empty state gained a home board (`ChronoaWindow._home_board`,
+  `TranscriptView(home_factory=)`, CSS class `home-board` - added to
+  `test_window_ux`'s DELIBERATE rows): Today (next timer, battery, extras to
+  add), recent conversations, quick actions that exist as app actions.
+- Voice page: picker + preview + speed/pitch on top; the old reading under
+  Details. Settings: vision and Piper voice pickers beside the free-text boxes.
+- README rewritten as a landing page; stale claims fixed (259 skills, 94/17,
+  `run_command` exists, the optional daemon exists, install paths).
+  `CAPABILITIES.md` regenerated (`tools/gen_capabilities.py > CAPABILITIES.md`);
+  `delegate` and `run_command` were missing from `capabilities._GROUPS`.
+- **DEBIAN/control was not valid deb822** - a `\` continuation in Depends, `#`
+  comment lines, and prose in parentheses under Suggests (read as versions) -
+  so `dpkg-deb` refused it and no .deb could be built; the README told people
+  to run `dpkg-buildpackage`, which needs a `debian/` dir this repo does not
+  have. Fixed; notes moved to `docs/packaging-debian.md`;
+  `test_dpkg_deb_accepts_the_control_file` builds it with dpkg-deb. The Arch
+  PKGBUILD is in `shani-pkgbuilds`, not here; it now installs the lan-bridge unit.
+- Render harness: `render_ui.py alone:<panel>` (one panel, no main-window
+  probes; `phone` stubs device discovery so MAP/obexd is not activated),
+  `watch[:summary.json]`. PNGs have a transparent page background - composite
+  onto the window colour before judging contrast. For dark, pass theme `Yaru`
+  and `ADW_DEBUG_COLOR_SCHEME=prefer-dark`.
+
+## Rail, reload banner, Artifacts, Learning, Calendar (2026-10-15)
+
+- Rail: an empty section is one line - heading plus its "nothing" text, body
+  hidden (`_Section.empty`, `rail-quiet`); a "Could not ..." line keeps the full
+  section; `row`/`controlled`/`meter` call `_loud()`.
+- `common.read_banner(on_reload)`: "Read at HH:MM - not live. Reload for the
+  latest." replaces the three 30-word read-once sentences (Model, Voice; Desktop
+  footer shortened). The Voice page lifts it out of its Details revealer.
+- Voice Details is a `Gtk.Revealer`, not a `Gtk.Expander`: a collapsed expander
+  unparents its child, so the engine reading left the widget tree.
+- `model_status` checks never construct `ChronoaConfig` (it writes
+  ~/.config/glib-2.0/settings with the file backend; caught by the Voice page's
+  writes-nothing test).
+- Artifacts: Open / Show / Move to Trash (Adw.AlertDialog, `Gio.File.trash`),
+  checksum in the tooltip, Space used per category (catch-all labelled Other).
+- Learning: "How the tools are doing" - confirmed / failed / never checked, and
+  the worst tools with >=3 checked calls. `charts.level_colour(..., high_is_bad=False)`
+  is green >=80%, yellow >=50% (the flipped disk scale called 33% green).
+- Calendar's no-backend state says what to do (Online Accounts) first.

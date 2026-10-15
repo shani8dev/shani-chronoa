@@ -53,6 +53,44 @@ def _sense_names() -> list:
         return sorted(_SENSE_CONSENT_KEYS)
 
 
+def _flows_chart():
+    """Bytes sent per host over the whole log, as ranked bars.
+
+    The rows below show the last few requests; this shows where data has gone
+    at all - this computer (green) against anywhere else (orange) - which a
+    list of eight rows cannot.
+    """
+    from collections import defaultdict
+    from urllib.parse import urlparse
+    from shani_chronoa.gui import charts
+    try:
+        events = egress.read_events()
+    except Exception:  # noqa: BLE001 - an unreadable log is the rows' to report
+        return None
+    totals, counts = defaultdict(int), defaultdict(int)
+    for event in events:
+        host = urlparse(str(event.get("url") or "")).hostname or "unknown"
+        totals[host] += int(event.get("bytes_out") or 0)
+        counts[host] += 1
+    if not totals:
+        return None
+    local = ("localhost", "127.0.0.1", "::1")
+    rows = sorted(totals.items(), key=lambda kv: -kv[1])[:8]
+    card, body = charts.card("Where your data goes", "network-transmit-symbolic")
+    outside = sum(v for h, v in totals.items() if h not in local)
+    body.append(Gtk.Label(
+        label=("Everything stayed on this computer." if not outside else
+               f"{outside / 1024:,.0f} KB went off this computer."),
+        xalign=0.0, css_classes=["dim-label"]))
+    bars = charts.HBars()
+    bars.set([(h, v) for h, v in rows],
+             colours=[charts.GREEN if h in local else charts.ORANGE for h, _v in rows],
+             values=[f"{v / 1024:,.1f} KB · {counts[h]:,} requests" for h, v in rows])
+    body.append(bars)
+    card.set_margin_bottom(6)
+    return card
+
+
 def _recent_events(limit: int = 8) -> list:
     """The most recent egress events. Never raises: an unreadable log is an
     honest empty list, not a surface that crashes."""
@@ -242,6 +280,9 @@ def build(app) -> Gtk.Widget:
             except (TypeError, ValueError, OverflowError):
                 pass
         _add(events_group, label)
+    flows = _flows_chart()
+    if flows is not None:
+        body.append(flows)
     body.append(events_group)
 
     # -- per-sense consent ---------------------------------------------------

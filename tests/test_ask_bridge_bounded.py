@@ -46,6 +46,9 @@ sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
 from shani_chronoa import ask_bridge  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _ask import ask_timeout, defaults_with_timeout  # noqa: E402
+
 
 @pytest.fixture(autouse=True)
 def clean_pending():
@@ -99,14 +102,10 @@ class TestPromptsAreBounded:
     def test_a_full_set_refuses_rather_than_queues(self):
         ask_bridge._presenter = _holding_presenter()
         ask_bridge._pending.extend(f"q{i}" for i in range(ask_bridge.MAX_PENDING))
-        original = ask_bridge.ask.__defaults__
-        try:
-            ask_bridge.ask.__defaults__ = ("", [], 30.0)
+        with ask_timeout(30.0):
             started = time.monotonic()
             answer = ask_bridge.ask("one too many", ["a", "b"])
             elapsed = time.monotonic() - started
-        finally:
-            ask_bridge.ask.__defaults__ = original
         assert answer == "", "a refused question must not look like an answer"
         assert elapsed < 1.0, (
             f"the refusal took {elapsed:.1f}s; a refusal that waits is a queue")
@@ -133,13 +132,15 @@ class TestSlotsAreAlwaysReturned:
             return event
 
         ask_bridge._presenter = answered
-        monkeypatch.setattr(ask_bridge.ask, "__defaults__", ("", [], 2.0))
+        monkeypatch.setattr(ask_bridge.ask, "__defaults__",
+                             defaults_with_timeout(2.0))
         assert ask_bridge.ask("q", ["a", "b"]) == "a"
         assert ask_bridge.pending_count() == 0
 
     def test_a_slot_comes_back_after_a_timeout(self, monkeypatch):
         ask_bridge._presenter = _holding_presenter()
-        monkeypatch.setattr(ask_bridge.ask, "__defaults__", ("", [], 0.1))
+        monkeypatch.setattr(ask_bridge.ask, "__defaults__",
+                             defaults_with_timeout(0.1))
         ask_bridge.ask("q", ["a", "b"])
         assert ask_bridge.pending_count() == 0, (
             "a timed-out question kept its slot, so the next N questions are all refused")
@@ -149,7 +150,8 @@ class TestSlotsAreAlwaysReturned:
             raise RuntimeError("the window is gone")
 
         ask_bridge._presenter = broken
-        monkeypatch.setattr(ask_bridge.ask, "__defaults__", ("", [], 2.0))
+        monkeypatch.setattr(ask_bridge.ask, "__defaults__",
+                             defaults_with_timeout(2.0))
         ask_bridge.ask("q", ["a", "b"])
         assert ask_bridge.pending_count() == 0, (
             "a broken presenter leaked its slot, which is how a crashed window turns "
@@ -160,13 +162,15 @@ class TestSlotsAreAlwaysReturned:
         # A presenter that returns junk is "no answer", not an exception, and it must
         # not strand a slot.
         ask_bridge._presenter = lambda question, options: "not an event"
-        monkeypatch.setattr(ask_bridge.ask, "__defaults__", ("", [], 2.0))
+        monkeypatch.setattr(ask_bridge.ask, "__defaults__",
+                             defaults_with_timeout(2.0))
         assert ask_bridge.ask("q", ["a", "b"]) == ""
         assert ask_bridge.pending_count() == 0
 
     def test_slots_do_not_leak_across_many_calls(self, monkeypatch):
         ask_bridge._presenter = _holding_presenter()
-        monkeypatch.setattr(ask_bridge.ask, "__defaults__", ("", [], 0.05))
+        monkeypatch.setattr(ask_bridge.ask, "__defaults__",
+                             defaults_with_timeout(0.05))
         for _ in range(20):
             ask_bridge.ask("q", ["a", "b"])
         assert ask_bridge.pending_count() == 0, (
@@ -184,7 +188,8 @@ class TestTheExistingGuaranteesStillHold:
             return event
 
         ask_bridge._presenter = answered
-        monkeypatch.setattr(ask_bridge.ask, "__defaults__", ("", [], 2.0))
+        monkeypatch.setattr(ask_bridge.ask, "__defaults__",
+                             defaults_with_timeout(2.0))
         for _ in range(10):
             assert ask_bridge.ask("only one", ["a", "b"]) == "a"
 
@@ -203,7 +208,8 @@ class TestTheExistingGuaranteesStillHold:
             return event
 
         ask_bridge._presenter = dismissed
-        monkeypatch.setattr(ask_bridge.ask, "__defaults__", ("", [], 2.0))
+        monkeypatch.setattr(ask_bridge.ask, "__defaults__",
+                             defaults_with_timeout(2.0))
         assert ask_bridge.ask("q", ["a", "b"]) == ""
 
     def test_pending_count_is_readable_without_holding_the_lock(self):
@@ -282,7 +288,8 @@ class TestTheLockIsLoadBearing:
             return threading.Event()       # nobody answers
 
         ask_bridge._presenter = presenter
-        monkeypatch.setattr(ask_bridge.ask, "__defaults__", ("", [], 0.5))
+        monkeypatch.setattr(ask_bridge.ask, "__defaults__",
+                             defaults_with_timeout(0.5))
         results: "list[str]" = []
         lock = threading.Lock()
 

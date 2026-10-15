@@ -343,29 +343,63 @@ class _ArtifactRow(Gtk.Box):
         time_label.add_css_class("dim-label")
         meta.append(time_label)
         
-        # Checksum (if available)
+        # Checksum: in the tooltip, not on the row. Sixteen hex digits are noise
+        # to a person deciding what to delete; the full sum is one hover away.
         if artifact.checksum:
-            # Ellipsised, and `max_width_chars` lowered to 24 to match what is
-            # actually shown ("SHA256: " plus 16 hex digits). With only
-            # `set_max_width_chars(30)` and no wrap or ellipsise this label
-            # demanded 194px on its own and put the whole row at 528px in a
-            # 480px window - a sideways scrollbar under the page, which is
-            # exactly what the layout contract exists to catch.
-            checksum_label = Gtk.Label(label=f"SHA256: {artifact.checksum[:16]}...", xalign=0.0)
-            checksum_label.add_css_class("artifact-checksum")
-            checksum_label.set_ellipsize(Pango.EllipsizeMode.END)
-            checksum_label.set_max_width_chars(24)
-            meta.append(checksum_label)
+            name.set_tooltip_text(f"{artifact.path}\nSHA256 {artifact.checksum}")
         
         info_box.append(meta)
         self.append(info_box)
 
-        # Path button
+        # Open, Show, Trash: the panel promises "clean up" and had only Show.
+        actions = Gtk.Box(spacing=4, valign=Gtk.Align.CENTER)
+        open_btn = Gtk.Button(icon_name="document-open-symbolic", tooltip_text="Open")
+        open_btn.connect("clicked", lambda *_: self._open(artifact.path))
         path_btn = Gtk.Button(label="Show")
         path_btn.set_tooltip_text("Show in file manager")
         path_btn.connect("clicked", self._on_path_clicked, artifact.path)
         path_btn.add_css_class("path-button")
-        self.append(path_btn)
+        trash_btn = Gtk.Button(icon_name="user-trash-symbolic",
+                               tooltip_text="Move to Trash (it can be restored from there)")
+        trash_btn.add_css_class("destructive-action")
+        trash_btn.connect("clicked", lambda *_: self._confirm_trash(artifact))
+        for button in (open_btn, path_btn, trash_btn):
+            button.add_css_class("flat")
+            button.update_property([Gtk.AccessibleProperty.LABEL],
+                                   [button.get_tooltip_text() or button.get_label()])
+            actions.append(button)
+        self.append(actions)
+
+    def _open(self, path: Path) -> None:
+        try:
+            Gio.AppInfo.launch_default_for_uri(path.as_uri(), None)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not open %s: %s", path, exc)
+
+    def _confirm_trash(self, artifact: "Artifact") -> None:
+        """Ask, then move to the Trash - reversible, unlike deleting."""
+        dialog = Adw.AlertDialog(
+            heading=f"Move {artifact.name} to the Trash?",
+            body=(f"{self._format_size(artifact.size)} - {artifact.description}. "
+                  "You can restore it from the Trash."))
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("trash", "Move to Trash")
+        dialog.set_response_appearance("trash", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+
+        def chosen(_d, response: str) -> None:
+            if response != "trash":
+                return
+            try:
+                Gio.File.new_for_path(str(artifact.path)).trash(None)
+            except Exception as exc:  # noqa: BLE001 - said on the row, not raised
+                self.set_tooltip_text(f"Could not move it to the Trash: {exc}")
+                return
+            parent = self.get_parent()
+            if parent is not None:
+                parent.remove(self)
+        dialog.connect("response", chosen)
+        dialog.present(self.get_root())
 
     def _format_size(self, size: int) -> str:
         """Format size in human-readable units."""
@@ -405,6 +439,13 @@ def _artifact_icon(category: str) -> str:
 # Main artifact store view
 # ---------------------------------------------------------------------------
 
+def _human(size: float) -> str:
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if size < 1024 or unit == "TB":
+            return f"{size:.1f} {unit}" if unit != "B" else f"{int(size)} B"
+        size /= 1024
+
+
 class _ArtifactStoreView(Gtk.Box):
     """The artifact store: artifact list + filters + actions."""
 
@@ -422,6 +463,17 @@ class _ArtifactStoreView(Gtk.Box):
         # the panel showed its name twice, in two different sizes, with two
         # different sentences under each. The window owns the title; a panel
         # that repeats it is a second heading for the same page.
+
+        # Space used, by category - what "clean up" is weighed against.
+        from shani_chronoa.gui import charts
+        self._space_card, space_body = charts.card("Space used", "drive-harddisk-symbolic")
+        self._space_card.set_margin_bottom(8)
+        self._space_total = Gtk.Label(xalign=0.0)
+        self._space_total.add_css_class("title-3")
+        space_body.append(self._space_total)
+        self._space_bars = charts.HBars(colour=charts.PURPLE)
+        space_body.append(self._space_bars)
+        self.append(self._space_card)
 
         # Filter section
         filter_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -517,11 +569,27 @@ class _ArtifactStoreView(Gtk.Box):
 
     # -- actions ---------------------------------------------------------
 
+    def _show_space(self) -> None:
+        from collections import defaultdict
+        sizes = defaultdict(int)
+        for artifact in self._artifacts:
+            name = str(getattr(artifact.category, "value", artifact.category)).split(".")[-1]
+            # The enum's catch-all doubles as the "all" filter; in a size chart
+            # it means files that fit no category.
+            label = "Other" if name.lower() == "all" else name.replace("_", " ").capitalize()
+            sizes[label] += artifact.size
+        total = sum(sizes.values())
+        self._space_card.set_visible(bool(total))
+        self._space_total.set_text(f"{_human(total)} in {len(self._artifacts)} files")
+        rows = sorted(sizes.items(), key=lambda kv: -kv[1])
+        self._space_bars.set(rows, values=[_human(v) for _k, v in rows])
+
     def _load_artifacts(self) -> None:
         """Load artifacts from the home directory."""
         try:
             home = Path.home()
             self._artifacts = _discover_artifacts(home)
+            self._show_space()
             self._apply_filters()
         except Exception as exc:  # noqa: BLE001
             logger.warning("Could not load artifacts", exc_info=True)

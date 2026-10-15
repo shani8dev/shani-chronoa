@@ -207,17 +207,9 @@ def _row(title: Any, subtitle: Any = "",
 # have meant a user opening the phone page to change a watch setting.
 COMPANION_KEY = "watch-companion-enabled"
 
-#: The four measurements `watch.py` can take. Each is a *measurement*, not a
-#: read: the watch has to be worn and still, which is why `watch()` below says
-#: so on the row rather than looking like something that hung.
-MEASURES = (("Activity & sleep", {"action": "summary"}),
-            ("Heart rate", {"action": "measure", "what": "heart_rate"}),
-            ("Blood oxygen", {"action": "measure", "what": "blood_oxygen"}),
-            ("Blood pressure", {"action": "measure", "what": "blood_pressure"}))
-
-#: The watch's own controls, as opposed to measurements.
-WATCH_ACTIONS = (("Settings", {"action": "settings"}),
-                 ("Sync time", {"action": "sync_time"}))
+#: The watch itself is drawn by `watch_dashboard.WatchDashboard` (activity
+#: ring, sleep stages, stress line, measurement tiles); the nine buttons that
+#: printed sentences into one label are gone.
 
 
 def _in_thread(work: "Callable[[], Any]", done: "Callable[[Any], None]") -> None:
@@ -273,55 +265,6 @@ def _watch_call(name: str, arguments: dict, note: Gtk.Label) -> None:
     _in_thread(lambda: _tool("watch", {**arguments, "device": name}),
                lambda r: note.set_text(
                    str(r).split(" (unverified")[0]))
-
-
-def _moyoung_card(name: str) -> Tuple[Gtk.Widget, Gtk.Label]:
-    """One MoYoung watch: measurements, controls, a message, and its own note.
-
-    **The card is a plain box of labels, not an ActionRow.** `phone.py` records
-    why: a list row outside a list raises
-    `gtk_list_box_row_grab_focus` criticals, measured.
-    """
-    note = _label("", dim=True)
-    note.set_selectable(True)
-    health = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE,
-                         column_spacing=4, row_spacing=4, max_children_per_line=6)
-    for label, args in MEASURES:
-        health.append(_button(
-            label, lambda a=args, n=name, l=note: _watch_call(n, a, l)))
-    health.append(_button(
-        "Battery", lambda n=name, l=note: _gatt_read(n, "battery level", l)))
-
-    controls = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE,
-                           column_spacing=4, row_spacing=4, max_children_per_line=6)
-    for label, args in WATCH_ACTIONS:
-        controls.append(_button(
-            label, lambda a=args, n=name, l=note: _watch_call(n, a, l)))
-    controls.append(_button(
-        "Info", lambda n=name, l=note: _gatt_info(n, l)))
-    controls.append(_button(
-        "Find", lambda n=name, l=note: _find_device(n, l), suggested=True))
-
-    text = Gtk.Entry(hexpand=True, placeholder_text="Message to show on the watch")
-    msg = Gtk.Box(spacing=6)
-    msg.append(text)
-    msg.append(_button("Send to watch", lambda n=name, t=text, l=note: _watch_call(
-        n, {"action": "notify", "sender": "Chronoa", "text": t.get_text()}, l)))
-
-    card = common.page_body(6)
-    for side in ("top", "bottom", "start", "end"):
-        getattr(card, f"set_margin_{side}")(12)
-    title = _label(name)
-    title.add_css_class("heading")
-    card.append(title)
-    card.append(_label("MoYoung (Da Fit) watch", dim=True))
-    card.append(_label("Health", dim=True))
-    card.append(health)
-    card.append(_label("Watch", dim=True))
-    card.append(controls)
-    card.append(msg)
-    card.append(note)
-    return card, note
 
 
 def _gatt_read(name: str, what: str, note: Gtk.Label) -> None:
@@ -560,44 +503,70 @@ def _device_detail(mac: str, name: str) -> Gtk.Widget:
     two different shapes. A device that will not answer is **one empty answer
     here**, not an empty panel: the refusal lands under the device's name, so
     the list of paired devices stays true.
+
+    **Read on a thread, drawn on the loop.** This ran `gatttool` (services,
+    then characteristics) straight from the idle callback that builds the list,
+    so with a real watch nearby the whole window froze for as long as gatttool
+    took to connect - measured 2026-10-15, a window test hung past its 300s cap
+    inside `gatt.services` on the main thread.
     """
     column = common.page_body(8)
     column.append(_row(name, mac))
+    reading = _row("Reading", "asking the device what it offers…")
+    column.append(reading)
 
-    try:
-        svc_rows = list(gatt.services(mac))
-    except Exception as exc:  # noqa: BLE001 - the refusal is the answer
-        column.append(_row("Could not be read", str(exc)))
-        return column
+    def work():
+        try:
+            svc_rows = list(gatt.services(mac))
+        except Exception as exc:  # noqa: BLE001 - the refusal is the answer
+            return ("services", exc, None, None)
+        kinds = _wearable_kinds(mac)
+        try:
+            chars = list(gatt.attributes(mac))
+        except Exception as exc:  # noqa: BLE001
+            return ("chars", exc, svc_rows, kinds)
+        values = {}
+        for handle, uuid, _kind in chars[:MAX_ROWS]:
+            try:
+                values[handle] = gatt.read_value(mac, handle, gatt.uuid_name(uuid), uuid)
+            except Exception as exc:  # noqa: BLE001 - shown on its row
+                values[handle] = exc
+        return ("ok", (chars, values), svc_rows, kinds)
 
-    kinds = _wearable_kinds(mac)
-    column.append(_row("Looks like",
-                       ", ".join(kinds) if kinds
-                       else "No wearable service in the list it advertises"))
-    column.append(_row("Services", _names(svc_rows) or "None advertised"))
+    def done(result) -> None:
+        column.remove(reading)
+        if isinstance(result, Exception):
+            column.append(_row("Could not be read", str(result)))
+            return
+        stage, value, svc_rows, kinds = result
+        if stage == "services":
+            column.append(_row("Could not be read", str(value)))
+            return
+        column.append(_row("Looks like",
+                           ", ".join(kinds) if kinds
+                           else "No wearable service in the list it advertises"))
+        column.append(_row("Services", _names(svc_rows) or "None advertised"))
+        if stage == "chars":
+            column.append(_row("Characteristics", f"Not read: {value}"))
+            return
+        chars, values = value
+        if not chars:
+            column.append(_row("Characteristics",
+                               "None readable. This device advertises services "
+                               "but gatttool listed no characteristics on it."))
+            return
+        shown = chars[:MAX_ROWS]
+        for handle, uuid, kind in shown:
+            column.append(_readable_row(mac, handle, uuid, column, values.get(handle)))
+        if len(chars) > len(shown):
+            # **Say how many were not shown.** A truncated list with no count
+            # reads as the whole list.
+            column.append(_row(
+                f"{len(chars) - len(shown)} more characteristic(s)",
+                f"This panel shows the first {MAX_ROWS}. Ask the assistant for a "
+                f"specific one by name."))
 
-    try:
-        chars = list(gatt.attributes(mac))
-    except Exception as exc:  # noqa: BLE001
-        column.append(_row("Characteristics", f"Not read: {exc}"))
-        return column
-    if not chars:
-        column.append(_row("Characteristics",
-                           "None readable. This device advertises services "
-                           "but gatttool listed no characteristics on it."))
-        return column
-
-    shown = chars[:MAX_ROWS]
-    for handle, uuid, kind in shown:
-        column.append(_readable_row(mac, handle, uuid, column))
-    if len(chars) > len(shown):
-        # **Say how many were not shown.** A truncated list with no count reads
-        # as the whole list, which is how a panel comes to under-report a device
-        # that exposes more than a screenful.
-        column.append(_row(
-            f"{len(chars) - len(shown)} more characteristic(s)",
-            f"This panel shows the first {MAX_ROWS}. Ask the assistant for a "
-            f"specific one by name."))
+    _in_thread(work, done)
     return column
 
 
@@ -661,7 +630,7 @@ def _listen_button(label: str, mac: str, handle: int,
 
 
 def _readable_row(mac: str, handle: int, uuid: str,
-                  column: Optional[Gtk.Widget] = None) -> Gtk.Widget:
+                  column: Optional[Gtk.Widget] = None, preread: Any = None) -> Gtk.Widget:
     """One characteristic, with its stored value read through the module.
 
     The read is `read_value()`'s, and the value handle is the one
@@ -680,7 +649,11 @@ def _readable_row(mac: str, handle: int, uuid: str,
         row.add_suffix(listen)
         return row
     try:
-        raw, problem = gatt.read_value(mac, handle, label, uuid)
+        # `preread` is the value read on `_device_detail`'s thread; reading here
+        # would run gatttool on the GTK loop.
+        if isinstance(preread, Exception):
+            raise preread
+        raw, problem = preread if preread is not None else gatt.read_value(mac, handle, label, uuid)
     except Exception as exc:  # noqa: BLE001 - one unreadable value is not a page
         return _row(label, f"Could not be read: {exc}")
     if problem:
@@ -721,10 +694,32 @@ def _append_moyoung(listing: Gtk.Widget, app: Any) -> None:
         if not watches:
             return
         holder.append(_companion_row(_app_config(app), note))
-        for name in watches:
-            card, card_note = _moyoung_card(name)
-            holder.append(card)
-            _gatt_read(name, "battery level", card_note)
+        # **(mac, name) pairs.** This loop used to hand each whole pair to
+        # `_moyoung_card(name)` as if it were the name - never seen, because no
+        # MoYoung watch was ever listed: it does not bond, and `paired()` only
+        # listed bonded devices until it learned Trusted (2026-10-14).
+        from shani_chronoa.gui.surfaces.watch_dashboard import WatchDashboard, find as watch_find
+        for mac, name in watches:
+            card_note = _label("", dim=True)
+            dashboard = WatchDashboard(mac, name, actions=[
+                # MoYoung's own find (cmd 97): the generic `find_device`
+                # needs Immediate Alert, which this watch does not have.
+                ("Find", "find-location-symbolic",
+                 lambda m=mac, l=card_note: watch_find(m, l.set_text)),
+                ("Sync time", "preferences-system-time-symbolic",
+                 lambda n=name, l=card_note: _watch_call(n, {"action": "sync_time"}, l)),
+                ("Settings", "emblem-system-symbolic",
+                 lambda n=name, l=card_note: _watch_call(n, {"action": "settings"}, l)),
+            ])
+            holder.append(dashboard)
+            text = Gtk.Entry(hexpand=True, placeholder_text="Message to show on the watch")
+            message = Gtk.Box(spacing=6)
+            message.append(text)
+            message.append(_button("Send to watch", lambda n=name, t=text, l=card_note: _watch_call(
+                n, {"action": "notify", "sender": "Chronoa", "text": t.get_text()}, l)))
+            holder.append(message)
+            holder.append(card_note)
+            dashboard.refresh()
         holder.append(note)
 
     def work() -> Any:
@@ -768,12 +763,15 @@ def build(app) -> Gtk.Widget:
         route = ROUTES.get(state.state)
         if route is not None:
             label, target = route
-            column.append(common.banner(
-                "This is a setting on this machine, not a fault.",
-                label,
-                lambda _l=label, _t=target: common.open_page(app, _t)))
-        column.append(common.empty_state(ICON, state.headline,
-                                         state.body))
+            # The switch by its Settings name, turned on here - see
+            # `common.gate_banner`.
+            column.append(common.gate_banner(
+                app, "bluetooth-gatt-enabled" if state.state == STATE_REFUSED else None,
+                "wearables", label, target))
+        column.append(common.empty_state(
+            ICON, state.headline, state.body,
+            child=(common.connect_button(app, "bluetooth", "Pair a watch or band")
+                   if state.state == STATE_NONE_PAIRED else None)))
         return common.scrolled(column)
 
     refusal = _permission(_app_config(app))

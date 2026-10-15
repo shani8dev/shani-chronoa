@@ -1,19 +1,99 @@
-# shani-chronoa
+<p align="center">
+  <img src="usr/share/icons/hicolor/scalable/apps/shani-chronoa.svg" width="112" alt="Chronoa">
+</p>
 
-Local-first voice/text AI assistant, integrated into the Shanios desktop.
+<h1 align="center">Chronoa</h1>
 
-> **What can it actually do? → [`CAPABILITIES.md`](CAPABILITIES.md)** — all 256
-> skills, grouped by what they are for, with each one's consent switch and
-> whether the assistant asks before running it. Generated from the same table
-> the Help window renders, so it cannot claim something the build does not have.
+<p align="center"><b>A private AI assistant that lives on your computer — and can actually use it.</b><br>
+Talk to it, type to it, hand it a job. It answers on your own hardware, acts through 259 named skills,<br>
+asks before anything risky, and every action runs in a sandbox.</p>
 
-Chronoa listens for a wake-word, transcribes speech locally with
-[whisper.cpp](https://github.com/ggerganov/whisper.cpp), routes the text through an on-device LLM — by default `llama.cpp`'s
-`llama-server`, with Ollama optional — with tool-calling, and speaks the reply
-with Piper TTS (or espeak-ng when no Piper voice is provisioned). It runs as a
-single GTK4
-process — no API keys, no telemetry, and no daemon behind it. Nothing leaves
-the machine unless you switch it twice on purpose.
+<p align="center">
+  <a href="CAPABILITIES.md">259 skills</a> ·
+  runs offline ·
+  no account, no telemetry ·
+  GTK4 + libadwaita ·
+  <a href="https://shani.dev">part of ShaniOS</a>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/main.png" width="720" alt="Chronoa's main window">
+</p>
+
+## Why Chronoa
+
+Most assistants are a chat box in front of someone else's computer. Chronoa is
+the other way round: the model runs **here** (llama.cpp by default), your voice
+is transcribed **here** (whisper.cpp), and what it does to your machine happens
+through skills you can read, switch off, and undo.
+
+- 🗣️ **Talk or type.** Wake word, push-to-talk, dictation, barge-in, a natural
+  voice (Kokoro or Piper) that you pick and preview in the app.
+- 🛠️ **It does things, not just chats.** Files, apps, windows, settings,
+  calendar, reminders, network, Bluetooth, screenshots, documents, images,
+  git — [259 skills](CAPABILITIES.md), each a small, typed, auditable module.
+- 💻 **Builds with you.** Point it at a project folder: it edits with inline
+  diffs, runs your tests in a sandbox, commits, and reverts a whole turn with
+  one click. Plan mode, subagents, and MCP servers in both directions.
+- 📱 **Phone and watch.** Calls with a car-style dialer, texts, contacts and
+  files over plain Bluetooth or KDE Connect; Android over USB or Wi-Fi (QR
+  pairing); MoYoung/Da Fit watches with steps, sleep, stress and heart rate.
+- 🎙️ **Meetings and transcription.** Record a meeting or capture what an app
+  is playing — who said what, then notes, all on this computer.
+- 📊 **See what it sees.** Your watch, battery, disks, what Chronoa did and
+  where your data went — as charts, not log lines.
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/watch.png" alt="Watch dashboard"></td>
+    <td><img src="docs/screenshots/voice.png" alt="Choosing a voice"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Your watch: steps, sleep stages, stress, heart rate</sub></td>
+    <td align="center"><sub>Pick and preview the voice it speaks with</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/dialer.png" alt="Phone dialer"></td>
+    <td><img src="docs/screenshots/transcribe.png" alt="Transcribe what's playing"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Calls through your phone, from the desktop</sub></td>
+    <td align="center"><sub>Transcribe a call, a video or a podcast</sub></td>
+  </tr>
+</table>
+
+## Security: an assistant you can let near your computer
+
+An assistant that can act is only as good as the walls around it. Chronoa's are
+real, layered, and tested by running them:
+
+| Layer | What it does |
+|---|---|
+| **Named skills, not a shell** | The model can only call typed skills from a whitelist. The single command runner (`run_command`, for your tests and builds) is off by default, takes one program per call — no pipes, no `$(…)` — and asks every time. |
+| **bubblewrap** | Each command runs in fresh PID, IPC, UTS and network namespaces, with a private `/tmp` and runtime dir and a read-only system. Your project is writable; the rest of your home — `~/.ssh`, keyrings, browser profiles — is not even readable. |
+| **Landlock (ABI up to 8)** | Kernel-enforced file rules pinned to file descriptors, plus scoping that blocks abstract-socket and signal escapes — and it still applies where user namespaces are unavailable. |
+| **seccomp** | An optional filter denying 28 syscalls (mount, kexec, bpf, ptrace, io_uring, unshare, …); with it on, a machine that cannot install it runs nothing. |
+| **Containers and VMs** | Run a project's commands in a rootless podman container with no network, or in a systemd-nspawn / vmspawn machine. |
+| **Consent per switch, per action** | 94 skills sit behind a named switch; the 17 destructive ones ask first, showing the exact command or the diff it will apply. "Allow for this turn" covers one turn, never a session. |
+| **Remote turns need the desk** | A message from your phone or a chat app can ask, but cannot edit, delete or run commands unless someone at the computer approves it. |
+| **Undo** | Every file Chronoa writes is snapshotted; revert one file or a whole turn. |
+| **Nothing leaves silently** | Every outbound request is logged with its destination. Privacy mode is local-only, and a request that breaks it raises an alarm. |
+
+Details: [Confinement](#confinement) · [What leaves this machine](#what-leaves-this-machine) · [Untrusted text](#untrusted-text).
+
+## Quick start
+
+**On ShaniOS** Chronoa is already installed — open it from the app grid.
+**On Arch**, build it from [shani-pkgbuilds](https://github.com/shani8dev/shani-pkgbuilds)
+(see [Installation](#installation); Debian too). Then:
+
+```bash
+shani-chronoa          # first run opens Setup: pick a model, a voice, and extras
+```
+
+Setup downloads only what you choose, shows every size first, and asks once.
+Anything you skip can be added later — every page that needs a model shows
+its own **Download** button.
 
 ## Features
 
@@ -25,12 +105,13 @@ the machine unless you switch it twice on purpose.
 - **Local speech-to-text** — whisper.cpp; runs on CPU or CUDA.
 - **On-device LLM** — tool-calling via llama.cpp `llama-server` by default
   (the `ollama` package is also supported), so Chronoa can act on your machine
-  rather than just chatting about it. **257 callable
-  skills**, every one a named, schema-typed module under `skills/`. There is
-  no generic shell-exec tool; the whitelist is the design, not a starting point.
+  rather than just chatting about it. **259 callable
+  skills**, every one a named, schema-typed module under `skills/`. The
+  whitelist is the design; the one command runner (`run_command`, for a
+  project's tests and builds) is sandboxed, off by default, and asks each time.
   **They are all listed in [`CAPABILITIES.md`](CAPABILITIES.md)**, grouped by
   what they are for, each with the consent switch it needs and whether the
-  assistant asks before running it — 92 are consent-gated and 16 are
+  assistant asks before running it — 94 are consent-gated and 17 are
   destructive. That file is generated from `capabilities._GROUPS`, the same
   table the Help window renders, so it cannot drift from what the build does;
   `tests/check_capabilities_doc.py` fails if it does.
@@ -118,8 +199,9 @@ the machine unless you switch it twice on purpose.
 
 A **sense** perceives; a **skill** acts. `senses/` is inbound and deposits
 **percepts**; `skills/` is outbound and is the whitelist the LLM can call.
-Neither is a "tool" in the shell-exec sense — there is no generic command
-escape hatch, and that is the point.
+Neither is a "tool" in the shell-exec sense. The one command runner,
+`run_command`, exists for a project's tests and builds: off by default, one
+program per call with no shell syntax, sandboxed, and asked about every time.
 
 **The default split is a rule, not a listing.** Machine-state facts about
 *this* machine default on, because knowing your disks are full is not
@@ -324,7 +406,9 @@ rot the way the previous set did.*
 
 ## Architecture
 
-There is no daemon. `app/` is a package whose `application.py` defines
+The app is one process; the only daemon is optional and off by default
+(`shani-chronoa-daemon.service`, "Background mode", which runs your rules with
+the window closed and never listens). `app/` is a package whose `application.py` defines
 `ChronoaApplication(Gtk.Application)`, so the UI, the assistant and its tool
 loop, and the senses scheduler are all one process with one main loop.
 Anything that needs another process is an external engine, and each of those is
@@ -535,18 +619,20 @@ within this repository.
 ### Arch
 
 ```bash
-# Build and install from source
-git clone https://github.com/shani8dev/shani-chronoa
-cd shani-chronoa
+# The PKGBUILD lives in shani-pkgbuilds, not in this repository.
+git clone https://github.com/shani8dev/shani-pkgbuilds
+cd shani-pkgbuilds/shani-chronoa
 makepkg -si
 ```
 
 ### Debian
 
 ```bash
-# Build the .deb
-dpkg-buildpackage -uc -us
-sudo dpkg -i ../shani-chronoa_*.deb
+# usr/ and DEBIAN/ are the package; dpkg-deb builds it (notes: docs/packaging-debian.md)
+mkdir -p build/deb && cp -r usr DEBIAN build/deb/
+find build/deb -name __pycache__ -prune -exec rm -rf {} +
+dpkg-deb --root-owner-group --build build/deb shani-chronoa.deb
+sudo apt install ./shani-chronoa.deb
 ```
 
 ## Configuration

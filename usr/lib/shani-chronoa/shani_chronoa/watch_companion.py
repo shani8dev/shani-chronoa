@@ -46,6 +46,11 @@ GATT_KEY = "bluetooth-gatt-enabled"
 #:
 #: The watch's own buttons are unaffected by either. See the two schema keys.
 #:
+#: **Correction, 2026-10-14: both did reboot it - by being split into 20-byte
+#: writes, fixed in `moyoung.Watch.request` (see `WEATHER_LABEL_CHARS`).** The
+#: idle control held 60s on 2026-10-14 with no drop. Below is the earlier
+#: reading, kept as the record:
+#:
 #: **Neither of these reboots the watch, and an earlier version of this comment
 #: blamed the weather push. That was wrong.** The control that settles it:
 #: connected with **nothing sent at all** - no sync-time, no weather, no music -

@@ -81,6 +81,9 @@ UNIT = "shani-chronoa-daemon.service"
 
 #: The gschema boolean that says whether background mode is wanted.
 CONFIG_KEY = "background-mode-enabled"
+#: What the switch is called in Settings > Privacy, which is what a person
+#: reads - the key itself is for logs (MAIN-UI-TODO 10g).
+SETTING_NAME = "Keep Chronoa's automatic rules running in the background"
 
 #: The sentence that makes this setting safe, on the panel rather than only in
 #: `daemon.py`'s docstring. It states the property, not the marketing.
@@ -94,7 +97,7 @@ MICROPHONE_NOTE = (
 #: writes. The page subtitle above is the reason; this is what someone deciding
 #: whether to flip the switch wants to know before flipping it.
 SETTING_CAPTION = (
-    f"Writes {CONFIG_KEY}, the same key as the switch in Settings. On, the daemon "
+    f"The same switch as “{SETTING_NAME}” in Settings. On, the daemon "
     "runs your rules and senses with the window closed - and never listens."
 )
 
@@ -528,10 +531,10 @@ class _DaemonSurface:
         if self._config is None:
             self._switch.set_sensitive(False)
 
-        spoken = (f"Run Chronoa's rules in the background ({CONFIG_KEY}): "
+        spoken = (f"Run Chronoa's rules in the background: "
                   f"{'on' if self._switch.get_active() else 'off'}")
         self._switch.set_tooltip_text(
-            f"{spoken}. Writes {CONFIG_KEY}; Chronoa acts on it the next time it "
+            f"{spoken}. The same switch as in Settings; Chronoa acts on it the next time it "
             f"starts. Never the microphone."
         )
         self._switch.update_property([Gtk.AccessibleProperty.LABEL], [spoken])
@@ -547,7 +550,7 @@ class _DaemonSurface:
         # `set_text()` stores the string without parsing it - the parse happens
         # later, where a stray `&` becomes a blank row and a warning nobody sees.
         self._state_label.set_text(_plain(
-            f"{'on' if on else 'off'} ({CONFIG_KEY}) - "
+            f"{'On' if on else 'Off'} - "
             + ("the unit is enabled or disabled for this the next time Chronoa starts"
                if self._config is not None
                else "no settings available, so this cannot be read or written here"))

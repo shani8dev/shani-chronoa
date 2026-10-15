@@ -8,13 +8,19 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Gdk', '4.0')
 gi.require_version('GLib', '2.0')
 
-from gi.repository import Gtk, GLib
+from gi.repository import Gio, GLib, Gtk
 
 
 
 logger = logging.getLogger(__name__)
 
 
+
+
+#: Suffixes the `recording` skill can transcribe (anything ffmpeg decodes;
+#: these are the ones a person drops).
+TRANSCRIBABLE = frozenset({".wav", ".mp3", ".m4a", ".ogg", ".opus", ".flac", ".aac",
+                           ".webm", ".mp4", ".mkv", ".mov", ".avi"})
 
 
 class AttachingMixin:
@@ -68,8 +74,43 @@ class AttachingMixin:
             chip.set_tooltip_text(str(path))
             chip.update_property([Gtk.AccessibleProperty.LABEL], [f"Remove attachment {path.name}"])
             chip.connect("clicked", lambda _b, p=path: self._remove_attachment(p))
+            if path.suffix.lower() in TRANSCRIBABLE:
+                # **Transcription had no door.** The `recording` skill turns
+                # any audio or video file into text, subtitles or who-said-what,
+                # and the only ways in were the Meetings panel and asking in
+                # words. A recording on the composer is the moment to offer it.
+                row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+                row.append(chip)
+                transcribe = Gtk.Button(label="Transcribe")
+                transcribe.add_css_class("pill")
+                transcribe.add_css_class("suggested-action")
+                transcribe.set_tooltip_text(f"Write out what is said in {path.name}, on this computer")
+                transcribe.connect("clicked", lambda _b, p=path: self._transcribe_attachment(p))
+                row.append(transcribe)
+                self._attach_bar.append(row)
+                continue
             self._attach_bar.append(chip)
         self._attach_bar.set_visible(bool(self._attachments))
+
+    def _transcribe_attachment(self, path) -> None:
+        """Ask for this one file's transcript, as its own turn.
+
+        `/recording` names the tool, so only the arguments are left to the
+        model (`user_prompts.forced_tool`). **The draft and the other chips are
+        set aside and put back**: `submit_text` sends whatever is in the
+        composer and every attachment on it, and a person who pressed
+        Transcribe on one file did not ask to send their half-written message
+        or the other files with it.
+        """
+        others = [p for p in self._attachments if p != path]
+        draft = self._input_text() if hasattr(self, "_input_text") else ""
+        self._attachments = []
+        self._refresh_attach_bar()
+        self.submit_text(f"/recording transcribe what is said in {path}")
+        self._attachments = others
+        self._refresh_attach_bar()
+        if draft and hasattr(self, "_set_input_text"):
+            self._set_input_text(draft)
 
     def _remove_attachment(self, path) -> None:
         self._attachments = [p for p in self._attachments if p != path]
@@ -82,6 +123,39 @@ class AttachingMixin:
             logger.warning(f"Could not take the dropped files: {e}")
             return False
         return True
+
+    #: What "Transcribe a recording..." asks, with the file attached. The
+    #: `recording` skill does the work (speakers told apart where it can).
+    TRANSCRIBE_REQUEST = "Make a transcript of this recording, telling the speakers apart."
+
+    def pick_recording_to_transcribe(self) -> None:
+        """Choose an audio or video file and ask for its transcript.
+
+        Transcribing a file had no door but the Meetings panel (MAIN-UI-TODO
+        8k); the skill already took a path. This is attach + one request,
+        through the same send path as typing it.
+        """
+        audio = Gtk.FileFilter(name="Recordings")
+        audio.add_mime_type("audio/*")
+        audio.add_mime_type("video/*")
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(audio)
+        dialog = Gtk.FileDialog(title="Transcribe a recording", modal=True,
+                                filters=filters, default_filter=audio)
+
+        def done(dlg, result):
+            try:
+                chosen = dlg.open_finish(result)
+            except GLib.Error:
+                return              # dismissed, or no portal: nothing was asked
+            path = chosen.get_path() if chosen is not None else None
+            if path:
+                self.add_attachments([path])
+                self.submit_text(self.TRANSCRIBE_REQUEST)
+        try:
+            dialog.open(self, None, done)
+        except Exception:  # noqa: BLE001
+            logger.warning("could not open the file dialog", exc_info=True)
 
     def _pick_files(self) -> None:
         dialog = Gtk.FileDialog(title="Attach files", modal=True)

@@ -39,13 +39,21 @@ class BrainMixin:
         `not self.llm.is_available()` check `_submit()` already uses - so
         this must check availability explicitly, not just "is it set".
         """
+        # **Where answers come from, not "Ready" again.** The state line above
+        # this one already says Ready, so the line read "Ready" twice
+        # ("Ready (this computer: local)"), and "LLM" is a word the window uses
+        # nowhere else.
         if self.llm is None or not self.llm.is_available():
-            return "LLM unavailable"
+            return "No model is answering yet"
         if isinstance(self.llm, CloudLLMChain):
-            return f"Ready (cloud: {self.llm.model})"
+            return f"Answering from the cloud: {self.llm.model}"
         if getattr(self.llm, "local", False):
-            return f"Ready (this computer: {self.llm.model})"
-        return f"Ready (Ollama: {self.llm.model})"
+            # "local" is the provider's placeholder when no model file is
+            # chosen, not a model anyone could recognise.
+            if self.llm.model in ("", "local"):
+                return "Answering on this computer"
+            return f"Answering on this computer: {self.llm.model}"
+        return f"Answering through Ollama: {self.llm.model}"
 
     def _toggle_privacy(self, _action: Gio.SimpleAction, _param: object) -> None:
         """Toggle privacy mode."""
@@ -80,8 +88,15 @@ class BrainMixin:
             logger.exception("could not tell whether setup is needed")
             return False
 
-    def _open_setup(self) -> None:
-        """Show the setup window; when it finishes, pick up a model or voice it installed without a restart."""
+    def _open_setup(self, page: str = "") -> None:
+        """Show the setup window - on `page` if given - and, when it finishes,
+        pick up a model or voice it installed without a restart.
+
+        **Registered with `pages`**, so `show-page setup:<tag>` and this are one
+        window. They were two: this one was never noted, so `pages.show` built a
+        second wizard with no `on_finished`, and a model installed from it was
+        not picked up until a restart.
+        """
         # **Not during teardown.** A queued "offer setup once" idle can be
         # drained inside `do_shutdown`, and building a window against an
         # application that has begun shutting down segfaults the interpreter.
@@ -94,6 +109,8 @@ class BrainMixin:
         from shani_chronoa import setup_wizard
         existing = getattr(self, "_setup_window", None)
         if existing is not None and existing.get_visible():
+            if page and hasattr(existing, "show_page"):
+                existing.show_page(page)
             existing.present()
             return
 
@@ -107,6 +124,10 @@ class BrainMixin:
             if self.window:
                 self.window.set_status(self._llm_status_text())
         self._setup_window = setup_wizard.build_window(self, self.config, on_finished=finished)
+        from shani_chronoa import pages
+        pages.note_window("setup", self._setup_window)
+        if page and hasattr(self._setup_window, "show_page"):
+            self._setup_window.show_page(page)
         self._setup_window.present()
 
     def _use_local_server(self, wake: bool = True) -> bool:

@@ -198,7 +198,36 @@ class ChronoaOrbWidget(Gtk.Button):
         self._level = 0.0
         self._level_target = 0.0
         self._tick_id = 0
+        self._compact = False
         self._setup_ui()
+
+    #: How much of its size the orb keeps once a conversation is on screen.
+    COMPACT_SCALE = 0.5
+
+    def set_compact(self, compact: bool) -> None:
+        """Half size while there is a conversation to read.
+
+        **The orb is the empty window's invitation and the full window's status
+        light**, and those are two jobs of different sizes. Measured at the
+        window's own 460x640, the resting orb, its state word and the status
+        line under it were ~150px of a 640px window while the transcript beside
+        them had ~180px - so the third reply was read in a box barely bigger than
+        a microphone. Compact keeps every state, colour and the halo; it only
+        gives the height back.
+        """
+        compact = bool(compact)
+        if compact == self._compact:
+            return
+        self._compact = compact
+        if compact:
+            self.add_css_class("orb-compact")
+        else:
+            self.remove_css_class("orb-compact")
+        self._apply_state(self._state)
+        self._resize_halo()
+
+    def _scaled(self, px: int) -> int:
+        return int(round(px * self.COMPACT_SCALE)) if self._compact else px
 
     def _setup_ui(self) -> None:
         # **No size request here.** `_apply_state(AssistantState.IDLE)` at the end
@@ -252,7 +281,7 @@ class ChronoaOrbWidget(Gtk.Button):
         return GLib.SOURCE_CONTINUE
 
     def _resize_halo(self) -> None:
-        self._halo.set_size_request(*_halo_size(self._level))
+        self._halo.set_size_request(*(self._scaled(px) for px in _halo_size(self._level)))
 
     def set_state(self, state: AssistantState) -> None:
         """Move to a state. The only mutator; everything else is derived."""
@@ -267,7 +296,7 @@ class ChronoaOrbWidget(Gtk.Button):
     def _apply_state(self, state: AssistantState) -> None:
         _color, icon_name = _STATE_STYLE[state]
         self._icon.set_from_icon_name(icon_name)
-        self._icon.set_pixel_size(32)
+        self._icon.set_pixel_size(self._scaled(32))
         self.set_tooltip_text(state.label)
         for candidate in AssistantState:
             self.remove_css_class(f"state-{candidate.value}")
@@ -276,7 +305,7 @@ class ChronoaOrbWidget(Gtk.Button):
         self._halo.add_css_class(f"halo-{state.value}")
         # The halo only reaches its maximum in the states that feed it a level,
         # so those are the states that carry the room for it.
-        side = _orb_size(state)
+        side = self._scaled(_orb_size(state))
         self.set_size_request(side, side)
 
 
@@ -704,8 +733,11 @@ class TranscriptView(Gtk.ScrolledWindow):
 
     def __init__(self, config=None, caps=None, on_suggestion=None,
                  reduce_motion: bool = False, on_regenerate=None,
-                 on_show_diff=None) -> None:
+                 on_show_diff=None, home_factory=None) -> None:
         super().__init__()
+        #: Builds the home board under the suggestions (today, recent
+        #: conversations, quick actions) - the window's, since it knows the app.
+        self._home_factory = home_factory
         self.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         self.set_vexpand(True)
         self.set_propagate_natural_height(True)
@@ -1143,6 +1175,16 @@ class TranscriptView(Gtk.ScrolledWindow):
             )
             self._rows.append(bar)
 
+        if self._home_factory is not None:
+            try:
+                board = self._home_factory()
+            except Exception:  # noqa: BLE001 - an empty state must still draw
+                logging.getLogger(__name__).debug("home board failed", exc_info=True)
+                board = None
+            if board is not None:
+                board.add_css_class("home-board")
+                self._rows.append(board)
+
     def clear(self) -> None:
         self._turns = []
         self._turn_start = []
@@ -1246,6 +1288,42 @@ class TranscriptView(Gtk.ScrolledWindow):
         label.update_property([Gtk.AccessibleProperty.LABEL],
                               [f"this turn used {' and '.join(parts)}"])
         row.append(label)
+        # **Revert the whole turn's files, from the turn itself.** Undo is the
+        # last change only; a turn that edited five files needed five undos and
+        # a guess at the order. The pre-image ring already knows which turn
+        # wrote what (`changes_for_turn`), so the turn can put them all back.
+        handler = getattr(self, "_on_revert_turn", None)
+        turn = str(stats.get("turn") or "")
+        if changed and turn and handler is not None:
+            button = Gtk.Button(label=f"Revert {len(changed)} file"
+                                + ("" if len(changed) == 1 else "s"))
+            button.add_css_class("flat")
+            button.add_css_class("caption")
+            button.set_halign(Gtk.Align.START)
+            button.set_margin_start(28)
+            button.set_tooltip_text(
+                "Put back every file this turn changed, as it was before the "
+                "turn. The revert itself can be undone.")
+            button.connect("clicked", self._revert_turn_clicked, turn, handler)
+            row.append(button)
+
+    @staticmethod
+    def _revert_turn_clicked(button, turn: str, handler) -> None:
+        try:
+            restored, skipped = handler(turn)
+        except Exception as exc:  # noqa: BLE001 - a failed revert is said, not raised
+            button.set_label(f"Could not revert: {exc}")
+            return
+        said = f"Reverted {len(restored)} file" + ("" if len(restored) == 1 else "s")
+        if skipped:
+            said += f" ({len(skipped)} left as they are)"
+            button.set_tooltip_text("\n".join(skipped))
+        button.set_label(said)
+        button.set_sensitive(False)
+
+    def set_revert_turn_handler(self, handler) -> None:
+        """Attach what "Revert N files" calls: `handler(turn) -> (restored, skipped)`."""
+        self._on_revert_turn = handler
 
     def _append_turn(self, role: str, text: str) -> Gtk.Label:
         """Append one turn, styled by role, and return its label."""
@@ -1353,6 +1431,11 @@ class TranscriptView(Gtk.ScrolledWindow):
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         row.set_hexpand(True)
         label.set_hexpand(True)
+        # **Top-aligned, so the bubble is as tall as its text.** A box hands
+        # every child the row's full height, and the row is as tall as the
+        # two stacked buttons beside the reply - so a one-line answer was drawn
+        # as a two-line bubble with an empty line at the bottom.
+        label.set_valign(Gtk.Align.START)
         row.append(label)
 
         buttons = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)

@@ -4,16 +4,13 @@
 deciding to call `lan_phone`. That is right for "send my notes to the phone"
 said out loud, and the wrong shape for everything else — a person wants to *see*
 what is on the network, push a line of text over, and know whether the thing
-they are about to try can work at all. It is also the only place the honest
-"pairing is not implemented" sentence can be seen before someone tries.
+they are about to try can work at all.
 
-**It says what is not implemented, and says it first.** `lan_link.pairing_status()`
-returns `("not implemented", ...)` and is honest about why — there is no KDE
-Connect phone on any network this code has run against, so the pairing, the TLS
-upgrade and the plugin packets could only ever be written from the spec. That is
-a real limitation and it belongs at the top of the page, not in a refusal after
-somebody has tried. Discovery *is* real and *is* tested, and the panel separates
-the two rather than presenting one capability.
+**Pairing state first, and the way to change it beside it.** It said "pairing
+is not implemented" long after `lan_link.pair` existed - because no link could
+open at all (see `tests/test_lan_pairing.py`), so nobody could tell. Now the top
+row is the stored pairing, and "Pair a phone" opens Connect a device on its KDE
+Connect route, where the phone's owner taps Accept.
 
 **Everything slow is off the GTK thread.** `listen_once` waits on the network
 for as long as it is asked, and a file push waits on a phone that may never
@@ -55,13 +52,9 @@ CONSENT_KEY = "lan-phone-enabled"
 #: than a model reading a sentence does.
 LOOK_SECONDS = 5.0
 
-NOT_PAIRED = "Pairing is not implemented"
-NOT_PAIRED_WHY = (
-    "Discovery is real and is tested: this panel can find a phone and this "
-    "computer can announce itself. Pairing, the TLS upgrade and the plugin "
-    "packets are specified but not written — there is no KDE Connect phone on "
-    "any network this code has been able to run against, so they could only be "
-    "written from the spec and never run.")
+NOT_PAIRED = "No phone is paired"
+NOT_PAIRED_WHY = ("Pair one to send it files and, if you want, let it ask "
+                  "Chronoa. The phone's owner taps Accept on it.")
 
 
 def _app_config(app: Any) -> Any:
@@ -138,35 +131,57 @@ class _PhoneLinkView(Gtk.Box):
 
     # -- the honest top line ------------------------------------------------
 
+    def _after_consent(self) -> None:
+        """The switch was turned on from the banner: redraw both halves."""
+        self._refresh_status()
+        self._refresh_list()
+
     def _refresh_status(self) -> None:
         common.clear(self._status_slot)
         state, why = lan_link.pairing_status()
         if not _consent(self._app):
-            self._status_slot.append(self.status_recorder.row(
-                common.STATUS_OFF,
-                f"Talking to phones is turned off ({CONSENT_KEY})",
-                f"Nothing will be sent. Turn on '{CONSENT_KEY}' in Settings to "
-                "allow it."))
+            self.status_recorder.set(common.STATUS_OFF)
+            self._status_slot.append(common.consent_banner(
+                self._app, CONSENT_KEY, "Nothing will be sent.",
+                on_change=self._after_consent))
             return
-        if state != "not implemented":
+        buttons = Gtk.Box(spacing=8, margin_start=12, margin_end=12)
+        if state == "paired":
             self._status_slot.append(self.status_recorder.row(
-                common.STATUS_OK,
-                f"Pairing is {state}: {why}",
-                "Discovery and this computer announcing itself are real and "
-                "tested."))
-            return
-        # **The limitation first, not a refusal after somebody tries.** The two
-        # halves of this module are different: discovery is real, pairing is
-        # not written. A page that presented them as one capability would send
-        # someone to "Pair" and then explain what was missing.
-        self._status_slot.append(self.status_recorder.row(
-            common.STATUS_ATTENTION, NOT_PAIRED, NOT_PAIRED_WHY))
+                common.STATUS_OK, f"Paired {why.split(';')[0]}",
+                "Only this phone is accepted from now on."))
+            buttons.append(self._connect_button("Pair another phone"))
+            forget = Gtk.Button(label="Forget this phone")
+            forget.connect("clicked", self._on_forget)
+            buttons.append(forget)
+        else:
+            self._status_slot.append(self.status_recorder.row(
+                common.STATUS_ATTENTION, NOT_PAIRED, NOT_PAIRED_WHY))
+            buttons.append(self._connect_button("Pair a phone", suggested=True))
+        self._status_slot.append(buttons)
         host = _hosts()
         if host:
             self._status_slot.append(common.status_row(
                 common.STATUS_OK, f"Last phone seen: {host}",
                 f"speaking protocol version {lan_link.PROTOCOL_VERSION} on UDP "
                 f"{lan_link.UDP_PORT}"))
+
+    def _connect_button(self, label: str, suggested: bool = False) -> Gtk.Button:
+        button = Gtk.Button(label=label)
+        if suggested:
+            button.add_css_class("suggested-action")
+        button.set_tooltip_text("Opens Connect a device; the phone asks its owner to accept")
+
+        def clicked(*_a) -> None:
+            activate = getattr(self._app, "activate_action", None)
+            if callable(activate):
+                activate("connect-device", GLib.Variant("s", "kdeconnect"))
+        button.connect("clicked", clicked)
+        return button
+
+    def _on_forget(self, *_a) -> None:
+        lan_link.forget_pairing()
+        self._refresh_status()
 
     # -- discovery ----------------------------------------------------------
 
@@ -239,8 +254,8 @@ class _PhoneLinkView(Gtk.Box):
         if not self._devices:
             if not _consent(self._app):
                 return nothing_state(
-                    "dialog-warning-symbolic", "Talking to phones is turned off",
-                    f"Turn on '{CONSENT_KEY}' in Settings first.")
+                    "phone-symbolic", "Talking to phones is turned off",
+                    f"Turn on “{common.consent_name(CONSENT_KEY)}” above first.")
             return nothing_state(
                 "phone-symbolic", "No phone found yet",
                 "Nothing has been looked for, or nothing answered. Press Look "
@@ -315,8 +330,8 @@ class _PhoneLinkView(Gtk.Box):
         belongs there.
         """
         self.find_note.set_label(
-            f"{what} needs the '{CONSENT_KEY}' switch in Settings. Nothing was "
-            f"sent.")
+            f"{what} needs “{common.consent_name(CONSENT_KEY)}” turned on "
+            f"(above). Nothing was sent.")
         # No `idle_add`: every caller is a `clicked` handler, which already runs
         # on the loop. Deferring it would let the note and the list disagree
         # for one frame.

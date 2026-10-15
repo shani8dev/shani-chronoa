@@ -37,7 +37,8 @@ from typing import Any, Iterable, Optional
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import GLib, Gtk  # noqa: E402
+gi.require_version("Adw", "1")
+from gi.repository import Adw, GLib, Gtk  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 
 SURFACE_ID = "listening"
@@ -55,7 +56,7 @@ SECTION = "Sensing"
 #: microphone. "Listening" in an app whose centrepiece is a microphone orb means
 #: the microphone, so this sat beside **Voice** under a name that pointed at
 #: neither of the two things it is.
-TITLE = "App audio"
+TITLE = "Transcribe"
 #: Required by `surfaces.all_surfaces()` (TITLE, ICON, build) - a surface
 #: without one raises AttributeError inside that loop, which takes the
 #: whole registry down rather than just this page. Found by walking the
@@ -63,81 +64,12 @@ TITLE = "App audio"
 ICON = "audio-input-microphone-symbolic"
 
 
-def _strip(box: Gtk.Box) -> None:
+def _strip(box: Gtk.Widget) -> None:
     child = box.get_first_child()
     while child is not None:
-        following = child.get_next_sibling()
+        nxt = child.get_next_sibling()
         box.remove(child)
-        child = following
-
-
-class _StateRow(Gtk.Box):
-    """A labelled fact whose value is filled in off the main loop."""
-
-    def __init__(self, label: str, initial: str = "not checked yet") -> None:
-        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        name = Gtk.Label(label=label, xalign=0.0, hexpand=True, wrap=True)
-        name.add_css_class("dim-label")
-        self.value = Gtk.Label(label=initial, xalign=1.0, wrap=True, selectable=True)
-        self.append(name)
-        self.append(self.value)
-        #: The button, when this fact has one. `None` for every row whose
-        #: answer cannot be changed from anywhere a button can reach.
-        self._route: Optional[Gtk.Widget] = None
-
-    def set_state(self, text: str, ok: Optional[bool] = None) -> None:
-        """`ok=None` is a fact with no verdict, and giving it one is how a
-        panel invents a problem."""
-        self.value.set_label(text)
-        for cls in ("success", "error"):
-            self.value.remove_css_class(cls)
-        if ok is True:
-            self.value.add_css_class("success")
-        elif ok is False:
-            self.value.add_css_class("error")
-
-    def set_route(self, route: Optional[Gtk.Widget]) -> None:
-        """Put `route` at the end of this row, replacing any earlier one.
-
-        **Only ever called with a button that changes the answer.** The caller
-        decides that; this method only places it. Same rule as
-        `gui/surfaces/devices.py`: a button that opens a page and changes
-        nothing is a worse dead end than the sentence it replaced.
-        """
-        if self._route is not None:
-            self.remove(self._route)
-            self._route = None
-        if route is not None:
-            self._route = route
-            self.append(route)
-
-
-class _Row(Gtk.Box):
-    """One line of "what is playing", with whether it can be transcribed."""
-
-    def __init__(self, label: str, value: str, ok: Optional[bool] = None) -> None:
-        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        name = Gtk.Label(label=label, xalign=0.0, hexpand=True, wrap=True)
-        value_label = Gtk.Label(label=value, xalign=1.0, wrap=True, selectable=True)
-        self.append(name)
-        self.append(value_label)
-        if ok is True:
-            value_label.add_css_class("success")
-        elif ok is False:
-            value_label.add_css_class("error")
-
-
-class _Card(Gtk.Box):
-    """A titled group of rows. `card` is this repo's own class for it."""
-
-    def __init__(self, title: str, *children: Gtk.Widget) -> None:
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        self.add_css_class("card")
-        head = Gtk.Label(label=title, xalign=0.0)
-        head.add_css_class("heading")
-        self.append(head)
-        for child in children:
-            self.append(child)
+        child = nxt
 
 
 def _what_is_playing() -> "tuple[list, str]":
@@ -191,29 +123,28 @@ def _sandbox_caveat() -> str:
             f"while a skill-run capture may not.")
 
 
-#: The page that grants the sound permission. `heard-sound` is written in
-#: `settings_window/privacy.py` and nowhere else, so this is the only page on
-#: which the answer can change - the same route `gui/surfaces/desktop.py` uses
-#: for the two gates it names there.
+#: The switch that lets an application's audio be captured - the microphone's
+#: own consent, since a call records whoever is speaking in it.
+CONSENT_KEY = "heard-sound-sense-enabled"
+#: Kept for callers that still open the page that writes it.
 CONSENT_TARGET = "settings:privacy"
 
 
-def _consent_route(app: Any, allowed: Optional[bool]) -> Optional[Gtk.Widget]:
-    """The way out of a refused sound permission, and nothing else.
+def _consent_route(app: Any, allowed: Optional[bool],
+                   on_change=None) -> Optional[Gtk.Widget]:
+    """A "Turn on" banner for a refused permission, and nothing else.
 
-    **A route only on refusal.** Granted has nothing to fix, so a button there
-    would open Privacy settings and change nothing - the dead end
-    `gui/surfaces/devices.py` calls out by name. `None` is a fact with no
-    verdict, and offering a button on it would claim a certainty the row has
-    just said it lacks. `app is None` is a panel built headless by a test, and
-    `common.wire_page_button` closes over the app it is handed, so there would be
-    nothing to press.
+    **Only on refusal.** Granted has nothing to fix; `None` is a fact with no
+    verdict, and a button would claim the certainty the page just said it
+    lacks; `app is None` is a headless build with nothing to press. It used to
+    open Privacy settings and leave the person to find the row - the switch is
+    now turned on here, by its Settings name (`common.consent_banner`).
     """
     if allowed is not False or app is None:
         return None
-    return common.wire_page_button(
-        common.open_settings_button("Open Privacy settings", CONSENT_TARGET),
-        app, CONSENT_TARGET)
+    return common.consent_banner(app, CONSENT_KEY,
+                                 "Nothing is captured until it is on.",
+                                 on_change=on_change)
 
 
 def _consent() -> "tuple[str, Optional[bool]]":
@@ -226,176 +157,259 @@ def _consent() -> "tuple[str, Optional[bool]]":
     return ("Not allowed - 'Let Chronoa name a sound when you ask' is off", False)
 
 
+#: How long to listen, as chips rather than a spin box: these are the four
+#: lengths people ask for, and 5-600 seconds is the skill's own range.
+DURATIONS = ((30, "30 sec"), (60, "1 min"), (300, "5 min"), (600, "10 min"))
+
+
 def build(app: Any = None) -> Gtk.Widget:
-    """The page. Everything after this runs off the main loop, on demand."""
-    page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-    for margin in ("margin-top", "margin-bottom", "margin-start", "margin-end"):
-        page.set_property(margin, 12)
+    """Transcribe what an application is playing: pick it, start, read it.
 
-    headline = Gtk.Label(
-        label="Chronoa can transcribe what an application is playing - a call in "
-              "a browser, a video, a podcast - by capturing that application's "
-              "audio stream. Here is whether this machine can do it right now.",
-        xalign=0.0, wrap=True)
-    headline.add_css_class("title-4")
+    **Why it was rebuilt (2026-10-14).** The page was a diagnostics table: an
+    essay for a heading, red key/value rows, a sandbox's address-space ceiling
+    explained to the person, a permission row that sent them to Settings, no
+    list of apps to choose from, and the controls floating at the bottom. Its
+    Start button also never said *which* app, so with two playing the skill
+    always refused ("say which one with stream="). Now: blockers are banners
+    that fix themselves, the playing apps are a list you pick from, duration
+    is four chips, Start is one button, and the transcript lands in a card
+    with Copy and Send to conversation. The engineering is behind Details.
+    """
+    page = common.page_body(16)
+    for side in ("top", "bottom", "start", "end"):
+        getattr(page, f"set_margin_{side}")(18)
+    state = {"streams": [], "chosen": "", "ok": None, "consent": None, "seconds": 60,
+             "running": False}
 
-    can_row = _StateRow("Transcription")
-    consent_row = _StateRow("Permission")
-    caveat_row = _StateRow("From a skill")
+    hero = Gtk.Box(spacing=14)
+    hero.append(Gtk.Image(icon_name="audio-x-generic-symbolic", pixel_size=48))
+    words = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER)
+    title = Gtk.Label(label="Transcribe what's playing", xalign=0.0)
+    title.add_css_class("title-2")
+    words.append(title)
+    words.append(_dim("A call, a video, a podcast - Chronoa writes down what is said, "
+                      "on this computer."))
+    hero.append(words)
+    page.append(hero)
 
-    status = Gtk.Label(label="Reading the audio graph…", xalign=0.0, wrap=True)
-    stream_rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+    blockers = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+    page.append(blockers)
 
-    # The action. **Not decorative.** A page that answers "yes you can" and
-    # offers no way to do it is a card over a queue nothing can enqueue, so the
-    # button runs the real skill through the same dispatch the model uses.
-    seconds = Gtk.SpinButton.new_with_range(5, 600, 5)
-    seconds.set_value(60)
-    seconds.set_tooltip_text("How many seconds of the application's audio to "
-                             "capture and transcribe.")
-    go = Gtk.Button(label="Transcribe it now")
+    # -- what to capture ---------------------------------------------------
+    sources = Adw.PreferencesGroup(title="Playing now")
+    refresh = Gtk.Button(icon_name="view-refresh-symbolic", valign=Gtk.Align.CENTER,
+                         tooltip_text="Look again")
+    refresh.add_css_class("flat")
+    sources.set_header_suffix(refresh)
+    stream_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+    stream_list.add_css_class("boxed-list")
+    sources.add(stream_list)
+    mic_note = _dim("")
+    mic_note.set_visible(False)
+    sources.add(mic_note)
+    page.append(sources)
+
+    # -- how long, and go --------------------------------------------------
+    controls = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10,
+                       halign=Gtk.Align.CENTER)
+    chips = Gtk.Box(spacing=0, halign=Gtk.Align.CENTER)
+    chips.add_css_class("linked")
+    first = None
+    for seconds_value, label in DURATIONS:
+        chip = Gtk.ToggleButton(label=label)
+        if first is None:
+            first = chip
+        else:
+            chip.set_group(first)
+        chip.set_active(seconds_value == state["seconds"])
+        chip.connect("toggled", lambda b, v=seconds_value: b.get_active()
+                     and state.update(seconds=v))
+        chips.append(chip)
+    controls.append(_dim("Listen for", center=True))
+    controls.append(chips)
+    go = Gtk.Button(label="Start transcribing")
+    go.add_css_class("pill")
     go.add_css_class("suggested-action")
-    said = Gtk.Label(label="", xalign=0.0, wrap=True, selectable=True)
+    go.set_size_request(240, -1)
+    controls.append(go)
+    why_not = _dim("", center=True)
+    controls.append(why_not)
+    page.append(controls)
 
-    def start(_button=None):
-        # Off the main loop: `tools.execute_tool` is a subprocess that runs for
-        # as long as the capture, and the app must not freeze for a minute.
-        go.set_sensitive(False)
-        said.set_label("Capturing and transcribing…")
-        wanted = int(seconds.get_value())
+    # -- the transcript ----------------------------------------------------
+    result = Adw.PreferencesGroup(title="Transcript")
+    result.set_visible(False)
+    text = Gtk.TextView(editable=False, wrap_mode=Gtk.WrapMode.WORD_CHAR,
+                        top_margin=12, bottom_margin=12, left_margin=12, right_margin=12)
+    text.add_css_class("card")
+    result.add(text)
+    actions = Gtk.Box(spacing=8, margin_top=8)
+    copy = Gtk.Button(label="Copy")
+    copy.add_css_class("pill")
+    send = Gtk.Button(label="Send to conversation")
+    send.add_css_class("pill")
+    actions.append(copy)
+    actions.append(send)
+    result.add(actions)
+    page.append(result)
 
-        def work():
-            from shani_chronoa import tools
-            result = tools.execute_tool(
-                "recording", {"action": "capture", "seconds": wanted})
-            GLib.idle_add(done, getattr(result, "text", str(result)))
+    # -- other ways in, and the details ------------------------------------
+    more = Adw.PreferencesGroup()
+    file_row = Adw.ActionRow(title="Transcribe a recording file…",
+                             subtitle="An audio or video file, speakers told apart",
+                             activatable=True)
+    file_row.add_prefix(Gtk.Image(icon_name="document-open-symbolic"))
+    file_row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
+    file_row.connect("activated", lambda *_: app is not None
+                     and app.activate_action("transcribe-file", None))
+    more.add(file_row)
+    details = Adw.ExpanderRow(title="Details", subtitle="What this machine can do, and why")
+    engine_row = Adw.ActionRow(title="Speech engine", subtitle="checking…", subtitle_selectable=True)
+    consent_row = Adw.ActionRow(title="Permission", subtitle="checking…")
+    caveat_row = Adw.ActionRow(title="From a skill", subtitle="checking…")
+    tip_row = Adw.ActionRow(title="Ask in conversation",
+                            subtitle="\u201ctranscribe what's playing in Chrome for the next minute\u201d",
+                            subtitle_selectable=True)
+    for row in (engine_row, consent_row, caveat_row, tip_row):
+        details.add_row(row)
+    more.add(details)
+    page.append(more)
 
-        threading.Thread(target=work, daemon=True).start()
+    # -- behaviour ---------------------------------------------------------
+    def can_start() -> str:
+        if state["running"]:
+            return "Listening…"
+        if state["ok"] is False:
+            return "Needs a speech model first."
+        if state["consent"] is False:
+            return "Needs the permission above."
+        if not state["chosen"]:
+            return "Play something, then pick it above." if not state["streams"] else "Pick what to transcribe."
+        return ""
 
-    def done(text: str):
-        go.set_sensitive(True)
-        # The sentence is the tool's own, including its refusals - a consent
-        # refusal here must name the switch, not a generic "failed".
-        said.set_label(text)
-        return False
-
-    go.connect("clicked", start)
-
-    unlock = Gtk.Button(label="Look again", halign=Gtk.Align.START)
+    def update_go() -> None:
+        reason = can_start()
+        go.set_sensitive(not reason)
+        why_not.set_text(reason if not state["running"] else
+                         f"Listening to it for {state['seconds']} seconds, then transcribing…")
 
     def fill(streams: Iterable, problem: str) -> None:
-        _strip(stream_rows)
-        if problem:
-            status.set_label(problem)
-            stream_rows.append(_Row("What is playing", "could not be read"))
-            return
+        _strip(stream_list)
         found = list(streams)
-        if not found:
-            status.set_label("Nothing is playing or recording audio right now - "
-                            "a quiet machine and not a failure.")
-            stream_rows.append(_Row("What is playing",
-                                    "no application has an audio stream open"))
-            return
         live = [s for s in found if s.recordable]
-        status.set_label(
-            f"{len(live)} of {len(found)} can be transcribed."
-            if live else
-            "Nothing here can be transcribed - these are applications' "
-            "microphones, not audio leaving them.")
-        for st in found:
-            if st.recordable:
-                # The capture name, not only the friendly one: `media.name` is
-                # what a person recognises, `node.name` is what
-                # `pw-record --target` takes, and a page that shows one while
-                # the action needs the other is the dead-control class.
-                stream_rows.append(
-                    _Row(f"{st.label}  ({st.name})", "can be transcribed", True))
+        mics = [s for s in found if not s.recordable]
+        state["streams"] = live
+        if state["chosen"] not in {s.name for s in live}:
+            state["chosen"] = live[0].name if len(live) == 1 else ""
+        if problem:
+            stream_list.append(Adw.ActionRow(title="Could not read what is playing",
+                                             subtitle=problem))
+        elif not live:
+            stream_list.append(Adw.ActionRow(
+                title="Nothing is playing right now",
+                subtitle="Start the video or call, then press refresh. A quiet machine, not a fault."))
+        group_head = None
+        for st in live:
+            radio = Gtk.CheckButton(valign=Gtk.Align.CENTER)
+            if group_head is None:
+                group_head = radio
             else:
-                stream_rows.append(_Row(st.label, "this app's own microphone"))
+                radio.set_group(group_head)
+            radio.set_active(st.name == state["chosen"])
+            radio.connect("toggled", lambda b, n=st.name: b.get_active()
+                          and (state.update(chosen=n), update_go()))
+            # The capture name too: `media.name` is what a person recognises,
+            # `node.name` is what `pw-record --target` takes.
+            row = Adw.ActionRow(title=GLib.markup_escape_text(st.label),
+                                subtitle=GLib.markup_escape_text(st.name),
+                                activatable_widget=radio)
+            row.add_prefix(radio)
+            stream_list.append(row)
+        mic_note.set_text(
+            f"{len(mics)} app(s) using the microphone - an app's own microphone "
+            f"cannot be captured, only audio leaving it." if mics else "")
+        mic_note.set_visible(bool(mics))
+        update_go()
 
-    def show(streams: Iterable, problem: str, can: str, ok: Optional[bool],
-             consent: str, consent_ok: Optional[bool], caveat: str) -> bool:
-        unlock.set_sensitive(True)
+    def show(streams, problem, can, ok, consent, consent_ok, caveat) -> bool:
+        refresh.set_sensitive(True)
+        state.update(ok=ok, consent=consent_ok)
+        _strip(blockers)
+        if ok is False:
+            blockers.append(common.banner(
+                f"Chronoa cannot hear yet: {can}", "Download a speech model",
+                (lambda: app.activate_action("download-speech-model", None)) if app else (lambda: None)))
+        route = _consent_route(app, consent_ok, on_change=again)
+        if route is not None:
+            blockers.append(route)
+        engine_row.set_subtitle(can)
+        consent_row.set_subtitle(consent)
+        caveat_row.set_subtitle(caveat or "not read")
         fill(streams, problem)
-        can_row.set_state(can, ok)
-        consent_row.set_state(consent, consent_ok)
-        # **The refused gate now has a way out of it.** This panel has always
-        # named the switch precisely - "Let Chronoa name a sound when you ask is
-        # off" - and offered nothing to click, which is the dead end
-        # `tests/test_dead_ends_have_buttons.py` was written about. The key is
-        # written in `settings_window/privacy.py` and nowhere else, so that is
-        # the only page that can change it.
-        #
-        # Offered **only** on refusal: granted has nothing to fix, and
-        # `ok=None` is a fact with no verdict to act on. `app is None` is a
-        # panel built headless by a test; `wire_page_button` closes over the app
-        # it is handed, so there would be nothing to press.
-        consent_row.set_route(_consent_route(app, consent_ok))
-        caveat_row.set_state(caveat or "not read", None)
         return False
 
     def read_off_loop() -> None:
-        """**Off the main loop, on a thread.** `pw-dump` and a whisper probe are
-        subprocesses, and probing inside an idle callback is the bug that froze
-        the app for seconds - so this never runs here."""
+        """**Off the main loop.** `pw-dump` and a whisper probe are
+        subprocesses; probing in an idle callback froze the app for seconds."""
         streams, problem = _what_is_playing()
         can, ok = _can_transcribe()
         consent, consent_ok = _consent()
         caveat = _sandbox_caveat()
-        GLib.idle_add(show, streams, problem, can, ok, consent, consent_ok,
-                     caveat)
+        GLib.idle_add(show, streams, problem, can, ok, consent, consent_ok, caveat)
 
-    def again(_button: Gtk.Button = None) -> None:
-        unlock.set_sensitive(False)
+    def again(*_a) -> None:
+        refresh.set_sensitive(False)
         threading.Thread(target=read_off_loop, daemon=True).start()
 
-    unlock.connect("clicked", again)
+    def start(_button=None) -> None:
+        state["running"] = True
+        update_go()
+        wanted, seconds = state["chosen"], state["seconds"]
 
-    # **Behind a scroller, because "what is playing right now" grows.** A machine
-    # with four captured streams makes this card taller than any window, and
-    # `test_every_surface_can_scroll` is the check that caught `inventory` shipping
-    # the same defect - rows straight into the toolbar's slot, unreachable at the
-    # bottom at every height. The controls that act on the list stay *above* it,
-    # so pressing one never scrolls away from what it acted on.
-    scroller = Gtk.ScrolledWindow()
-    scroller.set_vexpand(True)
-    scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-    scrollable = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-    scrollable.append(headline)
-    scrollable.append(_Card("What is possible", can_row, consent_row, caveat_row))
-    scrollable.append(_Card("What is playing right now", status, stream_rows))
-    scroller.set_child(scrollable)
-    page.append(scroller)
-    # **A FlowBox, not a horizontal Box.** Five items end to end measured
-    # 529px against the contract's 480px, so a narrow window clipped or
-    # side-scrolled them - the contract's own `test_no_surface_overflows...`
-    # caught it. The FlowBox bottoms out at 158px and stacks instead, which is
-    # the widget `OrganStrip` was switched to for the same reason.
-    controls = Gtk.FlowBox()
-    controls.set_selection_mode(Gtk.SelectionMode.NONE)
-    controls.set_column_spacing(8)
-    controls.append(Gtk.Label(label="Capture for", xalign=0.0))
-    controls.append(seconds)
-    controls.append(Gtk.Label(label="seconds", xalign=0.0))
-    controls.append(go)
-    controls.append(unlock)
-    page.append(controls)
-    page.append(said)
-    page.append(Gtk.Label(
-        label="Capturing an application records whoever is speaking in it, so it "
-              "sits behind the same permission as the microphone.",
-        xalign=0.0, wrap=True))
-    page.append(Gtk.Label(
-        label="Ask for it in conversation with: \"transcribe what's playing in "
-              "Chrome for the next minute\".",
-        xalign=0.0, wrap=True, selectable=True))
+        def work():
+            from shani_chronoa import tools
+            out = tools.execute_tool("recording", {"action": "capture", "seconds": seconds,
+                                                   "stream": wanted})
+            GLib.idle_add(done, getattr(out, "text", str(out)))
+        threading.Thread(target=work, daemon=True).start()
 
+    def done(said: str) -> bool:
+        state["running"] = False
+        update_go()
+        text.get_buffer().set_text(said)
+        result.set_visible(True)
+        return False
+
+    def copy_text(*_a) -> None:
+        buffer = text.get_buffer()
+        page.get_clipboard().set(buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False))
+
+    def send_text(*_a) -> None:
+        buffer = text.get_buffer()
+        window = getattr(app, "window", None)
+        if window is not None and hasattr(window, "set_input_text"):
+            window.set_input_text(buffer.get_text(buffer.get_start_iter(),
+                                                  buffer.get_end_iter(), False))
+            window.present()
+
+    refresh.connect("clicked", again)
+    go.connect("clicked", start)
+    copy.connect("clicked", copy_text)
+    send.connect("clicked", send_text)
+    update_go()
     again()
 
-    # **A health word, from the state this page already holds.** The sidebar's
-    # dot reads `page.status`, and a panel with none gets no dot at all - the
-    # contract's own message calls that "a flat list". `unknown` is honest:
-    # the probes have not run when `build()` returns, and a page that claimed
-    # `ok` before asking anything would be the confident wrong answer.
-    page.status = lambda: common.STATUS_UNKNOWN
-    return page
+    page.status = lambda: (common.STATUS_ATTENTION if state["ok"] is False or state["consent"] is False
+                           else common.STATUS_OK if state["ok"] else common.STATUS_UNKNOWN)
+    shell, set_content = common.surface(TITLE)
+    set_content(common.scrolled(page))
+    shell.status = page.status
+    return shell
+
+
+def _dim(text: str, center: bool = False) -> Gtk.Label:
+    label = Gtk.Label(label=text, xalign=0.5 if center else 0.0, wrap=True, max_width_chars=60)
+    if center:
+        label.set_justify(Gtk.Justification.CENTER)
+    label.add_css_class("dim-label")
+    return label

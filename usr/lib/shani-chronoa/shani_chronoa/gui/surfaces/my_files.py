@@ -214,11 +214,12 @@ class _FilesView(Gtk.Box):
             # Named, with the switch that grants it, because a panel that says
             # "no results" under a shut consent key is indistinguishable from a
             # directory that does not contain the words.
-            self._status_slot.append(self.status_recorder.row(
-                common.STATUS_OFF,
-                f"Indexing your files is turned off ({CONSENT_KEY})",
-                "Nothing has been read and nothing will be searched. "
-                f"Turn on '{CONSENT_KEY}' in Settings to allow it."))
+            # Named as Settings names it, and turned on from here.
+            self.status_recorder.set(common.STATUS_OFF)
+            self._status_slot.append(common.consent_banner(
+                self._app, CONSENT_KEY,
+                "Nothing has been read and nothing will be searched.",
+                on_change=self._after_consent))
             return
 
         state = file_index.status(root=self._directory())
@@ -267,6 +268,11 @@ class _FilesView(Gtk.Box):
         if not _has_scroller(widget):
             widget = common.scrolled(widget, 520)
         self._answer_slot.append(widget)
+
+    def _after_consent(self) -> None:
+        """The switch was turned on from the banner: redraw the page."""
+        self._refresh_status()
+        self._show_index_state()
 
     def _show_index_state(self) -> None:
         """Consent off, or nothing indexed: a sentence and a way out.
@@ -523,15 +529,16 @@ def _consent_refusal(app: Any) -> Gtk.Widget:
     # deliberately narrower than it.
     common.wrap_label(title)
     box.append(title)
+    # **No second button.** The banner above names the switch and turns it on;
+    # this page used to say the same thing three times - status row, this
+    # sentence, and an "Open Settings" that sent the person away to flip the
+    # switch the banner can flip here.
     detail = Gtk.Label(
-        label=(f"Nothing has been read. Turn on “{CONSENT_KEY}” in Settings "
-               "and Chronoa can index a directory you choose."))
+        label=(f"Nothing has been read. Turn on “{common.consent_name(CONSENT_KEY)}” "
+               "above and Chronoa can index a directory you choose."))
     detail.set_xalign(0.0)
     common.wrap_label(detail, 48)
     box.append(detail)
-    button = common.open_settings_button("Open Settings", "privacy")
-    button.set_halign(Gtk.Align.CENTER)
-    box.append(button)
     return box
 
 
@@ -551,7 +558,8 @@ def build(app: Any) -> Gtk.Widget:
     """The "My files" page: an `Adw.NavigationPage`."""
     view = _FilesView(app)
     page, set_content = common.surface(TITLE, SUBTITLE)
-    set_content(view)
+    set_content(common.with_model_banners(app, view, [
+        ("memory", "search your files by meaning - only by exact words")]))
     for name in ("path_entry", "search_entry", "search_button", "reindex",
                  "_show_index_state", "_show_hits", "_show_no_hits",
                  "_refresh_status", "_consent", "_directory"):

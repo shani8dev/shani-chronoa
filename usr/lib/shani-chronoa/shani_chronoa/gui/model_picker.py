@@ -235,6 +235,33 @@ def _heading(text: str) -> Gtk.Widget:
     return label
 
 
+def _choice_section(heading: str, action: str, rows) -> Gtk.Widget:
+    """A heading and one radio row per `(key, word, line, ...)` in `rows`.
+
+    Bound to the stateful `app.<action>` by name and target, so GTK draws the
+    current value as the selected radio and pressing a row changes the state -
+    the same contract every mode chip's menu has, in a popover that is not a
+    menu.
+    """
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+    box.append(_heading(heading))
+    group = None
+    for row in rows:
+        key, word, line = row[0], row[1], row[2]
+        check = Gtk.CheckButton(label=word)
+        check.set_tooltip_text(line)
+        check.set_action_name(f"app.{action}")
+        check.set_action_target_value(GLib.Variant("s", key))
+        if group is None:
+            group = check
+        else:
+            check.set_group(group)
+        check.set_margin_start(12)
+        check.set_margin_end(12)
+        box.append(check)
+    return box
+
+
 def rows_for(app) -> "list":
     """`(key, title, subtitle, usable, active)` for every tier, ordered.
 
@@ -303,11 +330,17 @@ class ModelPicker(Gtk.Popover):
     repository's most-recorded defect wearing a docstring as a disguise.
     """
 
-    def __init__(self, app) -> None:
+    def __init__(self, app, before=(), after=()) -> None:
+        """`before`/`after`: `(heading, action, rows)` choice sections drawn
+        above and below the model lists - where answers may come from, and
+        whether the model is kept in memory, which are about the same engine
+        the lists choose and used to be two chips of their own."""
         super().__init__()
         self.add_css_class("model-picker")
         self.set_size_request(260, -1)
         self._app = app
+        self._before = tuple(before)
+        self._after = tuple(after)
         self.rebuild()
         # **On `show`, not on construction.** The list is ten HTTP requests, so
         # a picker that fetched when it was built would freeze the window at
@@ -353,6 +386,8 @@ class ModelPicker(Gtk.Popover):
         self.set_child(None)
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        for heading, action, rows in self._before:
+            box.append(_choice_section(heading, action, rows))
 
         box.append(_heading("On this machine"))
         local = rows_for(self._app)
@@ -381,6 +416,8 @@ class ModelPicker(Gtk.Popover):
             cloud.append(self._cloud_row(provider_id, model, subtitle, chosen,
                                          pending))
         box.append(cloud)
+        for heading, action, rows in self._after:
+            box.append(_choice_section(heading, action, rows))
 
         scroller = Gtk.ScrolledWindow()
         # **The height is a ceiling, not a demand.** Below it the popover is

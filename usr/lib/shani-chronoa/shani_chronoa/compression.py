@@ -161,11 +161,10 @@ COMPRESSION_FIELD = "chronoa_compression"
 #: Whether the model has a delegation tool (a subagent it can hand a task to).
 #: Kilo's `truncate.ts` changes its hint when one exists - "delegate to save
 #: context" beats "call the tool again", because a subagent spends *its*
-#: context, not this conversation's. Chronoa has no subagent tool today, so
-#: the default is False and the note is byte-identical to what it was; the
-#: parameter is what keeps the default honest rather than a silent behaviour
-#: change.
-HAS_DELEGATION_TOOL = False
+#: context, not this conversation's. True since `skills/delegate.py`
+#: (`Assistant._delegate`); the parameter stays so a caller without an
+#: assistant behind it can still ask for the plain advice.
+HAS_DELEGATION_TOOL = True
 
 #: Prune constants (kilo's compaction.ts prune) — a backward pass that clears
 #: old tool results in place, replacing their content with a marker, until the

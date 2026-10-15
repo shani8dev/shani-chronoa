@@ -37,7 +37,11 @@ from shani_chronoa import (argfile, capabilities, config as config_mod,
                        permissions, planmode, verification)
 from shani_chronoa import outcome_model
 from shani_chronoa.reaction import ReactionLayer, destructive_tools
-from shani_chronoa.sandbox import SandboxConfig, SandboxExecutor, SandboxLevel
+from shani_chronoa.sandbox import (PROFILE_FULL_ACCESS, SandboxConfig,
+                                   SandboxExecutor, SandboxLevel)
+
+#: Tools whose programs need more than the default sandbox ceiling.
+_HEAVY_TOOLS = frozenset({"run_command"})
 from shani_chronoa.skills import discover_skills
 from shani_chronoa.tool_tracking import ToolTracker, ORIGIN_USER
 from typing import Dict, NamedTuple, Tuple
@@ -112,13 +116,46 @@ def current_turn() -> str:
     """The turn label for this process, or "" when none is set."""
     return _CURRENT_TURN
 
+
+#: Which surface asked this turn: "" at the window, else the gateway's name
+#: ("whatsapp", "telegram", "phone"). Set and cleared beside the turn label.
+_CURRENT_CHANNEL = ""
+
+
+def set_current_channel(channel: str) -> str:
+    global _CURRENT_CHANNEL
+    previous, _CURRENT_CHANNEL = _CURRENT_CHANNEL, str(channel or "").strip()
+    return previous
+
+
+def current_channel() -> str:
+    return _CURRENT_CHANNEL
+
+
+def _remote_needs_the_desk(name: str) -> bool:
+    """Whether a call from a remote channel must be approved at the computer.
+
+    **A switch that is on is a decision made at the desk, about the desk.**
+    "Let Chronoa run commands" was turned on by someone sitting here; it does
+    not follow that a message from a phone may run one with nobody watching -
+    and a gateway granted `execute` admits messages without asking. So for a
+    remote turn, anything destructive (`DESTRUCTIVE_CONSENT_KEYS`: running
+    commands, editing and deleting files, ...) and every external MCP tool is
+    asked about on screen, every call, switch or no switch - and refused when
+    nobody is there to answer.
+    """
+    from shani_chronoa import mcp_client
+    if name.startswith(mcp_client.PREFIX):
+        return True
+    return _consent_key_for(name) in capabilities.DESTRUCTIVE_CONSENT_KEYS
+
 logger.info(f"Loaded {len(_HANDLER_FNS)} skill(s): {', '.join(sorted(_HANDLER_FNS)) or '(none)'}")
 
 
 #: Tools whose real work takes longer than the usual 30 s, named here rather
 #: than guessed. The per-origin profile still caps each (300 s when a person
 #: asked, 15 s for an unattended rule), so this can only lengthen up to that.
-_SLOW_TOOLS = {"generate_image": 300, "photo_video": 300, "scan_document": 180, "recording": 300, "photos": 300,
+_SLOW_TOOLS = {"run_command": 600, "generate_image": 300, "photo_video": 300, "scan_document": 180, "recording": 300, "photos": 300,
                # 100 MB at a slow link; a long PDF merge; a polkit password prompt left open.
                "speed_test": 180, "pdf_pages": 150, "set_hostname": 90, "set_locale": 90,
                # A wrist measurement takes up to a minute after a ~5 s connect, and
@@ -146,6 +183,96 @@ _SLOW_TOOLS = {"generate_image": 300, "photo_video": 300, "scan_document": 180, 
                # time but this process is already limited to 185"). Equal fits;
                # anything less refuses.
                "ui_elements": 300, "container": 300, "vm": 120}
+
+
+#: Toolchain folders a project's build reads, kept to these rather than all of
+#: home: `~/.ssh`, keyrings and browser profiles stay unreadable to a build
+#: script. `.config/dconf` is the settings database the skill's own consent
+#: check reads.
+_TOOLCHAIN_DIRS = (".local", ".cargo", ".rustup", ".npm", ".nvm", ".pyenv",
+                   "go", ".gradle", ".m2", ".config/dconf")
+#: Caches a build writes into.
+_CACHE_DIRS = (".cache",)
+
+
+def _run_command_sandbox(arguments: dict) -> SandboxConfig:
+    """Where `run_command` runs, by its `where` argument.
+
+    - `sandbox` (default): `LEVEL_2_ISOLATED_DEV` - bubblewrap (read-only
+      root, private pid/ipc/uts, network cut unless `network` is true) plus
+      Landlock in the kernel (writes only to the project and caches; reads only
+      the system, the project and the toolchain dirs) plus seccomp when its
+      setting is on. The project is writable **in place**.
+    - `container` / `machine`: podman and machined do the isolating, and the
+      skill has to reach the user's systemd and D-Bus to ask them, which the
+      confined levels cut. So those run at host-user level, and the isolation
+      is the container's or the machine's.
+    """
+    import os
+    from shani_chronoa import buildmode
+    where = str(arguments.get("where") or "sandbox").strip().lower()
+    if where in ("container", "machine"):
+        return SandboxConfig(level=SandboxLevel.LEVEL_3_HOST_USER,
+                             timeout_seconds=_SLOW_TOOLS["run_command"])
+    home = os.path.expanduser("~")
+    project = buildmode.project()
+    writable = [project] if project else []
+    cwd = str(arguments.get("cwd") or "").strip()
+    if cwd:
+        target = os.path.realpath(os.path.join(project or home, os.path.expanduser(cwd)))
+        if target.startswith(home + os.sep):
+            writable.append(target)
+    return SandboxConfig(
+        level=SandboxLevel.LEVEL_2_ISOLATED_DEV,
+        timeout_seconds=_SLOW_TOOLS["run_command"],
+        allow_network=bool(arguments.get("network")),
+        writable_dirs=writable + [os.path.join(home, d) for d in _CACHE_DIRS],
+        # `/etc` and `/opt` too: git's config, CA certificates, resolv.conf and
+        # Python's own startup hooks read `/etc`, and Landlock reads only the
+        # system dirs it is told about. Nothing user-secret lives there.
+        readable_dirs=["/etc", "/opt"] + [os.path.join(home, d) for d in _TOOLCHAIN_DIRS],
+    )
+
+
+def approval_preview(name: str, arguments: dict):
+    """What a gated call will do, for the question that asks about it.
+
+    **The change before it is made.** The approval said "may it edit
+    greet.py?" and showed nothing, so the person agreed to an edit they could
+    only see afterwards - in the transcript's diff, once it had happened. For a
+    file write this is `(path, before, after)`, computed the way the skill will
+    apply it; for a command, the command and where it runs. None for anything
+    else, or when the preview cannot be worked out - the question is still
+    asked, just without it.
+    """
+    try:
+        if name == "run_command":
+            return {"command": str(arguments.get("command") or ""),
+                    "where": str(arguments.get("where") or "sandbox"),
+                    "network": bool(arguments.get("network"))}
+        if name not in ("edit_file", "write_text_file"):
+            return None
+        import os
+        from shani_chronoa import buildmode
+        from shani_chronoa import files as files_mod
+        raw = os.path.expanduser(str(arguments.get("path") or ""))
+        # Resolved where the skill will resolve it: the child gets the
+        # project as `CHRONOA_PROJECT`, this process does not.
+        if raw and not os.path.isabs(raw) and buildmode.project():
+            raw = os.path.join(buildmode.project(), raw)
+        path = files_mod.resolve(raw)
+        before = path.read_text(encoding="utf-8") if path.is_file() else ""
+        if name == "write_text_file":
+            after = str(arguments.get("content") or "")
+        else:
+            old = str(arguments.get("old_string") or "")
+            if not old or old not in before:
+                return None
+            after = before.replace(old, str(arguments.get("new_string") or ""), 1)
+        return (path, before, after)
+    except Exception:  # noqa: BLE001 - a preview must never stop the question
+        logger.debug("no approval preview for %s", name, exc_info=True)
+        return None
 
 
 def _get_sandbox_config(tool_name: str) -> SandboxConfig:
@@ -1253,7 +1380,19 @@ def _dispatch_inner(name: str, arguments: dict, by_reference: bool = False,
     # Feedback typed against the "Provide feedback" answer, carried to whichever
     # result this call produces. None on every path that never asked.
     _feedback_for_dispatch = None
-    if permissions.session_grant(name, grant_target):
+    channel = current_channel()
+    remote = bool(channel) and _remote_needs_the_desk(name)
+    if remote and not permissions.can_ask():
+        return DispatchResult(
+            f"Not done: {name} was asked for from {channel}, not at this computer, "
+            "and nobody is at the computer to approve it. Risky actions from a "
+            "remote channel need someone here to say yes.",
+            verification.Verdict.UNVERIFIED, False)
+    # A remote turn honours only a grant given *during this turn* (the person
+    # at the desk said "Allow for this turn"), never a session grant from
+    # earlier use at the desk.
+    if (permissions.turn_grant(name) if remote
+            else permissions.session_grant(name, grant_target)):
         granted_key = _consent_key_for(name)
     else:
         # Nothing on record, so the tool's own consent key decides. If it is
@@ -1269,8 +1408,11 @@ def _dispatch_inner(name: str, arguments: dict, by_reference: bool = False,
         consent_key = _consent_key_for(name)
         if (consent_key is not None
                 and permissions.can_ask()
-                and not config_mod.ChronoaConfig().get_bool(consent_key, False)):
+                and (remote
+                     or not config_mod.ChronoaConfig().get_bool(consent_key, False))):
             title = capabilities.tool_title(name) or name
+            if remote:
+                title = f"{title} - asked from {channel}, not at this computer"
             # **`offer_cancel=True`, wired 2026-10-06.** The option existed and
             # was never offered here, and where it *was* offered (the inbound
             # gateway) nothing acted on it - so either it is offered and honoured,
@@ -1279,7 +1421,9 @@ def _dispatch_inner(name: str, arguments: dict, by_reference: bool = False,
             # true, so the label is true.
             granted = permissions.decide(name, scoped_resource, consent_key,
                                          describe=title.lower(),
-                                         offer_cancel=True)
+                                         offer_cancel=True,
+                                         preview=approval_preview(name, arguments),
+                                         fresh=remote)
             if granted is None:
                 return DispatchResult(
                     f"The user did not allow {name}. Nothing was done.",
@@ -1320,6 +1464,16 @@ def _dispatch_inner(name: str, arguments: dict, by_reference: bool = False,
                 already.verdict, already.ran)
 
     config = _get_sandbox_config(name)
+    if name == "run_command":
+        config = _run_command_sandbox(arguments)
+    # An MCP tool's child has none of the discovery state, so it is told which
+    # server and which remote tool - after the approval, which showed the
+    # model's own arguments.
+    from shani_chronoa import mcp_client
+    if name.startswith(mcp_client.PREFIX) and mcp_client.route(name):
+        arguments = {**arguments, mcp_client.ROUTE_ARG: list(mcp_client.route(name))}
+        config = SandboxConfig(level=SandboxLevel.LEVEL_3_HOST_USER,
+                               timeout_seconds=mcp_client.CALL_TIMEOUT + 10)
     handler_module = handler.__module__
     handler_func = handler.__name__
 
@@ -1426,6 +1580,13 @@ def _dispatch_inner(name: str, arguments: dict, by_reference: bool = False,
     # a half-built module once.
     from shani_chronoa.skills.undo_last_change import TURN_ENV
 
+    # The project folder, so a relative path in a file skill means "in the
+    # project" (`files.PROJECT_ENV`) - set only while Build mode has one.
+    from shani_chronoa import buildmode
+    from shani_chronoa.files import PROJECT_ENV
+    if buildmode.project():
+        env_prefix.append(f"{PROJECT_ENV}={buildmode.project()}")
+
     turn = current_turn()
     if turn:
         # **Only what is needed for attribution.** The child is told which turn
@@ -1438,7 +1599,12 @@ def _dispatch_inner(name: str, arguments: dict, by_reference: bool = False,
         argv = ["env", *env_prefix, *argv]
 
     try:
-        exit_code, output, duration_ms = _SANDBOX.execute(argv, config)
+        # **A larger ceiling for running the project's own programs**: a
+        # compiler or test runner under the default 512 MB address space dies
+        # on allocation, which reads as a failing build. Only this tool.
+        exit_code, output, duration_ms = _SANDBOX.execute(
+            argv, config, **({"profile": PROFILE_FULL_ACCESS}
+                             if name in _HEAVY_TOOLS else {}))
         result = output if exit_code == 0 else f"ERROR(exit={exit_code}): {output}"
         if exit_code != 0:
             _TRACKER.record_call(name, arguments, result, duration_ms, origin=origin)

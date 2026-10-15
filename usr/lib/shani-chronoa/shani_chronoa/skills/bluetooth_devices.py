@@ -29,8 +29,10 @@ def _btctl(*args, timeout=20) -> str:
 
 
 def paired() -> list:
-    out = _btctl("devices", "Paired") or _btctl("paired-devices")
-    devs = re.findall(r"Device ([0-9A-F:]{17}) (.+)", out)
+    # Trusted too: a GATT-only wearable is connected and trusted, not bonded
+    # (see bt_pair.Pairing.connect_only).
+    out = (_btctl("devices", "Paired") or _btctl("paired-devices")) + "\n" + _btctl("devices", "Trusted")
+    devs = list(dict(re.findall(r"Device ([0-9A-F:]{17}) (.+)", out)).items())
     return [(mac, name.strip(), "Connected: yes" in _btctl("info", mac, timeout=10)) for mac, name in devs]
 
 
@@ -44,7 +46,7 @@ def _run(arguments: dict) -> str:
     action = arguments.get("action")
     if action == "list":
         if not devs:
-            return "No Bluetooth devices are paired. Pair one in Settings first."
+            return "No Bluetooth devices are paired. Use Connect a device (in the Devices panel, or Ctrl+K) to pair one."
         return "Paired: " + "; ".join(f"{n} ({'connected' if c else 'not connected'})" for _m, n, c in devs) + "."
     want = (arguments.get("name") or "").strip().lower()
     match = [d for d in devs if want and want in d[1].lower()] or (devs if len(devs) == 1 and not want else [])

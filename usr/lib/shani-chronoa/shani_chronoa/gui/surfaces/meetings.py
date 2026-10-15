@@ -157,20 +157,15 @@ class _MeetingsView(Gtk.Box):
         self._apply_record_gate()
         found = meeting.list_recordings()
         if not _consent(self._app):
-            if found:
-                self._status_slot.append(self.status_recorder.row(
-                    common.STATUS_OFF,
-                    f"Recording is turned off ({CONSENT_KEY})",
-                    f"The microphone will not be opened, so no new meeting can "
-                    f"be captured. The {len(found)} already recorded can still "
-                    "be read and written up - that needs no microphone. Turn on "
-                    f"'{CONSENT_KEY}' in Settings to record again."))
-            else:
-                self._status_slot.append(self.status_recorder.row(
-                    common.STATUS_OFF,
-                    f"Recording a meeting is turned off ({CONSENT_KEY})",
-                    "The microphone will not be opened. Turn on "
-                    f"'{CONSENT_KEY}' in Settings to allow it."))
+            # The switch, named as Settings names it, with the way to turn
+            # it on right here - not a config key and a trip to Settings.
+            self.status_recorder.set(common.STATUS_OFF)
+            kept = (f" The {len(found)} already recorded can still be read and "
+                    "written up - that needs no microphone." if found else "")
+            self._status_slot.append(common.consent_banner(
+                self._app, CONSENT_KEY,
+                "The microphone will not be opened to record." + kept,
+                on_change=self._after_consent))
             return
         if not found:
             self._status_slot.append(common.status_row(
@@ -183,6 +178,11 @@ class _MeetingsView(Gtk.Box):
             f"{len(found)} meeting(s) kept",
             f"newest: {newest['name']} ({newest['bytes'] // 1024} kB), in "
             f"{meeting.recordings_dir()}"))
+
+    def _after_consent(self) -> None:
+        """The switch was turned on from the banner: redraw both halves."""
+        self._refresh_status()
+        self._refresh_list()
 
     def _apply_record_gate(self) -> None:
         """**The Record button says whether it can act, before it is pressed.**
@@ -202,7 +202,7 @@ class _MeetingsView(Gtk.Box):
         if not self._recording_possible():
             self.record.set_sensitive(False)
             self.record.set_tooltip_text(
-                f"Recording is turned off - turn on '{CONSENT_KEY}' in Settings")
+                f"Recording is off - turn on “{common.consent_name(CONSENT_KEY)}” above")
             self.duration.set_sensitive(False)
             return
         self.record.set_tooltip_text("Start recording a meeting")
@@ -215,14 +215,21 @@ class _MeetingsView(Gtk.Box):
         for side in ("start", "end", "top", "bottom"):
             getattr(box, f"set_margin_{side}")(12 if side in ("start", "end") else 10)
 
-        self.record = Gtk.ToggleButton(label="Record")
+        self.record = Gtk.ToggleButton()
+        # The page's one action, so it looks like one: the record glyph and
+        # the word, in the suggested colour.
+        record_content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        record_content.append(Gtk.Image.new_from_icon_name("media-record-symbolic"))
+        record_content.append(Gtk.Label(label="Record"))
+        self.record.set_child(record_content)
+        self.record.add_css_class("suggested-action")
         self.record.set_tooltip_text("Start recording a meeting")
         _label(self.record, "Record a meeting")
         self.record.connect("toggled", self._on_toggled)
         box.append(self.record)
 
         self.duration = Gtk.DropDown.new_from_strings(
-            [label for label, _s in DURATIONS])
+            [f"up to {label}" for label, _s in DURATIONS])
         self.duration.set_selected(0)
         self.duration.set_tooltip_text("How long the ceiling should be")
         _label(self.duration, "Recording length limit")
@@ -235,6 +242,9 @@ class _MeetingsView(Gtk.Box):
         # the audio is already written, and the person can start another. The
         # word and the emphasis are both "stop", not "throw away".
         self.stop.set_sensitive(False)
+        # **Shown only while recording.** Greyed at rest it read as a second
+        # control that did nothing, beside a Record that also did nothing.
+        self.stop.set_visible(False)
         self.stop.set_tooltip_text("Stop waiting for the recording")
         _label(self.stop, "Stop waiting for this recording")
         self.stop.connect("clicked", self._on_stop)
@@ -258,7 +268,7 @@ class _MeetingsView(Gtk.Box):
             button.set_active(False)
             self._present(nothing_state(
                 "dialog-warning-symbolic", "Recording is turned off",
-                f"Turn on '{CONSENT_KEY}' in Settings first."))
+                f"Turn on “{common.consent_name(CONSENT_KEY)}” first."))
             return
         label, seconds = DURATIONS[min(self.duration.get_selected(),
                                        len(DURATIONS) - 1)]
@@ -267,6 +277,7 @@ class _MeetingsView(Gtk.Box):
         self.record.set_sensitive(False)
         self.duration.set_sensitive(False)
         self.stop.set_sensitive(True)
+        self.stop.set_visible(True)
         self.elapsed.set_label(f"Recording — up to {label}")
         self._present(nothing_state(
             "media-record-symbolic", RECORDING, RECORDING_DESC))
@@ -366,6 +377,7 @@ class _MeetingsView(Gtk.Box):
         # would undo the greyed button the status line just promised.
         self._apply_record_gate()
         self.stop.set_sensitive(False)
+        self.stop.set_visible(False)
         self.elapsed.set_label("")
 
     # -- the list ------------------------------------------------------------
@@ -378,7 +390,10 @@ class _MeetingsView(Gtk.Box):
         self._rows = []
         if not found:
             self._present(nothing_state(
-                "media-record-symbolic", NOTHING_YET, NOTHING_YET_DESC))
+                # Not `media-record-symbolic`: that glyph is a filled circle,
+                # and at the empty state's size it is a featureless grey disc.
+                # People talking, not a music file.
+                "system-users-symbolic", NOTHING_YET, NOTHING_YET_DESC))
             return
         group = common.group()
         group.set_margin_start(12)
@@ -562,7 +577,9 @@ def _label(widget: Gtk.Widget, label: str) -> None:
 def build(app: Any) -> Gtk.Widget:
     view = _MeetingsView(app)
     page, set_content = common.surface(TITLE, SUBTITLE)
-    set_content(view)
+    set_content(common.with_model_banners(app, view, [
+        ("stt", "transcribe a meeting"), ("speakers", "tell who said what"),
+        ("llm", "write meeting notes on this computer")]))
     for name in ("record", "stop", "duration", "elapsed", "_refresh_list",
                  "_refresh_status", "_on_toggled", "_on_stop"):
         setattr(page, name, getattr(view, name))

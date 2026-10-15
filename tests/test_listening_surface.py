@@ -210,9 +210,14 @@ def test_the_page_builds_and_asks_for_everything_it_needs():
 
     page = listening.build(None)
     said = _settled(page)
-    for expected in ("Transcription", "Permission", "From a skill",
-                     "What is playing right now", "Transcribe it now"):
+    for expected in ("Transcribe what's playing", "Playing now", "Listen for",
+                     "Start transcribing", "Transcribe a recording file", "Details"):
         assert expected in said, "%r missing from the built page: %r" % (expected, said)
+
+
+def _quiet_prereqs(monkeypatch, listening):
+    monkeypatch.setattr(listening, "_can_transcribe", lambda: ("whisper.cpp", True))
+    monkeypatch.setattr(listening, "_consent", lambda: ("Allowed", True))
 
 
 @pytest.mark.skipif(not _can_build, reason="no display to build a widget tree in")
@@ -220,32 +225,26 @@ def test_a_quiet_machine_is_reported_as_quiet(monkeypatch):
     from shani_chronoa.gui.surfaces import listening
 
     monkeypatch.setattr("shani_chronoa.pipewire.list_streams", lambda: [])
-    monkeypatch.setattr(listening, "_can_transcribe", lambda: ("whisper.cpp", True))
-    monkeypatch.setattr(listening, "_consent", lambda: ("Allowed", True))
-
+    _quiet_prereqs(monkeypatch, listening)
     said = _settled(listening.build(None))
-
-    assert "Nothing is playing" in said, said
+    assert "Nothing is playing right now" in said, said
     assert "quiet machine" in said, said
 
 
 @pytest.mark.skipif(not _can_build, reason="no display to build a widget tree in")
-def test_a_capturable_stream_carries_the_name_to_capture_it_by(monkeypatch):
+def test_a_capturable_stream_is_offered_with_its_capture_name(monkeypatch):
     """`media.name` is what a person recognises and `node.name` is what
-    `pw-record --target` takes. Showing one while the action needs the other is
-    the dead-control class."""
+    `pw-record --target` takes - the row shows both."""
     from shani_chronoa.gui.surfaces import listening
 
     monkeypatch.setattr("shani_chronoa.pipewire.list_streams",
                         lambda: [_Stream("Google Chrome", "Playback", True)])
-    monkeypatch.setattr(listening, "_can_transcribe", lambda: ("whisper.cpp", True))
-    monkeypatch.setattr(listening, "_consent", lambda: ("Allowed", True))
-
-    said = _settled(listening.build(None))
-
-    assert "1 of 1 can be transcribed" in said, said
-    assert "Playback" in said and "Google Chrome" in said, said
-    assert "can be transcribed" in said, said
+    _quiet_prereqs(monkeypatch, listening)
+    page = listening.build(None)
+    said = _settled(page)
+    titles = _row_texts(page)
+    assert "Playback" in titles and "Google Chrome" in titles, titles
+    assert "Pick what to transcribe" not in said, "one stream is chosen without asking"
 
 
 @pytest.mark.skipif(not _can_build, reason="no display to build a widget tree in")
@@ -254,12 +253,49 @@ def test_an_applications_microphone_is_not_offered_as_a_target(monkeypatch):
 
     monkeypatch.setattr("shani_chronoa.pipewire.list_streams",
                         lambda: [_Stream("chromium", "Audio input", False)])
-    monkeypatch.setattr(listening, "_can_transcribe", lambda: ("whisper.cpp", True))
-    monkeypatch.setattr(listening, "_consent", lambda: ("Allowed", True))
+    _quiet_prereqs(monkeypatch, listening)
+    page = listening.build(None)
+    said = _settled(page)
+    assert "own microphone cannot be captured" in said, said
+    assert "chromium" not in _row_texts(page), "a microphone was offered as a target"
 
-    said = _settled(listening.build(None))
 
-    assert "Nothing here can be transcribed" in said, said
-    assert "own microphone" in said, said
-    assert "capture as:" not in said, (
-        "a capture name was offered for a stream that cannot be captured")
+@pytest.mark.skipif(not _can_build, reason="no display to build a widget tree in")
+def test_start_names_the_stream_it_was_given(monkeypatch):
+    """The old button sent only `seconds`, so with two things playing the
+    skill refused every time ("say which one with stream=")."""
+    from shani_chronoa.gui.surfaces import listening
+    from shani_chronoa import tools
+
+    monkeypatch.setattr("shani_chronoa.pipewire.list_streams",
+                        lambda: [_Stream("Google Chrome", "Playback", True),
+                                 _Stream("Firefox", "Playback", True)])
+    _quiet_prereqs(monkeypatch, listening)
+    sent = []
+    monkeypatch.setattr(tools, "execute_tool", lambda name, args, **k: sent.append(args) or "said")
+    page = listening.build(None)
+    _settled(page)
+    radios = _widgets(page, _Gtk.CheckButton)
+    assert len(radios) == 2
+    radios[1].set_active(True)
+    start = [b for b in _widgets(page, _Gtk.Button) if b.get_label() == "Start transcribing"][0]
+    assert start.get_sensitive()
+    start.emit("clicked")
+    _settled(page)
+    assert sent and sent[0]["stream"] == "Firefox", sent
+
+
+def _widgets(widget, kind, acc=None):
+    acc = [] if acc is None else acc
+    if isinstance(widget, kind):
+        acc.append(widget)
+    child = widget.get_first_child()
+    while child is not None:
+        _widgets(child, kind, acc)
+        child = child.get_next_sibling()
+    return acc
+
+
+def _row_texts(page):
+    from gi.repository import Adw
+    return [t for r in _widgets(page, Adw.ActionRow) for t in (r.get_title(), r.get_subtitle()) if t]

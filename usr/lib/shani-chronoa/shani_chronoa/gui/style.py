@@ -294,6 +294,29 @@ class StyleMixin:
         .cajita-input:focus {
             border-color: @accent_color;
         }
+        /* The composer card: the field, the model it goes to and Send as one
+           bordered unit. The field inside it loses its own border - one
+           outline, lit when anything in the card has focus. */
+        .composer-card {
+            background-color: @theme_base_color;
+            border: 1px solid alpha(@theme_fg_color, 0.16);
+            border-radius: 14px;
+            padding: 4px 6px 4px 6px;
+            margin: 2px 8px 8px 8px;
+        }
+        .composer-card:focus-within {
+            border-color: @accent_color;
+        }
+        .composer-card .cajita-input,
+        .composer-card .cajita-input:focus {
+            border: none;
+            background-color: transparent;
+            padding: 6px 6px 2px 6px;
+        }
+        .chronoa-orb.orb-compact {
+            min-width: 40px;
+            min-height: 40px;
+        }
         .mic-off { color: #ef4444; }
 
         /* Suggestion chips. Outlined rather than filled so a screen full of
@@ -561,6 +584,12 @@ class StyleMixin:
                four thick marks filling the column, a long one gets thin ones
                that fit. */
             min-height: 1px;
+            /* **And the width, which the comment above takes for granted.**
+               A tick is a `Gtk.Button`, and Adwaita gives every button a
+               minimum width; `set_size_request(3, -1)` is a floor, not a
+               ceiling, so the "three pixel" ruler measured 16px - a grey bar
+               that read as a broken scrollbar beside the conversation. */
+            min-width: 3px;
             background-color: alpha(@theme_fg_color, 0.18);
             border-radius: 2px;
             border: none;

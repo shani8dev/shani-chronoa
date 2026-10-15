@@ -82,9 +82,28 @@ class _Section(Gtk.Box):
         self.set_margin_top(10)
         heading = _label(title, "rail-heading")
         heading.add_css_class("heading")
-        self.append(heading)
+        heading.set_wrap(False)
+        # **A quiet section is one line, not a card.** Measured on a 1100px
+        # window: nine sections, seven of them "Nothing ..."/"No ...", each a
+        # full card - most of the rail said nothing. The words stay (an
+        # honest empty state is still the rule); they move up beside the
+        # heading and the body hides until there is something in it.
+        head = Gtk.Box(spacing=8)
+        head.append(heading)
+        self._quiet = _label("", "dim-label")
+        self._quiet.set_hexpand(True)
+        self._quiet.set_xalign(1.0)
+        self._quiet.set_wrap(False)
+        self._quiet.set_ellipsize(Pango.EllipsizeMode.END)
+        self._quiet.set_visible(False)
+        head.append(self._quiet)
+        self.append(head)
         self._body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self.append(self._body)
+
+    #: Empty-state lines that are a fault, not a quiet moment: they keep the
+    #: full section, because they need reading.
+    _FAULT = ("Could not", "could not")
 
     def clear(self) -> None:
         child = self._body.get_first_child()
@@ -92,18 +111,59 @@ class _Section(Gtk.Box):
             following = child.get_next_sibling()
             self._body.remove(child)
             child = following
+        self._quiet.set_visible(False)
+        self._body.set_visible(True)
+        self.remove_css_class("rail-quiet")
 
     def row(self, text: str, detail: str = "") -> None:
+        self._loud()
         self._body.append(_label(text))
         if detail:
             self._body.append(_label(detail, "dim-label"))
 
+    def _loud(self) -> None:
+        """Something to show: the full section again."""
+        self._quiet.set_visible(False)
+        self._body.set_visible(True)
+        self.remove_css_class("rail-quiet")
+
     def empty(self, text: str) -> None:
+        has_rows = self._body.get_first_child() is not None
+        if not has_rows and not text.startswith(self._FAULT):
+            self._quiet.set_label(text)
+            self._quiet.set_tooltip_text(text)
+            self._quiet.set_visible(True)
+            self._body.set_visible(False)
+            self.add_css_class("rail-quiet")
+            return
         self._body.append(_label(text, "dim-label"))
+
+    def controlled(self, text: str, detail: str,
+                   actions: "list[tuple[str, str, Callable[[], None]]]") -> None:
+        """A row with small buttons beside it: `(icon, tooltip, run)` each."""
+        self._loud()
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        words = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        words.set_hexpand(True)
+        words.append(_label(text))
+        if detail:
+            words.append(_label(detail, "dim-label"))
+        row.append(words)
+        for icon, tooltip, run in actions:
+            button = Gtk.Button(icon_name=icon)
+            button.add_css_class("flat")
+            button.add_css_class("circular")
+            button.set_valign(Gtk.Align.CENTER)
+            button.set_tooltip_text(tooltip)
+            button.update_property([Gtk.AccessibleProperty.LABEL], [tooltip])
+            button.connect("clicked", lambda _b, r=run: r())
+            row.append(button)
+        self._body.append(row)
 
     def meter(self, fraction: float, tooltip: str = "") -> None:
         """A level bar under a row: a share of something is read faster as a
         length than as a number, and the context headline was only a number."""
+        self._loud()
         bar = Gtk.LevelBar(min_value=0.0, max_value=1.0)
         bar.set_value(max(0.0, min(1.0, float(fraction))))
         # Offsets named for the theme's own colours: under 75% normal, then
@@ -281,7 +341,9 @@ class NowRail(Gtk.Box):
         self._sensing = _Section("Sensing")
         self._tasks = _Section("Tasks")
         self._goals = _Section("Goals")
-        self._posture = _Section("Posture")
+        # "Safety", not "Posture": the section says how risky calls are
+        # treated and what is switched on, and "posture" is the code's word.
+        self._posture = _Section("Safety")
         for section in (self._now, self._context, self._timers, self._changed,
                         self._made, self._events, self._sensing,
                         self._tasks, self._goals, self._posture):
@@ -368,13 +430,27 @@ class NowRail(Gtk.Box):
         if not pending:
             self._timers.empty("No timers pending")
             return
-        for _identifier, label, left in pending:
-            # Not a link: there is no clock/timers panel to open, and a row
-            # that pointed at a panel id the window cannot show would answer
-            # "That panel is not available" - the one destination worse than
-            # none. A countdown is read, not navigated to; cancelling one is a
-            # spoken or typed request, not a click here.
-            self._timers.row(label, f"{_human_seconds(left)} left")
+        # Not a link: there is no timers panel to open. But **Cancel and five
+        # more minutes are buttons on the row** - they used to be "a spoken or
+        # typed request", so stopping a kettle timer meant asking the model to
+        # call a tool. These are the skill's own functions called directly: the
+        # person's click, about their own timer.
+        from shani_chronoa.skills import timer as timer_skill
+
+        def act(fn):
+            try:
+                fn()
+            except Exception:  # noqa: BLE001 - a click must not take the rail down
+                logger.debug("rail: timer action failed", exc_info=True)
+            self._fill_timers()
+
+        for identifier, label, left in pending:
+            self._timers.controlled(label, f"{_human_seconds(left)} left", [
+                ("list-add-symbolic", "Five more minutes",
+                 lambda i=identifier, l=label: act(lambda: timer_skill.add_to_timer(300, i, l))),
+                ("window-close-symbolic", "Cancel this timer",
+                 lambda i=identifier: act(lambda: timer_skill.cancel_timer(i))),
+            ])
 
     def _fill_changed(self) -> None:
         self._changed.clear()
@@ -388,14 +464,26 @@ class NowRail(Gtk.Box):
         if not pairs:
             self._changed.empty("Nothing changed since the last undo point")
             return
-        shown = pairs[:6]
-        for path, before, after in shown:
-            added = sum(1 for line in after.splitlines()
-                        if line not in before.splitlines())
-            self._changed.link(path.name or str(path), f"{added} line(s) added",
+        # **One row per file, its latest change.** The ring holds one entry
+        # per *write*, so a file edited ten times was listed ten times
+        # ("greet.py - 5 line(s) added" down the whole card, measured) - and
+        # the count ignored removed lines, so a rewrite read as pure addition.
+        import difflib
+        latest: dict = {}
+        for path, before, after in pairs:
+            latest.setdefault(str(path), (path, before, after))
+        files = list(latest.values())
+        for path, before, after in files[:6]:
+            added = removed = 0
+            for line in difflib.ndiff(before.splitlines(), after.splitlines()):
+                if line.startswith("+ "):
+                    added += 1
+                elif line.startswith("- "):
+                    removed += 1
+            self._changed.link(path.name or str(path), f"+{added} -{removed}",
                                "diff", self.on_open)
-        if len(pairs) > len(shown):
-            self._changed.empty(f"and {len(pairs) - len(shown)} more")
+        if len(files) > 6:
+            self._changed.empty(f"and {len(files) - 6} more file(s)")
 
     def _fill_made(self) -> None:
         """The files this session's skills declared they made.

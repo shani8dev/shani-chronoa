@@ -514,7 +514,22 @@ class TestExtras:
         for row in surface.build(_StubApp()).extras():
             tooltip = row.get_tooltip_text()
             assert "Read from" in tooltip, tooltip
-            assert "--setup" in tooltip, tooltip
+            # The way to install it is a **Download** on the row (for an extra
+            # that is a Setup page), not a command in a tooltip.
+            if getattr(row, "_extra_state", None) is False and \
+                    getattr(row, "_extra_key", "") in surface._SETUP_PAGES:
+                labels = []
+                child = row.get_first_child()
+                stack = [row]
+                while stack:
+                    node = stack.pop()
+                    if isinstance(node, Gtk.Button) and node.get_label():
+                        labels.append(node.get_label())
+                    c = node.get_first_child()
+                    while c is not None:
+                        stack.append(c)
+                        c = c.get_next_sibling()
+                assert "Download" in labels, (row._extra_key, labels)
 
     def test_math_is_read_from_the_skill_that_gates_on_symengine(self):
         """There is no maths page on the wizard - both engines are distro

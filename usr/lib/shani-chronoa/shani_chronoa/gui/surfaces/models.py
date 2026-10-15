@@ -100,7 +100,11 @@ def _cards(config=None) -> List[Dict[str, Any]]:
     for key, spec in voices.VOICES.items():
         out.append({"kind": "voice", "key": key,
                     "label": f"{spec.label.split(' - ')[0]} (Piper)",
-                    "size": spec.onnx_size, "installed": False})
+                    # Read, not assumed: this was a literal `False`, so every
+                    # Piper voice said "Not downloaded" even when it was the
+                    # one speaking.
+                    "size": spec.onnx_size,
+                    "installed": bool(voices.piper_binary()) and voices.voice_installed(key)})
     for key, voice in voices.KOKORO_VOICES.items():
         # Kokoro's engine and its model are one download shared by every voice,
         # so the card says that rather than implying six separate purchases. And
@@ -313,7 +317,10 @@ def _card(app: Any, card: Dict[str, Any], on_changed: Callable) -> Gtk.Widget:
         button.set_label(
             "Set up" if not installed else
             ("In use" if in_use else ("Loaded" if loaded else "Use it")))
-        button.set_sensitive(installed and not in_use)
+        # Insensitive only for the model already in use. A missing one keeps
+        # its "Set up" live - it was `installed and not in_use`, which disabled
+        # every Set up on the panel (the defect `_activate` documents, back).
+        button.set_sensitive(not in_use)
         button.set_tooltip_text(
             "Set this one up, then choose it - the setup window opens on its page"
             if not installed else
@@ -402,7 +409,7 @@ def _activate(app: Any, card: Dict[str, Any], box: Gtk.Widget,
     if card["installed"]:
         _switch(app, card, box, on_changed)
         return
-    _open_setup(app, box)
+    _open_setup(app, box, SETUP_PAGE_FOR_KIND.get(card.get("kind", ""), ""))
 
 
 def _engine_box(app: Any) -> Gtk.Widget:
@@ -766,7 +773,12 @@ class _StubApp:
         self.config = config
 
 
-def _open_setup(app: Any, widget: Gtk.Widget) -> None:
+#: The Setup page that downloads each card kind - what the button's tooltip
+#: ("the setup window opens on its page") always promised.
+SETUP_PAGE_FOR_KIND = {"llm": "model-picker", "stt": "ears", "voice": "voice", "vision": "eyes"}
+
+
+def _open_setup(app: Any, widget: Gtk.Widget, page: str = "") -> None:
     """Open the setup wizard, the one thing here that can install a model.
 
     **Delegates to `common.open_setup`,** which is the same function `model.py`
@@ -777,7 +789,7 @@ def _open_setup(app: Any, widget: Gtk.Widget) -> None:
     paying for. Kept as a named wrapper so this module's own callers and tests
     keep the name they had.
     """
-    common.open_setup(app, widget)
+    common.open_setup(app, widget, page=page)
 
 
 def _pick(app: Any, card: Dict[str, Any]) -> None:
@@ -790,7 +802,17 @@ def _pick(app: Any, card: Dict[str, Any]) -> None:
     if card["kind"] == "llm":
         config.set("model", key)
     elif card["kind"] == "stt":
-        config.set("whisper-model", key)
+        # **A Parakeet card selects the backend, not a whisper model.** It used
+        # to write `whisper-model = "parakeet:<key>"` - a name whisper.cpp would
+        # try to load - and leave `stt-backend` on whisper, so "Use it" on a
+        # Parakeet card changed nothing that listens and broke what did.
+        # Parakeet has no model key of its own (`stt.build_stt` loads its one
+        # model); a whisper card switches the backend back.
+        if key.startswith("parakeet:"):
+            config.set("stt-backend", "parakeet")
+        else:
+            config.set("whisper-model", key)
+            config.set("stt-backend", "whisper")
     elif card["kind"] == "vision":
         config.set("vision-model", key)
     elif card["kind"] == "voice":

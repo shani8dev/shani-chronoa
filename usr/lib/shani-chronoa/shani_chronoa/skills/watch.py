@@ -15,7 +15,7 @@ from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
 
 _CONSENT_KEY = "bluetooth-gatt-enabled"
-ACTIONS = ("summary", "measure", "settings", "set", "sync_time", "notify", "profile")
+ACTIONS = ("summary", "measure", "settings", "set", "sync_time", "notify", "profile", "find")
 
 
 def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
@@ -84,6 +84,9 @@ def _run(arguments: dict) -> str:
     mac, name = picked
     from shani_chronoa import moyoung as m
     try:
+        if action == "find":
+            m.find_watch(mac)
+            return f"{name} is ringing."
         if action == "summary":
             return _summary(mac, name)
         if action == "measure":
@@ -149,7 +152,7 @@ SCHEMA = {
             "blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, "
             "time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, "
             "other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb "
-            "'22:00-07:00'), 'sync_time', 'notify' (show a message on the watch), or set the 'profile' "
+            "'22:00-07:00'), 'sync_time', 'find' (make the watch ring), 'notify' (show a message on the watch), or set the 'profile' "
             "(height, weight, age, gender - weight is never measured by the watch). "
             "Requires the 'bluetooth-gatt-enabled' consent key."),
         "parameters": {"type": "object", "properties": {

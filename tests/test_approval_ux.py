@@ -519,27 +519,47 @@ class TestTheOrderCarriesMeaning:
     def test_the_refusal_is_last_and_nothing_is_the_default(self):
         # `git_inspect` rather than a destructive tool: every
         # destructive tool is bypass-immune now, so its prompt
-        # offers two options, not three - and the companion test
-        # below asserts that. The order (refusal last, nothing
-        # the default) is the property here, and a gated
-        # read-only tool carries it without the immunity.
+        # offers one fewer option - and the companion test
+        # below asserts that.
+        #
+        # **Refusal last, not a list of a given length.** The list grew a
+        # fourth entry when "Allow for this turn" landed between once and
+        # session, and the literal this used to assert was answering "is the
+        # list what it was" - which is the hand-kept count that `skills_total`
+        # and `42/87/70` are, and it goes red the next time a choice is added
+        # without saying anything about the property. What carries meaning is
+        # that the safe answer is last: it is what a dismissal, a timeout and
+        # nobody-at-all all resolve to, so anything above it must be chosen.
         ask = permissions.approval_request("git_inspect", "/tmp/x",
                                            "git-sense-enabled")
-        assert ask.options == [permissions.ALLOW_ONCE_CHOICE,
-                               permissions.ALLOW_SESSION_CHOICE,
-                               permissions.DENY_CHOICE]
+        assert ask.options[-1] == permissions.DENY_CHOICE, (
+            f"refusal must be last, or it stops being the default: {ask.options!r}")
+        # And every entry is a choice somebody can actually make - an option
+        # `parse_reply` does not recognise falls through to a denial carrying
+        # itself as the reason, so a typo'd label is a refusal in a button's
+        # clothes rather than the grant it reads as.
+        assert ask.options[:-1] == [permissions.ALLOW_ONCE_CHOICE,
+                                    permissions.ALLOW_TURN_CHOICE,
+                                    permissions.ALLOW_SESSION_CHOICE]
 
     def test_a_bypass_immune_tool_offers_no_session_option_it_cannot_keep(self):
-        """Two options, not three - and refusal still last.
+        """No session option - and refusal still last.
 
         Offering "Allow for this session" on a tool whose session grant is
         ignored would be a promise the mechanism cannot make; a presenter that
-        picked it would record a rule that does nothing.
+        picked it would record a rule that does nothing. "Allow for this turn"
+        **is** offered, because the reason these actions are immune is that a
+        grant stretched invisibly across a session and across tools - and a
+        named, turn-scoped one does not.
         """
         ask = permissions.approval_request("delete_file", "/tmp/x",
                                            "file-delete-enabled")
         assert permissions.is_bypass_immune("delete_file")
+        assert permissions.ALLOW_SESSION_CHOICE not in ask.options, (
+            "a session grant on a bypass-immune tool is ignored, so offering it "
+            "is a promise the mechanism cannot keep")
         assert ask.options == [permissions.ALLOW_ONCE_CHOICE,
+                               permissions.ALLOW_TURN_CHOICE,
                                permissions.DENY_CHOICE]
         assert ask.options[-1] == permissions.DENY_CHOICE, (
             "refusal must still be last, or it stops being the default"

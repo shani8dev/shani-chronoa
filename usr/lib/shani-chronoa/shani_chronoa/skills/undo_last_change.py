@@ -413,4 +413,83 @@ def _run(arguments: dict) -> str:
     )
 
 
+def _raw(entry: dict) -> "bytes | None":
+    """The bytes a ring entry recorded, or None when it cannot be read back."""
+    if isinstance(entry.get("content_b64"), str):
+        try:
+            return base64.b64decode(entry["content_b64"], validate=True)
+        except ValueError:
+            return None
+    content = entry.get("content")
+    return content.encode("utf-8") if isinstance(content, str) else None
+
+
+def restore_content(path: "Path | str", raw: bytes) -> str:
+    """Write `raw` back to `path`, recording what it replaces first.
+
+    The one write path for every "put it back" control in the window (a turn's
+    Revert, a Diff row's Revert): the current content becomes a fresh
+    pre-image, so the restore is itself on the ring and can be undone.
+    Returns "" on success, else the reason.
+    """
+    target = Path(path)
+    try:
+        current = target.read_bytes() if target.exists() else b""
+        if current == raw:
+            return "already as it was"
+        record_preimage(target, current)
+        target.write_bytes(raw)
+    except OSError as exc:
+        return exc.strerror or str(exc)
+    return ""
+
+
+def revert_turn(turn: str) -> "tuple[list[str], list[str]]":
+    """Put every file one turn changed back as it was **before that turn**.
+
+    Returns `(restored, skipped)` - paths, and "path: why" for each that was
+    not. Per file it is the turn's *earliest* pre-image, so a turn that edited
+    one file three times goes back past all three, not one step.
+
+    **Itself undoable.** Each file's current content is recorded as a fresh
+    pre-image (attributed to no turn) before it is overwritten, so `/undo` or
+    the Undo button can take the revert back - a one-click revert that could
+    not be reversed would be the destructive control this ring exists to
+    prevent.
+
+    Called by the window's "Revert this turn" button, in the app process: the
+    person pressed it, about changes Chronoa made, so it is not a model's
+    request and needs no consent prompt of its own.
+    """
+    want = " ".join(str(turn or "").split())[:MAX_TURN_CHARS]
+    if not want:
+        return [], []
+    earliest: "dict[str, dict]" = {}
+    for entry in _load():
+        if not isinstance(entry, dict) or str(entry.get("turn") or "") != want:
+            continue
+        path = str(entry.get("path") or "")
+        if path and path not in earliest:
+            earliest[path] = entry
+    restored, skipped = [], []
+    for path, entry in earliest.items():
+        target = Path(path)
+        raw = _raw(entry)
+        if raw is None:
+            skipped.append(f"{path}: its recorded content is unreadable")
+            continue
+        try:
+            current = target.read_bytes() if target.exists() else b""
+            if current == raw:
+                skipped.append(f"{path}: already as it was")
+                continue
+            record_preimage(target, current)
+            target.write_bytes(raw)
+        except OSError as exc:
+            skipped.append(f"{path}: {exc.strerror or exc}")
+            continue
+        restored.append(path)
+    return restored, skipped
+
+
 SKILLS = [Skill(name="undo_last_change", schema=SCHEMA, run=_run)]

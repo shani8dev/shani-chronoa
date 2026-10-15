@@ -138,7 +138,7 @@ class LanBridge:
             self._send(host, text)
             return True
         from shani_chronoa import lan_link
-        link, why = lan_link._link(host, timeout=20)
+        link, why = lan_link._link(host, timeout=20, tcp_port=_port())
         if link is None:
             logger.info("could not reach the phone: %s", why)
             return False
@@ -156,6 +156,44 @@ class LanBridge:
             link.close()
 
 
+UNIT = "shani-chronoa-lan-bridge.service"
+SETTING = "lan-bridge-enabled"
+
+
+def set_enabled(on: bool, config=None) -> "tuple[bool, str]":
+    """Turn the phone bridge on or off: the gateway entry and the user unit.
+
+    Both halves, because either alone does nothing: the unit without the
+    `phone` gateway has nobody to hand text to, and the gateway without the
+    unit has no phone feeding it. The gateway is added **ask-only** - an
+    existing `phone:execute` grant is kept, never created here.
+    """
+    import subprocess
+    from shani_chronoa import gateway as gateway_module
+    if config is None:
+        from shani_chronoa.config import ChronoaConfig
+        config = ChronoaConfig()
+    entries, _errors = gateway_module.parse_config(config.get("gateways", "") or "")
+    kept = [(n, g) for n, g in entries if n != GATEWAY_NAME]
+    mine = [(n, g) for n, g in entries if n == GATEWAY_NAME]
+    if on:
+        kept += mine or [(GATEWAY_NAME, "")]
+    text = ", ".join(f"{n}:{g}" if g and g != "ask" else n for n, g in kept)
+    config.set("gateways", text)
+    config.set(SETTING, "true" if on else "false")
+    try:
+        proc = subprocess.run(["systemctl", "--user", "enable" if on else "disable",
+                               "--now", UNIT], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, str(exc)
+    return proc.returncode == 0, (proc.stderr or "").strip()
+
+
+def _port() -> int:
+    from shani_chronoa import lan_link
+    return int(lan_link.paired_device().get("tcpPort") or lan_link.UDP_PORT)
+
+
 def main(argv: "Optional[list[str]]" = None) -> int:
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(message)s")
@@ -164,6 +202,11 @@ def main(argv: "Optional[list[str]]" = None) -> int:
     bridge = LanBridge(host=host)
 
     from shani_chronoa import lan_link
+    # The paired phone, not the first thing that answers a broadcast: every
+    # link is pinned to it anyway (`lan_link._link`), so another device here
+    # could only ever be refused.
+    if not host:
+        host = lan_link.paired_device().get("address", "")
     if not host:
         for entry in lan_link.listen_once(5.0):
             host = entry.get("address", "")
@@ -189,7 +232,7 @@ def main(argv: "Optional[list[str]]" = None) -> int:
 
     # The steady state: one link held open, replies pushed back to the phone.
     while True:
-        link, why = lan_link._link(host, timeout=30)
+        link, why = lan_link._link(host, timeout=30, tcp_port=_port())
         if link is None:
             logger.info("link failed (%s); retrying in 30s", why)
             time.sleep(30)

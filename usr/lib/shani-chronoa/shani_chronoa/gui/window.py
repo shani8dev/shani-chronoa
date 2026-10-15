@@ -1,6 +1,7 @@
 """The main window: layout, state, the transcript area and text input; styling, questions, attachments and the conversations menu are mixed in."""
 
 import logging
+import os
 import time
 
 import gi
@@ -166,7 +167,7 @@ def _panel_status(page: object) -> "str | None":
 #: vocabulary nobody would remember by the time they needed it.
 MODE_STRIP_CSS = """
 .mode-strip { padding: 2px 4px; }
-.mode-chip { padding: 1px 7px; border-radius: 9px; }
+.mode-chip { padding: 1px 2px; border-radius: 9px; }
 .mode-chip-label { font-size: 10px; opacity: 0.6; }
 .mode-chip-on { background-color: alpha(currentColor, 0.14); }
 .mode-chip-on .mode-chip-label { opacity: 1.0; font-weight: 600; }
@@ -237,25 +238,37 @@ class _ModeStrip(Gtk.Box):
         # Dictate and the Listening page are not modes and are not here: Dictate
         # is one action and stays with the mic button that shares its subject,
         # and the Listening panel is navigation, which belongs to the sidebar.
+        # **Three chips, one question each** (2026-10-14 redesign). The strip had
+        # four chips answering two questions twice - "what may it do" was split
+        # across General/Build, Ask first and a plan toggle beside Send, "where
+        # do answers come from" across a presence chip, an egress chip and the
+        # model row - and "how do I talk to it" had no chip at all, so wake word
+        # and talking over a reply had no visible state anywhere on the window.
+        #
+        #   Work         what it works on + whether it plans first
+        #   Permissions  risky actions + whether it acts on its own
+        #   Voice        mic button / wake word / talking over a reply
+        #
+        # "Where answers come from" and "is the model in memory" moved into the
+        # model button under the composer, beside the model they describe, and
+        # the reply style into the Thinking button. The single-setting chips
+        # below are still **built** - `refresh()` draws them and older tests
+        # reach them - but none is on screen.
         self._rules_chip = self._capability_chip()
-        self.append(self._rules_chip)
         self._auto_chip = self._auto_chip()
-        self.append(self._auto_chip)
         # **Built, not appended - it moved to the composer.** Measured: this
         # strip is 480px of a 496px column, so it was already full, and the
         # chip the newcomer most needs (which model answers) had been pushed off
-        # it entirely. `answer_button` carries plan mode, the model and the
-        # reply style together, beside Send, where the width is.
+        # it entirely. `answer_button` carries plan mode and the reply style
+        # together, beside Send, where the width is; the model has its own
+        # "Answers with" row under the composer (`ChronoaWindow._model_row`).
         #
         # Still constructed and still drawn by `refresh()`: `test_mode_strip`
         # asserts the *css class* on this chip, and a test reaching past the
         # row to ask about a widget is still a test worth keeping.
         self._plan_chip = self._plan_chip()
-        self._answer_button = self._answer_button()
         self._presence_chip = self._presence_chip()
-        self.append(self._presence_chip)
         self._answer_chip = self._egress_chip()
-        self.append(self._answer_chip)
 
         # **Built, not appended.** Four controls moved off the strip to the
         # palette (Ctrl+K) because they are set once per task rather than
@@ -272,7 +285,72 @@ class _ModeStrip(Gtk.Box):
         self._hands_chip = self._hands_free_chip()
         self._style_chip = self._reply_style_chip()
         self._model_chip = self._model_chip()
+        self._work_chip = self._work_chip()
+        self.append(self._work_chip)
+        self._permissions_chip = self._permissions_chip()
+        self.append(self._permissions_chip)
+        self.append(self._hands_chip)
         self.refresh()
+
+    #: The plan rows as a person picks them; `_PLAN`'s words are the chip's.
+    _PLAN_MENU = {"working": "Just do it", "plan": "Plan first"}
+
+    def _work_chip(self) -> Gtk.MenuButton:
+        """What it works on, and whether it plans before acting. One dropdown.
+
+        Both answer "what kind of work is this": Build is the file tools for
+        working on a project, and Plan first makes it say what it would do
+        without changing anything - which a coder reaches for *with* Build, so
+        the two were a pair split across the strip and the button beside Send.
+        Plan is bound to the stateful `app.answer-plan`, so GTK draws it as a
+        radio pair rather than two rows that both toggle.
+        """
+        button, label, image = self._menu_chip("system-run-symbolic")
+        self._work_label = label
+        self._work_image = image
+        menu = Gio.Menu()
+        works_on = Gio.Menu()
+        for key, word, _line, _icon in self._CAPABILITY:
+            works_on.append(word, f"app.answer-rules::{key}")
+        menu.append_section("Works on", works_on)
+        before = Gio.Menu()
+        for key, _word, _line, _icon in self._PLAN:
+            before.append(self._PLAN_MENU[key], f"app.answer-plan::{key}")
+        menu.append_section("Before acting", before)
+        # The project Build mode works in. Choosing one turns Build on.
+        project = Gio.Menu()
+        project.append("Choose project folder…", "app.choose-project")
+        project.append("No project", "app.clear-project")
+        menu.append_section("Project", project)
+        button.set_menu_model(menu)
+        button.update_property(
+            [Gtk.AccessibleProperty.LABEL],
+            ["What it works on, whether it plans first, and which project"])
+        return button
+
+    def _permissions_chip(self) -> Gtk.MenuButton:
+        """What it may do without you: risky calls, and acting unprompted.
+
+        Both are "how much does it do on its own" - one per request, one in the
+        background - and the second had no place on screen at all.
+        """
+        button, label, image = self._menu_chip("security-medium-symbolic")
+        self._permissions_label = label
+        self._permissions_image = image
+        menu = Gio.Menu()
+        risky = Gio.Menu()
+        for key, word, _line, _icon in self._AUTO:
+            risky.append(word, f"app.answer-permission::{key}")
+        menu.append_section("Risky actions", risky)
+        alone = Gio.Menu()
+        for key, word, _line, _icon in self._AMBIENT:
+            alone.append(word, f"app.answer-ambient::{key}")
+        menu.append_section("On its own", alone)
+        button.set_menu_model(menu)
+        button.update_property(
+            [Gtk.AccessibleProperty.LABEL],
+            ["What it may do without asking you"])
+        return button
 
     def _menu_chip(self, icon: str):
         """The shell every dropdown shares: a button, a label, an image.
@@ -471,8 +549,15 @@ class _ModeStrip(Gtk.Box):
     #: is already open - so the pair is one menu with the combinations that mean
     #: something.
     _HANDS = (
-        ("off", "Mic button", "Mic button: listen only while you hold it",
-         "audio-input-microphone-symbolic"),
+        # Press the orb, not hold it: `_toggle_listening` starts a turn that
+        # ends on silence or on a second press. "Hold" described a gesture that
+        # does nothing different.
+        # **`audio-headset-symbolic`, not the microphone.** The composer's
+        # Dictate button is a microphone - the convention for "speak into this
+        # field" - and the two sat side by side at the narrow width as two
+        # identical glyphs meaning different things.
+        ("off", "Mic button", "Mic button: press it to speak",
+         "audio-headset-symbolic"),
         # **`audio-volume-high-symbolic`, not `audio-input-microphone-high-symbolic`.**
         # The `-high` mic is a Yaru name - Adwaita ships only the plain
         # `audio-input-microphone-symbolic`, which the row above already uses for
@@ -598,75 +683,6 @@ class _ModeStrip(Gtk.Box):
         button.update_property(
             [Gtk.AccessibleProperty.LABEL],
             ["Whether Chronoa plans before acting"])
-        return button
-
-    def _answer_button(self) -> Gtk.MenuButton:
-        """Which model answers, how it works it out, how it replies. One control.
-
-        **Three settings, three sections, one button.** ChatGPT merged its model
-        picker and its Thinking slider into one menu, and Claude titles its
-        equivalent page "Change the model, effort, and thinking settings" - so
-        the three rows below are one question ("how should this be answered?")
-        and three chips asking it separately was the shape both moved away from.
-        This file has already paid for the split once: two chips answered
-        overlapping questions and could be set to disagree.
-
-        **The word is the model**, because that is the fact with no other home.
-        At 460px the strip has no room for it and the model was reachable only
-        through the palette, so a person could not see what was answering them.
-        Plan mode and reply style keep their state in the tooltip and in
-        `mode-chip-on`, which is the same highlight every other departure uses.
-
-        **Sections, not one long list.** `Gio.Menu.append_section` puts each
-        heading on screen, so the menu answers "which of these three am I
-        looking at?" without the reader counting rows.
-
-        **The menus are built from the tables this module already keeps** -
-        `_model_rows()`, `_PLAN`, `_STYLES` - and the action names are the ones
-        the four chips already fired, so moving a setting here cannot change
-        what pressing it does.
-        """
-        button, label, image = self._menu_chip("object-select-symbolic")
-        self._answer_label = label
-        self._answer_image = image
-
-        menu = Gio.Menu()
-
-        models = Gio.Menu()
-        for key, word, _line, _icon in self._model_rows():
-            models.append(word, f"app.answer-model::{key}")
-        menu.append_section("Which model", models)
-
-        how = Gio.Menu()
-        for _key, word, _line, _icon in self._PLAN:
-            # Both rows activate the same toggle action, exactly as the plan
-            # chip's own dropdown does - it carries no value, so the chip
-            # redraws from `planmode.is_enabled()` instead.
-            how.append(word, "app.toggle-plan-mode")
-        menu.append_section("How it works it out", how)
-
-        style = Gio.Menu()
-        # **`key`, not a name from another loop.** The first version wrote
-        # `for _key, word, ...` and then interpolated a bare `key` in the f-string
-        # - so all three rows inherited whatever `key` the *model* loop above
-        # left behind, and every one read `reply-style:qwen3-8b`. Measured on the
-        # built window, not reasoned about: pressing "Brief" would have asked for
-        # a reply style called `qwen3-8b`, which is not a style.
-        #
-        # Nothing caught it, which is the part worth keeping: the section
-        # rendered, three rows appeared, the words were right, and
-        # `test_mode_strip` stayed green throughout - because no test presses a
-        # menu row. A control that looks right and acts on nothing else is the
-        # dead-control class this file keeps meeting.
-        for key, word, _line, _icon in self._STYLES:
-            style.append(word, f"app.reply-style::{key}")
-        menu.append_section("How it replies", style)
-
-        button.set_menu_model(menu)
-        button.set_tooltip_text("Which model answers, and how it replies")
-        button.update_property(
-            [Gtk.AccessibleProperty.LABEL],
-            ["Which model answers, how it works it out, how it replies"])
         return button
 
     def _capability_chip(self) -> Gtk.MenuButton:
@@ -1010,7 +1026,9 @@ class _ModeStrip(Gtk.Box):
 
     def set_compact(self, compact: bool) -> None:
         """Icons only, or icons and words. Tooltips and accessible names are
-        unchanged either way, so nothing a screen reader says is lost."""
+        unchanged either way, so nothing a screen reader says is lost.
+
+        """
         stack = [self]
         while stack:
             node = stack.pop()
@@ -1074,20 +1092,40 @@ class _ModeStrip(Gtk.Box):
                        self._read_plan(), self._PLAN,
                        "Whether it plans first", quiet=("working",),
                        image=self._plan_image)
-            # **Drawn here, not on the strip.** `_draw` sets the word, the
-            # icon, the highlight and the tooltip; the menu was built once in
-            # `_answer_button` and `_draw` never touches it. The tooltip is
-            # then completed with the two settings the word does not carry, so
-            # hovering answers all three questions the menu holds.
-            model_rows = self._model_rows()
-            self._draw(self._answer_button, self._answer_label,
-                       self._read_model(), model_rows,
-                       "Which model answers", image=self._answer_image)
-            if model_rows:
-                self._answer_button.set_tooltip_text(
-                    f"Which model answers: {self._answer_label.get_text()}. "
-                    f"{self._answer_tooltip('Whether it plans first', self._read_plan(), self._PLAN)}. "
-                    f"{self._answer_tooltip('Reply style', self._read_reply_style(), self._STYLES)}.")
+            # **The work chip carries two settings in one word.** `_draw` sets
+            # word, icon and highlight from what it works on; plan mode then
+            # appends itself and lights the chip, because a chip that stayed
+            # dark while plan mode held every turn would say "nothing unusual"
+            # about the one setting that changes nothing.
+            plan = self._read_plan()
+            capability = self._read_capability()
+            self._draw(self._work_chip, self._work_label, capability,
+                       self._CAPABILITY, "What it works on", quiet=("general",),
+                       image=self._work_image)
+            # The project's folder name rides on the chip in Build mode, so
+            # "which code is it changing" is answered without opening anything.
+            from shani_chronoa import buildmode
+            folder = buildmode.project()
+            if folder:
+                self._work_label.set_text(
+                    f"{self._work_label.get_text()} · {os.path.basename(folder.rstrip('/'))}")
+            if plan != "working":
+                self._work_label.set_text(self._work_label.get_text() + " · Plan")
+                self._work_chip.add_css_class("mode-chip-on")
+            self._work_chip.set_tooltip_text(
+                f"{self._answer_tooltip('Works on', capability, self._CAPABILITY)}. "
+                f"{self._answer_tooltip('Before acting', plan, self._PLAN)}."
+                + (f" Project: {folder}." if folder else ""))
+            ambient = self._read_ambient()
+            auto = self._read_auto()
+            self._draw(self._permissions_chip, self._permissions_label, auto,
+                       self._AUTO, "Risky actions", quiet=("ask",),
+                       image=self._permissions_image)
+            if ambient != "on-ask":
+                self._permissions_chip.add_css_class("mode-chip-on")
+            self._permissions_chip.set_tooltip_text(
+                f"{self._answer_tooltip('Risky actions', auto, self._AUTO)}. "
+                f"{self._answer_tooltip('On its own', ambient, self._AMBIENT)}.")
             self._draw(self._ambient_chip, self._ambient_label,
                        self._read_ambient(), self._AMBIENT,
                        "When it may act", quiet=("on-ask",),
@@ -1299,7 +1337,13 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         button.set_tooltip_text(
             "Which model answers. Switching loads it and restarts the local "
             "server, so the next reply uses it")
-        button.set_popover(model_picker.ModelPicker(self._app))
+        # Where answers may come from, and whether the model stays in memory,
+        # ride in the same popover: both are about the engine the lists choose,
+        # and both were chips of their own on the strip.
+        button.set_popover(model_picker.ModelPicker(
+            self._app,
+            before=(("Where it answers", "answer-egress", _ModeStrip._EGRESS),),
+            after=(("Model in memory", "answer-presence", self._PRESENCE_WORDS),)))
         # **Held, not inlined.** The palette fetches a provider's list into the
         # cache this picker reads, and an inline popover would keep showing the
         # rows it drew before the answer arrived until the next reopen. The
@@ -1317,8 +1361,14 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         label = Gtk.Label(label="Answers with")
         label.add_css_class("dim-label")
         label.add_css_class("caption")
+        self._model_picker_caption = label
         which = Gtk.Label(label=self._model_word())
         which.add_css_class("caption")
+        # A model name is the one word here with no fixed length, so it is the
+        # one allowed to give way: ellipsised, the toolbar's minimum stays
+        # small enough for the 380px window floor.
+        which.set_ellipsize(Pango.EllipsizeMode.END)
+        which.set_max_width_chars(22)
 
         inside = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         inside.append(lead)
@@ -1329,8 +1379,99 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._model_picker_word = which
         self._model_picker_lead = lead
         row.append(button)
+        row.append(self._thinking_button())
         self._refresh_model_word()
         return row
+
+    #: `_ModeStrip._PRESENCE` with words for a model menu. The strip's
+    #: "Here / Drowsy / Asleep" describe Chronoa; inside "Model in memory"
+    #: they have to describe the model. Same keys, same action.
+    _PRESENCE_WORDS = (
+        ("active", "Kept loaded", "Loaded and answering straight away"),
+        ("drowsy", "Freed when idle",
+         "Loaded now; it lets go of the memory when nothing is asked"),
+        ("sleeping", "Asleep",
+         "Not loaded, and it will not load itself to answer until woken"),
+    )
+
+    #: level -> menu word. Keys are `cloud_llm.THINKING_LEVELS`.
+    _THINKING_WORDS = {"off": "Off", "low": "Low", "medium": "Medium",
+                       "high": "High", "xhigh": "Extra high", "max": "Max"}
+
+    def _thinking_button(self) -> Gtk.MenuButton:
+        """How hard the model thinks, beside the model it applies to.
+
+        **Beside "Answers with" because it is a property of that answer** - the
+        same engine, asked the same turn. Bound to the stateful `app.thinking`
+        action, so GTK draws the current level as the selected radio and the
+        menu cannot disagree with the setting.
+        """
+        from shani_chronoa.cloud_llm import THINKING_LEVELS
+
+        button = Gtk.MenuButton()
+        button.add_css_class("flat")
+        label = Gtk.Label()
+        label.add_css_class("caption")
+        button.set_child(label)
+        menu = Gio.Menu()
+        levels = Gio.Menu()
+        for level in THINKING_LEVELS:
+            levels.append(self._THINKING_WORDS[level], f"app.thinking::{level}")
+        menu.append_section("How hard it thinks", levels)
+        # **The reply style lives here too**: thinking is how much work goes
+        # into the answer, the style how much of it is written out, and both
+        # are set per question. It used to share a button beside Send with plan
+        # mode, which is about acting rather than answering.
+        styles = Gio.Menu()
+        for key, word, _line, _icon in _ModeStrip._STYLES:
+            styles.append(word, f"app.reply-style::{key}")
+        menu.append_section("How it replies", styles)
+        button.set_menu_model(menu)
+        self._thinking_picker_button = button
+        self._thinking_picker_word = label
+        return button
+
+    def _thinking_word(self) -> str:
+        from shani_chronoa.cloud_llm import thinking_level
+        try:
+            level = thinking_level(getattr(self._config, "thinking", "off"))
+        except Exception:                               # noqa: BLE001
+            level = "off"
+        return level
+
+    def _refresh_thinking_word(self) -> None:
+        """Redraw the level, and say what it means for the engine answering now."""
+        label = getattr(self, "_thinking_picker_word", None)
+        button = getattr(self, "_thinking_picker_button", None)
+        if label is None or button is None:
+            return
+        level = self._thinking_word()
+        word = self._THINKING_WORDS[level]
+        compact = getattr(self, "_composer_compact", False)
+        style = "ordinary"
+        strip = getattr(self, "_mode_strip", None)
+        if strip is not None:
+            try:
+                style = strip._read_reply_style()
+            except Exception:                           # noqa: BLE001
+                style = "ordinary"
+        style_word = next((r[1] for r in _ModeStrip._STYLES if r[0] == style), "")
+        # The style is named only when it departs from ordinary, the same
+        # "quiet" rule every chip follows.
+        suffix = "" if style == "ordinary" else f" · {style_word}"
+        label.set_label((f"Think: {word}" if compact else f"Thinking: {word}") + suffix)
+        if level == "off":
+            what = "It answers without thinking first - the fastest choice."
+        elif self._answering_kind() == "cloud":
+            what = ("The cloud provider is asked for this effort. One that "
+                    "cannot is asked at High, then without thinking.")
+        else:
+            what = ("A local model has no levels, so this turns its thinking "
+                    "on. On a CPU that is most of the wait.")
+        button.set_tooltip_text(f"Thinking: {word}. {what} Replies: {style_word or 'Ordinary'}.")
+        button.update_property(
+            [Gtk.AccessibleProperty.LABEL],
+            [f"How hard it thinks before answering, currently {word}"])
 
     def _refresh_model_word(self) -> None:
         """Redraw the chosen model's name under the composer.
@@ -1348,6 +1489,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         the handler); a version taking an argument would have two callers and one
         of them would pass the old one.
         """
+        self._refresh_thinking_word()
         label = getattr(self, "_model_picker_word", None)
         if label is None:
             return
@@ -1360,9 +1502,28 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # than any other.
         button = getattr(self, "_model_picker_button", None)
         if button is not None:
+            where = self._egress_row()
+            lead = getattr(self, "_model_picker_lead", None)
+            if lead is not None and where is not None and len(where) > 3 and where[3]:
+                # **The icon says where answers go**, so "Nothing leaves" is
+                # still visible at a glance now that its chip is gone.
+                lead.set_from_icon_name(where[3])
             button.set_tooltip_text(
-                "Answers with %s. Click to change it - switching loads the "
-                "model and restarts the local server" % self._model_word())
+                "Answers with %s%s. Click to change the model, where answers "
+                "come from, or whether the model stays in memory" % (
+                    self._model_word(),
+                    "" if where is None else " - " + where[1]))
+
+    def _egress_row(self):
+        """The `_EGRESS` row in force, or None when the strip cannot say."""
+        strip = getattr(self, "_mode_strip", None)
+        if strip is None:
+            return None
+        try:
+            current = strip._read_egress()
+        except Exception:                               # noqa: BLE001
+            return None
+        return next((r for r in _ModeStrip._EGRESS if r[0] == current), None)
 
     def _answering_kind(self) -> str:
         """`"cloud"`, `"local"` or `""` - which engine is holding the turn.
@@ -1610,6 +1771,116 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._apply_css()
         self._apply_motion_preference()
 
+    def _home_board(self) -> "Optional[Gtk.Widget]":
+        """What an empty conversation shows under the suggestions.
+
+        **Why (2026-10-15).** Measured on a 1100x760 window, the empty state
+        was the orb, a hint, six chips and ~200px of nothing above the composer,
+        while the useful things - a timer running, the conversation from an
+        hour ago, the panel that transcribes a file - were a menu or a sidebar
+        away. Each part reads one existing source and hides itself when it has
+        nothing to say, so a fresh install sees quick actions and little else.
+        """
+        app = getattr(self, "_app", None)
+        board = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14,
+                        margin_top=18, halign=Gtk.Align.FILL)
+        board.set_size_request(-1, -1)
+
+        def heading(text: str) -> Gtk.Label:
+            label = Gtk.Label(label=text, xalign=0.0)
+            label.add_css_class("heading")
+            return label
+
+        def activate(name: str, value=None):
+            return lambda *_: app is not None and app.activate_action(name, value)
+
+        # -- today ---------------------------------------------------------
+        tiles = []
+        try:
+            from shani_chronoa.skills import timer as timer_skill
+            pending = timer_skill.active_timers()
+        except Exception:  # noqa: BLE001
+            pending = []
+        if pending:
+            _ident, label, left = pending[0]
+            minutes, seconds = divmod(int(left), 60)
+            tiles.append(("Next timer", f"{minutes}:{seconds:02d}", label or "timer"))
+        try:
+            from shani_chronoa.gui.surfaces.machine import _battery
+            battery = _battery()
+        except Exception:  # noqa: BLE001
+            battery = None
+        if battery:
+            tiles.append(("Battery", f"{battery['percent']}%", battery["status"].lower()))
+        try:
+            from shani_chronoa import model_status
+            missing = model_status.missing()
+        except Exception:  # noqa: BLE001
+            missing = []
+        if tiles or missing:
+            from shani_chronoa.gui import charts
+            board.append(heading("Today"))
+            row = Gtk.Box(spacing=10, homogeneous=True)
+            for title, value, detail in tiles:
+                row.append(charts.stat(title, value, detail))
+            if missing:
+                tile = charts.stat("Extras", f"{len(missing)} to add", "vision, voice, memory…")
+                add = Gtk.Button(label="Set up", halign=Gtk.Align.START, margin_start=12,
+                                 margin_bottom=10)
+                add.add_css_class("pill")
+                add.connect("clicked", activate("setup-page", GLib.Variant("s", "extras")))
+                tile.append(add)
+                row.append(tile)
+            board.append(row)
+
+        # -- pick up where you left off ------------------------------------
+        try:
+            from shani_chronoa import conversation_store
+            sessions = [x for x in conversation_store.list_sessions(conversation_store.session_dir())
+                        if not x["active"] and x["messages"]][:3]
+        except Exception:  # noqa: BLE001
+            sessions = []
+        if sessions:
+            board.append(heading("Pick up where you left off"))
+            listing = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+            listing.add_css_class("boxed-list")
+            for session in sessions:
+                row = Adw.ActionRow(title=GLib.markup_escape_text(session["title"]),
+                                    subtitle=f"{session['messages']} messages",
+                                    activatable=True)
+                row.add_prefix(Gtk.Image(icon_name="chat-bubbles-text-symbolic"))
+                row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
+                row.connect("activated", activate("switch-conversation",
+                                                  GLib.Variant("s", session["id"])))
+                listing.append(row)
+            board.append(listing)
+
+        # -- quick actions -------------------------------------------------
+        wanted = [
+            ("Transcribe a recording", "audio-x-generic-symbolic", "transcribe-file", None),
+            ("Record a meeting", "media-record-symbolic", "", None),
+            ("Connect a device", "bluetooth-symbolic", "connect-device", GLib.Variant("s", "")),
+            ("Work on a project", "folder-open-symbolic", "choose-project", None),
+            ("Dictate", "audio-input-microphone-symbolic", "dictate", None),
+        ]
+        actions = []
+        for label, icon, name, value in wanted:
+            if not name:
+                actions.append((label, icon, lambda *_: self._show_surface("meetings")))
+            elif app is None or app.lookup_action(name) is not None:
+                # An action this app does not register is no button at all.
+                actions.append((label, icon, activate(name, value)))
+        board.append(heading("Do something"))
+        flow = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, column_spacing=8,
+                           row_spacing=8, max_children_per_line=3, homogeneous=True)
+        for label, icon, callback in actions:
+            button = Gtk.Button(child=Adw.ButtonContent(icon_name=icon, label=label))
+            button.add_css_class("pill")
+            button.connect("clicked", callback)
+            flow.append(button)
+        board.append(flow)
+        return board
+
     def _on_suggestion_clicked(self, _button: Gtk.Button, suggestion: str) -> None:
         """Put a suggestion in the input, ready to send or edit."""
         self._set_input_text(suggestion)
@@ -1687,6 +1958,9 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # ...and once when the window is first shown, because a window opened
         # already narrow emits no width change - it starts at that width.
         self.connect("map", lambda *_a: GLib.idle_add(self._apply_narrow_layout))
+        # ...and before the first frame, from the default size (see the
+        # `width <= 0` branch in `_apply_narrow_layout`).
+        self.connect("realize", lambda *_a: self._apply_narrow_layout())
         # A toolbar view with the header bar on top of the column, all of it
         # under a toast overlay - so a notice is a `Adw.Toast` that floats and
         # disappears rather than a line of text that permanently steals the room
@@ -1884,6 +2158,18 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._rail_toggle.set_active(True)
         self._rail_toggle.connect("toggled", self._on_rail_toggled)
         header_bar.pack_end(self._rail_toggle)
+        # **The palette's door.** Ctrl+K reached every panel, mode and command,
+        # and nothing on screen said so - an index nobody knew existed. A
+        # visible button, first on the left beside the panels toggle.
+        search = Gtk.Button(icon_name="system-search-symbolic")
+        search.add_css_class("flat")
+        search.set_valign(Gtk.Align.CENTER)
+        search.set_tooltip_text("Find anything: panels, settings, actions (Ctrl+K)")
+        search.update_property([Gtk.AccessibleProperty.LABEL],
+                               ["Find a panel, setting or action"])
+        search.connect("clicked", lambda _b: self._toggle_palette())
+        self._palette_button = search
+        header_bar.pack_start(search)
 
         main_box.set_hexpand(True)
         self._chat_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
@@ -2012,6 +2298,9 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             # A file write's card links straight to the Diff panel, which was
             # otherwise reachable only from the rail or by typing /diff.
             on_show_diff=lambda: self._show_surface("diff"),
+            # Today, recent conversations and quick actions under the
+            # suggestions - the empty window was an orb and 200px of nothing.
+            home_factory=self._home_board,
         )
         # Search this conversation (Ctrl+F). A search *field* in the window, not
         # a skill and not the desktop search provider: the two things a person
@@ -2034,6 +2323,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # assistant was written and reached nobody. Time and tokens only; the
         # pricing is deliberately left to whoever knows it.
         self._transcript.set_turn_footer_handler(self._turn_stats_for_footer)
+        self._transcript.set_revert_turn_handler(self._revert_turn)
 
         # **The minimap, beside the transcript rather than inside it.** The
         # transcript is a ScrolledWindow, and the ruler has to stay still while
@@ -2046,6 +2336,10 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._minimap = TurnMinimap(on_jump=self._minimap_jump)
         transcript_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
                                  spacing=4)
+        # **Expands, always.** Its width used to come from its content: with
+        # nothing but an approval drawn under it, measured 58px of a 722px row,
+        # so the request the approval was about disappeared from view.
+        self._transcript.set_hexpand(True)
         transcript_row.append(self._transcript)
         transcript_row.append(self._minimap)
         main_box.append(transcript_row)
@@ -2144,6 +2438,12 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._input_entry.update_property([Gtk.AccessibleProperty.LABEL], ["Message to Chronoa"])
         self._input_entry.add_css_class("cajita-input")
         self._input_entry.set_hexpand(True)
+        # **A floor of one line.** A `Gtk.TextView` reports a minimum height of
+        # almost nothing, so when the window is short of height - the empty
+        # state, whose hint and suggestions do not scroll - the box hands it
+        # that minimum and the placeholder is drawn over the composer's
+        # toolbar. Measured at 460x640 and 1000x760 with nothing said yet.
+        self._input_entry.set_size_request(-1, 32)
         # **A `Gtk.EventControllerKey`, not a `key-pressed` signal.**
         # `Gtk.TextView` has no such signal: `key-pressed` is the GTK 3 name and
         # GTK 4 widgets take an event controller instead. Connecting to it
@@ -2209,6 +2509,23 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self.add_controller(drop)
 
         input_row.append(self._attach_button)
+        # **Dictate, beside the paperclip.** `app.dictate` existed with
+        # Ctrl+Shift+D and nothing else - not a button, not the palette - and
+        # the mode strip's own docstring promised it "stays with the mic button
+        # that shares its subject", a button that was never built. It is one long
+        # spoken turn (up to five minutes, ended by silence), so it sits with the
+        # other ways of putting something into the message.
+        self._dictate_button = Gtk.Button()
+        self._dictate_button.set_icon_name("audio-input-microphone-symbolic")
+        self._dictate_button.add_css_class("flat")
+        self._dictate_button.set_valign(Gtk.Align.CENTER)
+        self._dictate_button.set_action_name("app.dictate")
+        self._dictate_button.set_tooltip_text(
+            "Dictate: speak a long message, it ends when you stop talking "
+            "(Ctrl+Shift+D)")
+        self._dictate_button.update_property(
+            [Gtk.AccessibleProperty.LABEL], ["Dictate a message"])
+        input_row.append(self._dictate_button)
         # **The overlay, not the text view.** The migration to a `Gtk.TextView`
         # built `composer = Gtk.Overlay()`, gave the entry a real placeholder-less
         # field - and then appended `self._input_entry` here, so the overlay was
@@ -2225,7 +2542,19 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # have failed either".
         composer.set_child(self._input_entry)
         composer.add_overlay(self._input_placeholder)
-        input_row.append(composer)
+        # **The text field is the card's first line, and this row its second.**
+        # See `composer_card` below: the field, the model it goes to, how hard
+        # that model thinks and Send are one act - writing a message - so they
+        # are one bordered unit rather than four rows stacked under the
+        # conversation, which measured ~185px of a 640px window.
+        #
+        # **"Answers with" rides here, beside the attachment button**, because
+        # the question it answers is asked at the moment of typing. It used to
+        # be a row of its own between the conversation and the strips.
+        input_row.append(self._model_row())
+        toolbar_gap = Gtk.Box()
+        toolbar_gap.set_hexpand(True)
+        input_row.append(toolbar_gap)
         input_row.append(self._stop_button)
         # **Stopping the turn, which the button above does not do.** That one is
         # `app.stop-speaking` - it stops the *voice* after the answer is made,
@@ -2280,7 +2609,6 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # A row of its own rather than packed into `input_row` so the send
         # button keeps its place and the picker does not fight the composer for
         # width.
-        main_box.append(self._model_row())
         main_box.append(self._attach_bar)
         # The organ strip sits directly above the composer, always present, so
         # "is it listening right now" is answerable without a menu. It is not
@@ -2309,7 +2637,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # `justify`, so the next thing to measure is where those 834px come
         # from: the `.organ-strip > flowboxchild { padding: 0 }` rule is worth
         # 350px of it and its natural width suggests it is not matching.
-        main_box.append(self._organ_strip)
+        # Appended below, on one row with the mode strip.
         # The mode strip sits between the organ strip and the composer:
         # what Chronoa *is* (its modes) rather than what it is *doing*
         # (its organs). Wake word, plan mode, privacy and dictation are
@@ -2320,38 +2648,34 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # widget - a label that says "on" and a switch elsewhere is two
         # widgets that can disagree.
         self._mode_strip = _ModeStrip(self._app, self._config)
-        main_box.append(self._mode_strip)
+        # The model button was drawn before the strip existed, so it could not
+        # read where answers go; now it can.
+        self._refresh_model_word()
+        # **One row: what Chronoa is on the left, what it is doing on the
+        # right.** The two strips were two centred rows of their own, and with
+        # the organ lights captioned they wrapped onto a third at the default
+        # width. Idle lights are icons only now (`OrganStrip.refresh`), so both
+        # fit one line at 460px and the line is the conversation's width,
+        # aligned with the composer card under it.
+        # The lights take the spare width, not the chips: an expanding strip
+        # would leave the chips at its start with empty width beside them.
+        self._mode_strip.set_halign(Gtk.Align.START)
+        self._organ_strip.set_hexpand(True)
+        self._organ_strip.set_halign(Gtk.Align.END)
+        self._organ_strip.set_valign(Gtk.Align.CENTER)
+        self._organ_strip.set_margin_top(0)
+        status_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        status_row.set_margin_start(8)
+        status_row.set_margin_end(8)
+        status_row.append(self._mode_strip)
+        status_row.append(self._organ_strip)
+        self._status_row = status_row
+        main_box.append(reading_width(status_row))
 
-        # **The answer controls ride with Send rather than sitting above it.**
-        # Measured at the size this window opens at: the composer row is 496px
-        # and holds two 34px buttons around 412px of typing room, so this is the
-        # one place on screen with width to spend - and the strip above it has
-        # none left (480px of 496px across five chips).
-        #
-        # `insert_child_before`, not `append`, so the control lands *before*
-        # Send rather than after it. It is already constructed by the strip's
-        # `__init__`; this only re-parents it, so nothing about how it works or
-        # what it writes changes.
-        answer = self._mode_strip._answer_button
-        # **A `Gtk.Box` has `append`, `prepend`, `insert_child_after` and
-        # `remove` - and nothing else.** `insert_child_before` is a
-        # `Gtk.ListBox` method and `reorder_child` belongs to `Gtk.Grid` and
-        # `Gtk.FlowBox`; both raise `AttributeError` on window build, which is
-        # how two earlier versions of this line took the whole window down.
-        # Checked with `hasattr` rather than remembered.
-        #
-        # So: find whatever currently sits immediately before Send, and insert
-        # after it. That is the same statement as "beside Send", expressed in
-        # the one method a box actually has.
-        previous = None
-        child = input_row.get_first_child()
-        while child is not None and child is not self._send_button:
-            previous = child
-            child = child.get_next_sibling()
-        if previous is None:
-            input_row.prepend(answer)
-        else:
-            input_row.insert_child_after(answer, previous)
+        # **Nothing rides beside Send any more.** The answer button that sat
+        # here carried plan mode and the reply style; plan moved to the work
+        # chip and the style to the Thinking button, each beside what it
+        # qualifies, so the toolbar is the message's own controls only.
 
         # The task card, above the composer: OpenHands and cline both keep the
         # plan in the conversation rather than behind a panel, because a plan
@@ -2362,7 +2686,12 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         main_box.append(self._task_card)
         # Same reading width as the conversation above it, so the composer lines
         # up with the turns instead of running the full width of the window.
-        main_box.append(reading_width(input_row))
+        composer_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        composer_card.add_css_class("composer-card")
+        composer_card.append(composer)
+        composer_card.append(input_row)
+        self._composer_card = composer_card
+        main_box.append(reading_width(composer_card))
         # ...and re-read whenever the window comes back, because the Settings
         # window flips these same settings through the same actions. A strip
         # that only refreshed on its own click would keep saying "off" for a
@@ -2439,9 +2768,16 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         """
         width = self.get_width()
         if width <= 0:
+            # **Before the first allocation, the size it is about to get.**
+            # Returning here meant the first frame was drawn uncollapsed -
+            # measured, a 665px split in a 460px window until the idle after
+            # `map` ran: a visible flash of a clipped window on every start.
+            width = self.get_default_size()[0]
+        if width <= 0:
             return
         if getattr(self, "_mode_strip", None) is not None:
             self._mode_strip.set_compact(width < _ModeStrip.COMPACT_BELOW)
+        self._set_composer_compact(width < _ModeStrip.COMPACT_BELOW)
         narrow = width <= self.SIDEBAR_COLLAPSE_WIDTH
         if narrow != self._narrow_applied:
             self._narrow_applied = narrow
@@ -2451,6 +2787,22 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
                 self._split.set_collapsed(False)
             self._fold_header(narrow)
         self._sync_sidebar_toggle()
+
+    def _set_composer_compact(self, compact: bool) -> None:
+        """Shorter words in the composer's toolbar on a narrow window.
+
+        The same threshold as the mode strip's, so the two rows change shape
+        together. Only words go: "Answers with" (the model's own name stays) and
+        "Thinking" becomes "Think". Tooltips and accessible names are unchanged.
+        """
+        compact = bool(compact)
+        if compact == getattr(self, "_composer_compact", None):
+            return
+        self._composer_compact = compact
+        caption = getattr(self, "_model_picker_caption", None)
+        if caption is not None:
+            caption.set_visible(not compact)
+        self._refresh_thinking_word()
 
     def _build_header_overflow(self) -> Gtk.MenuButton:
         """A "More" button holding Quick ask, Browse and Help on a narrow window.
@@ -2644,8 +2996,16 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             self._state_label.set_label("No model yet")
             self._state_label.add_css_class("dim-label")
         else:
-            self._state_label.set_label(self._state.label)
+            self._state_label.set_label(self._voice_aware_label())
             self._state_label.remove_css_class("dim-label")
+        dictating = self._is_dictating()
+        # Built later than the first sync, which runs during construction.
+        dictate = getattr(self, "_dictate_button", None)
+        if dictate is not None:
+            dictate.set_tooltip_text(
+                "Stop dictating (Ctrl+Shift+D)" if dictating else
+                "Dictate: speak a long message, it ends when you stop talking "
+                "(Ctrl+Shift+D)")
         # The mic is genuinely hot in exactly two states.
         hot = self._state in (AssistantState.LISTENING, AssistantState.INTERRUPTING)
         self._mic_icon.set_visible(True)
@@ -2662,6 +3022,37 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._stop_button.set_visible(self._state in (AssistantState.SPEAKING, AssistantState.THINKING))
         self._stop_button.set_tooltip_text("Stop speaking (Esc)" if self._state is AssistantState.SPEAKING
                                            else "Stop thinking about this (Esc)")
+
+    def _is_dictating(self) -> bool:
+        return bool(getattr(self._app, "_dictating", False))
+
+    def _voice_aware_label(self) -> str:
+        """The state word, plus what the voice setting means right now.
+
+        **Two voice states looked like others.** Dictation drew "Listening..."
+        - the same as a twenty-second question, though it runs five minutes and
+        ends on a longer silence - and an armed wake word drew "Ready", the
+        same as a mic that only opens when pressed. The state machine is right
+        about both; it just cannot say which kind of listening or which kind of
+        ready, so the label adds it.
+        """
+        label = self._state.label
+        if self._state is AssistantState.LISTENING and self._is_dictating():
+            return "Dictating…"
+        if self._state is AssistantState.IDLE:
+            strip = getattr(self, "_mode_strip", None)
+            try:
+                hands = strip._read_hands_free() if strip is not None else "off"
+            except Exception:                           # noqa: BLE001
+                hands = "off"
+            if hands in ("wake", "wake-over"):
+                try:
+                    phrase = str(self._config.wake_phrase or "").strip()
+                except Exception:                       # noqa: BLE001
+                    phrase = ""
+                if phrase:
+                    return f"Ready - say “{phrase}”"
+        return label
 
     def set_input_level(self, level: float) -> None:
         """Feed the recorder's input level to the orb.
@@ -3335,6 +3726,20 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
 
         GLib.idle_add(one, priority=GLib.PRIORITY_DEFAULT_IDLE)
 
+    def reload_surface(self, name: str) -> None:
+        """Forget panel `name` and, if it is on screen, show it built afresh.
+
+        Panels are built once and kept (see `_show_surface`), so a panel whose
+        switch was just turned on from its own banner would keep saying "off"
+        until the app restarted.
+        """
+        page = self._surface_pages.pop(name, None)
+        if page is None:
+            return
+        if self._content_view.get_visible_page() is page:
+            self._content_view.pop()
+            self._show_surface(name)
+
     def _show_surface(self, name: str) -> None:
         """Push a panel onto the content view.
 
@@ -3539,8 +3944,21 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         """Show what the user said, so a spoken turn is visible too."""
         self._transcript.add_user_turn(text)
 
+    def _revert_turn(self, turn: str):
+        """Put back the files `turn` changed; say so; refresh what shows them."""
+        from shani_chronoa.skills.undo_last_change import revert_turn
+        restored, skipped = revert_turn(turn)
+        if restored:
+            self.set_status(f"Reverted {len(restored)} file(s) to before that turn. "
+                            "Undo puts them back.")
+        refresh = getattr(self, "_refresh_undo_button", None)
+        if callable(refresh):
+            refresh()
+        return restored, skipped
+
     def clear_transcript(self) -> None:
         self._transcript.show_placeholder()
+        self._orb.set_compact(False)
 
     # ------------------------------------------------------------------
     # Input
@@ -3666,7 +4084,63 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
                 (lambda n=name: self._run_command(f"/{n}")),
                 group="Commands", weight=0))
         entries.extend(self._palette_cloud_entries())
+        entries.extend(self._palette_action_entries())
+        entries.extend(self._palette_settings_entries())
         return entries
+
+    #: (title, subtitle, icon, app action) - things that were a shortcut or a
+    #: chat request and nothing else. `app.<action>` so the palette fires the
+    #: same action the shortcut does.
+    _PALETTE_ACTIONS = (
+        ("Connect a device", "Bluetooth, Android, KDE Connect", "preferences-system-devices-symbolic", "connect-device::"),
+        ("Pair a Bluetooth device", "headphones, watch, keyboard, phone", "bluetooth-symbolic", "connect-device::bluetooth"),
+        ("Connect an Android phone", "USB cable or Wi-Fi debugging", "phone-symbolic", "connect-device::android"),
+        ("Pair a KDE Connect phone", "same Wi-Fi", "network-wireless-symbolic", "connect-device::kdeconnect"),
+        ("Dictate", "speak a long message", "audio-input-microphone-symbolic", "dictate"),
+        ("Transcribe a recording", "an audio or video file, speakers told apart", "audio-x-generic-symbolic", "transcribe-file"),
+        ("Find in this conversation", "Ctrl+F", "edit-find-symbolic", "find-in-conversation"),
+        ("Choose project folder", "Build mode works in it", "folder-open-symbolic", "choose-project"),
+        ("Reload MCP servers", "ask each server for its tools again", "view-refresh-symbolic", "reload-mcp"),
+        ("Set Chronoa up", "model, listening, voice", "system-software-install-symbolic", "setup"),
+        ("Settings", "all settings", "emblem-system-symbolic", "open-settings"),
+        ("Body", "what each part of Chronoa is doing", "dialog-information-symbolic", "show-body"),
+        ("Stop speaking", "Esc", "media-playback-stop-symbolic", "stop-speaking"),
+    )
+
+    def _palette_action_entries(self) -> list:
+        from shani_chronoa.gui import palette as palette_module
+        app = getattr(self, "_app", None)
+        out = []
+        for title, subtitle, icon, action in self._PALETTE_ACTIONS:
+            # `name::target` carries a string parameter, Gio's detailed form.
+            name, _sep, target = action.partition("::")
+            if app is None or app.lookup_action(name) is None:
+                continue        # not registered here: no entry that does nothing
+            value = GLib.Variant("s", target) if _sep else None
+            out.append(palette_module.Entry(
+                title, subtitle, icon,
+                (lambda a=name, v=value: app.activate_action(a, v)),
+                group="Actions", weight=0))
+        return out
+
+    def _palette_settings_entries(self) -> list:
+        """Every Settings page, by its own title, through the page registry."""
+        from shani_chronoa import pages
+        from shani_chronoa.gui import palette as palette_module
+        from shani_chronoa.gui.surfaces import common
+        out = []
+        try:
+            pairs = list(zip(pages.page_ids("settings"), pages.page_titles("settings")))
+        except Exception:  # noqa: BLE001
+            logger.debug("palette: settings pages unreadable", exc_info=True)
+            return out
+        for page_id, title in pairs:
+            out.append(palette_module.Entry(
+                f"Settings: {title}", "settings page", "emblem-system-symbolic",
+                (lambda p=page_id: common.open_page(getattr(self, "_app", None),
+                                                    f"settings:{p}")),
+                group="Settings", weight=0))
+        return out
 
     def _palette_cloud_entries(self):
         """Cloud models, for the people who search rather than browse.
@@ -3991,14 +4465,18 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         built to avoid.
         """
         strip = getattr(self, "_mode_strip", None)
+        # **Each setting opens the control it now lives in** - the grouped chip
+        # or the composer button - because the single-setting chips are built
+        # but not on screen, and a popover can only open from a widget that is.
+        model = getattr(self, "_model_picker_button", None)
         chip = {
-            "answer-rules": getattr(strip, "_rules_chip", None),
-            "toggle-plan-mode": getattr(strip, "_plan_chip", None),
-            "answer-egress": getattr(strip, "_answer_chip", None),
-            "answer-ambient": getattr(strip, "_ambient_chip", None),
-            "answer-presence": getattr(strip, "_presence_chip", None),
+            "answer-rules": getattr(strip, "_work_chip", None),
+            "toggle-plan-mode": getattr(strip, "_work_chip", None),
+            "answer-egress": model,
+            "answer-ambient": getattr(strip, "_permissions_chip", None),
+            "answer-presence": model,
             "hands-free": getattr(strip, "_hands_chip", None),
-            "reply-style": getattr(strip, "_style_chip", None),
+            "reply-style": getattr(self, "_thinking_picker_button", None),
         }.get(action_name)
         if chip is not None and hasattr(chip, "popup"):
             self._open_chip_dropdown(chip)
@@ -4409,6 +4887,8 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         """
         self._minimap.append_turn(role)
         self._update_minimap_viewport()
+        # A conversation is on screen, so the orb gives its height to it.
+        self._orb.set_compact(True)
 
     def _on_minimap_scroll(self, _adjustment) -> None:
         self._update_minimap_viewport()

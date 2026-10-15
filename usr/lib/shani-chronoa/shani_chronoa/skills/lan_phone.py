@@ -9,13 +9,12 @@ speaking it directly is in character.
 
 `lan_link.py` is the module; this is the surface the model sees.
 
-**What works, and what does not, in one place.** Discovery works and is tested
-against a fake peer over real sockets. Pairing, the TLS upgrade and every plugin
-packet after it are **not implemented and not claimed** - there is no KDE
-Connect phone on any network this code has been able to run against, so they
-could only be written from the spec and never executed. `pair` says exactly
-that instead of half-pairing wrongly, which is the reason `bluetooth_call`'s
-call events were left unbuilt rather than shipped unverified.
+**What works, and what does not, in one place.** Discovery, pairing (the
+phone asks its owner to accept; the phone's id is then stored and every later
+link must be that phone - `lan_link._link`), sending a file, and the bridge's
+clipboard and notification packets. Run against `tools/fake_kdeconnect.py`;
+pairing was also completed against one real phone. Other plugin packets are
+not written.
 """
 
 from __future__ import annotations
@@ -117,18 +116,23 @@ def _run(arguments: dict):
         return f"{why} was offered to the device"
 
     if action == "pair":
-        state, why = lan_link.pairing_status()
-        return (f"Pairing is {state}: {why} Discovery is real - use 'devices' "
-                f"to see what answers, and 'announce' to make this computer "
-                f"findable.")
+        host = str(arguments.get("host") or "").strip() or _default_host()
+        if not host:
+            return ("No device to pair with yet. Run 'devices' first, with the "
+                    "KDE Connect app open on the phone.")
+        state, why = lan_link.pair(host, timeout=60.0)
+        if state == "paired":
+            return f"Paired: {why}."
+        if state == "waiting":
+            return (f"Asked {host} to pair, and nobody answered on the phone in "
+                    f"time ({why}). Open KDE Connect on it and try again.")
+        return f"Not paired ({state}): {why}."
 
     if action == "status":
-        state, _why = lan_link.pairing_status()
+        state, why = lan_link.pairing_status()
         return (f"This computer speaks the KDE Connect LAN protocol "
                 f"(version {lan_link.PROTOCOL_VERSION}, UDP {lan_link.UDP_PORT}). "
-                f"Devices can be listed and this computer can announce itself. "
-                f"Pairing is {state}, so no phone can be *controlled* until that "
-                f"is written - see 'pair'.")
+                f"Pairing: {state}, {why}.")
 
     if action == "announce":
         did, why = lan_link.announce(_hostname())
@@ -162,8 +166,8 @@ def _run(arguments: dict):
             f"[{entry.get('deviceType') or 'unknown type'}] "
             f"at {entry.get('address')}, protocol {entry.get('protocolVersion')}, "
             f"control port {entry.get('tcpPort', lan_link.UDP_PORT)}")
-    lines.append("Pairing is not implemented yet, so these can be seen and not "
-                 "used - see 'pair'.")
+    lines.append("'pair' pairs with the remembered one; the phone asks the "
+                 "person to accept.")
     return "\n".join(lines)
 
 
@@ -177,8 +181,8 @@ SCHEMA = {
             "installed. 'devices': what announced itself on this network in the "
             "last few seconds (phones, tablets, other computers). 'announce': "
             "make this computer findable by a phone's KDE Connect app. 'status': "
-            "what this computer can and cannot do on the LAN. 'pair': what the "
-            "pairing half of the protocol is and why it is not here. Needs the "
+            "what this computer can and cannot do on the LAN. 'pair': pair with "
+            "the device 'devices' found (the phone asks its owner). Needs the "
             "'lan-phone-enabled' consent key."
         ),
         "parameters": {
@@ -189,7 +193,7 @@ SCHEMA = {
                     "enum": list(_ACTIONS),
                     "description": "devices: list what answers. announce: make "
                                    "this computer findable. status: what works "
-                                   "here. pair: why pairing is not written. "
+                                   "here. pair: pair with the found device. "
                                    "Defaults to status.",
                     "default": "status",
                 },

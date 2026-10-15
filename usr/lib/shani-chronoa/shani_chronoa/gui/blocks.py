@@ -618,6 +618,38 @@ def change_for(name: str, arguments: dict) -> "Optional[tuple]":
         return None
 
 
+#: Tool names that read wrongly as words on a card or the status clock.
+_TOOL_WORDS = {"delegate": "subagent"}
+
+
+def tool_words(name: str) -> str:
+    """A tool's name as the card and the progress clock say it."""
+    return _TOOL_WORDS.get(name, name.replace("_", " "))
+
+
+def _short_arg(value) -> str:
+    """An argument for the card's one-line summary; a path keeps its file name.
+
+    The summary is clipped from the right at 60 characters, so an absolute path
+    showed as `path=/tmp/claude-1001/-home-...` - every character of the
+    directory and none of the file the card is about. Home becomes `~`, and a
+    path still too long keeps its last two parts. The full arguments are one
+    click away in the card's details.
+    """
+    text = str(value)
+    if not text.startswith(("/", "~")) or "\n" in text:
+        return text
+    import os
+    home = os.path.expanduser("~")
+    if text == home or text.startswith(home + "/"):
+        text = "~" + text[len(home):]
+    if len(text) > 40:
+        parts = text.rstrip("/").split("/")
+        if len(parts) > 2:
+            text = "…/" + "/".join(parts[-2:])
+    return text
+
+
 class InlineDiff(Gtk.Box):
     """The changed lines of one file write, in the chat, under its tool card.
 
@@ -642,6 +674,21 @@ class InlineDiff(Gtk.Box):
         name = Gtk.Label(label=getattr(path, "name", str(path)), xalign=0.0)
         name.add_css_class("heading")
         name.set_tooltip_text(str(path))
+        # **The header's name was the one label here with no ellipsise**, and it
+        # was the diff's whole width: `getattr(path, "name", str(path))` falls
+        # back to the **entire path** for a `str`, and a header label lays out
+        # in one line however long it is. Measured, a 74-character name asked
+        # for **558px**, and the `InlineDiff` carrying it went from **117px to
+        # 73px** once this was set - the ellipsise is what bounds it, and it is
+        # also what it should have been: the tooltip one line above already
+        # carries the whole path, so truncating here loses nothing a reader can
+        # see and everything a row needs.
+        #
+        # A `set_max_width_chars` was tried here first and **measured inert** -
+        # 558px with the bound, 15px with the ellipsise, 15px with both. The
+        # bound describes how a *wrapping* label lays out; this one does not
+        # wrap, so it never applied. Kept as a note because that is the trap.
+        name.set_ellipsize(Pango.EllipsizeMode.END)
         head.append(name)
         plus = Gtk.Label(label=f"+{added}")
         plus.add_css_class("diff-count-add")
@@ -1055,9 +1102,9 @@ class ToolCallCard(Gtk.Box):
         icon.set_tooltip_text("This worked" if ok else "This did not work")
         row.update_property(
             [Gtk.AccessibleProperty.LABEL],
-            [f"{name.replace('_', ' ')}: "
+            [f"{tool_words(name)}: "
              + ("this worked" if ok else "this did not work")])
-        title = Gtk.Label(label=name.replace("_", " "))
+        title = Gtk.Label(label=tool_words(name))
         title.add_css_class("heading")
         title.set_hexpand(True)
         title.set_xalign(0.0)
@@ -1075,7 +1122,7 @@ class ToolCallCard(Gtk.Box):
                 "Chronoa says this call did not succeed. Its answer below "
                 "explains why, if it did.")
             row.append(outcome)
-        summary = ", ".join(f"{key}={value}" for key, value in self.arguments.items())
+        summary = ", ".join(f"{key}={_short_arg(value)}" for key, value in self.arguments.items())
         if len(summary) > 60:
             # **`markdown_lite.clip`, not a hard slice.** The arguments are
             # model-supplied text, and `[:57]` cuts a grapheme cluster: an emoji

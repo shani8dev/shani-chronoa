@@ -642,6 +642,48 @@ _ANTHROPIC_DEFAULT_MODEL = PROVIDERS["anthropic"].default_model
 _ANTHROPIC_MAX_TOKENS = 1024
 _ANTHROPIC_API_VERSION = "2023-06-01"
 
+#: How hard the model thinks before it answers, off first. One word for every
+#: engine, translated per engine at the request: `reasoning_effort` for the
+#: OpenAI-shaped providers, `reasoning.effort` for OpenRouter, a token budget
+#: for Anthropic, and on/off for a local Qwen3 or Ollama model, which have no
+#: levels - any level above "off" turns their thinking on.
+THINKING_LEVELS = ("off", "low", "medium", "high", "xhigh", "max")
+
+#: What the OpenAI-shaped `reasoning_effort` is sent as. `xhigh` is the top
+#: value OpenAI accepts, so "max" asks for that; a provider that refuses either
+#: is asked again at "high" before thinking is given up (`_thinking_cap`).
+_OPENAI_EFFORT = {"low": "low", "medium": "medium", "high": "high",
+                  "xhigh": "xhigh", "max": "xhigh"}
+
+#: Anthropic asks for a budget, not a word. 1024 is the API's own minimum.
+#: `max_tokens` must exceed the budget, so the reply keeps its usual room on top.
+_ANTHROPIC_THINKING_BUDGET = {"low": 1024, "medium": 4096, "high": 8192,
+                              "xhigh": 16000, "max": 24000}
+#: The reply is not streamed, so a long think arrives all at once: the read
+#: timeout has to cover the whole of it rather than the usual 60 seconds.
+_ANTHROPIC_THINKING_TIMEOUT = 600.0
+
+
+def thinking_level(value) -> str:
+    """`value` as one of `THINKING_LEVELS`, or "off" for anything else."""
+    got = str(value or "").strip().lower()
+    return got if got in THINKING_LEVELS else "off"
+
+
+def refuses_thinking(error: Exception) -> bool:
+    """Whether a provider turned the request down *because* it asked to think.
+
+    **Not every model can think, and the provider is the only one that knows.**
+    `gpt-4o-mini` refuses `reasoning_effort`, Groq refuses it on models without
+    reasoning, Ollama answers "does not support thinking", and Anthropic refuses
+    a tool loop whose earlier turn carries no thinking block. All of them name
+    the parameter, so a refusal that does is retried once without it rather
+    than costing the turn - and a refusal that does not is left alone.
+    """
+    text = str(error).lower()
+    return "reasoning" in text or "think" in text
+
+
 #: Error classes for `CloudLLMError.error_class`.
 ERROR_RATE_LIMIT = "rate_limit"
 ERROR_CONTEXT_OVERFLOW = "context_overflow"
@@ -753,6 +795,51 @@ class OpenAICompatibleLLM:
     #: set by the assistant for one request when the person named the tool ('/timer ...')
     required_tool: str = ""
     read_timeout: float = 60.0
+    #: One of `THINKING_LEVELS`, set by the assistant before every model call.
+    thinking: str = "off"
+    #: Set once this provider has refused the thinking field, so later turns
+    #: stop paying a failed request to learn it again.
+    _thinking_refused: bool = False
+    #: Set to "high" once this provider has refused a level above it.
+    _thinking_cap: str = ""
+
+    def _thinking_fields(self) -> dict:
+        """The request fields that ask this provider to think, or `{}`.
+
+        **"off" sends nothing at all**, rather than an explicit "none": that is
+        the request every provider here was verified against, so a person who
+        never touches the control sends exactly what they sent before it existed.
+        """
+        level = thinking_level(self.thinking)
+        if level == "off" or self._thinking_refused:
+            return {}
+        effort = self._thinking_cap or _OPENAI_EFFORT[level]
+        if self.provider.id == "openrouter":
+            return {"reasoning": {"effort": effort}}
+        return {"reasoning_effort": effort}
+
+    async def _without_thinking_on_refusal(self, call):
+        """Run `call()`; on a refused thinking field, step down to "high", then off.
+
+        Each step is remembered on the provider, so a refusal is paid for once
+        rather than on every turn.
+        """
+        while True:
+            fields = self._thinking_fields()
+            try:
+                return await call()
+            except CloudLLMError as e:
+                if not fields or not refuses_thinking(e):
+                    raise
+                effort = fields.get("reasoning_effort") or fields["reasoning"]["effort"]
+                if effort != "high" and not self._thinking_cap:
+                    logger.info("%s (%s) refused thinking effort %r; asking at 'high': %s",
+                                self.provider.name, self.model, effort, e)
+                    self._thinking_cap = "high"
+                else:
+                    logger.info("%s (%s) cannot think on request; asking without it: %s",
+                                self.provider.name, self.model, e)
+                    self._thinking_refused = True
 
     def prepare_messages(self, messages: list[dict]) -> list[dict]:
         return messages
@@ -797,12 +884,17 @@ class OpenAICompatibleLLM:
         """Send one chat request. Raises CloudLLMError on any failure, including
         a 200 response whose body is actually an error (confirmed live for
         both Kilo and BlockRun - see module docstring)."""
+        return await self._without_thinking_on_refusal(
+            lambda: self._chat_message_once(messages, tools))
+
+    async def _chat_message_once(self, messages: list[dict], tools: Optional[list[dict]]) -> dict:
         client = await self._get_client()
         sanitized_messages = [
             {**msg, "content": redactor.sanitize(msg.get("content", ""))}
             for msg in self.prepare_messages(messages)
         ]
-        payload: dict = {"model": self.model, "messages": sanitized_messages, **self.extra_payload}
+        payload: dict = {"model": self.model, "messages": sanitized_messages, **self.extra_payload,
+                         **self._thinking_fields()}
         if tools:
             payload["tools"] = _valid_tools(tools)
             if self.required_tool:
@@ -893,9 +985,15 @@ class OpenAICompatibleLLM:
         token may take long on a CPU, but a stalled stream fails (assistd's
         inactivity timeout).
         """
+        return await self._without_thinking_on_refusal(
+            lambda: self._chat_message_stream_once(messages, tools, on_text))
+
+    async def _chat_message_stream_once(self, messages: list[dict], tools: Optional[list[dict]],
+                                        on_text) -> dict:
         import json as _json
         client = await self._get_client()
-        payload: dict = {"model": self.model, "stream": True, **self.extra_payload, "messages": [
+        payload: dict = {"model": self.model, "stream": True, **self.extra_payload,
+                         **self._thinking_fields(), "messages": [
             {**msg, "content": redactor.sanitize(msg.get("content", ""))}
             for msg in self.prepare_messages(messages)]}
         if tools:
@@ -988,7 +1086,8 @@ class AnthropicLLM:
     #: Token counts from the most recent call, or None before the first
     #: one. See `usage.py` for why this is not part of the returned message.
     last_usage: "usage_mod.Usage | None" = None
-
+    #: One of `THINKING_LEVELS`, set by the assistant before every model call.
+    thinking: str = "off"
 
     def __init__(self, api_key: str, model: str = _ANTHROPIC_DEFAULT_MODEL) -> None:
         # A CloudProvider-shaped attribute purely so CloudLLMChain's logging
@@ -1050,7 +1149,11 @@ class AnthropicLLM:
                 if not tool_calls:
                     out.append({"role": "assistant", "content": msg.get("content") or ""})
                     continue
-                blocks = []
+                # **The thinking goes back first, unchanged.** With thinking on,
+                # Anthropic refuses a tool loop whose assistant turn does not
+                # start with the thinking block that produced the call, signature
+                # and all - and the OpenAI-shaped history has nowhere else for it.
+                blocks = list(msg.get("anthropic_thinking") or [])
                 if msg.get("content"):
                     blocks.append({"type": "text", "text": msg["content"]})
                 for i, call in enumerate(tool_calls):
@@ -1092,6 +1195,20 @@ class AnthropicLLM:
         return system_prompt, out
 
     async def chat_message(self, messages: list[dict], tools: Optional[list[dict]] = None, stream: bool = False) -> dict:
+        level = thinking_level(self.thinking)
+        try:
+            return await self._chat_message_once(messages, tools, level)
+        except CloudLLMError as e:
+            # The usual cause: the loop's earlier turn was answered without
+            # thinking (by another provider, or before the switch was flipped),
+            # so there is no thinking block to send back. Answer without it
+            # rather than lose the turn.
+            if level == "off" or not refuses_thinking(e):
+                raise
+            logger.info("Anthropic refused thinking for this request; asking without it: %s", e)
+            return await self._chat_message_once(messages, tools, "off")
+
+    async def _chat_message_once(self, messages: list[dict], tools: Optional[list[dict]], level: str) -> dict:
         client = await self._get_client()
         system_prompt, anthropic_messages = self._history_to_anthropic(messages)
         if system_prompt:
@@ -1109,10 +1226,17 @@ class AnthropicLLM:
             payload["system"] = system_prompt
         if tools:
             payload["tools"] = self._tools_to_anthropic(tools)
+        if level != "off":
+            budget = _ANTHROPIC_THINKING_BUDGET[level]
+            payload["thinking"] = {"type": "enabled", "budget_tokens": budget}
+            payload["max_tokens"] = budget + _ANTHROPIC_MAX_TOKENS
 
         status = None
         try:
-            response = await client.post("/messages", json=payload)
+            response = await client.post(
+                "/messages", json=payload,
+                **({"timeout": httpx.Timeout(_ANTHROPIC_THINKING_TIMEOUT, connect=10.0)}
+                   if "thinking" in payload else {}))
             status = response.status_code
         except httpx.RequestError as e:
             raise CloudLLMError(f"Anthropic: request failed: {type(e).__name__}: {e}") from e
@@ -1139,8 +1263,11 @@ class AnthropicLLM:
         # assistant.py never needs to know which backend answered.
         text_parts = []
         tool_calls = []
+        thinking_blocks = []
         for block in data.get("content", []):
-            if block.get("type") == "text":
+            if block.get("type") in ("thinking", "redacted_thinking"):
+                thinking_blocks.append(block)
+            elif block.get("type") == "text":
                 text_parts.append(block.get("text", ""))
             elif block.get("type") == "tool_use":
                 tool_calls.append({
@@ -1159,6 +1286,10 @@ class AnthropicLLM:
         message: dict = {"role": "assistant", "content": "".join(text_parts)}
         if tool_calls:
             message["tool_calls"] = tool_calls
+            # Only needed to continue a tool loop (see `_history_to_anthropic`),
+            # so a plain answer does not carry it into history.
+            if thinking_blocks:
+                message["anthropic_thinking"] = thinking_blocks
         return message
 
 
@@ -1222,6 +1353,16 @@ class CloudLLMChain:
         #: what a person said off the machine, and it has to be visible rather
         #: than inferable from a settings key.
         self.last_provider: str = ""
+
+    @property
+    def thinking(self) -> str:
+        return self._backends[0].thinking if self._backends else "off"
+
+    @thinking.setter
+    def thinking(self, level: str) -> None:
+        """Handed to every provider, because any of them may be the one that answers."""
+        for backend in self._backends:
+            backend.thinking = level
 
     _MAX_RETRY_WAIT = 10.0  # cap how long we'll wait on a provider's own retry_after hint
 

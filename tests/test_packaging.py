@@ -663,3 +663,21 @@ class TestMcpTrustModel:
         assert 'transport="stdio"' in mcp_src
         assert 'transport="sse"' not in mcp_src
         assert 'transport="http"' not in mcp_src
+
+def test_dpkg_deb_accepts_the_control_file(tmp_path):
+    """**Parsed by dpkg, not by a regex.** Every other test here reads
+    DEBIAN/control with `re`, and the file had three things dpkg-deb refuses -
+    a `\\` line continuation, `#` comment lines, and prose in parentheses under
+    Suggests (read as version constraints) - so no .deb could be built from
+    this repository while all of them passed (2026-10-15)."""
+    import shutil
+    import subprocess
+    if shutil.which("dpkg-deb") is None:
+        pytest.skip("dpkg-deb is not installed")
+    stage = tmp_path / "stage"
+    (stage / "DEBIAN").mkdir(parents=True)
+    shutil.copy(REPO_ROOT / "DEBIAN" / "control", stage / "DEBIAN" / "control")
+    (stage / "usr" / "share" / "doc").mkdir(parents=True)
+    done = subprocess.run(["dpkg-deb", "--root-owner-group", "--build", str(stage),
+                           str(tmp_path / "x.deb")], capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr

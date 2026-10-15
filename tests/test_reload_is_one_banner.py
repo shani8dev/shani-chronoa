@@ -175,10 +175,10 @@ def test_the_voice_panel_says_when_it_read(floor):
     """
     page = voice_surface.build(floor)
     text = _labels(page)
-    assert "Read once" in text, text
-    assert "polled" in text, (
-        "the banner does not say that nothing is polled, so a person has no way "
-        "to know the reading goes stale on its own")
+    assert "Read at " in text, text
+    assert "not live" in text, (
+        "the banner does not say the reading is not live, so a person has no way "
+        "to know it goes stale on its own")
 
 
 def test_the_model_panel_says_when_it_read(floor):
@@ -189,7 +189,7 @@ def test_the_model_panel_says_when_it_read(floor):
     """
     page = model_surface.build(floor)
     text = _labels(page)
-    assert "Read once" in text, text
+    assert "Read at " in text, text
     assert "Reload" in text, text
 
 

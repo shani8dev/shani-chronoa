@@ -21,6 +21,11 @@ class OllamaLLM:
     #: Token counts from the most recent call, or None before the first
     #: one. See `usage.py` for why this is not part of the returned message.
     last_usage: "usage_mod.Usage | None" = None
+    #: One of `cloud_llm.THINKING_LEVELS`, set by the assistant before every
+    #: model call. Ollama's `think` is on/off, so any level above "off" is on.
+    thinking: str = "off"
+    #: Set once the model answered "does not support thinking".
+    _thinking_refused: bool = False
 
     def __init__(self, host: str = "http://localhost:11434", model: str = "llama3", context_window: int = 4096) -> None:
         self.host = host.rstrip("/")
@@ -80,12 +85,23 @@ class OllamaLLM:
         }
         if tools:
             payload["tools"] = tools
+        # **"off" sends no `think` at all**, which is the request this client
+        # always sent - so nothing changes for a person who never asks.
+        if self.thinking != "off" and not self._thinking_refused:
+            payload["think"] = True
 
         try:
             if payload["stream"]:
                 content = await self._chat_stream(client, payload)
                 return {"role": "assistant", "content": content}
             response = await client.post("/api/chat", json=payload)
+            if response.status_code == 400 and payload.get("think") and "think" in response.text.lower():
+                # "<model> does not support thinking": ask again without it,
+                # and stop asking this model.
+                logger.info("Ollama model %s cannot think; asking without it", self.model)
+                self._thinking_refused = True
+                del payload["think"]
+                response = await client.post("/api/chat", json=payload)
             response.raise_for_status()
             data = response.json()
             # The token counts sit beside the message in Ollama's body, not

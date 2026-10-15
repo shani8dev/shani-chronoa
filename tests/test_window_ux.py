@@ -174,7 +174,7 @@ def test_empty_state_names_what_to_do(window):
     # `class` on a Pango `<span>` and `set_markup` leaves nothing behind, so the
     # prompt and the shortcuts both vanished. Measured, and recorded in
     # `gui/widgets.py`'s own comment beside the line it cost.
-    DELIBERATE = ("suggestion-bar", "dim-label")
+    DELIBERATE = ("suggestion-bar", "dim-label", "home-board")
     row = first.get_next_sibling()
     while row is not None:
         classes = row.get_css_classes() or []

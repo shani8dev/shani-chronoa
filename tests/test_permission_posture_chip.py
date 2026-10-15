@@ -91,30 +91,72 @@ class _Action:
         self.state = variant.get_string()
 
 
-# -- it is a chip, and it is on the strip ----------------------------------
+def _strip_targets():
+    """Every `(action, target)` a menu on one of the strip's **visible** chips offers.
+
+    Walks the chip's own children rather than counting the strip's tables, so a
+    control that is built and drawn but never appended cannot satisfy it - which
+    is exactly the state four chips were left in when they moved to the palette.
+    """
+    strip = _strip()
+    found = []
+    child = strip.get_first_child()
+    while child is not None:
+        model = child.get_menu_model() if hasattr(child, "get_menu_model") else None
+        if model is not None:
+            found.extend(_menu_targets(model))
+        child = child.get_next_sibling()
+    return found
 
 
-def test_the_posture_is_a_chip_on_the_strip():
+def _menu_targets(model):
+    """`(action, target)` for one `Gio.Menu`, descending into its sections.
+
+    A section is itself a `Gio.MenuModel` reached through `get_item_link`, not a
+    row - so a flat scan reports the section's *label* ("Risky actions") and none
+    of the choices inside it, which is how a chip holding the posture rows can
+    read as holding none.
+    """
+    rows = []
+    for index in range(model.get_n_items()):
+        action = model.get_item_attribute_value(index, "action")
+        if action is not None:
+            target = model.get_item_attribute_value(index, "target")
+            rows.append((action.get_string(),
+                         target.get_string() if target is not None else None))
+        section = model.get_item_link(index, "section")
+        if section is not None:
+            rows.extend(_menu_targets(section))
+    return rows
+
+
+# -- it is on the strip, and reachable from there -----------------------------
+
+
+def test_the_posture_is_reachable_from_the_strip():
     """A control in Settings alone is invisible from the conversation, which is
     where the question "will it ask me?" actually arises.
 
-    **Asserted as a parent, not as a count.** The first version said
-    `len(_PERMISSION) + 6`, and the `6` was the number of *other* dropdowns at
-    the time; the second counted the strip's tables and found eight against five
-    chips, which looked like a missing chip and was not - **Ambient, hands-free
-    and reply style are drawn by `refresh()` and reached from the Ctrl+K
-    palette, and are deliberately not appended to the strip.** Both versions
-    were counting something that is not the property.
+    **Asserted as reachability, not as a chip.** Three earlier versions counted:
+    `len(_PERMISSION) + 6` (the `6` was the number of *other* dropdowns at the
+    time), then the strip's tables against five chips, then
+    `_auto_chip.get_parent() is strip`. The last is the one that went stale: the
+    2026-10-14 redesign folded the posture rows into the **Permissions** chip's
+    "Risky actions" section, so the posture is still on the strip and the chip it
+    used to live on is still built - it is simply no longer a child.
 
-    The property is one line and does not go stale: the chip the file is about is
-    a child of the strip, and the table it is drawn from is one the strip draws.
+    Each version was answering "how many chips are there", which is not the
+    property. This asks the question the property is about: **is every row of the
+    posture table one keystroke from the conversation?** A chip that is built,
+    drawn, styled and reachable only from Settings would still fail it, and so
+    would a row dropped from the table without anyone noticing.
     """
-    strip = _strip()
-    assert strip._auto_chip is not None
-    assert strip._auto_chip.get_parent() is strip, (
-        "the posture chip is built but not on the strip, so the control exists "
-        "in a way nobody can reach")
     assert window_module._ModeStrip._AUTO, "the posture table is empty"
+    targets = _strip_targets()
+    for key, word, _line, _icon in window_module._ModeStrip._AUTO:
+        assert ("app.answer-permission", key) in targets, (
+            f"{word!r} is not on any menu of a chip the strip shows; the strip "
+            f"offers {sorted(set(targets))}")
 
 
 def test_the_posture_offers_exactly_the_two_that_are_peers():

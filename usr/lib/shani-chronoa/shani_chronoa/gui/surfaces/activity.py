@@ -157,8 +157,11 @@ def _row(record: dict) -> Gtk.Widget:
     status = _status(record)
     digest = _args_digest(record.get("args"))
 
+    # `escape=False`: markup is switched off just below, so escaping first
+    # printed the entities - measured, arguments read `&quot;import sock…`.
     row = common.row(f"{tool} - {status}",
-                     " | ".join(part for part in (when_text, digest and f"args {digest}") if part))
+                     " | ".join(part for part in (when_text, digest and f"args {digest}") if part),
+                     escape=False)
     # Adw parses title/subtitle as Pango markup; the audit trail is skill
     # prose, so rendering without markup (rather than escaping every string)
     # is the one call that cannot be half-done. `common.row()` has already set
@@ -526,12 +529,85 @@ def build_refusals() -> Gtk.Widget:
     return group
 
 
+def insights(records) -> "Optional[Gtk.Widget]":
+    """The log as pictures: how often tools worked, how busy each day was,
+    and which tools are used most - each bar coloured by its own success rate.
+
+    The list below answers "what ran at 14:03"; this answers "is it working,
+    and what do I use it for", which a column of rows cannot show.
+    """
+    from collections import Counter
+    from datetime import timedelta
+    from shani_chronoa.gui import charts
+
+    if not records:
+        return None
+    judged = [r for r in records if r.get("verdict") in ("verified", "failed")]
+    verified = sum(1 for r in judged if r.get("verdict") == "verified")
+    rate = verified / len(judged) if judged else 0.0
+
+    today = datetime.now().date()
+    per_day = Counter()
+    for r in records:
+        when = _parse_timestamp(r.get("timestamp"))
+        if when is not None:
+            per_day[when.astimezone().date() if when.tzinfo else when.date()] += 1
+    days = [today - timedelta(days=n) for n in range(13, -1, -1)]
+    week = sum(per_day[d] for d in days[-7:])
+
+    grid = Gtk.Grid(column_spacing=12, row_spacing=12, column_homogeneous=True,
+                    margin_top=12, margin_start=12, margin_end=12)
+    ring_card, body = charts.card("Worked", "object-select-symbolic")
+    ring = charts.Ring(120)
+    ring.set(rate, f"{rate:.0%}", f"of {len(judged):,} checked",
+             colour=charts.level_colour(rate, high_is_bad=False))
+    body.append(ring)
+    stats = Gtk.Box(spacing=8, homogeneous=True)
+    stats.append(charts.stat("All calls", f"{len(records):,}"))
+    stats.append(charts.stat("This week", f"{week:,}"))
+    body.append(stats)
+    grid.attach(ring_card, 0, 0, 1, 1)
+
+    days_card, body = charts.card("Calls per day", "x-office-calendar-symbolic")
+    bars = charts.Bars(height=110, colour=charts.BLUE)
+    bars.set([(d.strftime("%a")[:2] if i % 2 == 0 else "", per_day[d]) for i, d in enumerate(days)],
+             show_numbers=False)
+    body.append(bars)
+    body.append(Gtk.Label(label=f"Last 14 days · busiest {max(per_day[d] for d in days):,} calls",
+                          xalign=0.0, css_classes=["caption", "dim-label"]))
+    grid.attach(days_card, 1, 0, 1, 1)
+
+    top_card, body = charts.card("Most used tools", "applications-utilities-symbolic")
+    counts = Counter(r.get("tool_name") or "?" for r in records).most_common(8)
+    outcome = {}
+    for r in judged:
+        ok, total = outcome.get(r["tool_name"], (0, 0))
+        outcome[r["tool_name"]] = (ok + (r.get("verdict") == "verified"), total + 1)
+    colours, values = [], []
+    for tool, n in counts:
+        ok, total = outcome.get(tool, (0, 0))
+        colours.append(charts.level_colour(ok / total, high_is_bad=False) if total else charts.BLUE)
+        values.append(f"{n:,}" + (f" · {ok / total:.0%} worked" if total else ""))
+    ranked = charts.HBars()
+    ranked.set([(tool.replace("_", " "), n) for tool, n in counts], colours=colours, values=values)
+    body.append(ranked)
+    grid.attach(top_card, 0, 1, 2, 1)
+    return grid
+
+
 def build(app) -> Gtk.Widget:
     tracker = getattr(app, "tool_tracker", None)
     if tracker is None:
         tmp = Path(tempfile.mkdtemp(prefix="chronoa-activity-"))
         tracker = tool_tracking.ToolTracker(log_dir=tmp)
     view = _ActivityView(tracker)
+    try:
+        pictures = insights(_records(tracker))
+    except Exception:  # noqa: BLE001 - a chart that cannot be drawn is not a page
+        logger.debug("activity charts failed", exc_info=True)
+        pictures = None
+    if pictures is not None:
+        view.prepend(pictures)
     page, set_content = common.surface(TITLE, SUBTITLE)
     set_content(view)
     # `build()` hands back the page, so the two things a caller needs from this

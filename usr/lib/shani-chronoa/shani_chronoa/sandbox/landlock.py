@@ -50,6 +50,28 @@ class RulesetAttr(ctypes.Structure):
     _fields_ = [("handled_access_fs", ctypes.c_uint64)]
 
 
+class ScopedRulesetAttr(ctypes.Structure):
+    """The ABI 6 form: filesystem rights, network rights, and **scopes**.
+
+    The kernel reads as many fields as the size says, so the three-field form
+    is passed only where `scoped` exists. Scoping is what stops a confined
+    process reaching *outside its own Landlock domain* through the two IPC
+    channels a path rule cannot see: abstract unix sockets (X11's
+    `@/tmp/.X11-unix/X0`, many D-Bus brokers) and signals to processes it
+    did not start.
+    """
+
+    _fields_ = [("handled_access_fs", ctypes.c_uint64),
+                ("handled_access_net", ctypes.c_uint64),
+                ("scoped", ctypes.c_uint64)]
+
+
+#: `LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET | LANDLOCK_SCOPE_SIGNAL` (ABI 6).
+_SCOPE_ABSTRACT_UNIX_SOCKET = 1 << 0
+_SCOPE_SIGNAL = 1 << 1
+_SCOPED_FROM_ABI = 6
+
+
 class PathBeneathAttr(ctypes.Structure):
     """`struct landlock_path_beneath_attr`, packed, in the kernel's field order.
 
@@ -92,6 +114,9 @@ _LANDLOCK_ACCESS_FS_CONNECT_TCP = 1 << 17  # May connect to TCP ports (ABI 4)
 # Every bit that may legally appear in `handled_access_fs`: 0-15. Bits 16-17
 # exist in the ABI but belong to `handled_access_net`, not this field.
 _LANDLOCK_ACCESS_FS_ALL_KNOWN = 0xFFFF
+#: Rights a later ABI added. Requested freely, dropped where unsupported.
+_ABI_DEPENDENT_RIGHTS = (_LANDLOCK_ACCESS_FS_REFER | _LANDLOCK_ACCESS_FS_TRUNCATE
+                         | _LANDLOCK_ACCESS_FS_IOCTL_DEV)
 
 # Rights that can only mean anything on a directory. See `access_for_path_fd`.
 _DIRECTORY_ONLY_RIGHTS = (
@@ -367,7 +392,11 @@ def apply_filesystem_allowlist(
     # Prepare the ruleset. The attr must describe which rights are handled and
     # size must be non-zero: the version-query form (NULL attr, size 0, the
     # VERSION flag) returns the ABI number, not a descriptor.
-    attr = RulesetAttr(handled_access_fs=known_rights)
+    if abi >= _SCOPED_FROM_ABI:
+        attr = ScopedRulesetAttr(handled_access_fs=known_rights, handled_access_net=0,
+                                 scoped=_SCOPE_ABSTRACT_UNIX_SOCKET | _SCOPE_SIGNAL)
+    else:
+        attr = RulesetAttr(handled_access_fs=known_rights)
     ruleset_fd = _syscall(
         _LANDLOCK_SYSCALL_CREATE_RULESET,
         ctypes.addressof(attr),
@@ -380,6 +409,11 @@ def apply_filesystem_allowlist(
     pinned: List[Tuple[str, int, int]] = []
     try:
         for path, access_rights in allowed_paths:
+            # Rights that only exist from a later ABI are dropped on an older
+            # kernel, not refused: the request is the same, the kernel simply
+            # cannot express all of it. Any *other* unknown bit is still an
+            # error, because that is a typo rather than an old kernel.
+            access_rights &= ~(_ABI_DEPENDENT_RIGHTS & ~known_rights)
             if access_rights & ~known_rights:
                 raise ValueError(
                     f"Access rights 0x{access_rights:x} includes bits not known "
@@ -457,22 +491,34 @@ def get_default_allowed_paths(workspace: str) -> List[Tuple[str, int]]:
         _LANDLOCK_ACCESS_FS_READ_FILE |
         _LANDLOCK_ACCESS_FS_READ_DIR
     )
+    # **Creating a file is its own right.** `WRITE_FILE` opens an existing
+    # file for writing; a new one needs `MAKE_REG` (and a symlink `MAKE_SYM`, a
+    # socket or FIFO theirs), renaming across dirs needs `REFER`, and `O_TRUNC`
+    # needs `TRUNCATE` from ABI 3. These sets carried none of them, so measured
+    # on this kernel (ABI 8) nothing could create a file anywhere in a
+    # confined call - the workspace included - and `open(path, "w")` on a new
+    # path failed with EACCES. It went unseen because no skill ran confined
+    # until `run_command`. `apply_filesystem_allowlist` drops the ABI-dependent
+    # bits on a kernel that predates them.
+    creating = (
+        _LANDLOCK_ACCESS_FS_WRITE_FILE |
+        _LANDLOCK_ACCESS_FS_MAKE_DIR |
+        _LANDLOCK_ACCESS_FS_MAKE_REG |
+        _LANDLOCK_ACCESS_FS_MAKE_SYM |
+        _LANDLOCK_ACCESS_FS_MAKE_FIFO |
+        _LANDLOCK_ACCESS_FS_MAKE_SOCK |
+        _LANDLOCK_ACCESS_FS_REMOVE_FILE |
+        _LANDLOCK_ACCESS_FS_REMOVE_DIR |
+        _LANDLOCK_ACCESS_FS_REFER |
+        _LANDLOCK_ACCESS_FS_TRUNCATE
+    )
     read_write_execute = (
         _LANDLOCK_ACCESS_FS_READ_FILE |
         _LANDLOCK_ACCESS_FS_READ_DIR |
-        _LANDLOCK_ACCESS_FS_WRITE_FILE |
-        _LANDLOCK_ACCESS_FS_MAKE_DIR |
-        _LANDLOCK_ACCESS_FS_REMOVE_FILE |
-        _LANDLOCK_ACCESS_FS_REMOVE_DIR |
-        _LANDLOCK_ACCESS_FS_EXECUTE
+        _LANDLOCK_ACCESS_FS_EXECUTE |
+        creating
     )
-    write_execute = (
-        _LANDLOCK_ACCESS_FS_WRITE_FILE |
-        _LANDLOCK_ACCESS_FS_MAKE_DIR |
-        _LANDLOCK_ACCESS_FS_REMOVE_FILE |
-        _LANDLOCK_ACCESS_FS_REMOVE_DIR |
-        _LANDLOCK_ACCESS_FS_EXECUTE
-    )
+    write_execute = creating | _LANDLOCK_ACCESS_FS_EXECUTE
 
     fixed = [
         # Traverse and run, but do NOT read. A READ_FILE rule on "/" makes every
@@ -494,6 +540,12 @@ def get_default_allowed_paths(workspace: str) -> List[Tuple[str, int]]:
         ("/dev", read_only),
         ("/proc", read_only),
         (workspace, read_write_execute),
+        # **`/dev/null` writable, and only it.** `/dev` above is read-only, so
+        # opening the null device for writing - `subprocess.DEVNULL`, which is
+        # O_RDWR, or any script's `> /dev/null` - failed with EACCES and took
+        # the whole command with it. A file rule carries file rights only;
+        # directory rights on a file are refused by the kernel.
+        ("/dev/null", _LANDLOCK_ACCESS_FS_READ_FILE | _LANDLOCK_ACCESS_FS_WRITE_FILE),
         ("/tmp", write_execute),
         ("/run", write_execute),
     ]

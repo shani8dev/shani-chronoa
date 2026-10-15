@@ -49,6 +49,19 @@
       <summary>How a reply is paced</summary>
       <description>A named reply-style preset, one config key, so one user's style setting cannot drift between sessions or require learning prompt syntax. 'ordinary' is the base; 'brief' keeps only the direct answer; 'explanatory' adds one sentence of mechanism around the same facts. The same style line is appended to the system prompt on every turn, so a change applies immediately and is live in settings rather than stored anywhere.</description>
     </key>
+    <key name="thinking" type="s">
+      <choices>
+        <choice value="off"/>
+        <choice value="low"/>
+        <choice value="medium"/>
+        <choice value="high"/>
+        <choice value="xhigh"/>
+        <choice value="max"/>
+      </choices>
+      <default>'off'</default>
+      <summary>How hard the model thinks before answering</summary>
+      <description>Asked of whichever engine answers. Cloud providers get it as a reasoning effort (or, for Anthropic, a thinking budget); a provider that refuses a level is asked again at 'high', then without thinking. A local Qwen3 or Ollama model has no levels, so anything above 'off' turns its thinking on. 'off' sends no thinking field at all, and on a CPU it is the fast choice.</description>
+    </key>
     <key name="answer-mode" type="s">
       <choices>
         <choice value="local"/>
@@ -154,6 +167,16 @@
       espeak-ng, then cloud speech, and the announcement says which one is
       speaking and why Piper was not.
       </description>
+    </key>
+    <key name="voice-clone-voice" type="s">
+      <default>''</default>
+      <summary>Which recorded voice to speak with</summary>
+      <description>The name of a voice registered in voice_clone, or empty for the ordinary chain. This is a setting rather than an argument to the speak skill on purpose: choosing whose voice to speak is an identity decision, and handing that choice to the model would let a reply steered by a document or a web page ask for a named person's voice. A person picks the voice here; the model picks the words. The agreement recorded for the voice covers the voice, not any particular text.</description>
+    </key>
+    <key name="voice-clone-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa speak with a recorded voice</summary>
+      <description>Off by default, and the default is the safe one. This permits building a voice out of a recording of a specific person, which is the only thing Chronoa does that speaks as somebody identifiable rather than as a synthesiser nobody owns. Turning it on does nothing on its own: a voice must also be registered, naming the speaker and the basis on which they agreed, and the agreement is bound to the SHA-256 of the recording it was made for - so replacing that file makes the agreement stop applying rather than silently covering the new recording. This switch is the outer limit, not the gate: a registered voice still refuses to speak when the recording on disk is not the one that was agreed to. Changing this does not download anything, and the engine itself needs the KittenTTS runtime, which Chronoa does not package.</description>
     </key>
     <key name="kokoro-tts-enabled" type="b">
       <default>true</default>
@@ -633,7 +656,12 @@
     <key name="lan-phone-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa find phones on the same Wi-Fi network</summary>
-      <description>When true, Chronoa may announce this computer on the local network and listen for devices announcing themselves, using the KDE Connect protocol directly - so it works without KDE Connect or GSConnect installed. Off by default. This is a broadcast on the local network, so anything on it can answer, and the devices that answer are named with their addresses. Discovery only: pairing is not implemented yet, so a phone found this way can be listed and not used. See the lan_phone tool's own answer for what that means.</description>
+      <description>When true, Chronoa may announce this computer on the local network and listen for devices announcing themselves, using the KDE Connect protocol directly - so it works without KDE Connect or GSConnect installed. This is a broadcast on the local network, so anything on it can answer, and the devices that answer are named with their addresses. Pairing is a separate, explicit step (Connect a device): the phone's owner taps Accept, and from then on only that phone is accepted.</description>
+    </key>
+    <key name="lan-bridge-enabled" type="b">
+      <default>false</default>
+      <summary>Let the paired KDE Connect phone ask Chronoa</summary>
+      <description>When true, the shani-chronoa-lan-bridge user service runs and the "phone" inbound channel is listed in gateways (ask-only): text shared from the paired phone becomes a question, and the answer is sent back as a notification. Only the phone stored by pairing is accepted. Set from the last page of Connect a device; turning it off stops the service and removes the channel.</description>
     </key>
     <key name="screen-share-enabled" type="b">
       <default>true</default>
@@ -684,6 +712,26 @@
       <default>false</default>
       <summary>Let Chronoa edit many files at once</summary>
       <description>When true, Chronoa may replace a string across every file matching a pattern. Off by default, and separate from writing one named file: a pattern that matches in forty files rewrites forty files, and that blast radius is not knowable in advance. Without this, find_and_replace still runs as a dry run and lists what it would change.</description>
+    </key>
+    <key name="run-command-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa run commands in your project</summary>
+      <description>When true, Chronoa may run one program at a time - a project's tests, build or linter - in the project folder (Build mode) or a folder inside home, and read its exit code and output. Not a shell: no pipes, redirections or command chaining. Asks every time under Ask first. Off by default: a command can do anything you can.</description>
+    </key>
+    <key name="mcp-client-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa use tools from MCP servers</summary>
+      <description>When true, Chronoa may call the tools that the MCP servers in mcp-servers offer. Off: each call is asked about first. The servers are programs you configured; what their tools do is up to them.</description>
+    </key>
+    <key name="mcp-servers" type="s">
+      <default>''</default>
+      <summary>MCP servers whose tools Chronoa may use</summary>
+      <description>JSON in the mcpServers shape Claude Desktop uses: {"name": {"command": "...", "args": [...], "env": {...}}}. A whole Claude Desktop config may be pasted; its mcpServers object is read. Each server's tools appear as mcp_name_tool.</description>
+    </key>
+    <key name="project-dir" type="s">
+      <default>''</default>
+      <summary>The project folder Build mode works in</summary>
+      <description>When set and Build mode is on, relative paths given to file skills resolve inside this folder, run_command runs here, and the model is told which project it is working on. Empty: no project; paths resolve as before.</description>
     </key>
     <key name="git-write-enabled" type="b">
       <default>true</default>

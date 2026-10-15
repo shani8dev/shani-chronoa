@@ -904,6 +904,21 @@ class ChronoaConfig:
         return got if got in ("ordinary", "brief", "explanatory") else "ordinary"
 
     @property
+    def project_dir(self) -> str:
+        """The project folder Build mode works in, or ""."""
+        return (self.get("project-dir", "") or "").strip()
+
+    @property
+    def thinking(self) -> str:
+        """How hard the model thinks before answering, or 'off'.
+
+        One of `cloud_llm.THINKING_LEVELS`; anything else reads as 'off', which
+        is the request every engine was sending before this setting existed.
+        """
+        from shani_chronoa.cloud_llm import thinking_level
+        return thinking_level(self.get("thinking", "off"))
+
+    @property
     def answer_mode(self) -> str:
         """The stored answer mode, or 'local' when it is unset or unknown.
 

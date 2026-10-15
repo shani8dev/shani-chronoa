@@ -394,13 +394,20 @@ def _render(widget, width, height, path, own_size=False):
         return False
     renderer = Gsk.CairoRenderer.new()
     renderer.realize(None)
-    texture = renderer.render_texture(node, Graphene.Rect().init(0, 0, width, height))
-    if texture is None:
-        print("NO TEXTURE", flush=True)
+    # **Unrealized before it is dropped.** GTK asserts `!priv->is_realized` when
+    # a renderer is disposed, so one left realized aborted the process at exit
+    # with `Gsk:ERROR ... Bail out!` - after "WROTE", so the PNG was fine and
+    # the run still ended in a crash that read like a rendering failure.
+    try:
+        texture = renderer.render_texture(node, Graphene.Rect().init(0, 0, width, height))
+        if texture is None:
+            print("NO TEXTURE", flush=True)
+            return False
+        texture.save_to_png(path)
+        print("WROTE", flush=True)
         return False
-    texture.save_to_png(path)
-    print("WROTE", flush=True)
-    return False
+    finally:
+        renderer.unrealize()
 
 
 def _frame_panel(window, css_class, needle):
@@ -793,6 +800,104 @@ def on_activate(app):
     global WIDTH, HEIGHT
     if THEME:
         Gtk.Settings.get_default().set_property("gtk-theme-name", THEME)
+    if WHICH.startswith("alone:"):
+        # One panel in a plain window, without the main window's start-up
+        # probes (which D-Bus-activate services such as obexd). For looking
+        # at a panel's own layout; `panel:` is the full-context version.
+        from shani_chronoa.gui.surfaces import available_surfaces
+        name = WHICH.split(":", 1)[1]
+        if name == "phone":
+            # No phone, on purpose: the panel's start-up reads messages over
+            # Bluetooth MAP, which D-Bus-activates obexd in this private session
+            # and would talk to a real paired phone. The dialer needs none.
+            from shani_chronoa import phone as _phone
+            _phone.devices = lambda: []
+        if name == "activity" and getattr(app, "tool_tracker", None) is None:
+            # The real log, read only - the page draws its charts from it.
+            from shani_chronoa import tool_tracking
+            app.tool_tracker = tool_tracking.ToolTracker()
+        page = available_surfaces()[name][2](app)
+        window = Adw.ApplicationWindow(application=app, default_width=WIDTH, default_height=HEIGHT)
+        toolbar = Adw.ToolbarView(content=page)
+        toolbar.add_top_bar(Adw.HeaderBar())
+        window.set_content(toolbar)
+        window.present()
+
+        def capture_alone():
+            _render(window, WIDTH, HEIGHT, OUT, own_size=True)
+            window.destroy()
+            app.quit()
+            return False
+        GLib.timeout_add(int(os.environ.get("RENDER_SETTLE_MS", "2500")), capture_alone)
+        GLib.timeout_add(20000, lambda: (app.quit(), False)[1])
+        return None
+    if WHICH.startswith("watch"):
+        # The watch dashboard on its own window, fed a `moyoung.health_summary`
+        # dict: `watch` draws a built-in week of sample data, `watch:PATH` the
+        # JSON a real read saved (datetimes as ISO strings). No watch is touched.
+        import json as _json
+        from datetime import datetime as _dt, timedelta as _td
+        from shani_chronoa.gui.surfaces.watch_dashboard import WatchDashboard
+
+        def _revive(o):
+            for k, v in list(o.items()) if isinstance(o, dict) else []:
+                if isinstance(v, str) and len(v) >= 16 and v[4:5] == "-" and "T" in v:
+                    o[k] = _dt.fromisoformat(v)
+            return o
+        if ":" in WHICH:
+            summary = _json.load(open(WHICH.split(":", 1)[1]), object_hook=_revive)
+            summary["stress_today"] = [(_dt.fromisoformat(w) if isinstance(w, str) else w, v)
+                                       for w, v in summary.get("stress_today") or []]
+        else:
+            night = _dt.now().replace(hour=23, minute=10, second=0, microsecond=0) - _td(days=1)
+            stages = [("light", 35), ("deep", 70), ("light", 80), ("awake", 10), ("light", 60),
+                      ("deep", 45), ("light", 95), ("awake", 5)]
+            sleep, at = [], night
+            for stage, minutes in stages:
+                sleep.append({"start": at, "end": at + _td(minutes=minutes), "stage": stage,
+                              "minutes": minutes})
+                at += _td(minutes=minutes)
+            today = _dt.now().replace(second=0, microsecond=0)
+            summary = {
+                "battery": 64, "step_goal": 10000,
+                "steps_today": {"steps": 6842, "distance_m": 4920, "calories": 231},
+                "steps_yesterday": {"steps": 11204, "distance_m": 8100, "calories": 402},
+                "steps_2_days_ago": {"steps": 8310, "distance_m": 5990, "calories": 296},
+                "sleep": sleep,
+                "sleep_summary": {"asleep_minutes": 385, "deep_minutes": 115,
+                                  "light_minutes": 270, "awake_minutes": 15,
+                                  "from": sleep[0]["start"], "to": sleep[-1]["start"]},
+                # Every half hour from midnight to now - a full line, whatever
+                # time of day the render runs.
+                "stress_today": [(today.replace(hour=h // 2, minute=30 * (h % 2)),
+                                  int(42 + 18 * __import__("math").sin(h / 3) + (h * 7) % 11))
+                                 for h in range(0, max(4, 2 * today.hour + today.minute // 30))],
+                "training": [{"type": "walk", "start": today.replace(hour=7, minute=5),
+                              "active_seconds": 1860, "steps": 3420, "calories": 118, "avg_hr": 104}],
+            }
+        window = Adw.ApplicationWindow(application=app, default_width=WIDTH, default_height=HEIGHT)
+        dash = WatchDashboard("B3:69:73:62:B2:B6", "FB BGS002", actions=[
+            ("Find", "find-location-symbolic", lambda: None),
+            ("Sync time", "preferences-system-time-symbolic", lambda: None)])
+        dash.show(summary)
+        if ":" not in WHICH:
+            dash.tiles["heart_rate"][0].set_text("72")     # sample only
+        for side in ("top", "bottom", "start", "end"):
+            getattr(dash, f"set_margin_{side}")(18)
+        scroller = Gtk.ScrolledWindow(child=Adw.Clamp(maximum_size=900, child=dash))
+        toolbar = Adw.ToolbarView(content=scroller)
+        toolbar.add_top_bar(Adw.HeaderBar())
+        window.set_content(toolbar)
+        window.present()
+
+        def capture():
+            _render(window, WIDTH, HEIGHT, OUT, own_size=True)
+            window.destroy()
+            app.quit()
+            return False
+        GLib.timeout_add(2000, capture)
+        GLib.timeout_add(9000, lambda: (app.quit(), False)[1])
+        return None
     if WHICH.startswith("panel:"):
         # Any panel in the registry, by its id: `panel:machine`, `panel:senses`.
         #

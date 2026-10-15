@@ -147,6 +147,52 @@ def _close_hunk(cur: List[DiffLine], old_start: int, new_start: int) -> DiffHunk
                     lines=cur)
 
 
+#: One row of a side-by-side hunk: `(old_no, text)` or None on each side.
+SplitCell = Optional[Tuple[int, str]]
+
+
+def split_rows(hunk: DiffHunk) -> List[Tuple[SplitCell, SplitCell, str]]:
+    """The hunk as side-by-side rows: `(left, right, kind)`.
+
+    A run of removed lines followed by a run of added lines is a *change*, and
+    its lines are paired row by row - the first removed beside the first added -
+    which is how every side-by-side diff reads. What is left over on either side
+    faces an empty cell. `kind` is "change", "delete", "insert" or "same".
+
+    **Old numbers are counted here**, from `old_start`: `DiffLine.line_no` is the
+    new side's number, and a removed line carries -1, which is why the unified
+    view could never number the left side.
+    """
+    rows: List[Tuple[SplitCell, SplitCell, str]] = []
+    old_no = hunk.old_start
+    removed: List[Tuple[int, str]] = []
+    added: List[Tuple[int, str]] = []
+
+    def flush() -> None:
+        for i in range(max(len(removed), len(added))):
+            left = removed[i] if i < len(removed) else None
+            right = added[i] if i < len(added) else None
+            kind = "change" if left and right else ("delete" if left else "insert")
+            rows.append((left, right, kind))
+        removed.clear()
+        added.clear()
+
+    for line in hunk.lines:
+        if line.tag == "-":
+            if added:           # a removal after additions starts a new change
+                flush()
+            removed.append((old_no, line.text))
+            old_no += 1
+        elif line.tag == "+":
+            added.append((line.line_no, line.text))
+        else:
+            flush()
+            rows.append(((old_no, line.text), (line.line_no, line.text), "same"))
+            old_no += 1
+    flush()
+    return rows
+
+
 def compute_file_diff(path: Path, old: str, new: str) -> DiffFile:
     """Compute the diff for a file, inferring its status."""
     lines = diff_text(old, new)
@@ -182,6 +228,8 @@ class _DiffLineBox(Gtk.Box):
                  selectable: bool = True) -> None:
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self.set_valign(Gtk.Align.START)
+        # Code, so it reads as code: monospace, one tight row per line.
+        self.add_css_class("diff-row")
         self._file = file
         self._hunk_idx = hunk_idx
         self._line_idx = line_idx
@@ -200,6 +248,7 @@ class _DiffLineBox(Gtk.Box):
         # Line number
         num = Gtk.Label(label=str(line.line_no) if line.line_no > 0 else "",
                         xalign=1.0, selectable=False)
+        num.add_css_class("diff-num")
         num.set_size_request(36, 0)
         self.append(num)
 
@@ -212,27 +261,19 @@ class _DiffLineBox(Gtk.Box):
         # Plain text into a plain label. It was markup-escaped first, and a
         # `label=` is not parsed as markup, so `a & b` showed as `a &amp; b`.
         label = Gtk.Label(label=line.text, xalign=0.0, wrap=True, selectable=selectable)
+        label.add_css_class("diff-code")
         if line.tag == "+":
             label.add_css_class("diff-line-add")
         elif line.tag == "-":
             label.add_css_class("diff-line-remove")
         self.append(label)
 
-        # Selection highlight
-        if selectable:
-            self._selector = _LineSelector()
-            self._selector.connect("clicked", self._on_select, file, hunk_idx, line_idx)
-            # Put selector on the left, before +/-.
-            #
-            # GTK4 removed `Gtk.Container.get_children()` and `get_child(int)`,
-            # so the two lines this replaces raised `AttributeError` on every
-            # selectable diff line; `children` was assigned and never read.
-            #
-            # `prepend()` is the whole of the fix and needs no remove-then-insert:
-            # a GTK4 `Gtk.Box` has no `insert_child_at_index` and no
-            # `reorder_child`, which is what an earlier attempt here reached for
-            # and got `AttributeError` for. Measured on the installed GTK 4.22.4.
-            self.prepend(self._selector)
+        # **No line selector.** Every row carried a 24x24 "select" button whose
+        # choice was stored in `selected_line_ids` and read by nothing - and
+        # whose `__click__` is not a GTK signal, so it never even toggled. A
+        # dead control that also made every diff line 34px tall, so a
+        # five-line change filled the panel. The text stays selectable.
+        self._selector: "Optional[_LineSelector]" = None
 
     def _on_select(self, selector: _LineSelector, file: DiffFile, hunk_idx: int,
                    line_idx: int) -> None:
@@ -244,7 +285,7 @@ class _DiffLineBox(Gtk.Box):
 
     @property
     def selected(self) -> bool:
-        return self._selector.selected
+        return bool(self._selector and self._selector.selected)
 
 
 class _LineSelector(Gtk.Button):
@@ -286,8 +327,13 @@ def _make_css():
         .diff-change { background-color: rgba(245,158,11,0.16); }
         .diff-tag-add { color: rgba(34,197,94,0.95); font-weight: bold; }
         .diff-tag-remove { color: #ef4444; font-weight: bold; }
-        .diff-line-add { color: rgba(34,197,94,0.95); }
-        .diff-line-remove { color: #ef4444; }
+        /* The tint says added or removed; the text keeps the theme's own
+           colour, which is the readable one. Green and red text on a green
+           and red tint was the lowest-contrast thing on the page. */
+        .diff-row { padding: 0 6px; min-height: 0; }
+        .diff-code, .diff-num { font-family: monospace; font-size: 0.92em; }
+        .diff-num { opacity: 0.55; padding: 0 6px; }
+        .diff-empty { background-color: alpha(currentColor, 0.04); }
         .diff-line-select { min-width: 4px; }
         .diff-line-select:selected { background-color: #888; }
         .diff-hunk { border-bottom: 1px solid alpha(currentColor, 0.15); padding: 4px 0; }
@@ -346,6 +392,18 @@ class _DiffFileItem(Gtk.Box):
         # for one already on disk: these handlers are only ever wired by a
         # caller that stages a preview before writing, and no such caller
         # exists, so drawing them would put two dead buttons on every row.
+        if applied and self._file.status != "unchanged":
+            # **The one action a written change has: put it back.** These
+            # writes already happened, so Accept is meaningless and "Reject"
+            # can only mean revert - which the undo ring can do, recording the
+            # current content first so the revert is undoable too.
+            revert = Gtk.Button(icon_name="edit-undo-symbolic")
+            revert.add_css_class("flat")
+            revert.set_tooltip_text(f"Put {file.path.name} back as it was before this change")
+            revert.update_property([Gtk.AccessibleProperty.LABEL],
+                                   [f"Revert {file.path.name}"])
+            revert.connect("clicked", self._on_revert)
+            self.append(revert)
         if not applied:
             buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
             accept = Gtk.Button(label="Accept")
@@ -399,6 +457,13 @@ class _DiffFileItem(Gtk.Box):
                 self.set_cursor(Gdk.Cursor.new_from_name("pointer"))
             except Exception:  # noqa: BLE001 - a cursor is not worth a failed row
                 pass
+
+    #: Set by the view: `on_revert(file)` puts the file back and re-renders.
+    on_revert = None
+
+    def _on_revert(self, button: Gtk.Button) -> None:
+        if self.on_revert is not None:
+            self.on_revert(self._file)
 
     def _status_icon(self) -> str:
         return {"modified": "document-edit-symbolic", "added": "list-add-symbolic",
@@ -494,6 +559,56 @@ class _DiffHunkView(Gtk.Box):
             self.append(_DiffLineBox(file, hunk_idx, line_idx, line, selectable=selectable))
 
 
+class _DiffHunkSplitView(Gtk.Box):
+    """One hunk side by side: the old file on the left, the new on the right."""
+
+    def __init__(self, hunk: DiffHunk) -> None:
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self.add_css_class("diff-hunk")
+        header = Gtk.Label()
+        header.add_css_class("diff-hunk-header")
+        header.set_text(
+            f"@@ -{hunk.old_start},{hunk.old_count} "
+            f"+{hunk.new_start},{hunk.new_count} @@")
+        self.append(header)
+        # **Two homogeneous columns, one per file.** Four columns (number and
+        # text on each side) sized themselves per hunk, so the divider sat in
+        # a different place in every hunk - measured, 544px in one and 562px
+        # in the next. Each side is one cell now, and the grid halves the width.
+        grid = Gtk.Grid(column_spacing=0, row_spacing=0)
+        grid.set_column_homogeneous(True)
+        for row, (left, right, kind) in enumerate(split_rows(hunk)):
+            tint_left = {"change": "diff-remove", "delete": "diff-remove"}.get(kind, "")
+            tint_right = {"change": "diff-add", "insert": "diff-add"}.get(kind, "")
+            for col, cell, tint in ((0, left, tint_left), (1, right, tint_right)):
+                num, code = self._cell(cell, tint)
+                side = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+                side.append(num)
+                side.append(code)
+                grid.attach(side, col, row, 1, 1)
+        self.append(grid)
+
+    @staticmethod
+    def _cell(cell: SplitCell, tint: str) -> "Tuple[Gtk.Widget, Gtk.Widget]":
+        number = Gtk.Label(label=str(cell[0]) if cell else "", xalign=1.0)
+        number.add_css_class("diff-num")
+        number.set_size_request(40, -1)
+        text = Gtk.Label(label=cell[1] if cell else "", xalign=0.0, wrap=True,
+                         selectable=bool(cell))
+        text.add_css_class("diff-code")
+        text.set_hexpand(True)
+        # A 1px request, so a long line wraps inside its half rather than
+        # asking the homogeneous grid for more width than half.
+        text.set_size_request(1, -1)
+        for widget in (number, text):
+            widget.add_css_class("diff-row")
+            if tint:
+                widget.add_css_class(tint)
+            elif not cell:
+                widget.add_css_class("diff-empty")
+        return number, text
+
+
 # ---------------------------------------------------------------------------
 # Main diff view
 # ---------------------------------------------------------------------------
@@ -507,6 +622,7 @@ class _DiffView(Gtk.Box):
         self.set_valign(Gtk.Align.FILL)
         self._app = app
         self._files: Dict[Path, DiffFile] = {}
+        self._befores: Dict[Path, str] = {}
         self._selected: Set[Path] = set()
         #: Whether what is on screen has already been written to disk. The
         #: panel's whole honesty turns on this: Accept/Reject are only drawn
@@ -566,7 +682,25 @@ class _DiffView(Gtk.Box):
         toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         toolbar.add_css_class("diff-toolbar")
         self._count_label = Gtk.Label(label="0 files changed")
+        self._count_label.set_hexpand(True)
+        self._count_label.set_xalign(0.0)
         toolbar.append(self._count_label)
+        # **Unified or side by side.** "auto" until the person picks: split
+        # when the window is wide enough for two files to sit next to each
+        # other, unified when it is not - the choice a terminal diff makes from
+        # its own width. A pick sticks for as long as the panel lives.
+        self._mode = "auto"
+        modes = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        modes.add_css_class("linked")
+        self._unified_button = Gtk.ToggleButton(label="Unified")
+        self._split_button = Gtk.ToggleButton(label="Split")
+        self._split_button.set_group(self._unified_button)
+        self._unified_button.set_tooltip_text("Old and new lines in one column")
+        self._split_button.set_tooltip_text("The old file on the left, the new on the right")
+        for mode, button in (("unified", self._unified_button), ("split", self._split_button)):
+            button.connect("toggled", self._on_mode_toggled, mode)
+            modes.append(button)
+        toolbar.append(modes)
         # Into the right-hand column, above the diff. It was appended to this
         # horizontal box, so it became a third column drawn between the file
         # list and the diff, on top of the file name.
@@ -583,7 +717,26 @@ class _DiffView(Gtk.Box):
         right.append(self._diff_scrolled)
         self.append(right)
 
+        # Built before it is on screen, so "auto" cannot know the width yet:
+        # decide again once it is shown.
+        self.connect("map", lambda *_a: self._mode == "auto" and self._render_files())
         # Initial render
+        self._render_files()
+
+    #: Window width from which "auto" shows two files side by side.
+    SPLIT_FROM_PX = 900
+
+    def _split_now(self) -> bool:
+        if self._mode != "auto":
+            return self._mode == "split"
+        root = self.get_root()
+        width = root.get_width() if root is not None else 0
+        return width >= self.SPLIT_FROM_PX
+
+    def _on_mode_toggled(self, button: Gtk.ToggleButton, mode: str) -> None:
+        if not button.get_active() or getattr(self, "_syncing_mode", False):
+            return
+        self._mode = mode
         self._render_files()
 
     def set_diffs(self, files: Dict[Path, Tuple[str, str]],
@@ -600,6 +753,8 @@ class _DiffView(Gtk.Box):
         """
         self._files.clear()
         self._applied = applied
+        #: The "before" side of each shown diff - what Revert writes back.
+        self._befores = {path: old for path, (old, _new) in files.items()}
         for path, (old, new) in files.items():
             self._files[path] = compute_file_diff(path, old, new)
         self._render_files()
@@ -640,6 +795,7 @@ class _DiffView(Gtk.Box):
             item = _DiffFileItem(f, applied=self._applied)
             item.on_accept = self._accept_file
             item.on_reject = self._reject_file
+            item.on_revert = self._revert_file
             item.on_select = self._select_file
             if path in self._selected:
                 item.selected = True
@@ -652,6 +808,13 @@ class _DiffView(Gtk.Box):
             self._diff_box.remove(child)
             child = next_child
 
+        self._syncing_mode = True
+        try:
+            split = self._split_now()
+            self._split_button.set_active(split)
+            self._unified_button.set_active(not split)
+        finally:
+            self._syncing_mode = False
         changed = [f for f in self._files.values() if f.status != "unchanged"]
         total_added = sum(sum(1 for h in f.hunks for l in h.lines if l.tag == "+")
                           for f in changed)
@@ -682,8 +845,10 @@ class _DiffView(Gtk.Box):
             if f.status == "unchanged":
                 continue
             if f.hunks:
+                split = self._split_now()
                 for hunk_idx, hunk in enumerate(f.hunks):
-                    self._diff_box.append(_DiffHunkView(f, hunk_idx, hunk))
+                    self._diff_box.append(_DiffHunkSplitView(hunk) if split
+                                          else _DiffHunkView(f, hunk_idx, hunk))
             else:
                 self._diff_box.append(
                     Gtk.Label(label=f"No hunks (empty change) - {f.status}"))
@@ -722,6 +887,18 @@ class _DiffView(Gtk.Box):
                 f"{len(changed)} file(s) awaiting your decision",
                 f"{added} line(s) added; nothing is written until you accept"))
 
+    def _revert_file(self, file: DiffFile) -> None:
+        """Restore the "before" side this panel is showing for `file`."""
+        from shani_chronoa.skills.undo_last_change import restore_content
+        before = self._befores.get(file.path)
+        if before is None:
+            return
+        why = restore_content(file.path, before.encode("utf-8"))
+        self._count_label.set_text(f"Reverted {file.path.name}" if not why
+                                   else f"{file.path.name} not reverted: {why}")
+        if not why:
+            self.load_recent_changes()
+
     def _accept_file(self, file: DiffFile) -> None:
         if self.on_accept_file:
             self.on_accept_file(file)
@@ -744,7 +921,9 @@ class _DiffView(Gtk.Box):
 
 def build(app: Any) -> Gtk.Widget:
     """Build the diff page for `app`."""
-    page, set_content = common.surface(TITLE, SUBTITLE)
+    # Wider than a prose panel: a side-by-side diff is two files across, and at
+    # the 820px reading width every line of either one wrapped.
+    page, set_content = common.surface(TITLE, SUBTITLE, max_width=1400)
     view = _DiffView(app)
     # Stage the preview at build time. Nothing else ever called `set_diffs`,
     # so before this the panel had no content and no way to acquire any: a

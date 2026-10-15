@@ -123,12 +123,14 @@ CONSENT_UNKNOWN_DETAIL = (
     "guessing which it was."
 )
 
-NO_BACKEND_TITLE = "This desktop has no calendar service for Chronoa to read"
+NO_BACKEND_TITLE = "No calendar is connected"
+#: What to do, first. The reason (Evolution Data Server on GNOME; Plasma keeps
+#: calendars in Akonadi, which this reader does not speak) is the last clause,
+#: not the paragraph.
 NO_BACKEND_DETAIL = (
-    "Chronoa reads calendars through Evolution Data Server, which the GNOME "
-    "image ships. Plasma has none: it keeps calendars in Akonadi, which this "
-    "reader does not speak, so on a Plasma install there is no backend here to "
-    "ask. That is not the same as having nothing on - nothing was asked."
+    "Chronoa reads calendars through GNOME's calendar service. On GNOME, add your "
+    "Google, Microsoft or Nextcloud account in Settings → Online Accounts, and its "
+    "events appear here. KDE Plasma calendars are not supported yet."
 )
 
 UNREADABLE_TITLE = "The calendar service is here but could not be read"
@@ -619,10 +621,9 @@ class _CalendarSurface:
         that would open Settings and change nothing.
         """
         if self._state == STATE_CONSENT:
-            self._content.append(common.banner(
-                "Reading the calendar is a switch on this machine.",
-                "Open Senses settings",
-                lambda: common.open_page(self._app, "settings:senses")))
+            self._content.append(common.consent_banner(
+                self._app, CONSENT_KEY, "Nothing was read from your calendars.",
+                on_change=lambda: common.reload_surface(self._app, "calendar")))
         widget = common.empty_state(ICON if self._state != STATE_UNREADABLE
                                     else "dialog-warning-symbolic",
                                     _plain(title), _plain(detail))

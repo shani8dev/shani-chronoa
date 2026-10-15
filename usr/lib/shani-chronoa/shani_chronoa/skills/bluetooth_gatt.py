@@ -291,10 +291,20 @@ _MAC = re.compile(r"Device ([0-9A-F:]{17}) (.+)")
 
 
 def paired() -> list:
-    """[(mac, name)] for every paired device, from bluetoothctl itself."""
-    proc = subprocess.run(["bluetoothctl", "devices", "Paired"],
-                          capture_output=True, text=True, timeout=15, check=False)
-    return [(mac, name.strip()) for mac, name in _MAC.findall(proc.stdout or "")]
+    """[(mac, name)] for every paired **or trusted** device, from bluetoothctl.
+
+    Trusted as well, because a Bluetooth LE band or watch often refuses to
+    bond: "Connect a device" connects it over GATT and marks it trusted
+    instead (`bt_pair.Pairing.connect_only`), and a list of bonded devices
+    alone would never show the one wearable this skill exists for.
+    """
+    out: dict = {}
+    for which in ("Paired", "Trusted"):
+        proc = subprocess.run(["bluetoothctl", "devices", which],
+                              capture_output=True, text=True, timeout=15, check=False)
+        for mac, name in _MAC.findall(proc.stdout or ""):
+            out.setdefault(mac, name.strip())
+    return list(out.items())
 
 
 def advertised_uuids(mac: str) -> list:

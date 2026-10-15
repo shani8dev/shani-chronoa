@@ -50,6 +50,9 @@ from shani_chronoa import ask_bridge  # noqa: E402
 from shani_chronoa import assistant as assistant_mod  # noqa: E402
 from shani_chronoa.assistant import Assistant  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _ask import defaults_with_timeout  # noqa: E402
+
 
 #: These tests check that the round cap *applies*, not what it is. The shipped
 #: cap (`MAX_TOOL_ROUNDS`, 40 since 2026-10-08) is above the loop detector's
@@ -107,7 +110,6 @@ def absent_user():
 def run_turn():
     """Run one turn; return (answer, elapsed, tool calls actually dispatched)."""
     original_budget = assistant_mod.MAX_TURN_SECONDS
-    original_defaults = ask_bridge.ask.__defaults__
     original_execute = assistant_mod.execute_tool
     calls: list = []
 
@@ -121,7 +123,7 @@ def run_turn():
     def _run(model, budget: float):
         calls.clear()
         assistant_mod.execute_tool = _execute
-        ask_bridge.ask.__defaults__ = ("", [], _ASK_SECONDS)
+        ask_bridge.ask.__defaults__ = defaults_with_timeout(_ASK_SECONDS)
         assistant_mod.MAX_TURN_SECONDS = budget
         started = time.monotonic()
         try:
@@ -129,7 +131,6 @@ def run_turn():
                 answer = asyncio.run(Assistant(model).handle("ask me things"))
         finally:
             assistant_mod.MAX_TURN_SECONDS = original_budget
-            ask_bridge.ask.__defaults__ = original_defaults
             assistant_mod.execute_tool = original_execute
         return answer, time.monotonic() - started, list(calls)
 

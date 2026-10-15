@@ -47,45 +47,53 @@ from shani_chronoa import pages  # noqa: E402
 from shani_chronoa.gui.surfaces import listening  # noqa: E402
 
 
+class _Config:
+    def __init__(self):
+        self.written = {}
+
+    def set(self, key, value):
+        self.written[key] = value
+
+    def get_bool(self, key, default=False):
+        return self.written.get(key) == "true"
+
+
 class _App:
     """The smallest thing `wire_page_button` can close over."""
 
     def __init__(self):
         self.window = None
-        self.config = None
+        self.config = _Config()
 
     def activate_action(self, name, arg):
         pass
 
 
-def test_a_refused_permission_offers_the_page_that_grants_it(monkeypatch):
-    """The positive case, asserted on the **route** rather than the label.
+def _buttons(widget, acc=None):
+    acc = [] if acc is None else acc
+    if isinstance(widget, Gtk.Button):
+        acc.append(widget)
+    child = widget.get_first_child()
+    while child is not None:
+        _buttons(child, acc)
+        child = child.get_next_sibling()
+    return acc
 
-    A button with the right words that opens nothing is the orb this repo treats
-    as the standing example of reading as complete and doing nothing.
+
+def test_a_refused_permission_is_turned_on_here():
+    """The positive case, asserted on **what the press writes**.
+
+    It used to open Privacy settings and leave the person to find the row; now
+    the switch is turned on from the page, by its Settings name. Asserted on
+    the literal key, not `listening.CONSENT_KEY` - a mutated constant would
+    move both sides of a tautology at once.
     """
-    reached = []
-    monkeypatch.setattr(pages, "show",
-                        lambda target, application=None, config=None:
-                        reached.append(target) or True)
-
-    button = listening._consent_route(_App(), False)
-    assert button is not None, (
-        "the panel names the switch that grants this permission and offered no "
-        "way to reach it - the dead end test_dead_ends_have_buttons.py exists "
-        "to prevent")
-    assert isinstance(button, Gtk.Button)
-
+    app = _App()
+    banner = listening._consent_route(app, False)
+    assert banner is not None, "a refused permission offered no way to turn it on"
+    (button,) = [b for b in _buttons(banner) if b.get_label() == "Turn on"]
     button.emit("clicked")
-    # **A literal, not `listening.CONSENT_TARGET`.** Asserting against the
-    # module's own constant is a tautology: mutating the constant moves both
-    # sides at once and this still passes. Measured - changing the target to
-    # `settings:senses` left all five tests green, which is how this was found.
-    # The desktop guard got this right by accident; this one did not.
-    assert reached == ["settings:privacy"], (
-        f"the press reached {reached!r}, not the page that writes "
-        "'heard-sound'. That key is written in settings_window/privacy.py and "
-        "nowhere else.")
+    assert app.config.written == {"heard-sound-sense-enabled": "true"}, app.config.written
 
 
 @pytest.mark.parametrize("allowed", [True, None])
@@ -121,27 +129,6 @@ def test_a_headless_build_gets_no_dead_button(monkeypatch):
         "a button was built with no app to press, which reads as complete and "
         "does nothing")
 
-
-def test_the_row_replaces_its_route_rather_than_stacking_them():
-    """`set_state` runs on every probe, so a second refusal must not leave two
-    buttons on one row."""
-    row = listening._StateRow("Permission")
-    row.set_route(listening._consent_route(_App(), False))
-    first = row._route
-    row.set_route(None)
-    row.set_route(listening._consent_route(_App(), False))
-
-    assert row._route is not first, (
-        "set_route kept the earlier button instead of replacing it, so a second "
-        "probe would stack a second identical button on the same row")
-    children = []
-    child = row.get_first_child()
-    while child is not None:
-        children.append(child)
-        child = child.get_next_sibling()
-    assert sum(isinstance(w, Gtk.Button) for w in children) == 1, (
-        f"the row carries {sum(isinstance(w, Gtk.Button) for w in children)} "
-        "buttons where there should be exactly one")
 
 def test_the_route_is_the_page_that_actually_writes_the_key():
     """Why `settings:privacy` is the target, asserted against the source.

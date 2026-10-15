@@ -1,5 +1,7 @@
 """Voice: listening, the wake phrase, speech output, speed and pause, speech models and audio devices."""
 
+import os
+import time
 
 import gi
 
@@ -114,7 +116,7 @@ class VoicePage:
             lambda a: self._set_bool("notification-enabled", a),
         )
         self._switch(
-            group, "Interrupt while replying (barge-in)",
+            group, "Talk over a reply to interrupt it",
             "No echo cancellation, so speaker output can self-interrupt; best with headphones",
             config.barge_in_vad_enabled, lambda a: self._app_toggle("toggle-barge-in-vad", a))
         model_ready = _stt_model_is_ready(config)
@@ -192,6 +194,160 @@ class VoicePage:
                             config.audio_output_device)
         self._build_voice_output(page)
 
+    def _clone_rows(self, group, config) -> None:
+        """The recorded-voice switch, and one removable row per agreement.
+
+        **There is deliberately no "add a voice" control here, and that is the
+        decision rather than an omission.** Registering a voice means asserting
+        that a specific person agreed to be built from a specific recording, and
+        a control that could be pressed by anything other than a person at the
+        machine would put that assertion behind a prompt injection. So
+        registration is a deliberate act with `voice_clone.register()`, and this
+        panel's job is to show what has been asserted and to let it be withdrawn
+        - which is the half that matters after the fact.
+
+        The rows are read from the registry, so this cannot offer a voice nobody
+        agreed to. **A removed voice disappears on the next window build** rather
+        than leaving a stale row: `revoke()` deletes the record and there is no
+        cached copy for the panel to be reading.
+        """
+        from shani_chronoa import voice_clone
+
+        # Read through the dispatcher's own property rather than from
+        # `config` directly: `cloned_voice` resolves the key and strips it, and
+        # a panel that read the raw setting would have two answers to "which
+        # voice is chosen" - the same two-answers problem `speaking with` above
+        # avoids by asking `engine()`.
+        from shani_chronoa import tts as _tts
+        problem = voice_clone.clone_problem()
+        self._switch(
+            group, voice_clone.SWITCH_LABEL,
+            "Permits building a voice out of a recording of a specific person. "
+            "On its own this does nothing: a voice also has to be registered "
+            "below, naming the speaker and the basis of their agreement, and "
+            "that agreement is bound to the exact recording it was made for - "
+            "so replacing the file makes it stop applying rather than quietly "
+            "covering the new audio. "
+            + (f"The engine itself cannot run here: {problem}"
+               if problem else
+               "The engine needs the KittenTTS runtime, which Chronoa does not "
+               "package, so this switch alone will not make a voice speak."),
+            config.get_bool(voice_clone.CONSENT_KEY, False),
+            self._set_clone,
+        )
+
+        entries = voice_clone.voices()
+        picker = Adw.ComboRow(title="Speak with which recorded voice")
+        picker.set_subtitle("A person's decision, and deliberately not an argument "
+                            "the model can pass: a reply steered by a document "
+                            "must not be able to ask for somebody's voice.")
+        # **The labels go in the model and the values live beside it**, because
+        # `Gtk.StringList` is a list of strings and nothing on this build can
+        # attach a value to an entry. Measured on libadwaita 1.9.1: there is no
+        # `ComboRow.append`, `set_active`, `get_active_id` or `get_selected_item
+        # ().get_value()`, and `Adw.ComboRowItem` is not in the introspection at
+        # all - the per-item value slot the API looks like it has is not
+        # reachable. `set_selected` by index is the whole of it, so the index is
+        # the handle and `values` is what it indexes into.
+        #
+        # Kept as a pair rather than deriving one from the other because the
+        # ordinary-voices entry has a label and an *empty* value, so a single
+        # list cannot be both without a sentinel the model would display.
+        values = [""] + [name for name, _consent in entries]
+        labels = Gtk.StringList()
+        labels.append("The ordinary voices")
+        for name, _consent in entries:
+            labels.append(name)
+        picker.set_model(labels)
+
+        # Only applied when there is something to select: an empty model
+        # reports `get_selected()` as G_MAXUINT rather than 0, so the default
+        # would be written as if it were a position.
+        current = _tts.PiperTTS().cloned_voice
+        if values:
+            picker.set_selected(
+                values.index(current) if current in values else 0)
+
+        def _chosen(row) -> None:
+            # Bounds-checked rather than trusted. The index comes from GTK, and
+            # an empty or shrunk model answers G_MAXUINT - which is a real value
+            # the picker would otherwise write into the setting as a voice name.
+            index = row.get_selected()
+            if 0 <= index < len(values):
+                self._set_clone_voice(values[index])
+
+        picker.connect("notify::selected", lambda r, *_: _chosen(r))
+        picker.set_sensitive(bool(entries))
+        group.add(picker)
+
+        # Held so `_forget_voice` can take a row off the page. An attribute
+        # rather than a closure because the Remove button outlives this call.
+        self._clone_rows_built = []
+        for name, consent in entries:
+            row = Adw.ActionRow()
+            # **Markup off, not escaped.** `Adw.ActionRow`'s title and subtitle
+            # are both Pango markup, and escaping for a row that switches markup
+            # off prints the entity instead - `model.py` is the recorded
+            # precedent for exactly this. A speaker's name and a consent basis
+            # are both free text somebody typed, so the plain path is the
+            # correct one rather than the lazy one.
+            row.set_use_markup(False)
+            row.set_title(f"Recorded voice: {name}")
+            row.set_subtitle(
+                f"{consent.speaker}, on the basis of: {consent.basis}. "
+                f"Agreed on {time.strftime('%d %b %Y', time.localtime(consent.registered_at))}"
+                f" for {os.path.basename(consent.clip)}.")
+            remove = Gtk.Button(label="Remove", valign=Gtk.Align.CENTER)
+            remove.add_css_class("destructive-action")
+            remove.connect("clicked", lambda _b, v=name: self._forget_voice(v))
+            row.add_suffix(remove)
+            group.add(row)
+            self._clone_rows_built.append(row)
+        if not entries:
+            self._info_row(
+                group, "No recorded voices",
+                "None has been agreed to. Cloning a voice needs a person to "
+                "record their agreement - Chronoa will not build someone's voice "
+                "from a recording they did not agree to.",
+            )
+
+    def _set_clone(self, active: bool) -> None:
+        """The consent switch's own writer, kept beside the row that calls it."""
+        self.app.config.set("voice-clone-enabled", "true" if active else "false")
+
+    def _set_clone_voice(self, voice: str) -> None:
+        """Which registered voice to speak with, written from the picker."""
+        from shani_chronoa import tts
+        self.app.config.set(tts.PiperTTS.CLONE_VOICE_KEY, voice or "")
+
+    def _forget_voice(self, voice: str) -> None:
+        """Withdraw an agreement, and take its row off this page.
+
+        The row is removed **here** rather than by rebuilding the page, because
+        `VoicePage` has no rebuild hook - inventing one would be a new mechanism
+        for a page that has never needed one. Revoking and then reading the gate
+        in the same session is refused, since the registry is read per call and
+        nothing caches a copy of it.
+        """
+        from shani_chronoa import voice_clone
+
+        if not voice_clone.revoke(voice):
+            return
+        title = f"Recorded voice: {voice}"
+        for row in list(getattr(self, "_clone_rows_built", ())):
+            if row.get_title() != title:
+                continue
+            # **The parent is the `ListBox`, not the group.** `Adw.Preferences-
+            # Group` wraps its rows, and measured on libadwaita 1.9.1 they sit
+            # eleven levels below the group rather than directly inside it - so
+            # `group.remove(row)` does not exist and the ListBox is the object
+            # that can take one out. Stated because it looks wrong and is not:
+            # the obvious `row.get_parent() is group` is the shape this file
+            # already had to correct for `common.rows_of`.
+            parent = row.get_parent()
+            if parent is not None:
+                parent.remove(row)
+
     def _build_voice_output(self, page) -> None:
         """Which engine speaks, and what its voice sounds like.
 
@@ -226,6 +382,7 @@ class VoicePage:
             config.get_bool(tts.PiperTTS.PIPER_KEY, True),
             self._set_piper,
         )
+        self._clone_rows(group, config)
         self._switch(
             group, "Use the Kokoro neural voice",
             "Sounds like a person where the voices below sound like a "

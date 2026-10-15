@@ -734,6 +734,10 @@ def _note(text: str) -> Gtk.Label:
     return label
 
 
+#: Extras whose key is a Setup page - the only ones a Download can land on.
+_SETUP_PAGES = frozenset({"eyes", "imagine", "memory", "languages", "photos", "sounds", "speakers"})
+
+
 def _row(title: str, detail: str, tooltip: str, accessible: str) -> Gtk.Widget:
     """One line of the page: a title, a plain detail, and both texts carried on
     the tooltip and the accessible label so either can be read without a
@@ -796,12 +800,7 @@ class _ModelSurface(Gtk.Box):
         # panel that can be a model downloaded minutes ago that is still reported
         # as absent. The banner carries the reason and the control together, and
         # its button inherits a tooltip and an accessible label from that reason.
-        self._reload_button = common.banner(
-            "Read once, when this panel was built. Nothing here is polled - press "
-            "Reload to read the model, the engines and the extras from this "
-            "machine again.",
-            "Reload",
-            lambda: self.refresh())
+        self._reload_button = common.read_banner(lambda: self.refresh())
         self.append(self._reload_button)
         self.append(self._summary)
 
@@ -962,10 +961,21 @@ class _ModelSurface(Gtk.Box):
             state = _state_word(extra.installed, INSTALLED, NOT_INSTALLED)
             built = _row(f"{extra.label} - {state}", f"{extra.what}; {extra.detail}",
                          f"{extra.label}: {state}\n{extra.what}\n{extra.detail}\n"
-                         f"Read from {extra.source}\nInstall it with: shani-chronoa --setup",
+                         f"Read from {extra.source}",
                          f"Extra {extra.label}: {state}. {extra.what}. {extra.detail}")
             built._extra_key = extra.key
             built._extra_state = extra.installed
+            # **A Download on the row that says it is missing**, opening Setup
+            # on this extra's own page (the keys are Setup's page tags). The
+            # tooltip used to say "Install it with: shani-chronoa --setup" -
+            # a command, on a page with a mouse.
+            if extra.installed is False and extra.key in _SETUP_PAGES and hasattr(built, "add_suffix"):
+                download = Gtk.Button(label="Download", valign=Gtk.Align.CENTER)
+                download.add_css_class("suggested-action")
+                download.set_tooltip_text(f"Opens Setup on its {extra.label} page")
+                download.connect("clicked", lambda _b, k=extra.key: common.open_setup(
+                    self._app, self, page=k))
+                built.add_suffix(download)
             self._extra_rows.append(built)
             _add(self._extra_group, built)
 

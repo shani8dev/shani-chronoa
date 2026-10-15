@@ -155,7 +155,9 @@ class OrganStrip(Gtk.FlowBox):
         # One property, one number, and
         # `tests/test_now_rail.py::test_the_organ_lights_are_separated_by_a_gap`
         # asserts it.
-        self.set_column_spacing(6)
+        # 4, not 2: an *active* light shows its word, and at 2px two lit
+        # words touch (`tests/test_now_rail.py` pins this).
+        self.set_column_spacing(4)
         self.set_row_spacing(2)
         self.set_min_children_per_line(0)
         # Set explicitly rather than relying on the default: rendered at 1280px
@@ -237,12 +239,19 @@ class OrganStrip(Gtk.FlowBox):
                 row.add_css_class("organ-idle")
                 word = ORGAN_ICONS[organ][1]
                 label.set_text(word)
+                # **Icon only while idle.** Eight captions saying what nothing
+                # is doing were the widest thing under the conversation and
+                # wrapped it onto two rows; the word comes back the moment the
+                # organ is busy, which is when it is worth reading. The tooltip
+                # and the accessible name still carry it at rest.
+                label.set_visible(False)
                 row.set_tooltip_text(f"{word.capitalize()} - idle")
                 row.update_property([Gtk.AccessibleProperty.LABEL], [f"{word}: idle"])
             else:
                 row.remove_css_class("organ-idle")
                 row.add_css_class("organ-active")
                 label.set_text(ORGAN_ICONS[organ][1])
+                label.set_visible(True)
                 detail = body_module.body.describe(organ)
                 row.set_tooltip_text(detail.capitalize())
                 row.update_property([Gtk.AccessibleProperty.LABEL], [detail])
@@ -378,7 +387,7 @@ ORGAN_IDLE_CSS = """
    needed 466, allocated 474, cells 8px off).  The vertical 2px is kept
    because it is the row's own breathing room and is not part of that sum. */
 .organ-strip { padding: 2px 0; }
-.organ { padding: 2px 6px; border-radius: 8px; }
+.organ { padding: 3px 4px; border-radius: 8px; }
 .organ-icon { opacity: 0.45; }
 .organ-label { font-size: 10px; opacity: 0.55; }
 .organ-idle { background-color: alpha(currentColor, 0.05); }

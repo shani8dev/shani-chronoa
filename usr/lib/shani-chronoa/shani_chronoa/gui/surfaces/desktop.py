@@ -196,11 +196,8 @@ ROW_TITLES = (
 )
 
 _FOOTER = (
-    "Read once, when this panel was built; reopen it to ask again. Nothing here "
-    "is started, stopped or bound - the panel asks the desktop what is already "
-    "true and changes none of it. A portal bind cannot be proven from outside "
-    "the process, so the global shortcut row reports the setting and stops "
-    "there."
+    "What the desktop says right now - search, shortcut, keyring, Open with. "
+    "This page only reads; reopen it to ask again."
 )
 
 
@@ -476,6 +473,29 @@ def _privacy_button(app: Any) -> Gtk.Widget:
         app, "settings:privacy")
 
 
+def _turn_on_button(app: Any, key: str) -> Gtk.Widget:
+    """"Turn on", for exactly this row's switch, then the panel rebuilds.
+
+    Was "Open Privacy settings" on both rows - two identical buttons sending
+    the person away to find which of two switches each one meant.
+    """
+    button = Gtk.Button(label="Turn on")
+    button.add_css_class("suggested-action")
+    button.set_valign(Gtk.Align.CENTER)
+    name = common.consent_name(key)
+    button.set_tooltip_text(f"Turn on \"{name}\", the same switch as in Settings")
+    button.update_property([Gtk.AccessibleProperty.LABEL], [f"Turn on {name}"])
+
+    def turn_on(_button) -> None:
+        config = getattr(app, "config", None)
+        if config is not None:
+            config.set(key, "true")
+            common.reload_surface(app, "desktop")
+
+    button.connect("clicked", turn_on)
+    return button
+
+
 def _off_button(app: Any, config: Any, key: str) -> Optional[Gtk.Widget]:
     """The button for `key`, and **only** when the key is off.
 
@@ -488,7 +508,7 @@ def _off_button(app: Any, config: Any, key: str) -> Optional[Gtk.Widget]:
     value, problem = _gate(config, key)
     if problem or value is None or value:
         return None
-    return _privacy_button(app)
+    return _turn_on_button(app, key)
 
 
 def _shortcut_sentence(config: Any) -> str:

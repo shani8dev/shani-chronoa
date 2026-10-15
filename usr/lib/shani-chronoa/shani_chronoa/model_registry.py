@@ -121,6 +121,37 @@ def classify(entry: Dict[str, object]) -> Tuple[str, str]:
                 + (f" for {base}" if base else "")
                 + ", not a model to load by itself - it applies to a base model, "
                   "and running it as one would fail")
+    if declared in modelfmt._TYPE_SUFFIXES:
+        # **The header's own `general.type`, read from the same table the
+        # filename rule uses** (measured 2026-10-15). `kind_of` answers
+        # "tokenizer data, not weights" for a file *named* `-vocab`, and a
+        # header saying the same thing was then ignored:
+        #
+        #     general.type=vocab    filename-kind=model  -> classify=vocab
+        #     general.type=adapter  filename-kind=model  -> classify=adapter
+        #
+        # **Two answers to one question from one source** - the shape
+        # `files.py`'s three `wpctl` copies and this module's own docstring
+        # ("Structure ... is `modelfmt.kind_of`'s answer and this module does
+        # not restate it") both warn about. Deriving from `_TYPE_SUFFIXES`
+        # rather than writing a new tuple is what stops a second vocabulary
+        # appearing the week a third type is added.
+        #
+        # The header is the file's own statement about itself and the filename
+        # is a convention, so the header outranks it - the same order
+        # `test_the_header_outranks_the_name` already holds for an adapter.
+        #
+        # **What this does not cover, stated rather than guessed at.** `gguf`
+        # defines no enum for `general.type` - it is a free string, and the only
+        # value checked anywhere in this tree is `"adapter"`
+        # (`adapter.py:65`). So the vocabulary here is the tree's own
+        # `_TYPE_SUFFIXES`, and a header declaring some third type this table
+        # has never heard of is still offered. Adding `tokenizer` because it
+        # reads like the right word would be inventing a format value, which is
+        # the thing this module exists to avoid; the table is the one place to
+        # add it, and it is named here so the next reader adds it there.
+        return ("adapter" if declared == "LoRA" else "vocab",
+                modelfmt._TYPE_SUFFIXES[declared] + ", and the header says so")
     if not entry.get("architecture"):
         return ("not-a-model",
                 "no `general.architecture` in the header, so nothing knows what "
@@ -182,10 +213,31 @@ def scan(model_dir: Optional[Path] = None,
             # about whether it *is* a model.
             kind, reason = classify(entry)
             if kind in ("model", "not-a-model"):
-                kind = "unreadable"
                 reason = ("the GGUF header could not be read, so whether this is "
                           "a model is unknown - a truncated download and a "
                           "tokenizer file are not the same problem")
+                # **Into `unreadable`, not `excluded`** (measured 2026-10-15).
+                # The docstring above says these are separate "on purpose"
+                # because an unreadable file is a *permissions* problem and
+                # reporting it as a format problem is a confident wrong answer -
+                # and the separation did not exist: every unreadable entry went
+                # into `excluded` with `kind="unreadable"`, so `scan()`'s third
+                # list was `[]` on every input and a caller reading it took that
+                # as "nothing was unreadable".
+                #
+                # Measured, on a mode-000 file beside a real model:
+                #
+                #     models=1 excluded=1 unreadable=0
+                #     scan()["unreadable"] -> []
+                #
+                # which is the third instance in this repository of an
+                # absence-shaped answer - and here it is in the module whose
+                # own docstring argues against exactly that reading.
+                unreadable.append({
+                    "entry": entry, "kind": "unreadable", "reason": reason,
+                    "path": str(path),
+                })
+                continue
             excluded.append({"entry": entry, "kind": kind, "reason": reason})
             continue
 

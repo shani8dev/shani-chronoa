@@ -147,6 +147,20 @@ def parse_problem(text: str, path) -> str:
     return ""
 
 
+#: The project folder, set on a skill's child process by `tools.py` while Build
+#: mode has one. A relative path then means "in the project", which is what a
+#: person working on code means by `src/app.py`.
+PROJECT_ENV = "CHRONOA_PROJECT"
+
+
+def _in_project(text: str) -> str:
+    """`text`, joined to the project folder when it is relative and one is set."""
+    if os.path.isabs(text):
+        return text
+    base = os.environ.get(PROJECT_ENV, "").strip()
+    return os.path.join(base, text) if base else text
+
+
 def resolve(raw: str) -> Path:
     """Expand and absolutise a user-supplied path.
 
@@ -154,7 +168,7 @@ def resolve(raw: str) -> Path:
     """
     if raw is None or not str(raw).strip():
         raise PathProblem("No path was given.")
-    text = os.path.expandvars(os.path.expanduser(str(raw).strip()))
+    text = _in_project(os.path.expandvars(os.path.expanduser(str(raw).strip())))
     try:
         return Path(text).resolve()
     except (OSError, RuntimeError) as exc:
@@ -172,7 +186,7 @@ def expand(raw: str) -> Path:
     """
     if raw is None or not str(raw).strip():
         raise PathProblem("No path was given.")
-    text = os.path.expandvars(os.path.expanduser(str(raw).strip()))
+    text = _in_project(os.path.expandvars(os.path.expanduser(str(raw).strip())))
     return Path(os.path.abspath(text))
 
 

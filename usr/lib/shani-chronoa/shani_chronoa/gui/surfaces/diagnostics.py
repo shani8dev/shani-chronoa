@@ -1337,7 +1337,10 @@ def build(app: Any = None) -> Gtk.Widget:
     footer.set_text(_text(_FOOTER))
     body.append(footer)
 
-    set_content(common.scrolled(body))
+    # Every missing model, each with its Download - this page is where
+    # "why can't it do X" is asked, and it used to answer only in prose.
+    from shani_chronoa import model_status
+    set_content(common.with_model_banners(app, common.scrolled(body), model_status.missing()))
     # What this panel says about itself, for the sidebar's health dot. The same
     # recorder that built the row at the top of the panel, so the dot and the
     # row are one statement about one reading.

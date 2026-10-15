@@ -38,7 +38,7 @@ fresh machine otherwise starts at zero and relearns what took months to accumula
 from __future__ import annotations
 
 import threading
-from typing import Any, Callable, Dict
+from typing import Optional, Any, Callable, Dict
 
 import gi
 
@@ -314,6 +314,9 @@ def build(app: Any) -> Gtk.Widget:
     _add_row(have, "What this machine has seen", _experience_sentence())
     _add_row(have, "Does the bandit beat chance", _bandit_quality_sentence())
     _add_row(have, "How much is trusted", _organ_status_sentence())
+    tools_chart = _tools_chart()
+    if tools_chart is not None:
+        body.append(tools_chart)
     body.append(have)
 
     # --- train -----------------------------------------------------------
@@ -377,7 +380,8 @@ def build(app: Any) -> Gtk.Widget:
     body.append(train)
     body.append(status)
     body.append(_background_passes())
-    set_content(common.scrolled(body))
+    set_content(common.with_model_banners(app, common.scrolled(body), [
+        ("memory", "recall past conversations by meaning")]))
     # What this panel says about itself, for the sidebar's health dot. The same
     # recorder that built the row at the top of the panel, so the dot and the
     # row are one statement about one reading.
@@ -834,6 +838,53 @@ def _lessons_sentence() -> str:
         return learning.render_lessons(learning.lessons()).strip()
     except Exception as exc:  # noqa: BLE001 - an unreadable log is not a lesson
         return f"could not be read ({type(exc).__name__})"
+
+
+def _tools_chart() -> "Optional[Gtk.Widget]":
+    """`learning.lessons()` as pictures: all calls split into confirmed,
+    failed and never checked, then the tools with enough checked calls ranked
+    worst first - the line of text this sits above says the same, slower."""
+    from shani_chronoa import learning
+    from shani_chronoa.gui import charts
+    try:
+        lessons = list(learning.lessons())
+    except Exception:  # noqa: BLE001 - the text row says why
+        return None
+    if not lessons:
+        return None
+    verified = sum(int(x.get("verified") or 0) for x in lessons)
+    failed = sum(int(x.get("failed") or 0) for x in lessons)
+    calls = sum(int(x.get("calls") or 0) for x in lessons)
+    unchecked = max(calls - verified - failed, 0)
+    card, body = charts.card("How the tools are doing", "applications-utilities-symbolic")
+    body.append(Gtk.Label(label=f"{calls:,} calls across {len(lessons)} tools", xalign=0.0,
+                          css_classes=["dim-label"]))
+    strip = charts.StackedBar(18)
+    strip.set([(charts.GREEN, verified), (charts.RED, failed), ((0.55, 0.55, 0.55), unchecked)])
+    body.append(strip)
+    legend = Gtk.Box(spacing=12)
+    for rgb, text in ((charts.GREEN, f"worked {verified:,}"), (charts.RED, f"failed {failed:,}"),
+                      ((0.55, 0.55, 0.55), f"never checked {unchecked:,}")):
+        legend.append(charts.Swatch(rgb))
+        legend.append(Gtk.Label(label=text, css_classes=["caption"]))
+    body.append(legend)
+    judged = [x for x in lessons if int(x.get("verified") or 0) + int(x.get("failed") or 0) >= 3]
+    judged.sort(key=lambda x: int(x["verified"]) / (int(x["verified"]) + int(x["failed"])))
+    if judged:
+        body.append(Gtk.Label(label="Checked often enough to judge - worst first", xalign=0.0,
+                              css_classes=["heading"], margin_top=6))
+        bars = charts.HBars()
+        rows, colours, values = [], [], []
+        for x in judged[:8]:
+            ok, bad = int(x["verified"]), int(x["failed"])
+            rate = ok / (ok + bad)
+            rows.append((x["tool"].replace("_", " "), rate))
+            colours.append(charts.level_colour(rate, high_is_bad=False))
+            values.append(f"{rate:.0%} of {ok + bad}")
+        bars.set(rows, top=1.0, colours=colours, values=values)
+        body.append(bars)
+    card.set_margin_bottom(6)
+    return card
 
 
 def _merge(button: Gtk.Button, status: Gtk.Label) -> None:

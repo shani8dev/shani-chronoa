@@ -611,6 +611,21 @@ class SandboxExecutor:
         from shani_chronoa.sandbox import landlock as _landlock
 
         paths = _landlock.get_default_allowed_paths(workspace)
+        # Extra folders, by the access the workspace's own rule carries (write)
+        # or the system dirs' (read). The package the skill imports must be
+        # readable too, or a skill run from a source tree dies on import.
+        rw = next((access for path, access in paths if path == workspace), None)
+        ro = next((access for path, access in paths if path == "/usr"), None)
+        extra_rw = [d for d in config.writable_dirs if d and os.path.isdir(d)]
+        extra_ro = [d for d in (*config.readable_dirs,
+                                *_child_pythonpath().split(os.pathsep),
+                                # A schema outside /usr (a source-tree run)
+                                os.environ.get("GSETTINGS_SCHEMA_DIR", ""))
+                    if d and os.path.isdir(d)]
+        if rw is not None:
+            paths += [(d, rw) for d in extra_rw]
+        if ro is not None:
+            paths += [(d, ro) for d in extra_ro]
         wrapper = os.path.join(workspace, ".chronoa-landlock-wrapper.py")
         with open(wrapper, "w", encoding="utf-8") as handle:
             handle.write(_landlock.get_landlock_wrapper())
@@ -636,12 +651,38 @@ class SandboxExecutor:
         inner_argv = [sys.executable, wrapper, *argv]
         use_bwrap = use_bwrap and _bwrap_usable()
         if use_bwrap:
+            binds = [arg for d in extra_rw for arg in ("--bind", d, d)]
+            # Folders it may read that live under the private /tmp below (a
+            # source-tree schema) have to be put back after the tmpfs.
+            ro_binds = [arg for d in extra_ro if d.startswith("/tmp/")
+                        for arg in ("--ro-bind", d, d)]
+            runtime = f"/run/user/{os.getuid()}"
+            # **The network is cut here too.** Only `_run_bwrap` honoured
+            # `allow_network=False`; this path - the one every confined call
+            # actually takes - left the network up while the level said off.
+            net = [] if config.allow_network else ["--unshare-net"]
+            # **The IPC layer, which this path never had** (measured
+            # 2026-10-14 from inside a confined `run_command`: it connected to
+            # the session bus, ran `systemd-run --user` to write a file on the
+            # host outside every write rule, saw all 485 host pids, could
+            # signal a host process, shared SysV IPC and saw the Wayland and
+            # X11 sockets). So: its own pid/ipc/uts/cgroup namespaces; the
+            # user's runtime dir (session bus, Wayland, PipeWire, keyring)
+            # replaced by an empty tmpfs; a private /tmp (X11's sockets). The
+            # workspace lives under ~/.local/share, so the tmpfs cannot hide it.
             inner_argv = [
                 "bwrap",
                 "--ro-bind", "/", "/",
+                "--tmpfs", "/tmp",
+                *(["--tmpfs", runtime] if os.path.isdir(runtime) else []),
                 "--bind", workspace, workspace,
+                *binds,
+                *ro_binds,
                 "--dev-bind", "/dev", "/dev",
                 "--proc", "/proc",
+                "--unshare-pid", "--unshare-ipc", "--unshare-uts",
+                "--unshare-cgroup-try", "--hostname", "chronoa-sandbox",
+                *net,
                 "--die-with-parent",
                 "--",
                 *inner_argv,
@@ -688,7 +729,13 @@ class SandboxExecutor:
                 "PYTHONPATH": _child_pythonpath(),
             }
         )
-        for key in ("HOME", "USER", "LANG", "LC_ALL"):
+        # The settings a skill reads its own consent from: without these a
+        # confined child cannot find the schema (a source-tree run) or the
+        # backend, so `get_bool` answers the default and a switch that is on -
+        # or a grant just given - reads as off. `_run_host` passes the same set.
+        for key in ("HOME", "USER", "LANG", "LC_ALL",
+                    "GSETTINGS_SCHEMA_DIR", "GSETTINGS_BACKEND",
+                    "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"):
             if key in os.environ and key not in env:
                 env[key] = os.environ[key]
 

@@ -91,6 +91,7 @@ def test_feedback_is_offered_only_where_the_extra_answers_are():
 
     assert permissions.FEEDBACK_CHOICE not in seen["options"]
     assert seen["options"] == [permissions.ALLOW_ONCE_CHOICE,
+                               permissions.ALLOW_TURN_CHOICE,
                                permissions.ALLOW_SESSION_CHOICE,
                                permissions.DENY_CHOICE]
 

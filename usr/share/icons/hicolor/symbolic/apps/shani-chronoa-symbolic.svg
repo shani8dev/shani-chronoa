@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Chronoa, symbolic (tray, panels, overview search). One colour; GTK recolours
+  it to the foreground. The same three things as the app icon at 16px: the orb,
+  the tilted ring (cut where it passes in front, so the orb reads as a sphere),
+  and the spark.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <defs>
+    <mask id="cut">
+      <rect width="16" height="16" fill="#fff"/>
+      <!-- a gap either side of the ring's front half, where it crosses the orb -->
+      <g transform="translate(7.5 8.5) rotate(-20)">
+        <path d="M -7.2 0 A 7.2 2.1 0 0 0 7.2 0" fill="none" stroke="#000" stroke-width="3.2"/>
+      </g>
+    </mask>
+  </defs>
+  <circle cx="7.5" cy="8.5" r="4.9" fill="#2e3436" mask="url(#cut)"/>
+  <g transform="translate(7.5 8.5) rotate(-20)" fill="none" stroke="#2e3436" stroke-width="1.2" stroke-linecap="round">
+    <!-- front half, over the orb -->
+    <path d="M -7.2 0 A 7.2 2.1 0 0 0 7.2 0"/>
+    <!-- back half: only where it shows beside the orb -->
+    <path d="M -7.2 0 A 7.2 2.1 0 0 1 -5.2 -1.45"/>
+    <path d="M 7.2 0 A 7.2 2.1 0 0 0 5.2 -1.45"/>
+  </g>
+  <path d="M13.5 0.6 C13.75 2 14 2.25 15.4 2.5 C14 2.75 13.75 3 13.5 4.4 C13.25 3 13 2.75 11.6 2.5 C13 2.25 13.25 2 13.5 0.6 Z" fill="#2e3436"/>
+</svg>

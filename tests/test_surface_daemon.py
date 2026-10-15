@@ -233,7 +233,9 @@ class TestBuild:
     def test_the_unit_is_named_on_the_panel(self):
         said = " ".join(_labels(daemon.build(_app())))
         assert daemon.UNIT in said
-        assert daemon.CONFIG_KEY in said
+        # The switch by its Settings name, not its key (MAIN-UI-TODO 10g).
+        assert daemon.SETTING_NAME in said
+        assert daemon.CONFIG_KEY not in said, "the raw key is back on the panel"
 
 
 class TestTheToggle:

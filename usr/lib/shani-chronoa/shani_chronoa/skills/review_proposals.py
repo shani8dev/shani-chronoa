@@ -35,6 +35,7 @@ that cannot tell them apart reports a memory that does not exist.
 
 from __future__ import annotations
 
+from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
 
 SCHEMA = {
@@ -82,8 +83,8 @@ SCHEMA = {
 _ANSWER = {"keep": True, "discard": False}
 
 
-def _consent() -> str:
-    """Why this tool is refusing, or "" if it may act.
+def _consent(config: ChronoaConfig) -> tuple[bool, str]:
+    """Return (allowed, reason). Fail-closed: no reason means no permission.
 
     **Consulted here and not only in `decide_candidate`, deliberately.** An
     entry-point gate is not a gate on the function: a caller who reaches the
@@ -98,10 +99,24 @@ def _consent() -> str:
     waiting. The repayment is that they never have to work out which of two
     switches governs whether a sentence from last night becomes a permanent
     fact about them.
-    """
-    from shani_chronoa.config import ChronoaConfig
 
-    return ChronoaConfig().sense_allowed_reason("memory")
+    **The signature is the house one, and it is load-bearing.** This was
+    `_consent() -> str` - the reason, or `""` - which is the shape of exactly
+    one gate in 82, and the consent sweep in `tests/test_question_presenter.py`
+    calls `gate(config)` and unpacks `(allowed, reason)` for every entry in
+    `capabilities.GATED`. It raised `TypeError: _consent() takes 0 positional
+    arguments but 1 was given`, which aborted the sweep **on the line after
+    this one**, so the file reported two failures that had nothing to do with
+    it and the gate itself was never reached.
+
+    Taking `config` rather than building one is the other half: a gate that
+    reads its own `ChronoaConfig()` cannot be driven by the caller that is
+    trying to shut the key, so the sweep's `config.set(key, "false")` would
+    not be what the gate consulted. `resolve_conflict.py` carries the same
+    note for the same reason.
+    """
+    reason = config.sense_allowed_reason("memory")
+    return not reason, reason
 
 
 def _listing(rows) -> str:
@@ -128,9 +143,9 @@ def _run(arguments: dict) -> str:
     from shani_chronoa.senses import memory
 
     action = str(arguments.get("action") or "list").strip().lower()
-    denied = _consent()
-    if denied:
-        return (f"{denied}. Nothing was changed, and nothing is remembered - "
+    allowed, reason = _consent(ChronoaConfig())
+    if not allowed:
+        return (f"{reason}. Nothing was changed, and nothing is remembered - "
                 f"this is what Chronoa noticed last night and did not save.")
     try:
         rows = memory.pending_proposals()

@@ -18,7 +18,7 @@ from shani_chronoa.assistant import Assistant
 
 from shani_chronoa.asyncbridge import AsyncBridge
 from shani_chronoa.audio import AudioPlayer, AudioRecorder, BargeInMonitor
-from shani_chronoa import pipewire, conversation_store, ask_bridge
+from shani_chronoa import pipewire, conversation_store, ask_bridge, planmode
 from shani_chronoa.config import ChronoaConfig, PrivacyManager
 from shani_chronoa.hardware_profile import HardwareProfile
 from shani_chronoa.stt import STT
@@ -420,6 +420,79 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
 
     #: The reply styles the schema allows, in the order a menu shows them.
     REPLY_STYLES = ("ordinary", "brief", "explanatory")
+
+    def _on_thinking(self, action, value) -> None:
+        """Write the chosen thinking level, then set the state from config.
+
+        Read back, as `_on_reply_style` does, so a refused value shows the
+        level that is actually in force rather than the click.
+        """
+        from shani_chronoa.cloud_llm import THINKING_LEVELS
+        level = value.get_string() if value is not None else ""
+        if level in THINKING_LEVELS:
+            self.config.set("thinking", level)
+        action.set_state(GLib.Variant("s", self.config.thinking))
+        self._refresh_strip()
+
+    def _on_choose_project(self, _action, _param) -> None:
+        """Pick the project folder, and turn Build mode on with it.
+
+        Choosing a project is saying "work on this code", so Build mode comes on
+        too - a project that only applied after a second switch would be a
+        setting that silently did nothing.
+        """
+        dialog = Gtk.FileDialog(title="Choose the project folder", modal=True)
+
+        def done(dlg, result):
+            try:
+                folder = dlg.select_folder_finish(result)
+            except GLib.Error:
+                return  # cancelled, or no portal: nothing chosen
+            path = folder.get_path() if folder is not None else ""
+            if path:
+                self._set_project(path)
+                rules = self.lookup_action("answer-rules")
+                if rules is not None:
+                    rules.change_state(GLib.Variant("s", "build"))
+
+        dialog.select_folder(self.window, None, done)
+
+    def _discover_mcp(self) -> None:
+        import threading
+        from shani_chronoa import mcp_client, tools
+
+        def work():
+            found = mcp_client.discover(tools.TOOLS, tools._HANDLER_FNS)
+            if found:
+                logger.info("MCP servers: %s", found)
+            GLib.idle_add(self._mcp_discovered, found)
+
+        threading.Thread(target=work, name="mcp-discovery", daemon=True).start()
+
+    def _mcp_discovered(self, found) -> bool:
+        window = getattr(self, "window", None)
+        if window is not None and found:
+            ready = sum(1 for v in found.values() if "tool" in v)
+            window.set_status(f"MCP: {ready} of {len(found)} server(s) ready")
+        return False
+
+    def _set_project(self, path: str) -> None:
+        from shani_chronoa import buildmode
+        self.config.set("project-dir", path or "")
+        # Read back, so a refused write leaves the old project in force.
+        buildmode.set_project(self.config.project_dir or path or "")
+        if self.window is not None:
+            self.window.set_status(
+                f"Project: {path}" if path else "No project folder")
+        self._refresh_strip()
+
+    def _on_answer_plan(self, action, value) -> None:
+        """Set plan mode to the chosen row, through the toggle that says so."""
+        want = (value.get_string() if value is not None else "") == "plan"
+        if want != planmode.is_enabled():
+            self._toggle_plan_mode(None, None)
+        action.set_state(GLib.Variant("s", "plan" if planmode.is_enabled() else "working"))
+        self._refresh_strip()
 
     def _on_reply_style(self, action, value) -> None:
         """Write the chosen style, then set the action's state from config.
@@ -852,6 +925,14 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         # returned None and the redraw silently never happened. The `callable()`
         # guard is what made that invisible: a refresh that does nothing looks
         # exactly like a refresh with nothing to do.
+        # The state line words the voice setting ("Ready - say ..."), so a
+        # change to it is a change to that line too.
+        sync = getattr(window, "_sync_from_state", None)
+        if callable(sync):
+            try:
+                sync()
+            except Exception:  # noqa: BLE001 - a label must not fail a mode
+                logger.debug("state line not redrawn", exc_info=True)
         refresh = getattr(window, "_refresh_model_word", None)
         if callable(refresh):
             try:
@@ -1359,6 +1440,14 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         plan_action = Gio.SimpleAction.new("toggle-plan-mode", None)
         plan_action.connect("activate", self._toggle_plan_mode)
         self.add_action(plan_action)
+        # The same switch as a choice of two, for menus: a radio pair needs a
+        # stateful action, and two rows that both fire a toggle would turn plan
+        # mode *off* when "Plan first" was pressed while it was already on.
+        plan_choice = Gio.SimpleAction.new_stateful(
+            "answer-plan", GLib.VariantType.new("s"),
+            GLib.Variant("s", "plan" if planmode.is_enabled() else "working"))
+        plan_choice.connect("change-state", self._on_answer_plan)
+        self.add_action(plan_choice)
 
         # Wake-word (hands-free) toggle action - no settings UI exists yet
         # to flip this, so it's reachable via a keyboard accelerator too,
@@ -1501,6 +1590,32 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         reply_style_action.connect("change-state", self._on_reply_style)
         self.add_action(reply_style_action)
 
+        # How hard the model thinks: the same stateful shape, read on every
+        # turn by `Assistant._ask`, so a change applies to the next reply.
+        thinking_action = Gio.SimpleAction.new_stateful(
+            "thinking", GLib.VariantType.new("s"),
+            GLib.Variant("s", self.config.thinking))
+        thinking_action.connect("change-state", self._on_thinking)
+        self.add_action(thinking_action)
+
+        # The project Build mode works in: chosen with a folder picker, kept in
+        # `project-dir`, handed to `buildmode` so skills and the prompt see it.
+        from shani_chronoa import buildmode
+        buildmode.set_project(self.config.project_dir)
+        choose_project = Gio.SimpleAction.new("choose-project", None)
+        choose_project.connect("activate", self._on_choose_project)
+        self.add_action(choose_project)
+        clear_project = Gio.SimpleAction.new("clear-project", None)
+        clear_project.connect("activate", lambda *_a: self._set_project(""))
+        self.add_action(clear_project)
+
+        # Tools from the MCP servers in `mcp-servers`: listed off the main
+        # loop (each server is a process to start), now and on demand.
+        reload_mcp = Gio.SimpleAction.new("reload-mcp", None)
+        reload_mcp.connect("activate", lambda *_a: self._discover_mcp())
+        self.add_action(reload_mcp)
+        self._discover_mcp()
+
         # Where a reply comes from. Three values, so it is the same stateful
         # action shape as the reply style, and it is in the mode strip for the
         # same reason a person flips it mid-conversation: "answer here" and
@@ -1585,6 +1700,30 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         # two ways for one chord - Shift+u and Shift+U are the same keystroke,
         # so taking it would have shadowed `app.open-browser`.
         self.set_accels_for_action("app.setup", ["<Ctrl><Shift>s"])
+        # The same wizard on one page ("ears", "eyes", "memory", ...): every
+        # panel's "Download" for a missing model lands on that model's page.
+        setup_page_action = Gio.SimpleAction.new("setup-page", GLib.VariantType.new("s"))
+        setup_page_action.connect("activate", lambda _a, p: self._open_setup(
+            p.get_string() if p is not None else ""))
+        self.add_action(setup_page_action)
+
+        # "Connect a device" (gui/connect_device.py): Bluetooth, an Android
+        # phone over adb, a KDE Connect phone. The parameter opens one route
+        # directly ("bluetooth", "android", "kdeconnect"); "" is the chooser.
+        transcribe_action = Gio.SimpleAction.new("transcribe-file", None)
+        transcribe_action.connect("activate", lambda *_: self.window is not None
+                                  and self.window.pick_recording_to_transcribe())
+        self.add_action(transcribe_action)
+
+        connect_action = Gio.SimpleAction.new("connect-device", GLib.VariantType.new("s"))
+        connect_action.connect("activate", lambda _a, p: self._open_connect_device(
+            p.get_string() if p is not None else ""))
+        self.add_action(connect_action)
+
+    def _open_connect_device(self, route: str = "") -> None:
+        from shani_chronoa.gui.connect_device import ConnectDeviceWindow
+        window = ConnectDeviceWindow(self, route, transient_for=self.window)
+        window.present()
 
     def _set_status(self, message: str) -> None:
         if self.window is not None:

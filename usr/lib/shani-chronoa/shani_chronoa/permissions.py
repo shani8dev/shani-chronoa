@@ -59,6 +59,8 @@ class Decision:
     """What to do about one (action, pattern) request."""
 
     ALLOW_ONCE = "allow_once"
+    #: This action, any target, until the turn that asked ends.
+    ALLOW_TURN = "allow_turn"
     ALLOW_SESSION = "allow_session"
     DENY_ONCE = "deny_once"
     DENY_SESSION = "deny_session"
@@ -300,8 +302,25 @@ def add_rule(action: str, pattern: str, decision: str,
                          pattern, decision)
 
 
+#: action -> the turn label it was allowed for. See `ALLOW_TURN_CHOICE`.
+_turn_grants: "dict[str, str]" = {}
+
+
+def _turn_label() -> str:
+    from shani_chronoa import tools
+    return tools.current_turn()
+
+
+def turn_grant(action: str) -> bool:
+    """Whether `action` was allowed for the turn that is running now."""
+    label = _turn_label()
+    with _lock:
+        return bool(label) and _turn_grants.get(action) == label
+
+
 def clear(session_only: bool = False) -> None:
     with _lock:
+        _turn_grants.clear()
         if session_only:
             _grants.clear()
         else:
@@ -407,6 +426,8 @@ def session_grant(action: str, resource: str) -> Optional[str]:
         # DONT_ASK: nothing widens while nobody is watching, not even a grant
         # recorded before the mode was set.
         return None
+    if turn_grant(action):
+        return Decision.ALLOW_TURN
     with _lock:
         decision = Decision.FALL_THROUGH
         index = -1
@@ -432,6 +453,13 @@ def session_grant(action: str, resource: str) -> Optional[str]:
 #: The three answers, in the order they are offered. The last is the safe
 #: default and is also what a dismissal, a timeout or no presenter resolves to.
 ALLOW_ONCE_CHOICE = "Allow this once"
+#: **Between once and the session.** A turn that edits five files asked five
+#: identical questions, and five identical questions is how a prompt becomes
+#: something clicked through unread. This covers the same action for the rest
+#: of the turn that asked - the request the person can see - and lapses by
+#: itself when the next turn starts, because it is keyed by the turn's label
+#: (`tools.current_turn`), not cleared by a hook somebody could forget.
+ALLOW_TURN_CHOICE = "Allow for this turn"
 ALLOW_SESSION_CHOICE = "Allow for this session"
 DENY_CHOICE = "No, don't allow"
 
@@ -543,6 +571,8 @@ def parse_reply(answer: str) -> Reply:
             return Reply(Decision.NO_ANSWER, "")
     if head == ALLOW_ONCE_CHOICE:
         return Reply(Decision.ALLOW_ONCE, message)
+    if head == ALLOW_TURN_CHOICE:
+        return Reply(Decision.ALLOW_TURN, message)
     if head == ALLOW_SESSION_CHOICE:
         return Reply(Decision.ALLOW_SESSION, message)
     if head == CANCEL_CHOICE:
@@ -680,9 +710,13 @@ class ApprovalRequest:
         promise the mechanism cannot keep, because the standing grant would
         be ignored anyway.
         """
-        base = [ALLOW_ONCE_CHOICE, DENY_CHOICE]
+        # "This turn" is offered to bypass-immune actions too: the reason they
+        # are immune is that a grant stretched invisibly across a session and
+        # across tools. This one is named, is this action only, and ends with
+        # the request on screen.
+        base = [ALLOW_ONCE_CHOICE, ALLOW_TURN_CHOICE, DENY_CHOICE]
         if not is_bypass_immune(self.action):
-            base.insert(1, ALLOW_SESSION_CHOICE)
+            base.insert(2, ALLOW_SESSION_CHOICE)
         return base
 
     def options_with_cancel(self) -> List[str]:
@@ -702,11 +736,24 @@ class ApprovalRequest:
         """
         from shani_chronoa import ask_bridge
 
-        base = [ALLOW_ONCE_CHOICE, DENY_CHOICE, CANCEL_CHOICE]
+        # **"Allow for this turn" is offered here too, for the same reason
+        # `options` offers it - and this list did not.** `ALLOW_TURN` is the
+        # one grant that is scoped to a single action and ends with the request
+        # on screen, which is why it survives `is_bypass_immune`: a bypass-
+        # immune action's session grant would be ignored anyway, and the reason
+        # it is immune is that a grant stretched invisibly across a session and
+        # across tools. A turn grant is neither.
+        #
+        # Its absence was a live gap rather than a stylistic choice: the
+        # cancel-split presenter is the one that offers `CANCEL_CHOICE`, so
+        # every question showing it also had **no way to answer "yes, this
+        # once, and not again for the rest of this request"** - the option was
+        # granted by `parse_reply` and reachable by nobody.
+        base = [ALLOW_ONCE_CHOICE, ALLOW_TURN_CHOICE, DENY_CHOICE, CANCEL_CHOICE]
         if ask_bridge.has_text_presenter():
             base.append(FEEDBACK_CHOICE)
         if not is_bypass_immune(self.action):
-            base.insert(1, ALLOW_SESSION_CHOICE)
+            base.insert(2, ALLOW_SESSION_CHOICE)
         return base
 
     @property
@@ -792,7 +839,8 @@ def can_ask() -> bool:
 
 
 def decide(action: str, resource: "str | None", consent_key: str,
-           describe: str = "", offer_cancel: bool = False) -> "str | None":
+           describe: str = "", offer_cancel: bool = False,
+           preview=None, fresh: bool = False) -> "str | None":
     """Ask the user whether to allow one gated call, and record what they said.
 
     Returns the granted decision, or None when the answer was a refusal or
@@ -856,7 +904,10 @@ def decide(action: str, resource: "str | None", consent_key: str,
     # `ALLOW_ONCE` is deliberately **not** in this set: "this once" means once,
     # so the next call must ask again. That is the whole difference between the
     # two options, and it is only meaningful because the other one now works.
-    if on_record == Decision.ALLOW_SESSION and not is_bypass_immune(action):
+    # `fresh`: a remote turn's risky call is asked every time, so an earlier
+    # session grant at the desk does not answer it.
+    if (on_record == Decision.ALLOW_SESSION and not is_bypass_immune(action)
+            and not fresh):
         logger.info("Permission for %s %s already granted this session",
                     action, resource)
         return Decision.ALLOW_SESSION
@@ -867,12 +918,24 @@ def decide(action: str, resource: "str | None", consent_key: str,
         return None
 
     request = approval_request(action, resource, consent_key, describe)
+    options = request.options_with_cancel() if offer_cancel else request.options
+    if fresh:
+        # Not offered where it would not be honoured.
+        options = [o for o in options if o != ALLOW_SESSION_CHOICE]
     reply = parse_reply(ask_bridge.ask(
         request.question,
-        request.options_with_cancel() if offer_cancel else request.options,
+        options,
         timeout=DECISION_TIMEOUT_SECONDS,
+        preview=preview,
     ))
 
+    if reply.reply == Decision.ALLOW_TURN:
+        label = _turn_label()
+        if label:
+            with _lock:
+                _turn_grants[action] = label
+        # Allowed now either way; with no turn running it is simply "once".
+        return reply.reply
     if reply.reply in (Decision.ALLOW_ONCE, Decision.ALLOW_SESSION):
         add_rule(action, resource or "*", reply.reply, session_only=True)
         return reply.reply

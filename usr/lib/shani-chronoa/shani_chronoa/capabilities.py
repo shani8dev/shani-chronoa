@@ -135,6 +135,9 @@ GATED: dict[str, str] = {
     # with `git reset --soft HEAD~1` and the working tree is untouched by it.
     "git_commit": "git-write-enabled",
     "git_branch": "git-write-enabled",
+    # Running a program is anything the person could do in a terminal, so it
+    # is its own key and asks every time (DESTRUCTIVE_CONSENT_KEYS).
+    "run_command": "run-command-enabled",
     # Publishing is the other half and gets its own key, so turning on
     # local commits never turns on pushing. Destructive, so it asks.
     "git_push": "git-push-enabled",
@@ -415,6 +418,7 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "install_app": ("Apps", "Install and remove apps"),
     "power_action": ("Power and screen", "Suspend, restart or shut down"),
     "ask_user": ("Everyday tools", "Ask a clarifying question"),
+    "delegate": ("Everyday tools", "Hand a long task to a helper and get back its summary"),
     "list_apps": ("Apps", "List installed applications"),
     "check_updates": ("System", "Check for waiting package updates"),
     "disk_usage": ("System", "Report filesystem and directory space use"),
@@ -492,6 +496,9 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "resolve_conflict": ("Code and git",
                          "What is conflicting in a git repository, and resolve it"),
     "git_commit": ("Code and git", "Commit the files you name"),
+    # Sandboxed (bwrap + Landlock, no network) in the project folder, or in a
+    # container / nspawn machine; asks before each command.
+    "run_command": ("Code and git", "Run a project's tests, build or linter"),
     "git_branch": ("Code and git", "Create or switch branch"),
     # Read-only: reads the marker and asks the tool, and never modifies a
     # repository - which is what makes it safe to point at any path.
@@ -794,6 +801,9 @@ GATE_NAMES: dict[str, str] = {
     "sessions-sense-enabled": "Who is on this machine",
     "monitoring-sense-enabled": "Who is capturing on this machine",
     "comms-typing-enabled": "Let Chronoa type into chat and mail windows",
+    # The one gate here whose subject is a person rather than a machine. Named
+    # with the wording the settings row carries, like every row below it.
+    "voice-clone-enabled": "Let Chronoa speak with a recorded voice",
     "ui-require-verified-focus": "Only type into a known field",
     # The Settings sense rows' own titles, so Help sends people to a row that exists.
     "snapshots-sense-enabled": "Rollback points",
@@ -849,6 +859,8 @@ GATE_NAMES: dict[str, str] = {
     # Chronoa record commits and branches", which is the documented
     # switch-nobody-can-find failure in the other direction.
     "git-write-enabled": "Let Chronoa record commits and branches",
+    "run-command-enabled": "Let Chronoa run commands in your project",
+    "mcp-client-enabled": "Let Chronoa use tools from MCP servers",
     "git-push-enabled": "Let Chronoa push a branch to a remote",
     "calendar-write-enabled": "Let Chronoa change your calendar",
     "bluetooth-gatt-enabled": "Let Chronoa read your Bluetooth devices",
@@ -1280,6 +1292,7 @@ def help_prompt() -> str:
 #: silently widened would put a false warning on a read, which trains people to
 #: dismiss the ones that matter.
 DESTRUCTIVE_CONSENT_KEYS = frozenset({
+    "run-command-enabled",
     "file-delete-enabled",
     "power-control-enabled",
     "process-kill-enabled",

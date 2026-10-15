@@ -1,28 +1,101 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Chronoa - the app icon.
+
+  The orb is the window's own single statement of state (gui/widgets.py
+  ChronoaOrbWidget): a living core with a halo. The tilted gold ring is Saturn -
+  Shani - and an orbit, which is time (Chronoa). The four-point spark is the
+  moment of thought; the two small satellites on the ring are its senses.
+  No face: it cannot survive 16px, and the orb is already the character.
+  128x128, GNOME app-icon grid; legible at 16, 24, 32, 48 and 64.
+-->
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
   <defs>
-    <linearGradient id="orbGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#2196F3;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#1565C0;stop-opacity:1" />
+    <radialGradient id="orb" cx="44%" cy="38%" r="70%">
+      <stop offset="0" stop-color="#3b5bdb"/>
+      <stop offset="0.45" stop-color="#2a2f8f"/>
+      <stop offset="0.8" stop-color="#1b1652"/>
+      <stop offset="1" stop-color="#120d36"/>
+    </radialGradient>
+    <radialGradient id="core" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.18" stop-color="#bff3ff"/>
+      <stop offset="0.45" stop-color="#4cc9ff" stop-opacity="0.85"/>
+      <stop offset="1" stop-color="#4c6bff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="rim" cx="50%" cy="50%" r="50%">
+      <stop offset="0.82" stop-color="#9b7bff" stop-opacity="0"/>
+      <stop offset="0.97" stop-color="#9b7bff" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#c3b2ff" stop-opacity="0.8"/>
+    </radialGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#b9772e"/>
+      <stop offset="0.35" stop-color="#ffd98a"/>
+      <stop offset="0.6" stop-color="#fff1c9"/>
+      <stop offset="1" stop-color="#c98a3c"/>
     </linearGradient>
-    <filter id="glow">
-      <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
-      <feMerge>
-        <feMergeNode in="coloredBlur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
+    <linearGradient id="shine" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <!-- The front half of the ring: below the ring's own axis. -->
+    <clipPath id="front">
+      <rect x="-80" y="0" width="160" height="80"/>
+    </clipPath>
+    <clipPath id="back">
+      <rect x="-80" y="-80" width="160" height="80"/>
+    </clipPath>
   </defs>
-  <!-- Orb base -->
-  <circle cx="64" cy="64" r="50" fill="url(#orbGrad)" filter="url(#glow)"/>
-  <!-- Inner ring -->
-  <circle cx="64" cy="64" r="35" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="2"/>
-  <!-- Microphone icon -->
-  <circle cx="64" cy="58" r="12" fill="none" stroke="white" stroke-width="2"/>
-  <rect x="60" y="70" width="8" height="14" rx="2" fill="white"/>
-  <!-- Sound waves -->
-  <path d="M 80 55 Q 88 64 80 73" fill="none" stroke="rgba(255,255,255,0.6)" stroke-width="1.5"/>
-  <path d="M 84 50 Q 94 64 84 78" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="1"/>
-  <!-- Bottom label area -->
-  <rect x="20" y="108" width="88" height="6" rx="3" fill="rgba(255,255,255,0.2)"/>
+
+  <!-- ground shadow -->
+  <ellipse cx="64" cy="110" rx="30" ry="4.5" fill="#000000" opacity="0.16"/>
+
+  <!-- ring, back half (behind the orb) -->
+  <g transform="translate(64 64) rotate(-20)">
+    <ellipse rx="58" ry="15" fill="none" stroke="url(#gold)" stroke-width="5.5"
+             clip-path="url(#back)" opacity="0.75"/>
+  </g>
+
+  <!-- the orb -->
+  <circle cx="64" cy="64" r="42" fill="url(#orb)"/>
+  <circle cx="64" cy="64" r="42" fill="url(#rim)"/>
+  <!-- the dial: twelve hours inside the glass, noon in gold - Chronoa is time -->
+  <g>
+    <line x1="64.00" y1="34.50" x2="64.00" y2="26.50" stroke="#ffd98a" stroke-width="2.6" stroke-linecap="round"/>
+    <line x1="79.50" y1="37.15" x2="82.50" y2="31.96" stroke="#c9c2ff" stroke-opacity="0.35" stroke-width="1.2" stroke-linecap="round"/>
+    <line x1="90.85" y1="48.50" x2="96.04" y2="45.50" stroke="#c9c2ff" stroke-opacity="0.35" stroke-width="1.2" stroke-linecap="round"/>
+    <line x1="93.50" y1="64.00" x2="101.50" y2="64.00" stroke="#c9c2ff" stroke-opacity="0.55" stroke-width="1.8" stroke-linecap="round"/>
+    <line x1="90.85" y1="79.50" x2="96.04" y2="82.50" stroke="#c9c2ff" stroke-opacity="0.35" stroke-width="1.2" stroke-linecap="round"/>
+    <line x1="79.50" y1="90.85" x2="82.50" y2="96.04" stroke="#c9c2ff" stroke-opacity="0.35" stroke-width="1.2" stroke-linecap="round"/>
+    <line x1="64.00" y1="93.50" x2="64.00" y2="101.50" stroke="#c9c2ff" stroke-opacity="0.55" stroke-width="1.8" stroke-linecap="round"/>
+    <line x1="48.50" y1="90.85" x2="45.50" y2="96.04" stroke="#c9c2ff" stroke-opacity="0.35" stroke-width="1.2" stroke-linecap="round"/>
+    <line x1="37.15" y1="79.50" x2="31.96" y2="82.50" stroke="#c9c2ff" stroke-opacity="0.35" stroke-width="1.2" stroke-linecap="round"/>
+    <line x1="34.50" y1="64.00" x2="26.50" y2="64.00" stroke="#c9c2ff" stroke-opacity="0.55" stroke-width="1.8" stroke-linecap="round"/>
+    <line x1="37.15" y1="48.50" x2="31.96" y2="45.50" stroke="#c9c2ff" stroke-opacity="0.35" stroke-width="1.2" stroke-linecap="round"/>
+    <line x1="48.50" y1="37.15" x2="45.50" y2="31.96" stroke="#c9c2ff" stroke-opacity="0.35" stroke-width="1.2" stroke-linecap="round"/>
+  </g>
+  <!-- living core: offset like a light seen through glass -->
+  <circle cx="58" cy="58" r="24" fill="url(#core)"/>
+  <circle cx="58" cy="58" r="4.2" fill="#ffffff"/>
+  <!-- glass highlight -->
+  <ellipse cx="52" cy="36" rx="22" ry="11" fill="url(#shine)"/>
+
+  <!-- ring, front half (over the orb) -->
+  <g transform="translate(64 64) rotate(-20)">
+    <ellipse rx="58" ry="15" fill="none" stroke="#1a1240" stroke-width="8.5"
+             clip-path="url(#front)" opacity="0.35"/>
+    <ellipse rx="58" ry="15" fill="none" stroke="url(#gold)" stroke-width="5.5"
+             clip-path="url(#front)"/>
+    <!-- satellites: its senses, riding the orbit -->
+    <circle cx="-41" cy="10.6" r="4" fill="#5ee7ff"/>
+    <circle cx="-41" cy="10.6" r="1.6" fill="#ffffff"/>
+    <circle cx="50" cy="-7.6" r="3" fill="#8fd8ff" clip-path="url(#back)"/>
+  </g>
+
+  <!-- the spark: four points, the moment of thought -->
+  <g transform="translate(99 24)">
+    <path d="M0 -15 C1.6 -4 4 -1.6 15 0 C4 1.6 1.6 4 0 15 C-1.6 4 -4 1.6 -15 0 C-4 -1.6 -1.6 -4 0 -15 Z"
+          fill="#ffe7a8"/>
+    <circle r="2.2" fill="#ffffff"/>
+  </g>
 </svg>

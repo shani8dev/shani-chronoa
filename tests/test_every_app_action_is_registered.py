@@ -51,7 +51,7 @@ EXPECTED = [
     "find-in-conversation", "hands-free", "open-browser", "open-settings",
     "quick-ask", "quit", "reply-style", "reset-conversation", "setup",
     "show-body", "show-page", "show-window", "stop-speaking",
-    "switch-conversation", "toggle-auto-start", "toggle-barge-in-vad",
+    "switch-conversation", "thinking", "answer-plan", "choose-project", "clear-project", "connect-device", "transcribe-file", "setup-page", "reload-mcp", "toggle-auto-start", "toggle-barge-in-vad",
     "toggle-cloud-fallback", "toggle-debug", "toggle-listening",
     "toggle-model-download", "toggle-plan-mode", "toggle-privacy",
     "toggle-rail", "toggle-sidebar", "toggle-start-hidden", "toggle-wake-word",

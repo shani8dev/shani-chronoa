@@ -151,7 +151,14 @@ elif case == "pressed_with_consent_on_finds_nothing":
 
 elif case == "pairing_not_implemented":
     page = phone_link.build(App(**{"lan-phone-enabled": True}))
-    say(texts=walk(page))
+    say(texts=walk(page), buttons=buttons(page))
+
+elif case == "paired":
+    from shani_chronoa import lan_link
+    lan_link._remember_pairing({"deviceId": "f" * 32, "deviceName": "Pixel 9"},
+                               "192.168.1.44", 1716)
+    page = phone_link.build(App(**{"lan-phone-enabled": True}))
+    say(texts=walk(page), buttons=buttons(page))
 
 elif case == "registry":
     from shani_chronoa import lan_link
@@ -224,18 +231,22 @@ def clicked(out) -> str:
 
 
 class TestItSaysWhatIsNotThere:
-    def test_it_leads_with_pairing_being_absent(self, broadway, tmp_path):
-        """**First, not after somebody tries.** Discovery is real and pairing is
-        not written; a page that presented them as one capability would send
-        someone to "Pair" and then explain what was missing."""
+    def test_not_paired_leads_with_the_way_to_pair(self, broadway, tmp_path):
+        """**First, not after somebody tries** - and with the button that
+        does it, not a sentence about a missing feature."""
         out = _run(broadway, "pairing_not_implemented", tmp_path)
-        assert "Pairing is not implemented" in shown(out), shown(out)
-        assert "Discovery is real and is tested" in shown(out), shown(out)
+        assert "No phone is paired" in shown(out), shown(out)
+        assert "Pair a phone" in out["buttons"], out["buttons"]
+
+    def test_paired_names_the_phone_and_offers_forget(self, broadway, tmp_path):
+        out = _run(broadway, "paired", tmp_path)
+        assert any("Pixel 9" in t and "192.168.1.44" in t for t in out["texts"]), out["texts"]
+        assert "Forget this phone" in out["buttons"], out["buttons"]
 
     def test_the_panels_claim_and_the_modules_agree(self, broadway, tmp_path):
         out = _run(broadway, "registry", tmp_path)
-        assert out["pairing"] == "not implemented", out
-        assert out["claims_not_implemented"] == "Pairing is not implemented", out
+        assert out["pairing"] == "not paired", out
+        assert out["claims_not_implemented"] == "No phone is paired", out
 
 
 class TestTheDeviceState:
@@ -277,7 +288,7 @@ class TestThePressSaysWhatHappened:
     def test_pressing_look_with_consent_off_names_the_switch(self, broadway, tmp_path):
         out = _run(broadway, "pressed_with_consent_off", tmp_path)
         assert "error" not in out, out.get("error")
-        assert "lan-phone-enabled" in (out["note"] or ""), out["note"]
+        assert "Let Chronoa find phones on the same Wi-Fi" in (out["note"] or ""), out["note"]
         assert "Nothing was sent" in (out["note"] or ""), out["note"]
 
     def test_it_does_not_leave_the_button_stuck(self, broadway, tmp_path):
@@ -296,7 +307,7 @@ class TestThePressSaysWhatHappened:
 class TestConsent:
     def test_it_names_the_switch_and_refuses(self, broadway, tmp_path):
         out = _run(broadway, "consent_off", tmp_path)
-        assert "lan-phone-enabled" in shown(out), shown(out)
+        assert "Let Chronoa find phones on the same Wi-Fi" in shown(out), shown(out)
         assert "Nothing will be sent" in shown(out), shown(out)
 
     def test_consent_off_does_not_offer_a_send(self, broadway, tmp_path):

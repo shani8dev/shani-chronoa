@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, Callable, Optional
 
 from shani_chronoa.tool_tracking import ORIGIN_USER, ORIGIN_UNATTENDED
 from shani_chronoa.ollama_llm import OllamaLLM
+from shani_chronoa.cloud_llm import thinking_level
 from shani_chronoa.loops import LOOP_THRESHOLD, LoopDetector
 from shani_chronoa import (compression, context_meter, history_repair,
                            conversation_store, user_prompts)
@@ -194,6 +195,22 @@ TOOL_FAILURE_TYPE_OVERRIDES: dict[str, tuple[str, ...]] = {}
 #: MAX_TOOL_ROUNDS went to 40: a browser task with a free cloud model ran
 #: ~11s a round (measured 2026-10-08), so 300s would cut it off midway.
 MAX_TURN_SECONDS = 600.0
+
+#: A subagent (`skills/delegate.py`) may not delegate in its turn: one level is
+#: enough to keep the parent's window clean, and a chain of them is a turn
+#: nobody can follow.
+MAX_DELEGATE_DEPTH = 1
+#: Seconds kept back from a subagent so the parent can still read its summary
+#: and answer inside its own budget.
+DELEGATE_RESERVE_SECONDS = 30.0
+#: Said to the subagent ahead of its task: it is talking to another model, and
+#: what it returns is all that survives.
+_DELEGATE_PREAMBLE = (
+    "You are a subagent. Another assistant gave you the task below and will "
+    "read only your final reply - not your tool calls or anything they "
+    "returned. Do the task with your tools, then end with a short, complete "
+    "summary of what you found or did: facts, paths, numbers, and anything you "
+    "could not do.\n\n")
 
 # _history grew unboundedly across a session before this - combined with a
 # small num_ctx that was previously hardcoded, a long session would
@@ -537,7 +554,11 @@ class Assistant:
         messages = self.context_builder.build_messages(
             self._history, self.active_percepts()) if self.percept_store is not None \
             else list(self._history)
-        clause = reply_style_clause(self.config)
+        # The reply style, and - in Build mode with a project - which project
+        # this is and that a change is checked by running it.
+        from shani_chronoa import buildmode
+        clause = " ".join(c for c in (reply_style_clause(self.config),
+                                      buildmode.prompt_clause()) if c)
         if clause and messages and messages[0].get("role") == "system":
             # dict(messages[0]) copies: the percept-insertion path built
             # messages[0] as a reference to the same dict _history holds, and a
@@ -789,6 +810,9 @@ class Assistant:
             #: skill called directly belongs to nobody, and a file listed here
             #: that this turn did not write is a worse lie than no list.
             "changed": self._turn_changed_files(),
+            # The label the ring filed this turn's writes under, so the footer's
+            # "Revert" can name exactly this turn.
+            "turn": str(getattr(self, "_turn_label", "") or ""),
         }
 
     def _turn_changed_files(self) -> "list[str]":
@@ -838,6 +862,13 @@ class Assistant:
         point.
         """
         self._measure_context(messages, tools)
+        # **Set here, on every call, because this is the funnel and `self.llm`
+        # is swapped** - local to cloud by the fallback, and back. An attribute
+        # set once at startup would stay on whichever engine held the turn then.
+        try:
+            self.llm.thinking = thinking_level(getattr(self.config, "thinking", "off"))
+        except Exception:  # noqa: BLE001 - a setting must not cost a reply
+            logger.debug("could not set the thinking level", exc_info=True)
         activity = _lit("brain", "thinking", "" if on_text is None else "writing a reply")
         try:
             if on_text is not None and getattr(self.llm, "stream_supported", False):
@@ -974,16 +1005,25 @@ class Assistant:
         #: against the turn that wrote it. Set around the turn and cleared in
         #: the `finally`, because a label left behind would attribute the next
         #: turn's writes to this one.
-        self._turn_label = "turn-%d" % (int(getattr(self, "_turn_seq", 0)) + 1)
+        # A subagent works under its parent's label (`_delegate`), so what it
+        # writes is listed and reverted with the turn the person saw, and a
+        # turn grant they gave covers it.
+        inherited = str(getattr(self, "_inherited_turn", "") or "")
+        self._turn_label = inherited or "turn-%d" % (int(getattr(self, "_turn_seq", 0)) + 1)
         self._turn_seq = int(getattr(self, "_turn_seq", 0)) + 1
         from shani_chronoa import tools as tools_module
 
         tools_module.set_current_turn(self._turn_label)
+        # Which surface asked, so the dispatcher can tell a remote channel's
+        # turn from one typed here (`tools._remote_needs_the_desk`).
+        tools_module.set_current_channel(getattr(self, "_channel", "") or "")
         # The plan this turn is accumulating, as data rather than prose. See
         # `planmode.begin_turn` for why it resets here and not at the end.
+        # A subagent's steps are part of its parent's plan, not a new one.
         from shani_chronoa import planmode as planmode_module
 
-        planmode_module.begin_turn()
+        if not inherited:
+            planmode_module.begin_turn()
         # Per-tool attempt counts, reset per *round*. See
         # `DEFAULT_TOOL_ATTEMPTS_PER_ROUND` for why not per turn: the tests of
         # record pin sixteen legitimate `ask_user` calls in one turn.
@@ -1022,7 +1062,14 @@ class Assistant:
             # so the one turn that got cancelled would appear to have rewritten
             # whatever the following turn did. That is precisely the claim this
             # exists to make true.
-            tools_module.clear_current_turn()
+            # A subagent hands its parent's label and channel back instead:
+            # the parent's turn is still running.
+            if inherited:
+                tools_module.set_current_turn(inherited)
+                tools_module.set_current_channel(getattr(self, "_channel", "") or "")
+            else:
+                tools_module.clear_current_turn()
+                tools_module.set_current_channel("")
 
     async def _run_turn(
         self,
@@ -1210,14 +1257,19 @@ class Assistant:
                 # What is fixed here is narrower and real: the guess is now
                 # made once, from the outcome the dispatcher already produced,
                 # and `_tool_verdict_of` documents what it can and cannot know.
-                ctx = contextvars.copy_context()
+                if name == "delegate":
+                    # In this process, not the skill sandbox: it needs the
+                    # model and the window. See `skills/delegate.py`.
+                    result, outcome = await self._delegate(arguments, origin, deadline), None
+                else:
+                    ctx = contextvars.copy_context()
+                    result, outcome = await asyncio.get_running_loop().run_in_executor(
+                        None, ctx.run, functools.partial(_run_tool, name, arguments, origin))
                 # **Two values, because one call has to carry both.** `result` is
                 # the prose the model reads; `outcome` is what the dispatcher
                 # already decided about it. The second is `None` only when
                 # `execute_tool` was patched and no dispatcher ran - see
                 # `_run_tool`.
-                result, outcome = await asyncio.get_running_loop().run_in_executor(
-                    None, ctx.run, functools.partial(_run_tool, name, arguments, origin))
                 # A result that begins with these is a call the dispatcher
                 # refused before execution (ill-formed arguments, a schema
                 # mismatch). Three of those in a row is not a turn making
@@ -1347,6 +1399,54 @@ class Assistant:
         self._record(message)
         self._turn_deadline = None
         return _out_of_rounds(message.get("content", ""), max_rounds)
+
+    async def _delegate(self, arguments: dict, origin: str, deadline: float) -> str:
+        """Run `arguments["task"]` in a fresh subagent and return its summary.
+
+        The child is an `Assistant` on the same model with an empty, unsaved
+        conversation. It inherits the turn label and channel (see `handle`), so
+        every call it makes is gated, attributed and asked about exactly as the
+        parent's would be. Its time is what the parent has left, less a reserve
+        for the parent to answer.
+        """
+        depth = int(getattr(self, "_delegate_depth", 0))
+        if depth >= MAX_DELEGATE_DEPTH:
+            return "Not run. A subagent cannot hand work to another subagent; do it directly."
+        task = str(arguments.get("task") or "").strip()
+        if not task:
+            return "Not run. Give the subagent a `task`: what to do and what to report."
+        budget = deadline - time.monotonic() - DELEGATE_RESERVE_SECONDS
+        if budget < 10:
+            return "Not run. Too little of this turn's time is left for a subagent."
+        context = str(arguments.get("context") or "").strip()
+        prompt = _DELEGATE_PREAMBLE + task + (f"\n\nContext:\n{context}" if context else "")
+        from shani_chronoa import tools as tools_module
+
+        child = Assistant(self.llm, percept_store=None,
+                          context_builder=self.context_builder,
+                          session_path=None, config=self.config)
+        child._delegate_depth = depth + 1
+        child._inherited_turn = tools_module.current_turn()
+        started = time.monotonic()
+        try:
+            reply = await asyncio.wait_for(
+                child.handle(prompt, origin=origin,
+                             channel=getattr(self, "_channel", "") or ""),
+                timeout=budget)
+        except asyncio.TimeoutError:
+            return (f"The subagent ran out of time after {budget:.0f}s without a "
+                    f"summary (it had called: {', '.join(getattr(child, '_turn_tools', [])) or 'nothing'}).")
+        finally:
+            # `handle` restores these itself; this covers a cancellation that
+            # landed before its `try` began.
+            tools_module.set_current_turn(child._inherited_turn)
+            tools_module.set_current_channel(getattr(self, "_channel", "") or "")
+        used = list(getattr(child, "_turn_tools", []) or [])
+        self._turn_tools.extend(f"delegate>{t}" for t in used)
+        tally = (f"{len(used)} tool call(s): {', '.join(dict.fromkeys(used))}"
+                 if used else "no tool calls")
+        return (f"Subagent finished in {time.monotonic() - started:.0f}s with "
+                f"{tally}. Its summary:\n{(reply or '').strip() or '(it returned nothing)'}")
 
     def _malformed_stop(self, misses: int) -> str:
         """The turn that cannot form a well-formed call ends honestly.
