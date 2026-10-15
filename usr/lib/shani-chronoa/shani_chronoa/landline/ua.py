@@ -243,11 +243,11 @@ class Line:
                 self._provisional(message)
             return
         handler = {"INVITE": self._on_invite, "ACK": self._on_ack, "BYE": self._on_bye,
-                   "CANCEL": self._on_cancel}.get(message.method)
+                   "CANCEL": self._on_cancel, "UPDATE": self._on_update}.get(message.method)
         if handler is not None:
             handler(message)
         else:
-            self._send(sip.response(message, 200))  # OPTIONS, NOTIFY, UPDATE, INFO, MESSAGE
+            self._send(sip.response(message, 200))  # OPTIONS, NOTIFY, INFO, MESSAGE
 
     # --- registration --------------------------------------------------------------------
     _expires = EXPIRES
@@ -392,6 +392,20 @@ class Line:
         if self.call is not call:  # hung up while it was being answered
             self._in_dialog(call, "BYE")
             return
+        # A renegotiated call answers the INVITE with no SDP of its own - the
+        # session parameters are the ones the mid-call re-offer already agreed
+        # (measured: the callee's phone re-offers while ringing and the 200 OK
+        # that follows carries a body only when nothing renegotiated it). Taking
+        # that as "no sound this computer can play" ended a call that was, by
+        # then, fully connected.
+        if not reply.body.strip():
+            if call.rtp.coder is not None:
+                call.state, call.started = "active", time.monotonic()
+                self.on_event("answered", number=call.number)
+                return
+            self._in_dialog(call, "BYE")
+            self._end(call, "the line answered with no sound at all")
+            return
         if not self._start_media(call, reply.body, answer=False):
             self._in_dialog(call, "BYE")
             self._end(call, "the line answered with no sound this computer can play")
@@ -446,7 +460,8 @@ class Line:
         body = media.offer(self.local_ip, call.rtp.port, only=chosen[1])
         self._send(sip.response(call.invite, 200, to_tag=call.local_tag, body=body,
                                 extra=[("Contact", self._contact()), ("Allow", ALLOW)]))
-        call.rtp.start((ip, port), chosen[0], chosen[1], dtmf)
+        packing = media.packing_for(media.negotiated(codecs, chosen[0]))
+        call.rtp.start((ip, port), chosen[0], chosen[1], dtmf, packing)
         call.state, call.started = "active", time.monotonic()
         self.on_event("answered", number=call.number)
 
@@ -460,6 +475,49 @@ class Line:
             return
         self._send(sip.response(bye, 200))
         self._end(call, "the other side hung up")
+
+    def _on_update(self, update: sip.Message) -> None:
+        """The far end re-offering the session while the call is still early.
+
+        Measured on the router: the callee's own phone sends an UPDATE carrying
+        an SDP offer a fraction of a second after 180 Ringing, before it has
+        been answered. RFC 3311 requires the 200 OK to that to carry an SDP
+        answer, and answering it with no body - which is what the generic
+        handler did - leaves the far end with nothing to accept, so it waits
+        and then tears the call down with 487. The answer is ours to give, and
+        it is the same one `answer()` gives a ringing INVITE.
+
+        The media is started here too, because a re-offer names the port the
+        far end is now sending from: without it the call would connect with no
+        audio until the 200 OK re-pointed it, and an answered call that has
+        been silent sounds broken rather than merely late.
+        """
+        call = self.call
+        if call is None or update.call_id != call.call_id:
+            self._send(sip.response(update, 200))
+            return
+        if not update.body.strip():
+            # A session timer refresh or a hold-offer: nothing to negotiate.
+            self._send(sip.response(update, 200, to_tag=call.local_tag,
+                                    extra=[("Contact", self._contact())]))
+            return
+        ip, port, codecs, dtmf = media.parse_sdp(update.body)
+        chosen = media.pick(codecs)
+        if not ip or not port or chosen is None or not media.can_play(chosen[1]):
+            self._send(sip.response(update, 488, to_tag=call.local_tag))
+            self._end(call, "the sound re-offered mid-call is not one this computer can play")
+            return
+        if call.rtp.sound is None and self.sound_factory is not None:
+            call.rtp.sound = self.sound_factory()
+        body = media.offer(self.local_ip, call.rtp.port, only=chosen[1])
+        self._send(sip.response(update, 200, to_tag=call.local_tag, body=body,
+                                extra=[("Contact", self._contact())]))
+        packing = media.packing_for(media.negotiated(codecs, chosen[0]))
+        try:
+            call.rtp.start((ip, port), chosen[0], chosen[1], dtmf, packing)
+        except Exception as exc:  # noqa: BLE001 - a re-offer we cannot take ends the call
+            logger.warning("landline: the re-offered sound would not start: %s", exc)
+            self._end(call, "this computer could not take the sound re-offered mid-call")
 
     def _on_cancel(self, cancel: sip.Message) -> None:
         call = self.call
@@ -515,8 +573,9 @@ class Line:
         chosen = media.pick(codecs)
         if not ip or not port or chosen is None or not media.can_play(chosen[1]):
             return False
+        packing = media.packing_for(media.negotiated(codecs, chosen[0]))
         try:
-            call.rtp.start((ip, port), chosen[0], chosen[1], dtmf)
+            call.rtp.start((ip, port), chosen[0], chosen[1], dtmf, packing)
         except Exception as exc:  # noqa: BLE001 - a codec that will not start ends the call
             logger.warning("landline: the sound would not start: %s", exc)
             return False

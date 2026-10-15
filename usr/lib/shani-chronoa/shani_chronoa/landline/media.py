@@ -163,6 +163,14 @@ class L16Codec(Codec):
 
 # --- AMR-NB, over the reference implementation's own interface ------------------
 
+#: Speech-data bits per frame type index (RFC 4867 Table 1a / 3GPP TS 26.101):
+#: modes 0-7 are 4.75 to 12.2 kbps, and index 8 is the SID comfort frame. The
+#: octet-aligned payload pads each frame to a byte boundary; the
+#: bandwidth-efficient one does not, so the exact bit count is what matters.
+AMR_BITS = (95, 103, 118, 134, 148, 159, 204, 244, 39)
+#: Octet-aligned total payload length per frame type, TOC byte included.
+AMR_OCTETS = (13, 14, 16, 18, 20, 21, 27, 32, 6)
+
 _LIBRARY: Optional[ctypes.CDLL] = None
 _LIBRARY_TRIED = False
 
@@ -210,6 +218,82 @@ class AmrMissing(RuntimeError):
     """This computer has no AMR-NB to play: the library is not here."""
 
 
+def _bits_of(data: bytes) -> List[int]:
+    """A byte string as a list of bits, most significant first."""
+    value = int.from_bytes(data, "big")
+    return [(value >> (len(data) * 8 - 1 - i)) & 1 for i in range(len(data) * 8)]
+
+
+def _bytes_of(bits: List[int]) -> bytes:
+    """A bit list back to bytes, most significant first, zero-padded at the end.
+
+    Left-aligned: the first bit of the list is the most significant bit of the
+    first byte. Right-aligning (which is what int.to_bytes does on its own)
+    would shift a run of bits that is not a whole number of bytes four bits in,
+    and the frame would come back as noise.
+    """
+    padded = list(bits)
+    while len(padded) % 8:
+        padded.append(0)
+    value = 0
+    for bit in padded:
+        value = (value << 1) | bit
+    return value.to_bytes(len(padded) // 8, "big")
+
+
+def _pack_efficient(frame: bytes) -> bytes:
+    """One octet-aligned frame -> a bandwidth-efficient payload (RFC 4867 4.3).
+
+    The payload is a 4-bit codec mode request (15: no request, which is what an
+    IP endpoint should send), a 6-bit ToC entry (F, FT, Q), and then the frame's
+    speech bits with nothing between them and no padding inside the frame.
+    """
+    if not frame:
+        return b""
+    ft = (frame[0] >> 3) & 0x0F
+    q = (frame[0] >> 2) & 0x01
+    if ft >= len(AMR_BITS):
+        return frame
+    bits = [1, 1, 1, 1]                       # CMR 15
+    bits.append(0)                            # F: the last frame in this payload
+    bits += [(ft >> 3) & 1, (ft >> 2) & 1, (ft >> 1) & 1, ft & 1]
+    bits.append(q)
+    bits += _bits_of(frame[1:])[:AMR_BITS[ft]]
+    while len(bits) % 8:
+        bits.append(0)                        # only the whole payload is padded
+    return _bytes_of(bits)
+
+
+def _unpack_efficient(payload: bytes) -> bytes:
+    """A bandwidth-efficient payload -> octet-aligned frames (RFC 4867 4.3).
+
+    Reads the 4-bit codec mode request (ignored: an IP endpoint should not set
+    it), then each 6-bit ToC entry and the frame it names, and rewrites the
+    frames the way the library's decoder reads them - a TOC byte whose three
+    top bits carry the type, then the frame's bits byte-aligned.
+    """
+    bits = _bits_of(payload)
+    if len(bits) < 10:
+        return b""
+    at = 4                                    # past the codec mode request
+    out = bytearray()
+    while at + 6 <= len(bits):
+        follow = bits[at]
+        ft = 0
+        for _ in range(4):
+            ft = (ft << 1) | bits[at + 1 + _]
+        q = bits[at + 5]
+        at += 6
+        if ft >= len(AMR_BITS):
+            break                             # NO_DATA or SPEECH_LOST: no frame
+        out.append((ft << 3) | (q << 2))
+        out.extend(_bytes_of(bits[at:at + AMR_BITS[ft]]))
+        at += AMR_BITS[ft]
+        if not follow:
+            break
+    return bytes(out)
+
+
 class Amr(Codec):
     """AMR-NB (RFC 4867) through opencore-amrnb's own interface.
 
@@ -218,12 +302,19 @@ class Amr(Codec):
     carries a voice best on this line. One packet is 20 ms: 160 samples in,
     32 payload bytes out.
 
-    **The encoder's own bytes are the payload, sent verbatim.** Its first byte
-    is the RFC 4867 table of contents (frame type in bits 7-3, the wrapper's
-    quality bit in bit 2), and a decoder finds a frame's length by indexing its
-    size table with those same bits - so rewriting the byte into a "cleaner"
-    TOC desynchronises the far end and it hears noise. The decoder here is the
-    library's mirror: it reads the same byte back off each frame.
+    **The library writes the octet-aligned packing, and the far end may well
+    ask for the other one.** Measured on the router: the callee's phone answers
+    the INVITE with `AMR/8000/1` (octet-aligned) and then re-offers the session
+    with `AMR/8000` (bandwidth-efficient), where the ToC and the frame bits are
+    packed together with no padding between them. Its frames arrive as 0xf3
+    where ours are 0x3c - the same mode 7, the other packing. So `packing`
+    converts at the edges: the library still sees octet-aligned, because that
+    is the only thing its interface takes.
+
+    Inside a frame, the library's own first byte is the table of contents and
+    is kept exactly as written: a decoder finds a frame's length by indexing
+    its size table with those bits, so rewriting one desynchronises the far
+    end and it hears noise.
     """
 
     pt = AMR_PT
@@ -241,7 +332,7 @@ class Amr(Codec):
     def available(cls) -> bool:
         return _library() is not None
 
-    def __init__(self) -> None:
+    def __init__(self, packing: str = "oa") -> None:
         lib = _library()
         if lib is None:
             raise AmrMissing("this system has no opencore-amrnb library, so it cannot play AMR")
@@ -249,6 +340,7 @@ class Amr(Codec):
         # fill the packet. A silent frame is a frame; silence must not become a
         # shorter one.
         self._lib = lib
+        self.packing = "be" if packing == "be" else "oa"
         self._enc = lib.Encoder_Interface_init(0)
         self._dec = lib.Decoder_Interface_init()
         if not self._enc or not self._dec:
@@ -262,21 +354,47 @@ class Amr(Codec):
         if len(pcm) < FRAME_BYTES:              # a short packet still fills 20 ms
             pcm = pcm + b"\x00" * (FRAME_BYTES - len(pcm))
         self._speech[:] = struct.unpack_from(f"<{FRAME_SAMPLES}h", pcm)
-        size = self._lib.Encoder_Interface_Encode(self._enc, self.MODE, self._speech, self._frame, 0)
-        return bytes(self._frame[:size]) if size > 0 else b""
+        size = self._lib.Encoder_Interface_Encode(self._enc, self.MODE, self._speech,
+                                                  self._frame, 0)
+        if size <= 0:
+            return b""
+        frame = bytes(self._frame[:size])
+        return _pack_efficient(frame) if self.packing == "be" else frame
+
+    def _one(self, payload: bytes) -> bytes:
+        self._lib.Decoder_Interface_Decode(self._dec, payload, self._pcm, 0)
+        return struct.pack(f"<{FRAME_SAMPLES}h", *self._pcm)
 
     def decode(self, payload: bytes) -> bytes:
+        """A payload of one or more frames -> 20 ms of PCM per frame.
+
+        The library reads past a TOC byte for the frame's own bits, so the rest
+        of the slot is zeroed: a short frame must not make it read whatever
+        follows it in memory.
+        """
         if not payload:
             return b"\x00" * FRAME_BYTES
-        # The library reads past the TOC byte for the frame's own bits, so the
-        # rest of the slot is zeroed: a short frame must not make it read the
-        # next packet's memory.
-        for i, byte in enumerate(payload[:self._SLOT]):
-            self._frame[i] = byte
-        for i in range(len(payload), self._SLOT):
-            self._frame[i] = 0
-        self._lib.Decoder_Interface_Decode(self._dec, self._frame, self._pcm, 0)
-        return struct.pack(f"<{FRAME_SAMPLES}h", *self._pcm)
+        frames = payload
+        if self.packing == "be" or payload[0] & 0x80:
+            # A far end that re-offered bandwidth-efficient and then sent
+            # octet-aligned after all is caught by the other reading.
+            unpacked = _unpack_efficient(payload)
+            if unpacked:
+                frames = unpacked
+        out = b""
+        at = 0
+        while at < len(frames):
+            ft = (frames[at] >> 3) & 0x0F
+            size = AMR_OCTETS[ft] if ft < len(AMR_OCTETS) else self._SLOT
+            chunk = frames[at:at + size]
+            at += size
+            slot = (ctypes.c_ubyte * self._SLOT)()
+            for i, byte in enumerate(chunk):
+                slot[i] = byte
+            for i in range(len(chunk), self._SLOT):
+                slot[i] = 0
+            out += self._one(slot)
+        return out
 
     def close(self) -> None:
         """Free the codec's encoder and decoder state; safe to call twice, and
@@ -317,7 +435,7 @@ def can_play(pt: int) -> bool:
     return any(cls.pt == pt for cls in available())
 
 
-def codec_for(pt: int) -> Optional[Codec]:
+def codec_for(pt: int, packing: str = "oa") -> Optional[Codec]:
     """A fresh codec for one of `offers()`'s payload types, or None when it is not ours.
 
     Fresh, and shared by nothing: the AMR encoder and decoder carry the previous
@@ -327,7 +445,7 @@ def codec_for(pt: int) -> Optional[Codec]:
     for cls in available():
         if cls.pt == pt:
             try:
-                return cls()
+                return cls(packing) if pt == AMR_PT else cls()
             except Exception as exc:  # noqa: BLE001 - a codec that will not start is not playable
                 logger.warning("landline: payload type %s (%s) would not start: %s",
                                pt, cls.rtpmap, exc)
@@ -377,16 +495,36 @@ def parse_sdp(text: str) -> Tuple[str, int, List[Tuple[int, str]], int]:
 def pick(codecs: List[Tuple[int, str]]) -> Optional[Tuple[int, int]]:
     """(their pt, our pt) for the first of theirs we can play, or None.
 
-    AMR matches only as `AMR/8000/1` (octet-aligned). The encoder writes
-    octet-aligned frames, so a far end answering bare `AMR/8000` is left
-    unmatched on purpose rather than sent frames it reads as the wrong lengths.
+    Both AMR spellings match: `AMR/8000/1` (octet-aligned) and `AMR/8000`
+    (bandwidth-efficient). Measured on the router, the same callee answers the
+    INVITE with the first and re-offers the session with the second, so the
+    packing a session negotiates can change under us - and the library only
+    writes octet-aligned, so the other one is converted at the edges
+    (`packing_for`).
     """
-    ours = {name.upper(): pt for pt, name in offers()}
+    ours = {}
+    for pt, name in offers():
+        ours[name.upper()] = pt
     for pt, name in codecs:
         mine = ours.get(name.upper())
+        if mine is None and name.strip().upper() in ("AMR/8000", "AMR/8000/1"):
+            mine = ours.get("AMR/8000/1")
         if mine is not None:
             return pt, mine
     return None
+
+
+def packing_for(name: str) -> str:
+    """Which AMR packing an rtpmap name negotiates: 'be' for bare AMR/8000."""
+    return "be" if name.strip().upper() == "AMR/8000" else "oa"
+
+
+def negotiated(codecs: List[Tuple[int, str]], pt: int) -> str:
+    """The rtpmap name the far end used for payload type `pt`, or ''."""
+    for their_pt, name in codecs:
+        if their_pt == pt:
+            return name
+    return ""
 
 
 def local_ip_towards(host: str) -> str:
@@ -462,14 +600,27 @@ class RtpSession:
     def port(self) -> int:
         return self.sock.getsockname()[1]
 
-    def start(self, remote: Tuple[str, int], pt: int, codec: int, dtmf_pt: int = 0) -> None:
-        coder = codec_for(codec)
+    def start(self, remote: Tuple[str, int], pt: int, codec: int, dtmf_pt: int = 0,
+              packing: str = "oa") -> None:
+        """Send and receive `codec` (one of `offers()`'s payload types) to `remote`.
+
+        Called once per call, and again when the far end re-offers the session
+        mid-call (the callee's phone sends an UPDATE with SDP while it rings,
+        RFC 3311) or answers the INVITE after such a re-offer: the second call
+        re-points the same two threads instead of starting another pair, which
+        would double the packets and hold two codecs at once.
+        """
+        coder = codec_for(codec, packing)
         if coder is None:
             raise ValueError(f"payload type {codec} is not a sound this computer can play")
         self.remote, self.pt, self.codec, self.dtmf_pt = remote, pt, codec, dtmf_pt
+        if self.coder is not None:
+            self.coder.close()
         self.coder = coder
         if self.sound is None:
             self.sound = PwCat()
+        if self._threads:
+            return
         for target in (self._send_loop, self._recv_loop):
             t = threading.Thread(target=target, daemon=True, name="landline-rtp")
             t.start()

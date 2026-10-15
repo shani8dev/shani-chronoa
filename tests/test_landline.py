@@ -127,13 +127,80 @@ def test_the_offer_leads_with_amr_and_says_what_it_sends():
 
 
 def test_amr_matches_only_the_octet_aligned_name():
-    """The encoder writes octet-aligned frames, so a far end answering bare
-    AMR/8000 (bandwidth-efficient) is left unmatched on purpose."""
+    """Both spellings match: the router's callee answers the INVITE with
+    AMR/8000/1 and re-offers the session with AMR/8000, so a session's packing
+    can change under us. Bare AMR/8000 is bandwidth-efficient, which the library
+    does not write - it is converted at the edges (packing_for)."""
     assert media.pick([(96, "AMR/8000/1")]) == (96, media.AMR_PT)
-    assert media.pick([(96, "AMR/8000")]) is None
+    assert media.pick([(96, "AMR/8000")]) == (96, media.AMR_PT)
     assert media.pick([(0, "PCMU/8000")]) == (0, 0)
     assert media.can_play(media.AMR_PT) is True
     assert media.can_play(42) is False
+    assert media.packing_for("AMR/8000") == "be"
+    assert media.packing_for("AMR/8000/1") == "oa"
+    assert media.negotiated([(96, "AMR/8000"), (101, "telephone-event/8000")], 96) == "AMR/8000"
+
+
+def test_amr_bandwidth_efficient_frames_are_the_same_frames():
+    """RFC 4867 4.3: the bandwidth-efficient payload is a 4-bit CMR, a 6-bit ToC
+    entry and the frame's bits, packed with no padding between them. The far end
+    sends 0xf3 where our own encoder writes 0x3c - the same mode 7, the other
+    packing. What must hold is the round trip: pack, unpack, decode, and the
+    audio is the audio."""
+    import math
+    import struct
+
+    octet = media.codec_for(media.AMR_PT, "oa")
+    packed = media.codec_for(media.AMR_PT, "be")
+    assert octet is not None and packed is not None
+
+    tone = [int(9000 * math.sin(2 * math.pi * 300 * i / 8000)) for i in range(160 * 30)]
+    heard = []
+    for i in range(30):
+        pcm = struct.pack("<160h", *tone[i * 160:(i + 1) * 160])
+        straight = octet.encode(pcm)
+        rewrapped = packed.encode(pcm)
+        assert len(rewrapped) == 32, "a bandwidth-efficient mode-7 payload is 32 bytes"
+        assert rewrapped[0] == 0xF3, f"expected the measured 0xf3, got 0x{rewrapped[0]:02x}"
+        assert len(straight) == 32 and straight[0] == 0x3C
+        # the frames carry the same speech bits, so unpacking must give ours back
+        assert media._unpack_efficient(rewrapped) == straight
+        heard += list(struct.unpack("<160h", octet.decode(straight)))
+
+    def correlation(x, y, off):
+        n = min(len(x), len(y) - off)
+        num = sum(x[i] * y[i + off] for i in range(n))
+        dx = sum(v * v for v in x[:n]) ** .5
+        dy = sum(y[i + off] ** 2 for i in range(n)) ** .5
+        return num / max(dx * dy, 1)
+
+    _lag, best = max(((o, correlation(tone, heard, o)) for o in range(0, 400)),
+                     key=lambda t: t[1])
+    assert best > 0.99, f"the packed and unpacked frames lost the audio (r {best:.4f})"
+
+
+def test_the_far_ends_bandwidth_efficient_frames_decode_to_speech():
+    """The measured far-end frames, from a live call, must decode to audio and
+    not to the decoder's comfort noise. With the packing read as octet-aligned
+    they were 0xf3 - an invalid frame type - and every packet came back as the
+    same silence."""
+    import struct
+
+    from tests import far_end_frames
+
+    coder = media.codec_for(media.AMR_PT, "be")
+    assert coder is not None
+    frames = far_end_frames.frames()
+    audio = b"".join(coder.decode(frame) for frame in frames)
+    samples = struct.unpack(f"<{len(audio) // 2}h", audio)
+    assert len(samples) == len(frames) * media.FRAME_SAMPLES
+    peak = max(abs(s) for s in samples)
+    assert peak > 100, f"the far end's frames decoded to silence (peak {peak})"
+    # Each captured frame type must be the one the packing says it is. Read as
+    # octet-aligned they are all frame type 14, which is why they were silence.
+    for frame in frames:
+        assert (frame[0] >> 3) & 0x0F == 14, "as octet-aligned it is an invalid type"
+        assert frame[0] in (0xF1, 0xF3, 0xF4)
 
 
 def test_device_id_is_stable_for_a_name():
@@ -195,8 +262,15 @@ def _line(router, monkeypatch, events, codecs=None, challenge_invite=True):
                     sound_factory=fake._Silence)
     line = factory("127.0.0.1", creds, instance, on_event=lambda k, **i: events.append((k, i)))
     line.start()
-    _wait(lambda: line.registered, "the line never registered")
+    _wait(lambda: line.registered, "the line never registered", seconds=REGISTER_SECONDS)
     return line
+
+
+#: How long to let the line register. The router's own TLS handshake sits in
+#: front of it and the Line's first REGISTER waits up to 32 s for an answer, so
+#: a tighter budget reports "the line never registered" for a line that was
+#: about to - which is what this was, measured three runs in fourteen.
+REGISTER_SECONDS = 45.0
 
 
 def _wait(cond, why, seconds=10.0):
@@ -289,6 +363,92 @@ def test_the_line_plays_amr_on_a_router_that_offers_nothing_else(router, monkeyp
         assert call is not None
         assert call.rtp.codec == media.AMR_PT, "the call did not agree on AMR"
         _wait(lambda: call.rtp.received > 2, "no AMR packets arrived on the wire")
+        line.hangup()
+    finally:
+        line.stop()
+        r2.stop()
+
+
+def test_the_line_answers_a_session_re_offered_mid_ring(router, monkeypatch, tmp_path):
+    """What the callee's own phone does on the router, and what the call died on.
+
+    Measured live: after 180 Ringing the far end sends an UPDATE carrying a
+    fresh SDP offer, and the device used to answer it with a 200 OK that had no
+    body - which RFC 3311 does not allow - so the far end had nothing to accept
+    and tore the call down with 487. The answer must be an SDP answer, and the
+    media must move to the port it names."""
+    router.stop()
+    (tmp_path / "reoffer").mkdir()
+    r2 = fake.Router(tmp_path / "reoffer", codecs=("AMR/8000/1",), reoffer_mid_ring=True)
+    monkeypatch.setattr(provision, "ACCOUNT_PORT", r2.http_port)
+    monkeypatch.setattr(provision, "IMS_PORT", r2.https_port)
+    events = []
+    line = _line(r2, monkeypatch, events)
+    try:
+        line.dial("+911234567890")
+        _wait(lambda: any(k == "answered" for k, _ in events),
+              "the call did not survive the far end re-offering the session")
+        call = line.call
+        assert call is not None and call.rtp.codec == media.AMR_PT
+        _wait(lambda: call.rtp.received > 2, "no audio arrived after the re-offer")
+        line.hangup()
+    finally:
+        line.stop()
+        r2.stop()
+
+
+def test_the_far_ends_bandwidth_efficient_re_offer_is_taken(router, monkeypatch, tmp_path):
+    """The re-offer the router's callee really sends, and the one that broke it.
+
+    It answers the INVITE with `AMR/8000/1` and then re-offers the session with
+    `AMR/8000` - bandwidth-efficient - where the ToC and the frame's bits are
+    packed together. Read as octet-aligned those frames are frame type 14 and
+    every one decoded to the same comfort noise, so the line has to speak the
+    packing the far end asks for."""
+    router.stop()
+    (tmp_path / "be").mkdir()
+    r2 = fake.Router(tmp_path / "be", codecs=("AMR/8000/1",), reoffer_mid_ring=True,
+                     reoffer_bandwidth_efficient=True)
+    monkeypatch.setattr(provision, "ACCOUNT_PORT", r2.http_port)
+    monkeypatch.setattr(provision, "IMS_PORT", r2.https_port)
+    events = []
+    line = _line(r2, monkeypatch, events)
+    try:
+        line.dial("+911234567890")
+        _wait(lambda: any(k == "answered" for k, _ in events),
+              "the call did not survive a bandwidth-efficient re-offer")
+        call = line.call
+        assert call is not None and call.rtp.codec == media.AMR_PT
+        # What we send must be the packing the far end asked for.
+        assert call.rtp.coder.packing == "be"
+        _wait(lambda: call.rtp.received > 2, "no audio arrived on the bandwidth-efficient call")
+        line.hangup()
+    finally:
+        line.stop()
+        r2.stop()
+
+
+def test_a_renegotiated_call_is_answered_without_sdp_of_its_own(router, monkeypatch, tmp_path):
+    """The callee's phone re-offers while ringing, so the 200 OK that follows
+    carries no SDP - the session parameters are the ones already agreed. A line
+    that reads an empty body as "no sound I can play" ends a call that is, by
+    then, fully connected: measured live as a call that rang, was picked up,
+    and dropped three seconds later."""
+    router.stop()
+    (tmp_path / "emptyanswer").mkdir()
+    r2 = fake.Router(tmp_path / "emptyanswer", codecs=("AMR/8000/1",), reoffer_mid_ring=True,
+                     empty_final_answer=True)
+    monkeypatch.setattr(provision, "ACCOUNT_PORT", r2.http_port)
+    monkeypatch.setattr(provision, "IMS_PORT", r2.https_port)
+    events = []
+    line = _line(r2, monkeypatch, events)
+    try:
+        line.dial("+911234567890")
+        _wait(lambda: any(k == "answered" for k, _ in events),
+              "the call did not survive being answered without new SDP")
+        call = line.call
+        assert call is not None and call.rtp.codec == media.AMR_PT
+        _wait(lambda: call.rtp.received > 2, "no audio arrived on a connected call")
         line.hangup()
     finally:
         line.stop()

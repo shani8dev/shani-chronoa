@@ -45,11 +45,19 @@ def _tls_context(directory: Path) -> "tuple[ssl.SSLContext, str]":
 class Router:
     """The fake router. `host` is 127.0.0.1; the three ports are chosen free."""
 
-    def __init__(self, directory: Path, codecs=("PCMU/8000",), challenge_invite=True):
+    def __init__(self, directory: Path, codecs=("PCMU/8000",), challenge_invite=True,
+                 reoffer_mid_ring=False, empty_final_answer=False,
+                 reoffer_bandwidth_efficient=False):
         self.tls, self.cert = _tls_context(directory)
         self.codecs = codecs
         self.challenge_invite = challenge_invite
-        self.seen = {"http": [], "register": [], "invite": [], "rtp_in": 0}
+        self.reoffer_mid_ring = reoffer_mid_ring
+        self.empty_final_answer = empty_final_answer
+        self.reoffer_bandwidth_efficient = reoffer_bandwidth_efficient
+        self.update_refused = False
+        self._ringed = None
+        self.seen = {"http": [], "register": [], "invite": [], "rtp_in": 0,
+                     "update_answer": None}
         self.added: "set[str]" = set()
         self.password = ""              # the current fetched password, regenerated each fetch
         self._pending_alias = ""
@@ -122,7 +130,7 @@ class Router:
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         listener.bind(("127.0.0.1", 0))
-        listener.listen(1)
+        listener.listen(16)
         port = listener.getsockname()[1]
         threading.Thread(target=self._sip_accept, args=(listener,), daemon=True).start()
         return port, listener
@@ -164,6 +172,8 @@ class Router:
                     self._on_request(conn, message)
                 elif message.status == 200 and message.method == "INVITE":
                     self._on_answer(conn, message)
+                elif message.method == "UPDATE":
+                    self._on_update_answer(conn, message)
 
     def _on_request(self, conn, req: sip.Message):
         method = req.method
@@ -195,6 +205,27 @@ class Router:
         if chosen and self._rtp is not None:
             self._rtp.start((ip, port), chosen[0], chosen[1])
 
+    def _on_update_answer(self, conn, reply: sip.Message):
+        """What the callee's phone does with the device's answer to its UPDATE.
+
+        Measured live: RFC 3311 requires the 200 OK to carry an SDP answer, and
+        a device that answers with no body gets the call torn down with 487.
+        The far end does not ask twice, so the case is recorded here.
+        """
+        self.seen["update_answer"] = reply
+        if reply.body.strip():
+            if self._ringed is not None:
+                pending, self._ringed = self._ringed, None
+                self._answer_ringing(pending["conn"], pending["req"], pending["to_tag"],
+                                     pending["answer"], pending["ip"], pending["port"],
+                                     pending["chosen"], pending["packing"])
+            return
+        self.update_refused = True
+        pending, self._ringed = self._ringed, None
+        if pending is not None:
+            time.sleep(0.3)
+            self._send(conn, sip.response(pending["req"], 487, to_tag=pending["to_tag"]))
+
     def _on_register(self, conn, req: sip.Message):
         auth = req.get("Authorization")
         self.seen["register"].append(req)
@@ -220,6 +251,7 @@ class Router:
                 ("Proxy-Authenticate", f'Digest realm="{REALM}", nonce="{nonce}", qop="auth"')]))
             return
         to_tag = sip.new_tag()
+        self.update_refused = False
         self._send(conn, sip.response(req, 100))
         self._send(conn, sip.response(req, 180, to_tag=to_tag, extra=[
             ("Contact", f"<sip:far@127.0.0.1:{self.sip_port};transport=tls>")]))
@@ -231,9 +263,47 @@ class Router:
             return self._send(conn, sip.response(req, 488, to_tag=to_tag))
         self._rtp = media.RtpSession.bind("127.0.0.1", _Silence())
         answer = media.offer("127.0.0.1", self._rtp.port, only=chosen[1])
-        self._rtp.start((ip, port), chosen[0], chosen[1])
+        if self.reoffer_mid_ring:
+            # What the callee's JUICE phone does on the real router: an UPDATE
+            # carrying a fresh SDP offer while the INVITE is still ringing. It
+            # answers the INVITE only once it has a real SDP answer, and tears
+            # the call down with 487 if none comes - so the rest of this call is
+            # driven from _on_update_answer, on the reader thread, and this
+            # call returns rather than waiting for a message it is the one
+            # reading.
+            offer = media.offer("127.0.0.1", self._rtp.port, only=chosen[1])
+            if self.reoffer_bandwidth_efficient:
+                offer = offer.replace("AMR/8000/1", "AMR/8000")
+                offer = offer.replace("mode-change-capability=1", "mode-change-capability=2")
+            self._ringed = {"conn": conn, "req": req, "to_tag": to_tag, "answer": answer,
+                            "ip": ip, "port": port, "chosen": chosen,
+                            "packing": "be" if self.reoffer_bandwidth_efficient else "oa"}
+            return self._send(conn, sip.Message(
+                f"UPDATE {sip.uri_of(req.get('Contact'))} SIP/2.0", [
+                    ("Via", f"SIP/2.0/TLS 127.0.0.1:{self.sip_port};branch={sip.new_branch()}"),
+                    ("Max-Forwards", "70"),
+                    ("From", req.get("From")),
+                    ("To", f"<{sip.uri_of(req.get('To'))}>;tag={to_tag}"),
+                    ("Call-ID", req.call_id), ("CSeq", f"{req.cseq[0]} UPDATE"),
+                    ("Content-Type", "application/sdp")], offer))
+        self._ringed = None
+        self._answer_ringing(conn, req, to_tag, answer, ip, port, chosen, "oa")
+
+    def _answer_ringing(self, conn, req, to_tag, answer, ip, port, chosen, packing) -> None:
+        self._ringed_packing = packing
+        if packing == "be":
+            # A far end that re-offered bandwidth-efficient also answers the
+            # INVITE with it - the packing does not go back afterwards.
+            answer = answer.replace("AMR/8000/1", "AMR/8000")
+        self._rtp.start((ip, port), chosen[0], chosen[1], 0, packing)
         time.sleep(0.05)
-        self._send(conn, sip.response(req, 200, to_tag=to_tag, body=answer, extra=[
+        if self.empty_final_answer:
+            # What the callee does once a mid-ring re-offer has already
+            # negotiated the session: the 200 OK carries no SDP of its own.
+            body = ""
+        else:
+            body = answer
+        self._send(conn, sip.response(req, 200, to_tag=to_tag, body=body, extra=[
             ("Contact", f"<sip:far@127.0.0.1:{self.sip_port};transport=tls>")]))
 
     def call_in(self, from_number: str = "+911112223334") -> None:
