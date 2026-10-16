@@ -325,6 +325,63 @@ def _live_level(value: object) -> float:
     return max(0.0, min(1.0, float(value)))
 
 
+#: The finest difference in level the drawn character can actually show.
+#:
+#: **A level finer than this is a redraw that looks identical**, and the art
+#: module's own docstring already says why it cannot simply write the number:
+#: `mind_op` is interpolated at full float precision, so `svg()` returns a
+#: *different string* for nearly every level - 159 distinct strings for
+#: `listening` over a 100,000-sample sweep, and a "smallest visible change" of
+#: 0.0000. A string that differs by 1e-6 is not a picture that differs by 1e-6:
+#: 8-bit alpha cannot show it.
+#:
+#: Measured by hashing the **rasterised pixbuf** rather than the string, over a
+#: 1,000-sample sweep of `listening` at `SIZE * 2` (levels `i/1000` for
+#: `i` in 0..999):
+#:
+#: | step | distinct pictures |
+#: |---|---|
+#: | none | **156** |
+#: | 0.02 | **51** |
+#: | 0.05 | 21 |
+#:
+#: The 51 and the 21 are grid-independent; the 156 is this grid's count and
+#: 157 with `1.0` included, which is why the row above names the grid.
+#:
+#: **The load-bearing property, and the one 0.02 was chosen for.** Over the 51
+#: quantised levels the halo radius `int(44 * level)` takes **45 distinct
+#: values - all 45 the unquantised range spans**, so the step is at or below the
+#: drawing's own granularity and costs the picture nothing. (Measured: the
+#: radius moves by 1 on 44 of the 50 transitions and by 0 on 6. An earlier
+#: version of this comment read that as `int(44 * 0.02) = 0` "on most steps",
+#: which is the *level* increment and not the *radius* move - the two differ
+#: because the radius accumulates.)
+#:
+#: **This is load bearing rather than cosmetic**: a Shell actor that displays
+#: this art takes a file route (`St.TextureCache.load_file_sync`, measured in
+#: `harness-study/HARVEST-COUCOU.md` PART 9), and that costs **12.4 ms per
+#: changed frame** against a 16.6 ms budget - so 156 re-encodes per turn is a
+#: frame budget spent, and 51 is not.
+LEVEL_STEP = 0.02
+
+
+def quantise_level(level: float) -> float:
+    """A live level snapped to the finest step the drawn character can show.
+
+    Snapping is `round`, not `floor` or a string format, so it is symmetric: a
+    level that arrives as 0.019 or 0.021 draws the same picture and neither is
+    the one that owns it. **Rounding is what makes the boundary stable** - a
+    floor would put 0.019 and 0.021 in different buckets either side of a value
+    that looks the same, so a level hovering at a step edge would re-encode
+    forever.
+    """
+    if level <= 0.0:
+        return 0.0
+    if level >= 1.0:
+        return 1.0
+    return min(1.0, round(level / LEVEL_STEP) * LEVEL_STEP)
+
+
 def _decor(state: str, level: float, net: str) -> str:
     """A per-state signal that reads at a glance, so states never look alike.
 
@@ -392,6 +449,7 @@ def svg(state: str = "idle", expression: str = "", blink: bool = False,
     # The halo tracks the live mic/playback level, so only listening and speaking
     # move with it; any other state is steady regardless of a stray level.
     level = _live_level(level) if state in ("listening", "speaking") else 0.0
+    level = quantise_level(level)
     halo_r = 150 + int(44 * level)
     halo_op = 0.30 + 0.30 * level
     mind_op = (0.7 if state == "thinking" else 0.26) + 0.15 * level

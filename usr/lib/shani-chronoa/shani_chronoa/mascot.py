@@ -659,6 +659,40 @@ class Mascot:
         except Exception:  # noqa: BLE001
             logger.debug("mascot: render failed", exc_info=True)
 
+    def _begin_turn_work(self) -> None:
+        """Run the work timeline for a turn nobody dragged the mascot for.
+
+        `MascotMotion.begin_work()` existed and was fully tested and had **no
+        caller in `usr/`** - the engine could chew after a drop (`release()`) but
+        nothing could start a turn's worth of it, which is the common case: a
+        question asked by voice reaches `set_state("thinking")` with no pointer
+        anywhere near the sprite.
+
+        **Two refusals, and neither is decoration.**
+
+        - *Held.* `begin_work()` sets `_held = False`. Running it while a drag is
+          in progress would let go of the mascot under the pointer, so a turn
+          starting mid-drag would be felt as the mascot dropping itself.
+        - *Already working.* A mascot dropped 200 ms ago is mid-chew; starting
+          again rewinds `t` to `T_DROP` and **re-plays the entry pop** the person
+          just watched. One turn, one timeline - and `_frame_tick` ends the
+          timeline on its own, so skipping here cannot leave it running for ever.
+
+        **`_start_frames()` is part of this, not a detail.** The timeline only
+        advances when something calls `engine.frame()`, and the only caller is the
+        frame timer - which `_on_drag_begin` starts and nothing else does. Without
+        it the mascot would enter `working`, never move, and never stop: `working`
+        is what `_frame_tick` checks to end the turn, so a turn that never ticks
+        never ends.
+        """
+        engine = self._engine
+        if engine is None or engine.held or engine.working:
+            return
+        if _motion_is_reduced():
+            return
+        engine.begin_work(_WORK_SECONDS)
+        self._start_frames()
+
     def set_state(self, state: str) -> None:
         # Validated against the art module's own list. This carried a hand-typed
         # tuple, so a state added to `mascot_art._PALETTE` would render happily
@@ -668,6 +702,12 @@ class Mascot:
             self._state = state
             self._announce()
             self._render()
+            # On the *transition*, not on every call: `set_state` is how a level
+            # feed and a turn both reach here, and a turn re-announcing itself
+            # would restart the timeline on every frame of it. `thinking` is the
+            # only state that means work is under way.
+            if state == "thinking":
+                self._begin_turn_work()
 
     def _announce(self) -> None:
         """The one place the mascot's accessible name is set.
@@ -698,15 +738,25 @@ class Mascot:
     def set_level(self, level: float) -> None:
         """Feed a live mic/playback level, so the halo swells with the voice.
 
-        **Nothing calls this yet.** The two feeds that exist are
-        `ChronoaWindow.set_input_level` and `set_playback_level`, driven from
-        `app/voice.py` - so finishing this is one call beside each of those two
-        lines, and it is left unwired rather than guessed at, because the mascot
-        has no way to reach a level the app is not already handing to the orb.
+        Driven from `app/voice.py`'s two level handlers - the same two feeds the
+        orb reads - so this is one call beside each of them rather than a second
+        subscription to the audio.
+
+        **The value stored is the quantised one**, from `mascot_art`, because
+        the stored level is the picture's only record of it: a level finer than
+        `mascot_art.LEVEL_STEP` renders an identical character, and returning
+        early on an unchanged picture is what keeps a mic feeding samples at
+        audio rate from re-rendering the orb on every one of them. The
+        quantisation lives in the art module because that is where the mapping
+        from level to pixels is, so the two cannot disagree about which levels
+        are distinguishable.
         """
         # Only the live states show the halo swelling; ignore stray levels.
         if self._state in ("listening", "speaking"):
-            self._level = max(0.0, min(1.0, level))
+            level = mascot_art.quantise_level(level)
+            if level == self._level:
+                return
+            self._level = level
             self._render()
 
     def express(self, name: str, seconds: float = 2.6) -> None:
