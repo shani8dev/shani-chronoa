@@ -68,6 +68,7 @@ code before it was written down:
 from __future__ import annotations
 
 import argparse
+import ast
 import os
 import re
 import subprocess
@@ -495,7 +496,57 @@ def _apply(path: Path, pairs) -> None:
             "anchor is not unique is either aimed at the wrong place or does not "
             "exist, and either way it reports a survivor against unmutated code"
             % (old[:60], text.count(old), path.name))
+        # **`count == 1` is necessary and not sufficient.** `str.replace(old, old)`
+        # matches exactly once and rewrites the file with itself, so the run
+        # proceeds to report this mutation as a SURVIVOR - a claim that nothing
+        # covers it, measured against a file it never changed. `assert s.count(old)
+        # == 1` passes on it; the runner's own docstring records this as *the*
+        # str.replace trap in the one costume that gets past the guard written
+        # for it. Refused here, before the write, so the tree stays untouched.
+        assert new != old, (
+            "the mutation anchored on %r replaces it with itself in %s - it "
+            "changes nothing, so the run would report a survivor against "
+            "unmutated code"
+            % (old[:60], path.name))
         text = text.replace(old, new)
+    # **Once, after every pair, before the write - and unconditional.**
+    #
+    # *Why not per pair.* `pairs` is `[old, new] = zip(list, list)`, so one
+    # mutation may be **several edits that must land together** for a reason
+    # that has nothing to do with parsing - two loops that are not adjacent and
+    # have to change together (`mutate.py`'s own docstring). Per-pair parsing
+    # would demand something stricter than the shape promises: that each half is
+    # independently valid Python. A half that *opens* a construct is legal in a
+    # pair and unparseable alone. **Measured on this tree: 4 pair-anchor
+    # mutations across 3 sets, and 0 halves that fail to parse alone** - so this
+    # is a property of the format, not an observed need, and it is recorded as
+    # such rather than dressed up as a finding.
+    #
+    # *What once-at-the-end buys instead.* It validates the **combination**,
+    # which no per-pair parse can: two edits that are each fine and jointly are
+    # not is a class the two-sided check below is the only thing that sees.
+    #
+    # *Why unconditional.* Not gated on a `.py` suffix, because
+    # `usr/bin/shani-chronoa` and `usr/bin/shani-chronoa-overlay` are Python with
+    # no extension and four mutations target them - and `ast.parse` does not care
+    # what the file is called.
+    #
+    # Downstream, `MutationDidNotParse` already refuses to count an unparseable
+    # run as caught *or* as a survivor; it reports UNMEASURABLE. That is correct
+    # and it is **late**: by then the malformed file is on disk, pytest cannot
+    # even collect it, and a set that used to reach every mutation reports none.
+    # Caught at the source instead, the file is never written, so the tree stays
+    # byte-identical and the run's other verdicts stay meaningful. The class this
+    # exists for is not hypothetical - `goal_edits` and `sink_shape` each carry a
+    # comment about an anchor that ended mid-line and left a dangling
+    # continuation.
+    try:
+        ast.parse(text)
+    except SyntaxError as exc:
+        raise AssertionError(
+            "the spliced text of %s does not parse (%s at line %s) - this "
+            "mutation is malformed, not uncovered; the file was not written"
+            % (path.name, exc.msg, exc.lineno)) from exc
     path.write_text(text, encoding="utf-8")
 
 

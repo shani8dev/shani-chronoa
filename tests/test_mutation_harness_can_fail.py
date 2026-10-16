@@ -113,6 +113,39 @@ def _run(*args, cwd=REPO, timeout=600):
     )
 
 
+#: A module with two independent functions, so a pair-anchor has two places to
+#: work that do not interact. `test_the_no_op_mutation_leaves_the_tree_alone` and
+#: its neighbours mutate this rather than `FIXTURE`, because the pair case needs a
+#: second function to move half of.
+PAIR_FIXTURE = '''"""A fixture with two independent functions."""
+
+
+def one(items):
+    return sum(items)
+
+
+def two(items):
+    return max(items)
+'''
+
+
+def _fixture(tmp_path):
+    """A whole fixture tree: the module, its test, and the set directory.
+
+    At module level, for the reason `_named_set` gives - two classes build
+    fixtures, and a second copy is a second thing to keep in step.
+    """
+    (tmp_path / "tools" / "mutations").mkdir(parents=True)
+    (tmp_path / "tools").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "tests").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "usr" / "lib").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "usr" / "lib" / "fixture_module.py").write_text(
+        FIXTURE, encoding="utf-8")
+    (tmp_path / "tests" / "test__mutation_selfcheck.py").write_text(
+        FIXTURE_TEST, encoding="utf-8")
+    return tmp_path
+
+
 def _write_fixture_set(directory: Path, mutations):
     path = directory / "tools" / "mutations" / "selfcheck.py"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -131,19 +164,8 @@ def _write_fixture_set(directory: Path, mutations):
 class TestTheHarnessCanFail:
     """A runner that cannot fail is not a runner."""
 
-    def _fixture(self, tmp_path):
-        (tmp_path / "tools" / "mutations").mkdir(parents=True)
-        (tmp_path / "tools").mkdir(parents=True, exist_ok=True)
-        (tmp_path / "tests").mkdir(parents=True, exist_ok=True)
-        (tmp_path / "usr" / "lib").mkdir(parents=True, exist_ok=True)
-        (tmp_path / "usr" / "lib" / "fixture_module.py").write_text(
-            FIXTURE, encoding="utf-8")
-        (tmp_path / "tests" / "test__mutation_selfcheck.py").write_text(
-            FIXTURE_TEST, encoding="utf-8")
-        return tmp_path
-
     def test_a_covered_mutation_is_reported_caught(self, tmp_path):
-        self._fixture(tmp_path)
+        _fixture(tmp_path)
         name = _write_fixture_set(tmp_path, [{
             "file": "usr/lib/fixture_module.py",
             "old": "    return sum(items)\n",
@@ -159,7 +181,7 @@ class TestTheHarnessCanFail:
     def test_an_uncovered_mutation_is_a_survivor(self, tmp_path):
         """**The control.** A mutation nothing covers must be reported as one,
         or "all mutations caught" means nothing at all."""
-        self._fixture(tmp_path)
+        _fixture(tmp_path)
         # **The mutation now parses, and that is the fix.** It used to replace a
         # docstring line with `"""A fixture.` - an unterminated string literal, so
         # the fixture was a SyntaxError and pytest aborted with "1 error during
@@ -193,7 +215,7 @@ class TestTheHarnessCanFail:
         tests were failing for exactly the right reason and the run said
         "survivor". The runner reports both halves now.
         """
-        self._fixture(tmp_path)
+        _fixture(tmp_path)
         name = _write_fixture_set(tmp_path, [{
             "file": "usr/lib/fixture_module.py",
             "old": "    return sum(items)\n",
@@ -210,7 +232,7 @@ class TestTheHarnessCanFail:
     def test_an_absent_anchor_is_refused_not_skipped(self, tmp_path):
         """**The count assertion.** A `str.replace` that matched nothing is a
         no-op, and a no-op mutation looks exactly like a caught one."""
-        self._fixture(tmp_path)
+        _fixture(tmp_path)
         name = _write_fixture_set(tmp_path, [{
             "file": "usr/lib/fixture_module.py",
             "old": "    return sum(nothing_here)\n",
@@ -234,7 +256,7 @@ class TestTheHarnessCanFail:
         accepting it was caught only by a constant witness in `harness`, which
         says nothing about this particular rule.
         """
-        self._fixture(tmp_path)
+        _fixture(tmp_path)
         doubled = tmp_path / "usr" / "lib" / "fixture_module.py"
         doubled.write_text(FIXTURE + FIXTURE, encoding="utf-8")
         name = _write_fixture_set(tmp_path, [{
@@ -263,7 +285,7 @@ class TestTheHarnessCanFail:
         the order `run_set` performs them in - not about an order this test
         wrote itself and then checked.
         """
-        self._fixture(tmp_path)
+        _fixture(tmp_path)
         _write_fixture_set(tmp_path, [{
             "file": "usr/lib/fixture_module.py",
             "old": "    return sum(items)\n",
@@ -309,7 +331,7 @@ class TestTheHarnessCanFail:
         """The cleanup half of the sabotage rule: the fixture is a source file, so
         it must be byte-identical after the run - including on the failing path.
         """
-        self._fixture(tmp_path)
+        _fixture(tmp_path)
         target = tmp_path / "usr" / "lib" / "fixture_module.py"
         before = target.read_bytes()
         name = _write_fixture_set(tmp_path, [
@@ -390,6 +412,275 @@ class TestTheHarnessCanFail:
             assert (REPO / test_file).is_file(), (
                 f"{test_file} does not exist, so this set reports against a file "
                 f"nothing will ever run:\n{line}")
+
+
+class TestAMutationThatChangesNothingIsRefused:
+    """`count == 1` is necessary and not sufficient.
+
+    The two rules asserted here are the other two ways `_apply` could accept a
+    mutation that does not change anything, and both produce the same shape of
+    false evidence - **a survivor reported against a file that was never
+    modified**, which is a claim that nothing covers it, measured against
+    unmutated code:
+
+    1. `new == old`. `str.replace(old, old)` matches exactly once and rewrites the
+       file with itself. `assert text.count(old) == 1` passes on it.
+    2. A splice that does not parse. `MutationDidNotParse` already refuses to count
+       an unparseable run as caught or as a survivor - and it does so **late**: the
+       malformed file is on disk, pytest cannot collect it, and a set that used to
+       reach every mutation reports none.
+
+    **The two halves are asserted at two different levels, and the split is the
+    point.**
+
+    At the *runner* level, through a real subprocess: what the run **reports**.
+    Byte-identity is worthless here, because `run_set` restores in a `finally` -
+    the file comes back identical whether it was written or not, so the only
+    observable claim is the tally and the error line.
+
+    At the `_apply` level, in-process: what lands **on disk**. There is no
+    `finally` in that path, so an unchanged file can only mean the write never
+    happened. A test that asserts byte-identity through the runner would pass with
+    the guard deleted, which is the shape this file exists to catch.
+
+    The control is last and is a real mutation through the real `run_set`: a
+    harness that refuses everything reports a clean tally and no file change, and
+    two refusal tests alone cannot tell that from working.
+    """
+
+    _ANCHOR = "    return sum(items)\n"
+
+    def _apply(self):
+        """The runner's own `_apply`, exec'd from its file.
+
+        Deliberately the real function and not a re-implementation, and
+        deliberately *not* called through `run_set` - see the class docstring for
+        why the two levels are not interchangeable.
+        """
+        namespace = {"__file__": str(RUNNER)}
+        exec(compile(RUNNER.read_text(encoding="utf-8"), str(RUNNER), "exec"),
+             namespace)
+        return namespace["_apply"]
+
+    def _pair_fixture(self, tmp_path):
+        _fixture(tmp_path)
+        target = tmp_path / "usr" / "lib" / "fixture_module.py"
+        target.write_text(PAIR_FIXTURE, encoding="utf-8")
+        return target
+
+    # -- level one: what the run says ------------------------------------
+
+    def test_a_mutation_that_replaces_its_anchor_with_itself_is_refused(
+            self, tmp_path):
+        """The no-op guard, measured through the real runner.
+
+        The claim is not that the file is unchanged - it is unchanged either way,
+        because `str.replace(old, old)` is a rewrite with itself. **The claim is
+        that the run says so**, rather than carrying on and reporting a survivor
+        for a mutation it never made.
+        """
+        _fixture(tmp_path)
+        name = _write_fixture_set(tmp_path, [{
+            "file": "usr/lib/fixture_module.py",
+            "old": self._ANCHOR,
+            "new": self._ANCHOR,
+            "label": "replaces its anchor with itself",
+            "expect": ["test_the_total_is_what_the_docstring_says"],
+        }])
+        out = _run(name, cwd=tmp_path)
+        report = out.stdout + out.stderr
+
+        assert out.returncode == 1, report
+        assert "replaces it with itself" in report, (
+            "a no-op mutation was not named as one:\n" + report)
+        assert "changes nothing" in report, report
+        # The four verdicts must all be zero. A survivor here is the defect this
+        # guard exists for, so it is asserted rather than left to the tally.
+        assert "0 mutations, 0 caught, 0 survivors" in report, (
+            "a no-op mutation was reported as a result:\n" + report)
+        assert "0 equivalent" in report and "0 unmeasurable" in report, report
+
+    def test_a_malformed_mutation_is_refused_before_it_is_run(self, tmp_path):
+        """The parse guard, measured through the real runner.
+
+        Downstream, `MutationDidNotParse` already reports UNMEASURABLE for this -
+        so the guard is not making a *new* claim, it is making the same claim
+        **without writing the file**. The distinction is visible in the tally: with
+        the guard in place nothing reaches that state at all, so `0 unmeasurable`
+        is the post-condition rather than the outcome.
+        """
+        _fixture(tmp_path)
+        name = _write_fixture_set(tmp_path, [{
+            "file": "usr/lib/fixture_module.py",
+            "old": self._ANCHOR,
+            "new": "    return sum(items\n",   # the call is never closed
+            "label": "leaves the call open",
+            "expect": ["test_the_total_is_what_the_docstring_says"],
+        }])
+        out = _run(name, cwd=tmp_path)
+        report = out.stdout + out.stderr
+
+        assert out.returncode == 1, report
+        assert "does not parse" in report, report
+        # Named as malformed, not as uncovered. "malformed, not uncovered" is the
+        # whole difference between a bad mutation and a coverage gap.
+        assert "malformed, not uncovered" in report, report
+        assert "the file was not written" in report, report
+        assert "0 mutations, 0 caught, 0 survivors" in report, (
+            "a malformed mutation was reported as a result:\n" + report)
+        assert "0 unmeasurable" in report, (
+            "the malformed mutation reached MutationDidNotParse instead of being "
+            "refused at the source, so the file was written first:\n" + report)
+
+    # -- level two: what reaches the disk ---------------------------------
+
+    def test_a_malformed_mutation_never_reaches_the_file(self, tmp_path):
+        """**The claim no runner-level assertion can make.**
+
+        `run_set` restores in a `finally`, so through it an unchanged file is
+        consistent with *both* "never written" and "written then put back". Here
+        `_apply` is called directly, so there is no restore - and an unchanged
+        file can only be a file that was never written.
+        """
+        target = self._pair_fixture(tmp_path)
+        before = target.read_bytes()
+
+        with pytest.raises(AssertionError) as caught:
+            self._apply()(target, [(self._ANCHOR, "    return sum(items\n")])
+
+        assert "does not parse" in str(caught.value), caught.value
+        assert target.read_bytes() == before, (
+            "the malformed text was written and then restored; only a refusal "
+            "that never writes can leave the tree alone")
+        # And the thing that matters downstream: a file that cannot be collected
+        # takes every test in it with it.
+        ast.parse(target.read_text(encoding="utf-8"))
+
+    def test_a_no_op_mutation_is_refused_at_the_source(self, tmp_path):
+        """The no-op guard at the same level, for symmetry with the two above.
+
+        Byte-identity proves nothing here even in-process - `str.replace(old, old)`
+        leaves the file identical whether it ran or the mutation was refused. So
+        the assertion is the **refusal**, and this test exists so the two guards
+        are held to the same instrument rather than one being measured by tally
+        and the other by bytes.
+        """
+        target = self._pair_fixture(tmp_path)
+
+        with pytest.raises(AssertionError) as caught:
+            self._apply()(target, [(self._ANCHOR, self._ANCHOR)])
+
+        assert "replaces it with itself" in str(caught.value), caught.value
+
+    def test_the_refusal_says_why_rather_than_only_that_it_failed(self, tmp_path):
+        """A refusal a person cannot act on is a refusal they will route around.
+
+        Both messages carry the two facts that make the failure diagnosable - what
+        the mutation was, and what it would have claimed - so this is asserted on
+        both shapes rather than on the presence of an exception.
+        """
+        target = self._pair_fixture(tmp_path)
+
+        with pytest.raises(AssertionError) as no_op:
+            self._apply()(target, [(self._ANCHOR, self._ANCHOR)])
+        message = str(no_op.value)
+        assert "survivor" in message, (
+            "the refusal does not say what it is preventing:\n" + message)
+        assert "fixture_module.py" in message, (
+            "the refusal does not name the file:\n" + message)
+
+        with pytest.raises(AssertionError) as malformed:
+            self._apply()(target, [(self._ANCHOR, "    return sum(items\n")])
+        message = str(malformed.value)
+        assert "malformed, not uncovered" in message, message
+        assert "fixture_module.py" in message, message
+
+    # -- placement: why the parse is once, after every pair ----------------
+
+    def test_a_pair_anchor_whose_halves_do_not_parse_alone_still_applies(
+            self, tmp_path):
+        """**This is what pins the parse *after* the loop rather than in it.**
+
+        `pairs` is `[old, new] = zip(...)`, so one mutation may be several edits
+        that must land together - two loops that are not adjacent and have to
+        change together. A parse inside the loop would demand something stricter
+        than the format promises: that each half is *independently* valid Python.
+        A half that opens a construct is legal in a pair and unparseable alone.
+
+        Measured on this tree: **4 pair-anchor mutations across 3 sets, and 0
+        halves that fail to parse alone** - so a per-pair parse would not break
+        anything *today*. This test exists because that is a property of the
+        current sets rather than of the format, and the guard is on the shape.
+
+        The fixture is a string that opens here and closes there, which is the
+        clearest instance of the class: neither half is a Python file, jointly
+        they are one.
+        """
+        target = self._pair_fixture(tmp_path)
+        before = target.read_bytes()
+        pairs = [
+            # Opens a triple-quoted string and never closes it: unparseable alone.
+            ("def one(items):\n", 'def one(items):\n    doc = """\n'),
+            # Closes it, far below in a different function: also unparseable alone,
+            # because on its own it opens a second unterminated string.
+            ("    return max(items)\n", '    return max(items)\n    """\n'),
+        ]
+        # The precondition, asserted rather than assumed - the claim above is
+        # about these two halves specifically, so it is checked here.
+        for old, new in pairs:
+            half = PAIR_FIXTURE.replace(old, new, 1)
+            with pytest.raises(SyntaxError):
+                compile(half, "<half>", "exec")
+        joint = PAIR_FIXTURE
+        for old, new in pairs:
+            joint = joint.replace(old, new, 1)
+        compile(joint, "<joint>", "exec")   # must not raise
+
+        self._apply()(target, pairs)
+
+        assert target.read_bytes() != before, (
+            "the pair was refused, so the parse is per-pair after all - and a "
+            "pair-anchor that splits a construct is now unrepresentable")
+        assert target.read_text(encoding="utf-8") == joint
+
+    # -- the control ------------------------------------------------------
+
+    def test_a_real_mutation_still_applies_and_its_result_parses(self, tmp_path):
+        """**The control, and it is the reason the five above mean anything.**
+
+        A guard that refuses everything passes all five: the file never changes
+        and an `AssertionError` is raised every time. Only a real mutation
+        getting through shows the guards discriminate rather than blanket-refuse -
+        and this one runs through the real `run_set` and its real pytest, so
+        "caught" additionally proves the mutated text really was on disk while
+        the test ran.
+        """
+        _fixture(tmp_path)
+        name = _write_fixture_set(tmp_path, [{
+            "file": "usr/lib/fixture_module.py",
+            "old": self._ANCHOR,
+            "new": "    return sum(items) + 1\n",
+            "label": "covered",
+            "expect": ["test_the_total_is_what_the_docstring_says"],
+        }])
+        out = _run(name, cwd=tmp_path)
+        report = out.stdout + out.stderr
+
+        assert out.returncode == 0, report
+        assert "1 mutations, 1 caught" in report, (
+            "a real mutation was refused or lost, so the guards above are "
+            f"refusing more than they claim:\n{report}")
+        assert "0 survivors" in report, report
+        assert "0 unmeasurable" in report, report
+
+        # And the same thing at the `_apply` level, so the control covers the
+        # instrument the file-level assertions use rather than only the runner.
+        # Its own directory: `_fixture` builds the tree rather than filling it, so
+        # a second call on the same path is a `FileExistsError`, not a refresh.
+        target = self._pair_fixture(tmp_path / "pair")
+        self._apply()(target, [(self._ANCHOR, "    return sum(items) + 1\n")])
+        assert "+ 1" in target.read_text(encoding="utf-8")
+        ast.parse(target.read_text(encoding="utf-8"))
 
 
 class TestTheTreeIsOnlyEverHeldByOneRun:
@@ -1121,11 +1412,25 @@ class TestTheTallyCannotBeQuietlyWrong:
             "measurement cost the whole set:\n" + out.stdout)
         assert "2 mutations," in out.stdout, out.stdout
 
-    def test_a_module_that_will_not_parse_names_the_file_that_failed(self,
-                                                                  tmp_path):
+    #: A mutation whose result is **valid Python that cannot be imported**.
+    #: `_apply`'s parse guard does not fire on it - it parses - so it is the route
+    #: to the downstream path this test is about. Kept deliberately distinct from
+    #: `_UNPARSEABLE`: an unparseable mutation is now refused at the source and
+    #: never reaches collection at all.
+    _UNIMPORTABLE = {
+        "file": "usr/lib/fixture_module.py",
+        "old": '"""A fixture with one invariant for the harness to break."""\n',
+        "new": ('"""A fixture with one invariant for the harness to break."""\n'
+                'import a_name_that_does_not_exist\n'),
+        "label": "the module imports a name that does not exist",
+        "expect": ["test_the_total_is_what_the_docstring_says"],
+    }
+
+    def test_a_mutation_that_cannot_be_collected_names_the_file_that_failed(
+            self, tmp_path):
         """**The honest shape of it, which is not the one I first wrote.**
 
-        A mutation that leaves the module unparseable produces
+        A mutation that leaves the module uncollectable produces
         `ERROR tests/test__mutation_selfcheck.py` - **a file, not a test id**. So
         the witness cannot be matched no matter what flags are passed: there is no
         test run to match *against*. My first version of this test asserted the
@@ -1138,9 +1443,25 @@ class TestTheTallyCannotBeQuietlyWrong:
         literal word **"ERROR"**, so the report read
         `failed for another reason: {'ERROR'}` - about a mutation that broke every
         test in a file. The path is now reported instead.
+
+        **The fixture changed when the parse guard landed, and the route is the
+        interesting part.** This used to be driven by an *unparseable* mutation,
+        which is the same defect the guard now refuses upstream: the run reports
+        the refusal and nothing reaches collection. A test written against a route
+        that no longer exists would pass on a build that collected nothing, so the
+        mutation here is valid Python that **cannot be imported** - which parses,
+        so the guard does not fire, and still leaves the test file uncollectable.
+        `compile` is asserted on the result so the fixture cannot drift back into
+        the guard's territory while staying green.
         """
         self._tree(tmp_path)
-        _named_set(tmp_path, "aaa_parse", [self._UNPARSEABLE])
+        # The precondition: this mutation must parse, or the guard refuses it and
+        # the assertions below would be measuring the guard rather than the report.
+        spliced = FIXTURE.replace(
+            self._UNIMPORTABLE["old"], self._UNIMPORTABLE["new"], 1)
+        compile(spliced, "<spliced>", "exec")   # must not raise
+
+        _named_set(tmp_path, "aaa_parse", [self._UNIMPORTABLE])
         out = _run("aaa_parse", cwd=tmp_path)
         assert "SURVIVOR [aaa_parse]" in out.stdout, out.stdout
         assert "test__mutation_selfcheck.py" in out.stdout, (

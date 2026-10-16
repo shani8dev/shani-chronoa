@@ -134,4 +134,74 @@ MUTATIONS = [
         # no witness until this.
         "expect": ["test_an_anchor_occurring_twice_is_refused"],
     },
+
+    # -- the two rules `count == 1` does not imply --------------------------
+    # Both were the same shape of false evidence: a survivor reported against a
+    # file that was never modified. `str.replace(old, old)` matches once and
+    # rewrites the file with itself, and the no-op guard passes it; a splice that
+    # does not parse is refused downstream by `MutationDidNotParse` **after** the
+    # malformed file is on disk, where pytest cannot collect it.
+    {
+        "file": _RUNNER,
+        "old": "        assert new != old, (\n",
+        "new": "        assert new is not old or True, (\n",
+        "label": "the no-op guard is gone, so a mutation can replace its anchor with itself",
+        # Three witnesses, and they are three different levels on purpose: the
+        # run's *report* (a survivor is the defect), the refusal itself, and the
+        # message a person has to act on. Byte-identity is not among them,
+        # because `str.replace(old, old)` leaves the file identical either way -
+        # which is why the file-level test asserts the refusal and not the bytes.
+        "expect": [
+            "test_a_mutation_that_replaces_its_anchor_with_itself_is_refused",
+            "test_a_no_op_mutation_is_refused_at_the_source",
+            "test_the_refusal_says_why_rather_than_only_that_it_failed",
+        ],
+    },
+    {
+        "file": _RUNNER,
+        "old": "    try:\n        ast.parse(text)\n",
+        "new": "    try:\n        pass\n",
+        "label": "the parse guard is gone, so a malformed mutation is written first",
+        # The same three levels. `test_a_malformed_mutation_never_reaches_the_file`
+        # is the only one that can see *never written*: through `run_set` a
+        # `finally` restores the file, so byte-identity there is consistent with
+        # both "never written" and "written then put back".
+        "expect": [
+            "test_a_malformed_mutation_is_refused_before_it_is_run",
+            "test_a_malformed_mutation_never_reaches_the_file",
+            "test_the_refusal_says_why_rather_than_only_that_it_failed",
+        ],
+    },
+    {
+        "file": _RUNNER,
+        # **A well-meaning addition, not a deletion.** The whole-text parse is
+        # *kept* and a per-pair parse added beside the no-op guard - which is what
+        # "validate each edit as we go" looks like. Deleting the whole-text parse
+        # instead would be the same defect as the mutation above and would be
+        # caught by the same three tests, so it measures nothing about placement.
+        #
+        # **`pairs` is `[old, new] = zip(...)`, so one mutation may be several
+        # edits that must land together.** A per-pair parse demands that each half
+        # be *independently* valid Python, which the format does not promise: a
+        # half that opens a construct is legal in a pair and unparseable alone.
+        # Measured on this tree: 4 pair-anchor mutations across 3 sets and 0
+        # halves that fail to parse alone - so a per-pair parse breaks nothing
+        # *today*, and this is the only witness for the shape.
+        "old": "        assert new != old, (\n",
+        "new": (
+            "        assert new != old, (\n"
+            "        try:\n"
+            "            ast.parse(text)\n"
+            "        except SyntaxError as exc:\n"
+            "            raise AssertionError('refused per pair') from exc\n"
+        ),
+        "label": "each pair is parsed as it is applied, so a pair that is only "
+                 "jointly valid is refused",
+        # **One witness, and it is the only test in the file that can see this.**
+        # Measured: 1 failed, and the three tests above stay green - the
+        # placement mutation is invisible to every other assertion here.
+        "expect": [
+            "test_a_pair_anchor_whose_halves_do_not_parse_alone_still_applies",
+        ],
+    },
 ]
