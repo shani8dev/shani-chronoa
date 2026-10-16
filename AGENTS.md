@@ -26686,3 +26686,170 @@ move, and never stop — because `working` is what ends the turn.
 
 `tests/test_mascot_three_seams.py` (30) drives each seam through the product path that
 reaches it rather than the helper behind it; `tools/mutations/three_seams.py` (14).
+
+## A malformed mutation aborted the set, and the cap left a grandchild rewriting the tree (2026-10-16)
+
+Three defects in the harness this repository uses to check everything else, all
+found by running the thing and all closed with a mutation and a witness. Two of
+them are the same class as incidents already recorded here - *a mutation run that
+keeps going on a mutation it could not measure*, and *a `finally` that does not
+cover what it is supposed to cover* - and the third is a fact about the runner's
+own timeout that nothing in the file had ever said.
+
+### Defect 1: a guard added to prevent one abort caused another
+
+`harness.py` mutation 3 anchored on **a prefix of a multi-line statement**:
+
+        "old": "        assert new != old, (\n"
+
+which is the opening of a `raise` whose message continues on the next lines. The
+replacement is inserted *inside that open parenthesis*, so the spliced text is a
+`SyntaxError`, and the first version of the parse guard raised **a bare
+`AssertionError`** - the type that stops the set on a rotated anchor.
+
+Measured, in the order it happened:
+
+| | what the run printed |
+|---|---|
+| before the guard | `AssertionError: the spliced text of mutate.py does not parse (invalid syntax at line 507) - the file was not written`, and the run aborted |
+| the guard as first written | **`0 mutations, 0 caught, 0 survivors, 0 equivalent, 0 unmeasurable, 0 stale witness(es), 1 of 1 sets`** |
+| after the repair | **`1 mutations, 0 caught, 0 survivors, 0 equivalent, 1 unmeasurable, 0 stale witness(es), 1 of 1 sets`** + `INCOMPLETE:` + `UNMEASURABLE [selfcheck] leaves the call open`, returncode 1 |
+
+The middle row is the one worth reading twice. **`0 mutations` over `1 of 1
+sets` is a finished-looking tally for a run that produced no evidence** - and it
+came *through* the guard added to prevent exactly that shape, because the guard
+reused the type that means "this file is not what the remaining mutations expect".
+
+So the class is now `MalformedMutation`, and **it is deliberately not an
+`AssertionError` subclass**. That is the whole reason it is a separate class
+rather than a narrower tuple: a future `except AssertionError` around the apply
+would absorb it silently, and the set would abort again with no line saying so.
+The docstring carries the reasoning; `_apply`'s `count == 1` stays a bare
+`AssertionError` because a rotated anchor *is* a statement about the file every
+remaining mutation is aimed at.
+
+**And the anchor moved as well**, because the mutation was wrong rather than the
+guard. It now sits on `        text = text.replace(old, new)\n` with an
+`ast.parse(text)` after it - a whole line, not a prefix of one.
+
+### Defect 2: `subprocess.run(timeout=)` kills the child, not what the child started
+
+The first entry above records the incident this is the mechanism for: *"a
+mutation run started before a session boundary was still alive when the next one
+began ... two mutations stuck applied"*, blamed on two overlapping runs. The
+mechanism is this file's own timeout.
+
+`subprocess.run(timeout=…)` terminates the direct child and raises. **Anything
+that child started keeps running.** Measured both ways on the same scenario - a
+child that spawns a grandchild writing a marker file two seconds in, and a cap of
+one second:
+
+| runner | raised | elapsed | **grandchild survived** |
+|---|---|---|---|
+| `subprocess.run` | True | 2.0 s | **True** |
+| `_run_capped` | True | 2.0 s | **False** |
+
+The second row is what a `Popen(start_new_session=True)` plus
+`os.killpg(proc.pid, signal.SIGKILL)` buys: the child leads its own process group,
+so one signal ends it **and everything it started**. SIGKILL rather than SIGTERM
+because the thing being cleaned up is a half-finished mutation run and there is
+nobody left to let it clean up after itself.
+
+**The cap is the caller's, unchanged** - `RUN_TIMEOUT = 300`, four times the
+slowest real set - and both call sites (`_failures`, `_collected_ids`) pass
+`stdout=PIPE, stderr=PIPE` explicitly, because `capture_output` is a `run`
+convenience the helper does not have.
+
+### The wiring had no witness, so one is a source check and says so
+
+All four behavioural tests drive `_run_capped` **directly**, so they are all green
+if the helper is perfect and **nothing calls it** - which is exactly the shape of
+the defect, because `subprocess.run` is what both call sites used.
+`test_both_call_sites_go_through_the_helper` reads the source of both, in both
+directions (`_run_capped(` present, `subprocess.run(` absent), because *"mentions
+subprocess.run"* alone is satisfied by a module docstring.
+
+A runtime witness there would have to time out a real pytest run, and the budget
+is `RUN_TIMEOUT = 300`: **five minutes to measure two lines.** The `--collect-only`
+site is in the same test because it runs **once per set** rather than once per
+mutation, so a revert there is invisible to everything else in the file.
+
+### Eight mutations, and the subset they were measured through
+
+`tools/mutations/harness.py` goes **10 -> 18**: four for the malformed-mutation
+path (the raise, the catch tuple, the tally append, the `continue` that stops the
+entry falling through into the survivor branch), four for the cap (the process
+group, a *mistyped signal constant* - `killpg(pid, 0)` is a liveness probe and
+kills nothing, which is the realistic shape of the bug and unlike deleting the
+call, which would make the test hang rather than fail - and the two call sites).
+
+**Not "remove the killpg entirely": that leaves `communicate()` waiting on a
+process that is still running, so the mutation would hang instead of failing, and
+a mutation run that hangs measures nothing.**
+
+| | |
+|---|---|
+| mutations | **18** (was 10) |
+| anchors sound | **18 of 18** - count == 1, match starts at a **line start**, splice parses, splice changes the text |
+| witnesses | **27**, all resolving |
+| the eight new ones | **8 caught, 0 survivors, 0 unmeasurable**, 0 stale |
+
+**The full `harness` set is still UNMEASURABLE, and that is pre-existing.** Its
+mutation 1 (*"every lock is stale"*) makes a test's second `mutate.py` **take**
+the lock rather than refuse it, so the pytest run exceeds `RUN_TIMEOUT` and the
+set never gets past its first entry. So the eight were measured through a subset
+carrying them **verbatim**: `ast.get_source_segment` on each entry, so the emitted
+text is the file's own rather than a re-rendering of it, and **every field of all
+eight compared against the committed set** - `file`, `old`, `new`, `label`,
+`expect`, `equivalent`, `why`, and the key sets - at **0 differences**.
+
+Run on a snapshot at `/tmp/opencode/snap-d23`, never the shared tree: baseline
+**67 passed**, preflight `cmp` on the three files this pass touches, restore
+verified byte-identical afterwards, and no orphan left (checked through `/proc`
+rather than `pgrep`, which self-matched its own command line).
+
+### Three of my own test bugs, each found by running
+
+- **One namespace per test, or the exception is uncaught.** A second `exec` of
+  `mutate.py` builds a **second** `MalformedMutation` class object, and
+  `pytest.raises` matches by identity - so a test that fetched the class from one
+  exec and `_apply` from another let a real malformed mutation escape. Two of the
+  first attempts failed exactly this way. `_runner()` is memoised again, but every
+  test takes one namespace and uses it for both.
+- **A memoised namespace hid a real contamination risk.** Module globals
+  (`STATE_DIR`, `ROOT`) are read by `_Lock`, and the trap is that every current
+  test sets those keys before use - so the contamination is invisible until a test
+  needs one *unset*.
+- **One over-claimed witness, reported by the runner and corrected by name.** The
+  process-group mutation named the *control* test, and the run printed
+  `NOT caught by` - correctly: the control drives plain `subprocess.run` and never
+  calls `_run_capped`, so removing `start_new_session` cannot change it. The
+  control's job is to prove the **marker** discriminates; naming it as a witness
+  was the over-claim this file records for `asleep_state`, and the fix is the
+  name, not a new test.
+
+### The three negative controls, and what each one measured
+
+Every fix above was reverted in a snapshot and the failure read:
+
+| fix | reverted | result |
+|---|---|---|
+| D2 | the catch tuple narrowed **and** the raise retyped | **3 failed**, with the pre-fix tally printed in the message: `0 mutations, 0 caught, 0 survivors, 0 unmeasurable, 1 of 1 sets` + `ERROR` |
+| D3 | `_run_capped` is a bare `subprocess.run` | **1 failed** (`the grandchild outlived the cap ... which is the incident this helper exists to close`), and the other three stay green - correct, because those do not depend on the kill |
+
+`tests/test_mutation_harness_can_fail.py` is **67** (was 60): the D2 runner-level
+test, the D3 class of four, the wiring check and the budget check. Two negative
+controls carried over from earlier work still hold: `MutationDidNotParse` and a
+run with no summary are **UNMEASURABLE, never "caught"**, and a witness that
+*skips* is reported as possibly-unmeasurable rather than as uncovered.
+
+### The shape worth carrying
+
+**A guard can be the mechanism of the failure it was added to prevent**, when it
+reuses the type that means something else. The fix was not a narrower `except`
+tuple - it was a class that cannot be absorbed by the handler that would hide it,
+with the reason written where the next reader will look.
+
+**And a `finally` that restores a file does not cover what the file's child
+started.** Two rules have been recorded here about the harness; this is a third,
+and it is the one the timeout itself created rather than the lock or the journal.
