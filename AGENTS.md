@@ -27148,3 +27148,104 @@ later argument is a path ending in `mutate.py`, with my own pid and ppid
 excluded. Run that way, the answer was **no python process running
 `tools/mutate.py`** - which is what the naive scan would have had me report as a
 hang, on the one check whose purpose is to catch a hang.
+
+## The count the rotted path did not print, and the reason it counted mutations (2026-10-16)
+
+The entry below recorded this as **deferred**, on the grounds that the verdict
+was already carried by exit code 1 and a headline was decoration. That was the
+reasoning of a pass whose subject was the anchors; this pass's subject is the
+reporting, so it is done.
+
+### The asymmetry, measured
+
+`--check-anchors` on a clean tree prints three numbers:
+
+    83 set(s), 863 anchors of 859 declared mutations, all still match the code
+
+The rotted path printed the failure list and **no count at all** - so on a
+rotted tree a reader could not tell five rotted anchors from five hundred. The
+exit code was 1 either way, which is why it went unnoticed: the verdict was
+never in doubt, only the scale.
+
+### The count is mutations, and the list is lines
+
+The list holds **one line per rotted anchor**, and a pair-anchor is one
+mutation with two anchors - which this harness supports on purpose, for the two
+loops that are not adjacent and must change together. So a pair-anchor that
+rots in both halves contributes **two** lines and must contribute **one** to the
+count. `len(rotted)` is the obvious implementation and it is wrong in the
+direction that over-reports, on precisely the shape the harness exists partly
+to support.
+
+Measured on the fixture that distinguishes them - one pair-anchor, both halves
+rotted:
+
+    a mutation set's anchor has rotted: 2 of 2 declared mutation(s) have at
+    least one rotted anchor, out of 4 anchor(s) checked across 1 set(s).
+
+**Four lines, two mutations, and the three numbers are three different units**
+kept apart in the sentence rather than conflated. `declared` and the rotted
+count are mutations; `checked` is anchors; they differ *on correct code*,
+which is why `checked != declared` must never be a gate.
+
+The correspondence is exact rather than incidental: `rotted_entries` has **4
+write sites** (the initialisation and the three places that can report a rotted
+mutation - a missing file, a mismatched pair, and the per-anchor flush) and
+**1 read**, and `rotted` is appended at **3** sites. So the one place that can
+append more than one line per mutation is the one with its own flush, and
+deleting that flush is a third failure mode: not the wrong number and not no
+number, but a plausible-looking zero.
+
+**The count is in the first line because the list below it is unbounded.** A
+count printed after an unbounded list is a count a reader has to scroll back
+for.
+
+### Both controls, both directions
+
+| | against the fix | against `HEAD`'s pre-fix runner |
+|---|---|---|
+| `test_the_rotted_path_says_how_many_rotted` | passes | **fails** |
+| `test_the_count_is_rotted_mutations_and_not_failure_lines` | passes | **fails** |
+| `test_the_clean_and_silent_lines_gained_no_count` | passes | **passes** |
+
+The third is the control and it is **green in both states**, which is what a
+control is for: the clean and `silent` lines already carry three numbers each,
+and their bytes are pinned rather than their content, because they are the lines
+CI quotes. It also kills the over-fix - printing the count on every path would
+satisfy the first two.
+
+### Measured
+
+- Baseline in the snapshot: **70 passed** (67 + 3) in 33.5 s.
+- `tools/mutations/harness.py` **18 -> 21**, three new mutations: the count as
+  `len(rotted)`, **the shipped defect restored verbatim** (no count at all), and
+  `if False:` on the per-mutation flush.
+- The set, on a snapshot at `/tmp/opencode/snap-count`: **21 mutations, 21
+  caught, 0 survivors, 0 equivalent, 0 unmeasurable, 0 stale witness(es), 1 of 1
+  sets (768 s)**, and no `NOT caught by` line.
+- Every new anchor checked in both directions: `count(old) == 1`, match at a
+  **line start**, the splice parses, the splice changes the text, and
+  `count(new) == 0` on the unmutated tree.
+- `--check-anchors` **863/859 -> 866/862**, still exit 0. `--check-witnesses`
+  **1185 -> 1189**, all resolve (four new names across three mutations).
+- Restored byte-identical on all three files; journal cleared, lock gone, **0**
+  orphaned `mutate.py` processes.
+
+### Two things this does not do
+
+**The `silent` path is untouched, and its count still does not add up to the
+set count.** A set that declared nothing is reported in a *different* branch,
+so `declared` counts only sets with mutations while `len(wanted)` counts all
+of them. That is pre-existing and unchanged, and it is the one asymmetry left
+on this check.
+
+**And three packaging failures are not this pass's.** `test_packaging.py` is
+**3 failed, 26 passed** on `test_no_pycache_in_packaged_payload`,
+`test_no_bytecode_files_in_packaged_payload` and
+`test_every_launcher_in_usr_bin_is_executable` - the first two from **3** stray
+`.pyc` files under `usr/`, all written at **14:52:06**, all untracked
+(`git ls-files` counts **0** tracked), and the third from `usr/bin/` modes.
+`usr/` is the other session's active work; this pass modified exactly three
+files, none under `usr/`, so these were neither introduced nor cleaned here.
+Recorded rather than fixed: removing files inside a directory another session is
+editing is the path operation this workspace forbids, and the residue is theirs.

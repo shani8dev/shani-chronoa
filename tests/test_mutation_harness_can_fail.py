@@ -1997,6 +1997,138 @@ MUTATIONS = [
         assert out.returncode != 0, out.stdout
         assert "occurs 0 times" in out.stdout, out.stdout
 
+    def test_the_rotted_path_says_how_many_rotted(self, tmp_path):
+        """**The reporting asymmetry this class now also holds.**
+
+        On a clean tree the line is `83 set(s), 863 anchors of 859 declared
+        mutations, all still match the code` - three numbers, and a reader can
+        scale the check. The rotted path printed the failure list and **no
+        count at all**, so the same reader cannot tell five rotted anchors from
+        five hundred. The count is in the *first* line because the list below it
+        is unbounded: one line per rotted anchor, so a count printed after it is
+        a count a reader has to scroll back for.
+
+        Three mutations, one sound and two rotted, so the count is 2 of 3 and
+        is not the number of entries in the file.
+        """
+        (tmp_path / "tools" / "mutations").mkdir(parents=True)
+        (tmp_path / "usr" / "lib").mkdir(parents=True)
+        (tmp_path / "usr" / "lib" / "fixture_module.py").write_text(
+            FIXTURE, encoding="utf-8")
+        self._bare(tmp_path, '''TEST_FILE = "tests/x.py"
+MUTATIONS = [
+    {"file": "usr/lib/fixture_module.py",
+     "old": "TOTAL = 3\\n",
+     "new": "TOTAL = 4\\n",
+     "label": "the total is off by one",
+     "expect": ["test_the_total_is_what_the_docstring_says"]},
+    {"file": "usr/lib/fixture_module.py",
+     "old": "TOTAL = 99\\n",
+     "new": "TOTAL = 4\\n",
+     "label": "an anchor that no longer exists",
+     "expect": ["test_nothing"]},
+    {"file": "usr/lib/fixture_module.py",
+     "old": "    return sum(items) + 99\\n",
+     "new": "    return 0\\n",
+     "label": "a second anchor that no longer exists",
+     "expect": ["test_nothing"]},
+]
+''')
+        out = _run("--check-anchors", "probe", cwd=tmp_path)
+        assert out.returncode != 0, out.stdout
+        headline = out.stdout.splitlines()[0]
+        assert "2 of 3 declared mutation(s)" in headline, (
+            "the rotted path prints the failure list with no count, so a "
+            "reader cannot tell five rotted anchors from five hundred:\n"
+            + out.stdout)
+        assert "3 anchor(s) checked" in headline, out.stdout
+        assert "across 1 set(s)" in headline, out.stdout
+        # The count has to be *above* the list it counts, not below it.
+        assert out.stdout.index("2 of 3 declared") < out.stdout.index(
+            "occurs 0 times"), (
+            "the count is in the list rather than in the headline, so it is "
+            "scrolled off with it:\n" + out.stdout)
+
+    def test_the_count_is_rotted_mutations_and_not_failure_lines(self, tmp_path):
+        """**A pair-anchor is one mutation and two anchors, and it rots in two
+        places at once.** So it contributes *two* lines to the list and must
+        contribute **one** to the count - and the sentence has to keep the two
+        units apart, or `2 of 1 declared mutations` is what it prints.
+
+        Counting `len(rotted)` is the obvious implementation and it is wrong in
+        the direction that over-reports: the pair-anchor is precisely the shape
+        this harness supports on purpose (two loops that are not adjacent and
+        have to change together), so it is the case that must not be counted
+        twice.
+        """
+        (tmp_path / "tools" / "mutations").mkdir(parents=True)
+        (tmp_path / "usr" / "lib").mkdir(parents=True)
+        (tmp_path / "usr" / "lib" / "fixture_module.py").write_text(
+            FIXTURE, encoding="utf-8")
+        self._bare(tmp_path, '''TEST_FILE = "tests/x.py"
+MUTATIONS = [
+    {"file": "usr/lib/fixture_module.py",
+     "old": ["TOTAL = 99\\n", "    return sum(items) + 99\\n"],
+     "new": ["TOTAL = 4\\n", "    return 0\\n"],
+     "label": "two adjacent loops, both rotted",
+     "expect": ["test_nothing"]},
+]
+''')
+        out = _run("--check-anchors", "probe", cwd=tmp_path)
+        assert out.returncode != 0, out.stdout
+        assert "1 of 1 declared mutation(s)" in out.stdout, (
+            "the count is lines in the list rather than mutations that have a "
+            "rotted anchor, so one pair-anchor is reported twice:\n" + out.stdout)
+        # And the two units are named separately rather than conflated, which
+        # is what makes the sentence above readable.
+        assert "2 anchor(s) checked" in out.stdout, out.stdout
+        assert out.stdout.count("occurs 0 times") == 2, (
+            "the fixture rots both halves, so the list should carry two lines "
+            "and the count should still be one:\n" + out.stdout)
+
+    def test_the_clean_and_silent_lines_gained_no_count(self, tmp_path):
+        """**The control for both tests above.** A check that printed the count
+        everywhere would satisfy them, and the two sibling lines are quoted by
+        CI and by people - so their bytes are pinned rather than their content.
+
+        The count belongs on the rotted path because that is the path with no
+        number. The clean and `silent` lines already carry three each.
+        """
+        (tmp_path / "tools" / "mutations").mkdir(parents=True)
+        (tmp_path / "usr" / "lib").mkdir(parents=True)
+        (tmp_path / "usr" / "lib" / "fixture_module.py").write_text(
+            FIXTURE, encoding="utf-8")
+        name = _write_fixture_set(tmp_path, [{
+            "file": "usr/lib/fixture_module.py",
+            "old": "    return sum(items)\n",
+            "new": "    return sum(items) + 1\n",
+            "label": "the fixture's total is off by one",
+            "expect": ["test_the_total_is_what_the_docstring_says"],
+        }])
+        out = _run("--check-anchors", name, cwd=tmp_path)
+        assert out.returncode == 0, out.stdout
+        assert out.stdout.strip() == (
+            "1 set(s), 1 anchors of 1 declared mutations, all still match "
+            "the code"), (
+            "the clean line has changed, and it is the line CI quotes:\n"
+            + out.stdout)
+        assert "rotted" not in out.stdout, (
+            "the count reached a path that already had three numbers:\n"
+            + out.stdout)
+
+        # And the silent line, which is the third path with a headline.
+        (tmp_path / "tools" / "mutations" / f"{name}.py").unlink()
+        self._bare(tmp_path, 'TEST_FILE = "tests/x.py"\nMUTATIONS = []\n')
+        out = _run("--check-anchors", "probe", cwd=tmp_path)
+        assert out.returncode != 0, out.stdout
+        assert out.stdout.splitlines()[0] == (
+            "1 set(s), 0 anchors of 0 declared mutations, all still match the "
+            "code - BUT 1 set(s) declared nothing and were NOT checked:"), (
+            "the silent line has changed:\n" + out.stdout)
+        assert "rotted" not in out.stdout, (
+            "the count reached the silent path, which is a different problem "
+            "with a different answer:\n" + out.stdout)
+
 
 class TestAWitnessThatNamesNothingIsAnErrorNotALogLine:
     """A witness that names no test is a witness that cannot fail.

@@ -928,6 +928,13 @@ def _check_anchors(wanted, available) -> int:
     silent = []
     checked = 0
     declared = 0
+    #: **How many *mutations* have a rotted anchor, not how many lines the list
+    #: below holds.** A pair-anchor contributes one entry and can contribute two
+    #: lines - one per anchor that no longer matches - and a mutation aiming at a
+    #: file that is gone contributes a line and no anchors at all. Counting lines
+    #: would answer a question nobody asked, and would over-report precisely the
+    #: case this harness exists to support.
+    rotted_entries = 0
     for name in wanted:
         namespace = {}
         exec(compile(available[name].read_text(encoding="utf-8"),
@@ -949,6 +956,7 @@ def _check_anchors(wanted, available) -> int:
             if not target.is_file():
                 rotted.append(f"{name}: {entry['label']} -> "
                               f"{entry['file']} does not exist")
+                rotted_entries += 1
                 continue
             text = target.read_text(encoding="utf-8")
             old, new = entry["old"], entry["new"]
@@ -963,20 +971,39 @@ def _check_anchors(wanted, available) -> int:
                         f"{name}: {entry['label']} - {len(old)} anchor(s) but "
                         f"{len(new)} replacement(s); zip() would drop the rest "
                         f"and check less than the set declares")
+                    rotted_entries += 1
                     continue
                 pairs = list(zip(old, new))
             else:
                 pairs = [(old, new)]
+            bad = False
             for i, (before, _after) in enumerate(pairs, 1):
                 checked += 1
                 count = text.count(before)
                 if count != 1:
+                    bad = True
                     rotted.append(
                         f"{name}: {entry['label']} - anchor {i} of {len(pairs)} "
                         f"occurs {count} times in {entry['file']}, not once")
+            if bad:
+                rotted_entries += 1
     if rotted:
-        print("a mutation set's anchor has rotted. Fix the set or the code it "
-              "aimed at - do not delete the set:\n" + "\n".join(rotted))
+        # **The count is in the first line, and that is the whole point.** The
+        # failure list is unbounded - one line per rotted anchor - so a count
+        # printed after it is a count a reader has to scroll back for, and the
+        # sentence above the list read identically for 5 rotted anchors and 500.
+        # "So a reader cannot tell 5 from 500" was the finding.
+        #
+        # **The three numbers are three different units and the sentence keeps
+        # them apart.** `rotted_entries` and `declared` count *mutations*;
+        # `checked` counts *anchors*. They differ on correct code, because a
+        # pair-anchor is one mutation and two anchors by design - see the note
+        # below this branch on why that gate must not be written.
+        print(f"a mutation set's anchor has rotted: {rotted_entries} of "
+              f"{declared} declared mutation(s) have at least one rotted "
+              f"anchor, out of {checked} anchor(s) checked across "
+              f"{len(wanted)} set(s). Fix the set or the code it aimed at - do "
+              f"not delete the set:\n" + "\n".join(rotted))
         return 1
     # **Both numbers are printed and neither is asserted against the other.**
     # They are anchors and mutations, and a *pair* of anchors for one mutation -

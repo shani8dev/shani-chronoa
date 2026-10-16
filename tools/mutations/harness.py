@@ -379,4 +379,101 @@ MUTATIONS = [
                  "capped collect-only leaves its grandchild behind",
         "expect": ["test_both_call_sites_go_through_the_helper"],
     },
+    {
+        "file": _RUNNER,
+        # **The count is the lines in the list rather than the mutations that
+        # have a rotted anchor.** This is the obvious implementation and it is
+        # wrong in the direction that over-reports, because the pair-anchor is
+        # precisely the shape the harness supports on purpose: two loops that
+        # are not adjacent and have to change together. So a single mutation
+        # that rots in both halves reports itself twice - and `declared` says 1
+        # beside it, which is the sentence a reader would have to notice.
+        "old": ('        print(f"a mutation set\'s anchor has rotted: '
+                '{rotted_entries} of "\n'),
+        "new": ('        print(f"a mutation set\'s anchor has rotted: '
+                '{len(rotted)} of "\n'),
+        "label": "the rotted count is lines in the list, so a pair-anchor is "
+                 "reported once per rotted half",
+        "expect": [
+            "test_the_count_is_rotted_mutations_and_not_failure_lines",
+        ],
+    },
+    {
+        "file": _RUNNER,
+        # **The shipped defect, restored verbatim**: the failure list and no
+        # count at all. The clean and `silent` lines carry three numbers each,
+        # so on a rotted tree a reader cannot tell five rotted anchors from
+        # five hundred - which is the whole of the finding.
+        #
+        # The comment block goes with it rather than being left standing. A
+        # comment that explains a count the line beneath it no longer prints is
+        # the shape this repository records most often, and reverting the
+        # explanation along with the behaviour is the honest reading of "this
+        # was never done" - which is what the previous entry decided when it
+        # deferred the change and this one is the pass that acts on it.
+        "old": (
+            "    if rotted:\n"
+            "        # **The count is in the first line, and that is the whole "
+            "point.** The\n"
+            "        # failure list is unbounded - one line per rotted anchor - "
+            "so a count\n"
+            "        # printed after it is a count a reader has to scroll back "
+            "for, and the\n"
+            "        # sentence above the list read identically for 5 rotted "
+            "anchors and 500.\n"
+            "        # \"So a reader cannot tell 5 from 500\" was the finding.\n"
+            "        #\n"
+            "        # **The three numbers are three different units and the "
+            "sentence keeps\n"
+            "        # them apart.** `rotted_entries` and `declared` count "
+            "*mutations*;\n"
+            "        # `checked` counts *anchors*. They differ on correct code, "
+            "because a\n"
+            "        # pair-anchor is one mutation and two anchors by design - see "
+            "the note\n"
+            "        # below this branch on why that gate must not be written.\n"
+            "        print(f\"a mutation set's anchor has rotted: "
+            "{rotted_entries} of \"\n"
+            "              f\"{declared} declared mutation(s) have at least one "
+            "rotted \"\n"
+            "              f\"anchor, out of {checked} anchor(s) checked across \"\n"
+            "              f\"{len(wanted)} set(s). Fix the set or the code it "
+            "aimed at - do \"\n"
+            "              f\"not delete the set:\\n\" + \"\\n\".join(rotted))\n"
+            "        return 1\n"),
+        "new": (
+            "    if rotted:\n"
+            "        print(\"a mutation set's anchor has rotted. Fix the set or "
+            "the code it \"\n"
+            "              \"aimed at - do not delete the set:\\n\" + "
+            "\"\\n\".join(rotted))\n"
+            "        return 1\n"),
+        "label": "the rotted path prints the failure list with no count, so 5 "
+                 "rotted anchors and 500 read the same",
+        "expect": [
+            "test_the_rotted_path_says_how_many_rotted",
+            "test_the_count_is_rotted_mutations_and_not_failure_lines",
+        ],
+    },
+    {
+        "file": _RUNNER,
+        # **The flag is set and never read.** `bad` is written by every anchor
+        # that does not match and consumed by exactly one statement, so the
+        # count can be zero on a set where every anchor rotted - which is a
+        # third failure mode, distinct from the two above: not the wrong
+        # number and not no number, but a plausible-looking zero in the place
+        # of the number.
+        #
+        # Nothing warns on the way out. The missing-file and mismatched-pair
+        # paths still increment, so a set with one of those beside it reports a
+        # positive count while the anchors-only case reports none - which is
+        # the arithmetic a reader would have to do to notice.
+        "old": ("            if bad:\n"
+                "                rotted_entries += 1\n"),
+        "new": ("            if False:\n"
+                "                rotted_entries += 1\n"),
+        "label": "the per-mutation flush never runs, so a set whose anchors all "
+                 "rotted reports zero rotted",
+        "expect": ["test_the_rotted_path_says_how_many_rotted"],
+    },
 ]
