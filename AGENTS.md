@@ -26794,14 +26794,21 @@ a mutation run that hangs measures nothing.**
 | witnesses | **27**, all resolving |
 | the eight new ones | **8 caught, 0 survivors, 0 unmeasurable**, 0 stale |
 
-**The full `harness` set is still UNMEASURABLE, and that is pre-existing.** Its
+~~**The full `harness` set is still UNMEASURABLE, and that is pre-existing.** Its
 mutation 1 (*"every lock is stale"*) makes a test's second `mutate.py` **take**
 the lock rather than refuse it, so the pytest run exceeds `RUN_TIMEOUT` and the
-set never gets past its first entry. So the eight were measured through a subset
+set never gets past its first entry.~~ **WRONG, and it was never measured - see
+"A blocker I recorded as pre-existing, which was not" below.** The whole set runs:
+**18 mutations, 18 caught, 0 survivors, 0 equivalent, 0 unmeasurable, 0 stale,
+1 of 1 sets in 732 s**, and mutation 1 alone is caught in **41 s** through the real
+runner with the lock held. So the eight were measured through a subset
 carrying them **verbatim**: `ast.get_source_segment` on each entry, so the emitted
 text is the file's own rather than a re-rendering of it, and **every field of all
 eight compared against the committed set** - `file`, `old`, `new`, `label`,
 `expect`, `equivalent`, `why`, and the key sets - at **0 differences**.
+**The subset was unnecessary and the workaround did not survive its own
+justification**; the verbatim comparison is still the right way to check a
+generated set, and the entry below is where the number came from.
 
 Run on a snapshot at `/tmp/opencode/snap-d23`, never the shared tree: baseline
 **67 passed**, preflight `cmp` on the three files this pass touches, restore
@@ -26853,3 +26860,120 @@ with the reason written where the next reader will look.
 **And a `finally` that restores a file does not cover what the file's child
 started.** Two rules have been recorded here about the harness; this is a third,
 and it is the one the timeout itself created rather than the lock or the journal.
+
+## A blocker I recorded as pre-existing, which was not (2026-10-16)
+
+The entry above closed with a claim about its own coverage: the full `harness` set
+**is still UNMEASURABLE**, and that is pre-existing. Its mutation 1 (*"every lock
+is stale"*) makes a test's second `mutate.py` **take** the lock rather than refuse
+it, so the pytest run exceeds `RUN_TIMEOUT = 300` and the set never gets past its
+first entry - which is why the eight new mutations were measured through a subset.
+
+**The set runs. It ran for the first time this pass, all eighteen, and every one
+of them was caught.**
+
+    18 mutations, 18 caught, 0 survivors, 0 equivalent, 0 unmeasurable,
+    0 stale witness(es), 1 of 1 sets  (732s)
+
+### The numbers, and the four things they were measured through
+
+| | measured |
+|---|---|
+| the unmutated file, so the subject is known good | **67 passed in 44.9 s** |
+| mutation 1 applied by hand, the test file run directly | **2 failed, 65 passed in 49.0 s** |
+| mutation 1 through the **real runner**, so the outer run holds the lock | **caught in 50 s** |
+| the same with D3 reverted (see below) | **caught in 41 s** |
+| the whole set | **732 s**, ~41 s a mutation |
+
+The third row is the one the claim was about: the blocker was never about the
+lock, because the runner holding `build/mutate/run.lock` while a nested
+`mutate.py` takes it over is a **50-second** run, not a 300-second one.
+
+**And the attribution I reached for is also wrong, which is the more useful half.**
+`_run_capped`'s own docstring says, of D3: *"Measured 2026-10-16 on this very set:
+its first mutation makes a test's second `mutate.py` take the lock rather than
+refuse it, so the pytest run exceeded `RUN_TIMEOUT`, `subprocess.run` killed
+pytest, and the `mutate.py --quiet` grandchild carried on applying mutations with
+no parent and no lock."* That is a description of the **incident D3 fixes**, and
+I took it as the explanation for the blocker - which would have made the two
+findings one.
+
+Measured: `_run_capped` reverted to a bare `subprocess.run(cmd, timeout=...)`,
+mutation 1 applied **by the runner** (see the mistake below), and the set still
+reports **caught in 41 s**. **So D3's presence is not what makes mutation 1
+measurable, and the docstring cannot be read as the standing reason the set is
+unmeasurable.** It may still be a true account of a past incident - the box was
+running renders and two other suites that afternoon - and that is all it is now.
+
+### Why a blocker recorded as "pre-existing" is the expensive kind
+
+It is indistinguishable from a real limitation. It needs no measurement to
+believe, it justifies a workaround that then becomes the documented route, and it
+outlives whatever fixed it - because nothing re-reads a limitation, only code.
+
+**This is the `skills_total` shape, and the tell was the same:** the claim agreed
+with the conclusion I had already reached. What I had was a **failed run**, and
+what I wrote was a **cause** - and the cause was never measured. The remedy is the
+three-question method this file already states, applied to a limitation instead of
+a claim: *measure the noun*. The noun was a duration, and it is 41 seconds.
+
+The subset generator is the other casualty, and it is the one worth noticing. It
+existed to work around a blocker that did not exist, and its own docstring opened
+by asserting the blocker - so it would have been reused, and the false premise
+carried with it. **A workaround inherits its justification, and nobody re-derives
+it.** The verbatim-comparison method in it is still right and is worth keeping for
+any generated set; the reason it was written is now struck above.
+
+### Three of my own harness mistakes, and the runner caught two of them
+
+1. **I hand-applied mutation 1 and then asked the runner to apply it too.** The
+   runner found its anchor already gone and printed
+   `AssertionError: the anchor ... appears 0 times in mutate.py, not once`, with
+   `0 mutations, 0 caught, 0 survivors, 0 equivalent, 0 unmeasurable, 1 of 1 sets`.
+   **That is the finished-looking tally for a run that produced no evidence** -
+   the exact shape D2 exists to refuse, arrived at from the outside. The runner
+   was right and the experiment was wrong; a mutation is the runner's job.
+2. **My restore needle was ambiguous, and `count == 1` caught it.**
+   `"        return True\n"` counts **2** in that file, because a
+   12-space-indented `return True` *contains* an 8-space one. The reverse replace
+   therefore refused rather than writing, which is the only reason the file was
+   never half-restored. The forward apply asserted 1 correctly; the reverse needed
+   the 12-space line as context. **A count that is checked in one direction is not
+   checked in the other.**
+3. **I re-appended `_run_capped` to the end of the file to restore it**, which
+   left the snapshot faithful in content and unfaithful in order - `diff` put the
+   difference at line 331 with `def _run_capped` present. Fixed by `cp` of my own
+   pristine backup, which is the sanctioned route and the reason one was taken.
+
+### The runner's own output is invisible for most of a long run
+
+The 732-second set wrote **0 bytes for 580 seconds** and then flushed 4,228. That
+is ordinary block-buffering: `print()` to a redirected stdout is not a tty, so the
+buffer fills or the process exits. Nothing was wrong, and I read it twice as a
+stalled run - the same reflex as the `pytest | tail` incident this file records,
+where a **suite** whose output is piped is at the mercy of anything holding the
+pipe. **A diagnostic nobody can read is not a diagnostic**, and here the person
+reading it is the person deciding whether to kill the run.
+
+### Cheap checks, measured today
+
+- **`--check-witnesses`: 1190 witnesses across 83 sets, all resolve.**
+- **`--check-anchors`: exit 1**, on **5 rotted anchors in 3 sets** - `orb_space`
+  (1), `proposals_skill` (3), `why_this_tool` (1), all other sessions' sets and
+  untouched here. **`harness` contributes 0.**
+- **Unmutated baseline: 67 passed**, the same figure the subset route was
+  validated against, so the 18/18 is against a known-good subject.
+
+### One reporting asymmetry, recorded rather than fixed
+
+**When an anchor has rotted, `--check-anchors` prints the failure list and no
+count at all** - `N set(s), M anchors of K declared mutations, all still match`
+appears only on a clean tree. So on this tree today a reader cannot tell 5 rotted
+anchors from 500.
+
+**It is not fixed because the verdict is carried and the number is decoration: the
+exit code is 1.** A script branches on it and CI fails; what is missing is a
+headline for a human skimming the output. Adding a count is a change to
+`tools/mutate.py` with its own test and its own mutation, and it is a cosmetic
+gain over a correct exit status - so it waits for a pass whose subject is the
+reporting rather than this one's.
