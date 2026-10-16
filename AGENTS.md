@@ -26977,3 +26977,174 @@ headline for a human skimming the output. Adding a count is a change to
 `tools/mutate.py` with its own test and its own mutation, and it is a cosmetic
 gain over a correct exit status - so it waits for a pass whose subject is the
 reporting rather than this one's.
+
+### Five rotted anchors, and one of them was never a rotted anchor
+
+`--check-anchors` reported 5 in 3 sets: `orb_space` (1), `proposals_skill` (3),
+`why_this_tool` (1). Re-anchored rather than deleted, because the behaviours are
+still live in the code - an anchor that no longer matches is a broken promise
+about a line that exists, and deleting the entry would have removed the promise
+without touching the behaviour. It now exits **0**: 863 anchors of 859 declared
+mutations, all still match the code.
+
+**Four rotted, and the fifth never matched at all.** The first four counted 1 at
+the commits that introduced them (`ec52de3`, `857904f`) and 0 afterwards, so
+"rotted by another session" is measured and true for them. `why_this_tool`'s #15
+is different: its needle carried a **doubled backslash** where the source has
+always carried a single one. Measured at `3792014`, the commit I introduced it
+in, and at that commit's parent: **0 occurrences at both**. So it never worked,
+and I committed it broken - under the message "Work in flight from the other
+session", which is exactly how a thing of mine ends up looking like someone
+else's. **A wrong attribution is cheaper than a broken needle, because it looks
+like diligence.** The distinction worth carrying: "another session changed this"
+and "I wrote this wrong" are different findings, and the cheap test is to check
+the introducing commit rather than the current one - one `git show` settles it.
+
+Two of the new needles are not the obvious ones, and both would have rotted
+again:
+
+- `orb_space` #5 anchors on `        side = self._scaled(_orb_size(state))\n`.
+  The bare `_orb_size(state)` is a **substring of that line**, not a line of its
+  own, so anchoring there gives an anchor that survives the shape but not the
+  indentation.
+- `proposals_skill` 1-3 had to move to the `_consent(config) -> tuple[bool, str]`
+  shape, because the three-line shape they named is no longer in
+  `review_proposals.py` at all. These are three real behavioural changes, not
+  equivalents: `test_consent_off_refuses_and_names_the_row_not_the_key` asserts
+  that keep/discard/`{}` all say "Nothing was changed" with consent off, so #1
+  and #2 each break it, and #3 breaks the listing call.
+
+Each new needle was verified in **both** directions - forward `count == 1`, at a
+line start, splicing to something that parses and differs; reverse
+`count(new) == 1` and a byte-identical restore. `mutate.py` itself restores from
+a pristine in-memory copy rather than by reverse-replace, so the reverse check is
+stricter than the runner needs - but five entries in these three sets have a
+`new` that is not unique (`""` occurs 8220 times), and "stricter than the runner"
+is not a reason to stop checking.
+
+### The set that had never run, and the three survivors it finally reported
+
+`why_this_tool` had **never executed**, because #15's rotted anchor aborted the
+set. Repaired, it reported **3 survivors**. All three were faults in the mutation
+set rather than gaps in the tests, which is the outcome this file keeps asking
+for and which nothing would have told me while the anchor was broken.
+
+**Two were over-claimed witnesses**, corrected by renaming and not by writing a
+test. The pattern is the same in both and is worth stating as a rule:
+
+> **Two readers of one seam cannot witness the seam.**
+
+Entry 5 named `test_it_sends_exactly_what_select_tools_sends`, which compares the
+record against `select_tools` - and **both doors run the mutated line**, so
+dropping the subtraction moves them together and they still agree. The second
+named witness asserts `browse` not in the sent set, but `browse` is in the sent
+set either way, so the cue was never what decided it. The witness that actually
+fires is the one that asks whether a removed tool is *reported* as removed. Entry
+8's pair was wrong the same way. Correct over-claiming here costs nothing and
+buys a witness that means something; the temptation to write the missing test
+instead is how a set starts asserting things about code nobody changed.
+
+**The third is equivalent by construction**, and is now flagged with the
+measurement rather than a witness that could never fire. The claim is that
+reading `self._sink` in `_run_turn` would shadow the `sink` parameter `handle`
+was handed. Four measurements, each run:
+
+- `self._sink = sink` is at `assistant.py:1024`, inside `handle` (961-1130), and
+  is **unconditional** - an AST sweep for enclosing `if`/`for`/`while`/`try`
+  bodies found none. It is 61 lines *before* the direct `_run_turn` call.
+- `_run_turn` has **exactly two** callers tree-wide, both in that file: `:1085`
+  (direct, in `handle`) and `:896` (in `_keep_going`). The other two grep hits are
+  a docstring and a comment. Nothing outside the file calls it.
+- `_keep_going` is read at **one** place, `:1090`, in `handle`, after the
+  assignment.
+- `self._sink` has **one** writer in the whole package.
+
+So `self._sink is sink` holds on every path to line 1196, for every caller and
+every input. My first pass got this wrong in a way that would have been fine if
+I had not checked: I had it as "the site is in `handle`, and `handle` sets it
+near the top". The site is in **`_run_turn`** (1132-1465), not `handle`, so the
+whole argument rested on paths I had not enumerated. **An equivalence claim is
+the easiest kind of mutation entry to write and the easiest to be wrong about**,
+because it is argued from reading rather than from running - and the run is what
+told me it was equivalent in the first place.
+
+**And the comment above the site is stale in the same way.** `assistant.py:1190`
+says a caller that passes a sink without setting the attribute "loses every tool
+event **silently**". `handle` sets the attribute from its own parameter,
+unconditionally, before anything it calls, so there is no such caller. That
+sentence is in another session's active file and is left alone here; it is
+recorded instead. **A comment that documents a hazard the same function closes is
+worse than no comment**, because it sends the next reader to defend a door that
+has no lock.
+
+### Four more over-claims, and a tautology worth naming
+
+With the set running, the run reported 4 further `NOT caught by` across these two
+sets. All pre-existing, all corrected by renaming.
+
+The orb pair is the one worth keeping. Both tests **import `_orb_size` from the
+module they mutate** (test line 51) and compare the widget against it:
+
+    assert orb.get_size_request()[0] == _orb_size(state), state.name
+
+Both operands move when `_orb_size` does, so the assertion holds for *any* value
+it returns. It can only fail if the computed size stops being **applied** - which
+is the mutation two entries down, and that one is caught by it. So
+`test_the_size_follows_the_state` is not a weak test; it is a tautology, and it
+was named as a witness by a mutation that changes the function it imports. The
+witness that survives names a bound derived from `_halo_size`, a *different*
+function the mutation does not touch. **A test that imports the thing it
+validates is not validating it.** That is checkable in one grep, and it is worth
+a grep before trusting a witness rather than after.
+
+The two in `why_this_tool` are over-claims of different kinds, and both are
+correct as *contracts* - the fix is to stop naming them for a mutation they
+cannot see, not to weaken them:
+
+- `test_select_tools_still_returns_registry_order` asserts one thing:
+  `sent == [n for n in order if n in set(sent)]`. That is a claim about
+  **order**. The mutation appends every tool to `keep` while iterating the
+  registry in its own order, so the widened list returns in exactly the order
+  the invariant demands, only longer. Several hundred comparisons elsewhere rely
+  on that ordering; loosening the test to catch a membership bug would trade a
+  real guarantee for a fake one.
+- `test_the_card_renders_the_records_own_sentences` constructs
+  `ToolCallCard(..., selection=record)` by hand, so it exercises the card's
+  rendering of a record it was handed. The mutated line is `TranscriptView`'s
+  call - the one deciding what argument the card gets - and this test never
+  goes through the view. The witness that fires drives `view.add_tool_call(...)`,
+  and its docstring already says why: "**The other direction, or the guard above
+  is half a claim**: the same view, given a record, hands it through."
+
+### Measured after the repair, on a snapshot
+
+Baseline first: **68 passed in 10.47 s** on `/tmp/opencode/snap-anchors`, with
+`cmp` identical for all 6 files before the run and after it. One set at a time,
+each from inside the snapshot.
+
+| set | mutations | caught | survivors | equivalent | unmeasurable | stale |
+|---|---|---|---|---|---|---|
+| `orb_space` | 5 | 5 | 0 | 0 | 0 | 0 |
+| `proposals_skill` | 20 | 18 | 0 | 2 | 0 | 0 |
+| `why_this_tool` | 25 | 24 | 0 | 1 | 0 | 0 |
+| **total** | **50** | **47** | **0** | **3** | **0** | **0** |
+
+The 3 equivalents are documented with reasons: two in `proposals_skill` (the
+answer is derived from the action, and the out-of-range clamp, which is inert
+for exactly the guard above it), and the `_sink` one here. **0 survivors and no
+`NOT caught by` line in any of the three sets.** `--check-witnesses`: **1185
+witnesses across 83 sets, all resolve** - down from 1190, five over-claims
+dropped, and no test added anywhere in this pass.
+
+### One more self-match, this time in the safety check
+
+Checking for an orphaned run after the sets finished, I scanned `/proc/*/cmdline`
+for `*mutate.py*` and got a hit: **my own shell command**, whose text contains the
+pattern it is looking for. The lesson is the one already recorded about
+`pgrep -f` - and it survived being known, which is the part worth writing down.
+**A check written in the shell matches the shell that runs it.** The version that
+works reads `argv` structurally: `argv[0]` is a python interpreter *and* some
+later argument is a path ending in `mutate.py`, with my own pid and ppid
+excluded. Run that way, the answer was **no python process running
+`tools/mutate.py`** - which is what the naive scan would have had me report as a
+hang, on the one check whose purpose is to catch a hang.
