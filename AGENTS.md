@@ -27249,3 +27249,146 @@ on this check.
 files, none under `usr/`, so these were neither introduced nor cleaned here.
 Recorded rather than fixed: removing files inside a directory another session is
 editing is the path operation this workspace forbids, and the residue is theirs.
+
+## The gaze is sub-pixel at the shipped size, and the "notch" is a surface rather than art (2026-10-16)
+
+The gaze port landed earlier today (`219fec2`, `ee6a092`) and three seams were
+wired. This entry is the recording that produced them, and **its headline is a
+number that says the feature is weaker than the commit message implies**.
+
+### The headline: 0.74 px of a requested 2.58 px
+
+`mascot_art.svg()` translates the iris group by `2 x _GAZE_X`, and `_GAZE_X` is
+`5.0` SVG units in a **512-unit viewBox**. At the shipped `mascot.SIZE = 132`
+that is `10/512 x 132` = **2.58 px** of iris travel for a full-sweep gaze change.
+
+Measured, by differencing the rasterised picture and taking the centroid of the
+changed pixels:
+
+| | measured |
+|---|---|
+| requested | **2.58 px** |
+| realised, left eye | **0.81 px** |
+| realised, right eye | **0.74 px** |
+| delivered | **28-29%** |
+
+**Two independent instruments agree.** The Shell-actor path measured 0.74 px
+through `St.TextureCache` screenshots; rasterising the raw art at **264 px** and
+halving gives **1.47 px**, and `264/2 = 132` is exactly the screen size the
+actor is loaded at. Two unrelated routes, the same number.
+
+The cause is in `mascot_art`'s own geometry: the sclera is an **ellipse clip**
+with `_SCLERA_RX, _SCLERA_RY = 15.0, 20.0` and the iris is `rx=12`. Three units
+of slack on each side for a ±5-unit translate, so most of the sweep slides the
+iris along under a lip that hides it. **That is by design** - the clip is what
+makes the iris look like it sits *in* the eye - so this is not a bug to fix, it
+is the price of the effect, and it was previously unmeasured in either direction.
+
+**Saturation is the part a viewer would notice.** Gaze `0.75 -> 1.00` moves the
+iris **0.02-0.03 px**, while the `-0.25 .. +0.25` band carries **49% of the
+whole travel for 25% of the input**. The bearing is `-1..+1` because the gaze
+tracks the pointer across the *whole screen* (below), so the last quarter of the
+range is three quarters of a pixel.
+
+### What the recording is, and what it is not
+
+`tools/mascot_recording.py` drives a Clutter virtual pointer inside a private
+headless `gnome-shell`, reads the real position back out of the Shell, and
+captures through the extension's own actor. **The pointer is real** - Shell
+read-back **48/48**, and **79 cursor glyph-sized clusters** (20-200 px, median
+44 px) at **30 distinct positions** across the run, centroid x 726..1595 and
+y 676..997. Nothing is composited in post.
+
+Three videos, verified with `ffprobe` and by extracting frames back out and
+looking at them: `mascot-gaze.mp4` 156x156, `mascot-gaze-full.mp4` 1760x680,
+`mascot-gaze-screen.mp4` 1600x1000 - all **48 frames, 4.0 s at 12 fps**.
+
+**The gaze cannot be read in a video, and that is the finding rather than a
+disappointment.** Across the 48 frames only **140 px** change inside the actor -
+**0.80%**, in a 20x10 box - while the whole-sprite centroid is exactly
+(65.50, 65.50) in every frame, so the body is provably still and every pixel
+that moves is the iris. **A recording is a video at 132 px; this feature needs
+the pixel-level diff to see.**
+
+### The extension holds no art, which is provable rather than asserted
+
+`extension.js` has **zero** art of its own - its only `svg` hit is a comment
+saying *"The art is NOT reimplemented here"* - and loads a PNG rasterised from
+`mascot_art.svg()`. The Shell's own screenshot shows the orb, glowing core, gold
+Saturn ring (both halves), both sparkles, eyes with irises and catchlights,
+blush, neural arc and shadow ellipse, plus the real pointer arrow.
+
+**And there is no "notch" element, because there has never been one.** No
+identifier named `notch` exists in `mascot_art.py`. The cut ring is real art but
+only in the **`interrupting`** state: `_decor` returns 177 chars and 2 arcs
+there, **0 chars** for `idle` - which is why the recording showed none. Per state:
+listening **260 chars** (three concentric pulse rings), thinking **0** (its
+`_overlay` carries the rising thought), interrupting **177**.
+
+### "Do we have the notch?" - answered, and the answer is not ours to build
+
+Asked whether the extension carries the notch, the notch in **coucou** is not
+art either. Coucou's own README says the mascot *"lives in your Mac's notch - or
+at the top of your screen on Windows and Linux"*, and `windows/README.md:566-576`
+says in as many words:
+
+> *"GNOME has no layer-shell, so there it runs through XWayland as a dock window:
+> top centre, on every workspace, still there after Super+D."*
+
+So the notch is the **surface the mascot lives in** (macOS Dynamic Island is
+hardware), and on Linux coucou substitutes a **top-edge strip**. Three of its
+design facts do not transfer and one does:
+
+- **Click-through is the window's input region kept equal to the island shape** -
+  GTK4 exposes no region API at all, so this is only reachable through the Shell
+  actor, which has no input region to keep.
+- **Mochi's eyes follow the pointer only while it is over the island.** Ours
+  tracks the whole screen, which is precisely why our bearing is `-1..+1` and the
+  gaze saturates (above). **The sub-pixel finding is the direct consequence of
+  the one design decision of ours that differs.**
+- **Coucou's Linux build is Tauri + webkit2gtk** (`webkit2gtk-4.1`,
+  `gtk-layer-shell`, `appindicator`), not native GTK4.
+
+**What does transfer is the placement, and our `_place()` is the thing that
+decides it.** A top-edge strip under `Main.uiGroup` is the direct equivalent of
+coucou's island on GNOME, and it is achievable **without layer-shell** precisely
+because the Shell composites - the one thing coucou's XWayland dock cannot do
+(PART 9's 57,600/57,600 px over a fullscreen window). Today `_place()` hardcodes
+**bottom-right at `MARGIN`**, mirroring `mascot.py`'s `BOTTOM+RIGHT` anchor,
+which is the opposite end of the screen from coucou. **Not changed here**: whether
+the mascot belongs at the top is a product decision, and moving it is a one-line
+change once it is made.
+
+### The claims this entry does not make
+
+- **The drawing is an ordinary `St` actor under `Main.uiGroup`, not a layer
+  surface.** `mascot.available()` is still `False` - Mutter has never
+  implemented `zwlr_layer_shell_v1` - and the extension actor is a *different
+  surface* from the layer one. Writing this up as the layer surface would be the
+  confident wrong answer this file records against its own harness four times.
+- **Nothing here is a slot result.** Everything was measured in a private
+  headless Shell on this box.
+- **The 0.74 px is not a defect claim.** The clip is the mechanism that makes the
+  iris sit in the eye; the number is the price, and the recording is what makes it
+  a price rather than a guess.
+
+### Four instruments retired as confidently wrong
+
+Getting that 0.74 px took four instruments that produced a plausible number and
+none of them were it - recorded because each would have been filed as a finding:
+
+| instrument | answer |
+|---|---|
+| difference-set centroid | **0.00 px** |
+| integer-shift cross-correlation | matched **(0,0)** at 0.86 on a real move |
+| catchlight-by-colour | matched the **head specular sheen** -> 0.21 px |
+| outside-actor cluster analysis | **0 clusters** - it excluded the rect the cursor was inside |
+
+Each was caught by a **self-comparison control** (frame against itself must read
+**zero** differing pixels), which is the only reason any of them is known to have
+been wrong rather than merely unhelpful.
+
+### Where the numbers live
+
+`../harness-study/HARVEST-COUCOU.md` **PART 10** (:988-1078) carries the full
+record; PART 9 (:789) is the Shell-actor design this builds on.
