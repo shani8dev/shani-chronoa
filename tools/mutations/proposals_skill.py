@@ -27,19 +27,30 @@ _SKILL = "usr/lib/shani-chronoa/shani_chronoa/skills/review_proposals.py"
 
 # --- the gates -------------------------------------------------------------
 
+#: Re-anchored 2026-10-16. The gate was rewritten to the house signature -
+#: `_consent(config) -> tuple[bool, str]` - so the old needle was gone while
+#: the defect it names was not: `_run` consults the gate and refuses on its
+#: answer, and this is the mutation that deletes the consultation. `decide_candidate`
+#: still has its own check, which is why this is *defence in depth* rather than
+#: the only gate - and why the listing is the witness that bites, since a
+#: refused write would still be refused by the acceptor.
 _NO_ENTRY_CONSENT = (
-    "    denied = _consent()\n"
-    "    if denied:\n"
-    "        return (f\"{denied}. Nothing was changed, and nothing is remembered - \"\n"
+    "    allowed, reason = _consent(ChronoaConfig())\n"
+    "    if not allowed:\n"
+    "        return (f\"{reason}. Nothing was changed, and nothing is remembered - \"\n"
     "                f\"this is what Chronoa noticed last night and did not save.\")\n",
-    "    denied = \"\"\n",
+    "    allowed, reason = True, \"\"\n",
 )
 
+#: Re-anchored 2026-10-16, same rewrite. `_consent` now reads the config it is
+#: handed rather than building one, so the mutation is now on that line: the
+#: gate answers "allowed" for every caller, which is the same defect as
+#: deleting the call - and it survives a caller that fixes its own consent,
+#: because the gate is asked for a reason it no longer looks up.
 _NO_CONSENT_BODY = (
-    "    from shani_chronoa.config import ChronoaConfig\n"
-    "\n"
-    "    return ChronoaConfig().sense_allowed_reason(\"memory\")\n",
-    "    return \"\"\n",
+    "    reason = config.sense_allowed_reason(\"memory\")\n"
+    "    return not reason, reason\n",
+    "    return True, \"\"\n",
 )
 
 #: **The half-gate**, which is the shape that is easier to ship than either
@@ -49,11 +60,15 @@ _NO_CONSENT_BODY = (
 #: turned remembering off. The first version of this mutated
 #: `_listing(rows)` into `_listing(rows[:1])`, which is a different defect
 #: entirely; the runner caught it, reporting one unrelated failure.
+#:
+#: Re-anchored 2026-10-16 with the other two. The shape is unchanged - the call
+#: stays, the refusal becomes conditional on the action - so the mutation still
+#: answers "allowed" when the key is shut only for the listing.
 _NO_LISTING = (
-    "    denied = _consent()\n"
-    "    if denied:\n",
-    "    denied = _consent()\n"
-    "    if denied and action != \"list\":\n",
+    "    allowed, reason = _consent(ChronoaConfig())\n"
+    "    if not allowed:\n",
+    "    allowed, reason = _consent(ChronoaConfig())\n"
+    "    if not allowed and action != \"list\":\n",
 )
 
 # --- the answer table ------------------------------------------------------

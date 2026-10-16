@@ -168,10 +168,28 @@ _CLIP_MID_WORD = (
 #: `says` raising for a name the selection never had. A card asks about a tool
 #: that ran, so a miss is a defect rather than an empty case - and raising out
 #: of a tooltip takes the turn down with it.
+#:
+#: Re-anchored 2026-10-16, and this one was not rotted - it never matched.
+#: Measured against `tool_select.py` at `3792014` (the commit that added this
+#: set) **and** at its parent: the needle counted **0** in both, because it
+#: carried a doubled backslash where the source has always carried a single
+#: one. `git log -S` finds one commit touching that line and its added side is
+#: the single-backslash form, so there is no version of the source this needle
+#: ever matched. The other four rotted anchors in this batch were genuine rot -
+#: both `orb_space` #5 and `proposals_skill` 1-3 counted 1 in their source at
+#: the commit that introduced them, and `83ab820` is what moved the code out
+#: from under them. This one was committed already broken, in a commit made to
+#: carry another session's work-in-flight, so "rotted by someone else" was the
+#: right story for 4 of these 5 and the wrong one for the fifth.
+#:
+#: The block is taken from `Selection.says`, not `Selection.why` - the two hold
+#: the same three lines' shape (`why` returns a tuple for the transcript), so a
+#: needle written from the shape alone would match the wrong method. That is
+#: why the comment above names the method.
 _RAISES_ON_UNKNOWN = (
     "        one = self.offered(name)\n"
     "        if one is None:\n"
-    "            return \"not part of this turn\\\\'s selection\"\n",
+    "            return \"not part of this turn\\'s selection\"\n",
     "        one = self.offered(name)\n"
     "        if False:\n"
     "            return \"\"\n",
@@ -207,10 +225,35 @@ _FORGED_FORCED = (
 # --- the four hops ----------------------------------------------------------
 
 #: Reading `self._sink` instead of the parameter `handle` was handed. **This
-#: is the shape of a bug that shipped in the first version of this work**: it
-#: shadows `sink` for the `on_tool_start` and `on_tool_finish` fires further
-#: down, and both are `if sink is not None`, so a caller passing a sink without
-#: setting that attribute loses every tool event **silently**.
+#: is the shape of a bug that shipped in the first version of this work** - and
+#: reading it today shows the hazard cannot be reached, which is why the
+#: mutation entry below is flagged `equivalent` rather than witnessed.
+#:
+#: The site is in `_run_turn` (line 1196), **not** in `handle`, so the question
+#: is whether every path into it passes through `handle`'s assignment. Measured
+#: rather than reasoned:
+#:
+#: 1. `self._sink = sink` is at `assistant.py:1024`, inside `handle` (961-1130),
+#:    and is **unconditional** - an AST sweep for enclosing `if`/`for`/`while`/
+#:    `try` bodies found none.
+#: 2. `_run_turn` has **exactly two** callers in the tree, both in this file:
+#:    `:1085` (direct, inside `handle`) and `:896` (inside `_keep_going`).
+#:    Nothing outside `assistant.py` calls it - the other two tree-wide hits are
+#:    a docstring and a comment.
+#: 3. `_keep_going` is read at **one** place, `:1090`, inside `handle`, which
+#:    is 66 lines after the assignment.
+#: 4. `self._sink` has **one** writer in the whole package (`grep -rn '_sink *='`).
+#:
+#: So `self._sink is sink` holds on every path to line 1196, for every caller and
+#: every input. `getattr(self, "_sink", None) is not None` is therefore the same
+#: predicate as `sink is not None` here, and the fire reaches the same object.
+#:
+#: **And the comment above the site is stale in the same way.** It says "a
+#: caller that passes a sink without setting that attribute would lose every
+#: tool event silently" - but `handle` sets the attribute *from its own
+#: parameter*, unconditionally, before anything it calls. There is no such
+#: caller. That sentence is in `assistant.py` and is left alone here (another
+#: session's active file); it is recorded in AGENTS.md instead.
 _SINK_SHADOWED = (
     "            if sink is not None:\n"
     "                sink.fire(\"on_selection\", selection)\n",
@@ -289,8 +332,18 @@ MUTATIONS = [
         "why": "The other direction of the same pair. The record would be "
                "right and the prompt wrong, which is worse: the panel and the "
                "model disagree about what was offered.",
-        "expect": ["test_it_sends_exactly_what_select_tools_sends",
-                   "test_select_tools_still_returns_registry_order"],
+        # Witness corrected 2026-10-16 from the run's own `NOT caught by`.
+        # `test_select_tools_still_returns_registry_order` asserts exactly one
+        # invariant - `sent == [n for n in order if n in set(sent)]` - which is
+        # a statement about **order**. This mutation appends every tool to
+        # `keep` while iterating the registry in its own order, so the widened
+        # list comes back in precisely the order that invariant demands, only
+        # longer. An ordering contract cannot see a membership change, and it
+        # would be wrong to weaken it to try: the guarantee that the sent list
+        # is in registry order is what several hundred comparisons elsewhere
+        # rely on. The membership is witnessed where it is read back as
+        # membership.
+        "expect": ["test_it_sends_exactly_what_select_tools_sends"],
     },
     {
         "label": "ranked() reads the learned weights a second time",
@@ -327,9 +380,21 @@ MUTATIONS = [
                "subtraction the cue table stops doing its job - `log ?in` "
                "matching inside \"login\" again, which once protected ~850 "
                "tokens of a 1536 budget and dropped the correct tool.",
-        "expect": ["test_it_sends_exactly_what_select_tools_sends",
-                   "test_the_login_cue_is_a_word_boundary_and_the_record_"
-                   "shows_it"],
+        # Witness corrected 2026-10-16, from the run's own report: it printed
+        # "1 failed, 40 passed ... failed for another reason:
+        # test_a_tool_a_cue_removed_is_reported_as_removed". So the mutation did
+        # break a test, and it was not one of these two.
+        #   - `test_it_sends_exactly_what_select_tools_sends` compares the record
+        #     against `select_tools`, and **both doors run this line** - dropping
+        #     the subtraction moves them together and they still agree. Two
+        #     readers of one seam cannot witness the seam.
+        #   - `test_the_login_cue_is_a_word_boundary_and_the_record_shows_it`
+        #     asserts `browse` not in `record.sent`; for that request `browse` is
+        #     in the sent set either way, so the cue was never what decided it and
+        #     the test cannot see the cue removed.
+        # The witness is the one that asks whether a removed tool is *reported* as
+        # removed, which is the defect, and it fires.
+        "expect": ["test_a_tool_a_cue_removed_is_reported_as_removed"],
     },
     {
         "label": "the last rule to fire explains a tool, not the earliest",
@@ -361,8 +426,22 @@ MUTATIONS = [
         "why": "Subtracting a name that was not there is a no-op, so recording "
                "it invents a candidate the selection never had - and the panel "
                "then explains a tool that was never under consideration.",
-        "expect": ["test_the_considered_set_and_the_sent_set_are_consistent",
-                   "test_it_sends_exactly_what_select_tools_sends"],
+        # Witness corrected 2026-10-16, from the run's own report: it printed
+        # "2 failed, 39 passed ... failed for another reason:
+        # test_the_browser_rule_and_the_file_rule_are_both_stated,
+        # test_a_tool_a_cue_removed_is_reported_as_removed". So again the
+        # mutation did break tests, and neither was one of the two named here.
+        #   - `test_the_considered_set_and_the_sent_set_are_consistent` reads the
+        #     two sets the record already agrees about, and this mutation keeps
+        #     them in agreement - it adds a removal without adding a send.
+        #   - `test_it_sends_exactly_what_select_tools_sends` compares the record
+        #     against `select_tools`, and both doors run this line, so they move
+        #     together (the same reason as the entry above).
+        # What it actually changes is what the record *says*: a name the
+        # selection never held is now reported as considered and removed, so the
+        # browser's own reason and the cue's own reason are both overwritten.
+        "expect": ["test_the_browser_rule_and_the_file_rule_are_both_stated",
+                   "test_a_tool_a_cue_removed_is_reported_as_removed"],
     },
 
     # --- the sentences -----------------------------------------------------
@@ -482,11 +561,24 @@ MUTATIONS = [
         "old": _SINK_SHADOWED[0],
         "new": _SINK_SHADOWED[1],
         "why": "**The shape of a bug that shipped in the first version of this "
-               "work.** `sink` is `handle`'s parameter and it carries "
-               "`on_tool_start` and `on_tool_finish` further down; both are `if "
-               "sink is not None`, so a caller that passes a sink without "
-               "setting `_sink` loses every tool event silently.",
+               "work - which today cannot be reached, and the reason is measured "
+               "rather than argued.** `sink` is `handle`'s parameter and it "
+               "carries `on_tool_start` and `on_tool_finish` further down, so "
+               "reading `self._sink` here *looks* like it could shadow the "
+               "parameter and silently drop every tool event. It cannot: "
+               "`handle` assigns `self._sink = sink` from its own parameter, "
+               "**unconditionally**, 61 lines before this site, and this site is "
+               "in `_run_turn` rather than in `handle`. See the note on "
+               "`_SINK_SHADOWED` for the four measurements - the only two callers "
+               "of `_run_turn` tree-wide, the single reader of `_keep_going`, and "
+               "the single writer of `_sink` in the package - that make "
+               "`self._sink is sink` hold on every path.",
+        # Kept deliberately, as 12 other equivalents in this tree do: it names
+        # the test this mutation would have had to break. Its passing is part
+        # of the evidence for the equivalence rather than a witness for it, and
+        # it cannot fire - a mutation that changes nothing fails no test.
         "expect": ["test_the_sink_a_caller_passes_is_the_one_used"],
+        "equivalent": True,
     },
     {
         "label": "the selection event is never fired",
@@ -528,8 +620,19 @@ MUTATIONS = [
                "Driven through the real `TranscriptView`, because asserting a "
                "kwarg was passed is a wiring assertion and the wiring is not "
                "the behaviour.",
-        "expect": ["test_a_record_none_builds_a_card_with_no_why",
-                   "test_the_card_renders_the_records_own_sentences"],
+        # Witness corrected 2026-10-16 from the run's own `NOT caught by`.
+        # `test_the_card_renders_the_records_own_sentences` constructs
+        #     blocks.ToolCallCard("get_datetime", {}, ..., selection=record)
+        # with its own hand, so it exercises the card's *rendering* of a record
+        # it was handed directly. The mutated line is `TranscriptView`'s call -
+        # the one that decides what argument the card is built with - and this
+        # test never goes through the view, so no card it builds can reach it.
+        # The same witness stays named by the entry below, which mutates the
+        # card itself and so is exactly what that test is for. The witness that
+        # survives here drives `view.add_tool_call(...)`, and says why in its
+        # own docstring: "**The other direction, or the guard above is half a
+        # claim**: the same view, given a record, hands it through".
+        "expect": ["test_a_record_none_builds_a_card_with_no_why"],
     },
     {
         "label": "the why block is built and never shown",

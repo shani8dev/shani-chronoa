@@ -25,8 +25,17 @@ MUTATIONS = [
         # back, so the conversation stays 162px while a decorative microphone
         # occupies 124 of them.
         "label": "the orb never gives its space back (the shipped bug)",
-        "expect": ["test_a_quiet_window_does_not_carry_the_reserve",
-                   "test_a_freshly_built_orb_is_already_at_resting_size"],
+        # Witness corrected 2026-10-16 from the run's own `NOT caught by`. The
+        # dropped test asserts
+        #     orb.get_size_request()[0] == _orb_size(AssistantState.IDLE)
+        # and `_orb_size` is **imported from the source being mutated** (test
+        # line 51), so it compares the widget against the very function this
+        # entry replaces: whatever `_orb_size` returns, the comparison holds.
+        # It cannot see this mutation, and it was never scoped to - its own
+        # docstring says what it is for ("applying the size only on the first
+        # *state change* would pass every test above"), which is the entry below
+        # this one and does fire on it.
+        "expect": ["test_a_quiet_window_does_not_carry_the_reserve"],
     },
     {
         "file": _WIDGETS,
@@ -35,8 +44,18 @@ MUTATIONS = [
         # The over-fix, and the dangerous direction: the halo is clipped for the
         # whole length of every reply and every spoken answer.
         "label": "the orb never grows, clipping the halo while listening and speaking",
-        "expect": ["test_the_orb_is_never_smaller_than_the_halo_it_can_contain",
-                   "test_the_size_follows_the_state"],
+        # Witness corrected 2026-10-16 from the run's own `NOT caught by`. Same
+        # tautology as the entry above, and here it is the whole test:
+        #     assert orb.get_size_request()[0] == _orb_size(state), state.name
+        # both operands move when `_orb_size` does, since it is imported from
+        # the mutated source at test line 51. It can only fail if the computed
+        # size stops being *applied*, which is the mutation two entries down -
+        # and that one is caught by it. The witness that survives here moves on
+        # one side only: `side` comes from the mutated `_orb_size`, while the
+        # bound it is compared against comes from `_halo_size` - a different
+        # function in the same module that this entry does not touch - and is
+        # chosen per state by which states actually feed a level.
+        "expect": ["test_the_orb_is_never_smaller_than_the_halo_it_can_contain"],
     },
     {
         "file": _WIDGETS,
@@ -69,9 +88,15 @@ MUTATIONS = [
     },
     {
         "file": _WIDGETS,
-        "old": "        side = _orb_size(state)\n"
+        # Re-anchored 2026-10-16: `_apply_state` now scales the computed side
+        # through `self._scaled(...)` before applying it, so the anchor moved
+        # with the call. The defect is the same one - the size is computed on a
+        # state change and then thrown away - and the scaled form has to be in
+        # the needle, because anchoring on the bare `_orb_size(state)` would be
+        # a substring of this line rather than a line of its own.
+        "old": "        side = self._scaled(_orb_size(state))\n"
                "        self.set_size_request(side, side)\n",
-        "new": "        side = _orb_size(state)\n",
+        "new": "        side = self._scaled(_orb_size(state))\n",
         # The size is computed and thrown away, so the orb never follows the
         # state at all: every assertion above reads the construction.
         "label": "the size is computed on a state change and then not applied",
