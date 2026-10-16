@@ -20,44 +20,13 @@ _USR_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(_USR_DIR, "lib", "shani-chronoa"))
 
 
-def _preload_layer_shell() -> None:
-    """Make gtk4-layer-shell load **before libwayland-client**, or it is inert.
+# One copy of the fix, because there are two processes that need it: this one and
+# `usr/bin/shani-chronoa`, which creates the mascot's layer surface in the app's
+# own process. Its module docstring has the measurement and the link-order
+# warning the library emits.
+from shani_chronoa.layer_shell_preload import preload_layer_shell
 
-    Its own warning says it outright, and it is not advisory:
-    *"Failed to initialize layer surface, GTK4 Layer Shell may have been linked
-    after libwayland. Move gtk4-layer-shell before libwayland-client in the
-    linker options."* The protocol needs a `wl_registry` that is still open when
-    the library initialises, and once `libwayland-client` is in, it is not.
-
-    It cannot be fixed from inside a running process - the load order is decided
-    by the dynamic linker before `main()` - so the only correct fix is to
-    **re-exec** with `LD_PRELOAD`, which is what the library's own
-    `linking.md` recommends. One extra process start, once, only when the
-    library is actually present.
-
-    Guarded on a marker so the re-exec cannot loop, and it returns immediately
-    when the library is absent, so a machine without it behaves exactly as
-    before.
-    """
-    if os.environ.get("CHRONOA_CUE_REEXEC"):
-        return
-    for directory in ("/usr/lib/x86_64-linux-gnu", "/usr/lib64", "/usr/lib"):
-        candidate = os.path.join(directory, "libgtk4-layer-shell.so.0")
-        if os.path.exists(candidate):
-            break
-    else:
-        return
-    already = "libgtk4-layer-shell" in os.environ.get("LD_PRELOAD", "")
-    if already:
-        return
-    os.environ["LD_PRELOAD"] = " ".join(
-        part for part in (os.path.realpath(candidate),
-                          os.environ.get("LD_PRELOAD", "")) if part)
-    os.environ["CHRONOA_CUE_REEXEC"] = "1"
-    os.execv(sys.executable, [sys.executable] + sys.argv)
-
-
-_preload_layer_shell()
+preload_layer_shell()
 
 from shani_chronoa.automation_overlay import main
 

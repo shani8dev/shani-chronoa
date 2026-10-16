@@ -2,6 +2,60 @@
 
 This file applies to any AI coding assistant working in this repository
 (Claude Code, opencode, Kilo Code, Cursor, Aider, or similar). Read this
+
+## Driving the desktop on GNOME Wayland: what was measured (2026-10-15)
+
+All of this was found by running the skills against a real window in a private
+headless GNOME Shell (`tests/test_ui_skills_live.py`, `tests/test_windows_gnome_live.py`),
+never by reading the code. Before: type_text, move_pointer and click_pointer
+reached nothing.
+
+- **Input comes from inside the shell.** wtype needs a protocol Mutter does not
+  speak (and the old code passed `wtype -M hello` - "-M" is a *modifier*);
+  ydotool needs a root daemon; the RemoteDesktop portal is not always there.
+  `chronoa-windows@shani.dev` (Version 2+) sends pointer and keyboard input with
+  Clutter virtual devices - what GNOME's on-screen keyboard uses.
+- **Paced, not burst.** Sent in one instant, IBus dropped every letter and kept
+  digits ("hello, World! 42" arrived as " 42"); one key at a time with a gap,
+  exact. The first event on a freshly created virtual device is dropped, so the
+  devices are made at `enable()`.
+- **Button numbers are Clutter's 1/2/3.** Mutter converts them; evdev codes
+  logged "Unknown/invalid virtual device button 0x21b".
+- **The hot corner.** The pointer starts at (0,0). A diagonal move out of it
+  pushed the corner's pressure barrier (the pointer stopped at (640,0)) and
+  *opened the Activities overview*, so every following click landed on the
+  overview. `PointerMove` goes across, then down, and re-reads the position.
+  `Focus` also closes the overview - **before** activating, or focus goes back
+  to the previous window.
+- **Apps are launched by the shell (`LaunchApp`, Version 3), not by a skill.**
+  A process a skill starts inherits the skill's rlimits (address space among
+  them): GNOME Calculator died at start. `open_application` now waits for the
+  app's *window* and says so - "Opened" used to mean "a launch was requested",
+  and the model typed into Chronoa's own message box.
+- **`type_text`/`press_key` refuse when Chronoa's own window has focus.**
+- **Any script, through IBus.** Keys reach only the layout; `ibus_input.py`
+  hosts a pass-through engine in the app and commits text (Devanagari arrives
+  exactly). The engine's process must switch IBus to itself **asynchronously**:
+  a synchronous `set_global_engine` deadlocked (IBus asks that same process to
+  create the engine).
+- **Private-session gaps that are not product bugs:** the private dbus-daemon
+  needs `dbus-update-activation-environment WAYLAND_DISPLAY=...` (gnome-session
+  does this at login) or D-Bus-activated apps open no window; the shell
+  re-opens the overview at the end of its startup animation.
+- **Notifications:** `Gio.Notification` is shown by GNOME only with a desktop
+  file named after the app id (`dev.shani.chronoa.desktop`); Chronoa ships
+  `shani-chronoa.desktop`, so questions go through `org.freedesktop.Notifications`
+  like `incoming_call.py`.
+- **Tool output fence:** a skill's own words are outside the fence only through
+  `provenance.content_follows()` - a per-call token the dispatcher turns into a
+  private split. A fixed marker would let any file move text out of the fence.
+- **`common.switch_row` ignored `active`** - all 21 such switches showed off.
+- **Test isolation traps:** `Gio.TestDBus.up()` sets the bus address in the C
+  environment only; pass `bus.get_bus_address()` to a subprocess explicitly or
+  it joins the person's real session bus. `Atspi.init()` in a test process
+  without an accessibility bus aborts the whole run (47 tests in
+  test_ui_driver.py had silently never run).
+
 ## "wire all": `Asleep` was offered and could not be reached, and the fallback started it anyway (2026-10-12)
 
 Asked to wire everything this repo *offers*. `presence.py` documents three states
@@ -1387,6 +1441,7 @@ decision, not a mechanical one, and it is recorded rather than fixed.
 
 | `HARVEST-LINUX-HELLO.md` | linux-hello | three transfers, all measured: a pure `plausible()` beside detection so the face decision is testable without OpenCV; a **15-line V4L2 capability probe** - `/dev/video1` here is a metadata node that cannot capture, while `QUERYCAP` answers for it anyway; and **infrared capture in both photo skills**, verified against a real `v4l2loopback` IR camera: 58,791 bytes of h264 holding 90 frames, 206 levels from a 127-level source, which is why both replies state what ffmpeg's conversion did. The anti-spoofing set, the IR liveness constants, `mmap` streaming, the warm daemon and the PAM profile are refused with reasons. Recorded as a defect in the upstream: **face templates written world-readable (dir 0755, file 0644)** |
 | `HARVEST-OPENDOTS.md` | CopilotKit/OpenDots | **nothing taken, and the reason is measured**: transcribing its SSRF private-range list and comparing found 3 disagreements in 29 probes - each right where the other is wrong - and Chronoa's permissive allow side is the documented inverted-polarity choice (`127.0.0.1` is its own inference endpoint). Two rows kept: the approval replay guard (**already here**, args are in the replay key), and `learningSelector`'s owner/agent scoping, which is a question Chronoa has never asked - `train_and_save` has `only_tools` and no `only_origin`, while `_replay_key` records that a trigger-driven turn is a different decision. **Second pass, the Python `Shashankss1205/OpenDots`, has one real finding**: its `_assess_relevance` is a reference implementation of the organ Chronoa's table already records as `missing="no salience or priority queue"` - checked, not assumed, since `tool_select.py` does score tools but for fitting the context window, not for choosing between competing events. The part kept is that below the confidence minimum the status is **`uncertain`, not a second "no"**. Its `assessment_key` (which includes the model), its daily model-call budget and its `retry(inspected=True)` are all recorded as **already here by another mechanism**; its `preexec_fn` warning is answered by Chronoa's single documented chokepoint. **A deep pass found the same shape in both repos**: the TypeScript one carries `expectedRevision` on `pages.update` plus a `conflict` status that keeps both copies and never picks a winner (*"Your draft is safe"*), with `dirty` true on error/conflict - while `composer_draft` has **no version token at all**, so a stale write is undetectable by construction and last-writer-wins. What saves it is `ChronoaApplication` being a `Gio.Application` without `NON_UNIQUE` - **an invariant that is load-bearing and never written down as a reason**, while AGENTS.md records that same enforcement as a real capability gap versus sayri's socket. Also recorded as a checked-and-**refused** candidate: `pages.update` discards `.run()`'s row count on a compare-and-swap, which reads as a silent lost-update until you notice `BEGIN IMMEDIATE` takes SQLite's write lock *before* the read - so it cannot fire, and reporting it would have been the confident wrong answer |
+| `HARVEST-COUCOU.md` | coucou (Louis-CFM, 5.3k) | **one thing ported and mutation-proven - the mascot's gaze** (`tools/mutations/gaze_iris.py` 16/16, `gaze.py` 14/14; 0 survivors either side) - **and the headline feature being unportable is still the finding.** Its README says in one sentence what we had measured and refused over - *"GNOME has no layer-shell, so there it runs through XWayland as a dock window at the top of the screen"* - and it **shows the companion anyway**: `prefer_x11_on_gnome()` (l.111) picks the backend *before* GTK init, then `make_non_activating()` (l.370) falls back to a `Dock`-hinted, focus-refusing, keep-above window rather than not drawing. Measured on this box (GTK **4.22.4**, both backends): all three of those knobs - `set_accept_focus`, `set_keep_above`, `set_type_hint`/`Gdk.WindowTypeHint` - **do not exist in GTK4 at all**, and GTK4 exposes **no positioning API whatsoever** (`Gtk.Window.move`, `set_position`, `Gdk.Surface.move`/`get_origin`, `Gdk.Toplevel.move`/`get_position`: all absent). So `available()`'s refusal stands, but **for a different reason than its docstring gives**: not that Mutter lacks layer-shell - which it does, and which they also hit - but that if we ever declined layer-shell we would have no way to place the window and would produce the exact stray bottom-right window the docstring forbids. The real door is process-level and outside this module: `usr/bin/shani-chronoa` already exists to re-exec for the LD_PRELOAD link order, and choosing X11 there is the same shape of fix. Recorded, not taken. Also **already here and ours is the better shape** - their `stateOverride ?? focusTask.state` is a transient value of the *same* enum as the persistent state so the caller cannot tell which is load-bearing, while our `_expr`/`_expr_timer` is a second axis that cannot collide (6 states x 7 expressions); their **character has no accessible name** (`aria-*` is all in `views/`+`settings/`, none in `island/`, `mochi/`, `pill/`, `core/`) where `_announce()` is **ahead of the reference implementation**; their fail-open hook relay is **not applicable** because we have no hook binary and sit in nobody's critical path; their 60fps `requestAnimationFrame` loop has no counterpart in a render-on-state-change SVG. Two bugs recorded without claim: WebKitGTK never paints a first frame in a fresh layer surface (not ours - we rasterise through `GdkPixbuf`), and **GTK resets the input region to the whole window on every map**, which is an open question against `automation_overlay.py` this pass did **not** verify. **Second pass (drag/drop, Parts 5-6), same commit `f09ac0b`:** the recorded paths are relative to **`windows/src/`**, not the repo root - `ls core/anim.ts` at the root finds nothing, which is the "a harvest is a dated claim about a tree" trap in its purest form. Three implementations exist and `CLAUDE.md` states it: `NotchBuddy/` is the macOS Swift original, `windows/` the Tauri port for **Windows and Linux**, `android/` Kotlin - so `core/anim.ts` is a *port*, and the original is `CoucouKit/BotEngine.swift`. **There is no pet-draggable to copy**: the island is a fixed top-edge overlay and Mochi follows a *dragged file*, not a dragged pointer - so what ports is the *follow mechanic* as pure arithmetic (spring follow, a **60/90 lock hysteresis** so a pointer near the threshold does not chatter, `speed < 180` so a fast sweep does not lock, velocity tilt, a 150 ms catch-hop, a mouth spring), not a feature. Their `upload/sequence.ts` header is the transferable sentence: **"the engine owns no DOM and draws nothing"** - `frame()` is a pure function of cursor and drop time. And **two findings in the reference worth keeping**: `anim.ts` claims its eases mirror `BotEngine.swift`'s `enum Ease`, which is **accurate for four and silent about a fifth** (`easeIn` is not in the Swift enum); and the TypeScript tree holds **two copies of the same easing set** - `core/anim.ts` (imported by five files) and a self-contained `upload/sequence.ts` with **zero imports**, whose `back` carries `c1 = 1.70158` against the original's `1.7`. That is this repo's own `wpctl`-three-copies shape found in someone else's tree, which is the argument for our mascot keeping one easing vocabulary. **The hard part of the gaze port was not the geometry**: every test called the handlers *unbound* on a `Mascot` whose `_build()` never ran, so the `GestureMotion` controller was never connected and **three wiring mutations survived** - a witness has to invoke the handler `_build()` *recorded*, and the helper needs patching at **what it reads** (`automation_overlay.reduced_motion`), because a test that patches the helper to `True` is blind to the helper's body by construction | **Third pass (Parts 5-7), and a live defect found by measuring a claim instead of believing it**: `_layer_shell()` read the library with `getattr(gi.repository, namespace)`, and `gi.repository` on this PyGObject **does not import a submodule on attribute access** - measured cold, the `getattr` raises `AttributeError` with the typelib installed and `require_version` satisfied, while `importlib.import_module` returns the real module. So the gate **refused on every machine**, including one whose compositor speaks wlr-layer-shell, and named `GtkLayerShell 0.1` as unusable because the loop kept only its *last* failure. Fixed; `available()` now reports the real cause (Mutter has never implemented wlr-layer-shell, and the preload ordering `usr/bin/shani-chronoa` does not do) instead of a fictional missing package. **And PART 5's premise that window motion is blocked by "GTK4 exposes no positioning API" was false in the direction that removed the feature**: a layer-shell surface is positioned by anchors and margins, `set_margin` is present, and `_bob_tick` **already calls it every frame**. PART 1's own four measurements are about *ordinary* windows and stand; they are qualified in place rather than revised. The real blocker is coucou's own comment - *"a surface that moves under the pointer can't tell where it is"* on Wayland - and their workaround (stretch the surface over the whole display) needs an input region **GTK4 has no API for at all** (`Widget.set_input_region`, `Gdk.Region` and `Gdk.Window.input_shape_*` all absent, measured three ways), so a full-screen surface would eat every click. **Three of four witnesses passed with the defect fully restored**, each for the same reason: **`gi.repository` is process-global and `test_both_library_spellings_are_tried_gtk4_first` warms it** for everything after - so the gate's own witness needed a subprocess probing coldness *first* and discovering the namespaces with `require_version` alone (measured not to warm), because a precondition check that is itself the thing that breaks the precondition is not a precondition check |
 | `HARVEST-BWRAP.md` | bubblewrap | the three sandbox protections that belong to the machine |
 | `HARVEST-MAZE.md` | Maze-AI | nothing; a short negative result |
 | `HARVEST-TencentDB-Agent-Memory.md` | TencentDB-Agent-Memory | **one real port: a finished capability nobody could reach.** Reading its cold-start story ("import the save file, then get to work") prompted a grep, and the answer was measured rather than guessed: `conversation_store.checkpoint()`, `revert()` and `list_checkpoints()` were implemented and documented with **zero callers** anywhere - not the GUI, not a skill, not `app/brain.py` - so a person could neither save that point nor return to it by any route. Ported in `74d2158`. Three of its four flagship ideas were already here (`local_llm.fit_to_context` is turn-aware and already says in a note how many turns it left out; `context_meter.py`; `test_memory_recall_ranking.py`), one is **not applicable** (team ACL visibility on a single-user local-first box - porting it would be cargo cult), and the one genuinely new mechanism, L0->L3 distillation, is a real gap that needs an LLM pass per conversation and was deliberately not ported |
@@ -26432,3 +26487,53 @@ Result: show_page 7 passed in 63s (was hanging), setup button 12, sidebar 8.
   the worst tools with >=3 checked calls. `charts.level_colour(..., high_is_bad=False)`
   is green >=80%, yellow >=50% (the flipped disk scale called 33% green).
 - Calendar's no-backend state says what to do (Online Accounts) first.
+
+## The mascot ran in the one process that never fixed the link order (2026-10-16)
+
+`gtk4-layer-shell` only initialises if it is **linked before
+`libwayland-client`** (its own warning, verbatim in `strings` on the shipped
+`.so`), and it cannot be repaired from inside a running process - the loader
+decides before `main()`. The `LD_PRELOAD` re-exec that achieves it lived in
+**one** launcher, `shani-chronoa-overlay`.
+
+**The mascot's layer surface is created in the app's own process** -
+`app/application.py` does `mascot.Mascot(self)`, not a launch - so the mascot was
+the one surface a person sees without asking for, and the one that would **silently
+become an ordinary window**. Not an error: the library logs a warning and returns a
+*working* window, so nothing raises and the only evidence is one log line.
+
+`layer_shell_preload.py` now holds one copy, called by **both** `usr/bin/shani-chronoa`
+and `usr/bin/shani-chronoa-overlay`. Measured rather than asserted:
+
+- **7.2 ms** for the extra process start (20 interleaved starts: 9.1 ms vs 16.3 ms),
+  once per launch, **only on a machine that has the library** - the absence guard
+  returns, so the ordinary machine behaves exactly as before.
+- **Both launchers re-exec exactly once**, under `strace -e execve`: same pid,
+  `argv[0]` becomes the interpreter's path, **64 -> 66 environment variables**
+  (`LD_PRELOAD`, `CHRONOA_LAYER_SHELL_PRELOAD`). Two `execve` lines each, not a
+  loop - and the marker is what makes that a count rather than a hope.
+
+**Three properties are asserted rather than documented, because each is silent when
+it rots:** the module imports **`os` and `sys` and nothing else** (so a launcher can
+call it before importing the package - `automation_overlay` imports `gi` and `Gtk`
+at module scope, which is why it is the wrong home); the call comes **before**
+`from shani_chronoa.app import main`, because `execv` does not return and a call
+after the package import would re-exec a process that had already loaded GTK; and
+**neither launcher carries its own `os.execv`**.
+
+`tools/mutations/layer_shell_preload.py`: **15 mutations, 15 caught, 0 survivors,
+0 equivalent, 0 unmeasurable, 0 stale witnesses**, one of which **restores the
+shipped defect verbatim** (the app launcher without the call). The guards are
+mutated as *removed*, not *inverted* - inverting the loop guard would restart the
+second process again, and nothing here runs two processes, so an inverted mutation
+would be reported caught by a test that passes either way.
+
+**One mutation deliberately absent:** dropping `os.path.realpath()` is equivalent by
+construction (the loader resolves the soname), which is why the test accepts **either**
+spelling - it pins *"ours is first and it is the library"*, not how that is spelled.
+
+**Not claimed:** that the mascot is layer-shell-capable anywhere. Mutter has never
+implemented `zwlr_layer_shell_v1`, so `available()` is still `False` here and none
+of this reaches a surface on this desktop. What changed is the **precondition**: on a
+wlroots or KDE machine this was the second of two independent defects standing
+between the mascot and a working layer surface.
