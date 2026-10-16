@@ -26577,3 +26577,112 @@ Two traps here that cost real time, and both have a general shape:
    box had been added at child index 0 — underneath an opaque body — and painted
    **0 px**. The independent control (does the thing under test actually paint?)
    is not optional when every other number checks out.
+
+## `count == 1` was necessary and not sufficient, and both holes reported the same thing (2026-10-16)
+
+`tools/mutate.py`'s anchor rule asserted `text.count(old) == 1`. Two mutations get
+past it, and **both produce the same false evidence: a survivor, measured against a
+file that was never modified.**
+
+- `new == old`. `str.replace(old, old)` matches exactly once and rewrites the file
+  with itself, so the run carries on and reports that nothing covers it.
+- A splice that does not parse. `MutationDidNotParse` already refuses to count that
+  as caught *or* as a survivor — and does so **late**: the malformed file is on disk,
+  pytest cannot collect it, and a set that used to reach every mutation reports none.
+
+Both are now refused in `_apply` itself, before the write.
+
+**The parse is once, after every pair, and the placement is pinned by a test that
+exists for it.** `pairs` is `[old, new] = zip(...)`, so one mutation may be several
+edits that must land together — two loops that are not adjacent and have to change
+together. A half that *opens* a construct is legal in a pair and unparseable alone, so
+a per-pair parse would demand something the format never promised. Measured on this
+tree: **4 pair-anchor mutations across 3 sets, 0 halves that fail to parse alone** —
+so a per-pair parse breaks nothing *today*, and this is the only witness for the shape.
+
+### The two levels are not interchangeable, and byte-identity is worthless at one of them
+
+Through `run_set`, a real subprocess: what the run **reports**. Byte-identity is
+worthless there, because `run_set` restores in a `finally` and the file comes back
+identical whether it was written or not.
+
+In-process, on `_apply` itself: what lands **on disk**. There is no `finally` in that
+path, so an unchanged file can only mean the write never happened. **A byte-identity
+assertion written through the runner would pass with both guards deleted** — the
+shape this file exists to catch.
+
+The control is last and is what makes the other five mean anything: a real mutation
+through the real `run_set`, where "caught" additionally proves the mutated text really
+was on disk while the test ran. A blanket refusal fails all seven including it.
+
+### Three of my own fixtures were wrong before the tests were
+
+The pair fixture took three attempts, and each earlier one was a mutation that could
+not have failed. The shape that works is a **triple-quoted string opened in one
+function and closed in another**: neither half parses alone, jointly they do, and the
+mutation applies.
+
+Then the placement mutation was wrong rather than the test. Replacing the whole-text
+parse with an in-loop one is *the same defect from the other side*, and it was caught
+by exactly the same three tests — proving nothing about placement. The mutation that
+tests placement **adds** a per-pair parse and **keeps** the whole-text one, and is
+caught by **exactly one of the seven tests**: the pair-anchor one, invisible to every
+other assertion in the file.
+
+`tools/mutations/harness.py` (3 new, 10 total). `tests/test_mutation_harness_can_fail.py`
+(60, +7).
+
+### One pre-existing test was repointed rather than deleted, and why that is the honest move
+
+`test_a_module_that_will_not_parse_names_the_file_that_failed` drove an **unparseable**
+mutation to reach the downstream collection-error report — the same defect the parse
+guard now refuses *upstream*, so its route no longer exists. Rewriting it to assert
+the upstream refusal would have dropped the coverage of the downstream path, which is a
+separate mechanism that still exists for anything bypassing `_apply`.
+
+It is now driven by a mutation that is **valid Python and cannot be imported**: it
+parses, so the guard does not fire, and the test file still cannot be collected. The
+result is `compile`d in the test, so the fixture cannot drift back into the guard's
+territory while staying green.
+
+## Three seams were written, documented in the present tense, and joined to nothing (2026-10-16)
+
+`MascotMotion.begin_work()`, `Mascot.set_level()` and the level's own mapping were all
+complete and reachable from nothing in `usr/`. All three are **seams rather than missing
+features** — the work existed, the call site did not — and all three had the same
+shape: a docstring describing a route nobody took, written in the present tense.
+
+**The quantisation, measured on the rasterised picture rather than the string.**
+`mascot_art.svg()` interpolates `mind_op` at full float precision, so it returns a
+*different string* for nearly every level: **159 distinct strings over a 100,000-sample
+sweep, and a "smallest visible change" of 0.0000**. A string differing by 1e-6 is not a
+picture differing by 1e-6 — 8-bit alpha cannot show it. Hashing the **pixbuf** over 1,000
+samples of `listening`: **156** distinct pictures with no step, **51** at
+`LEVEL_STEP = 0.02`, 21 at 0.05.
+
+The step is chosen for the drawing's own granularity rather than for tidiness: over the
+51 quantised levels the halo radius `int(44 * level)` takes **45 distinct values — all
+45 the unquantised range spans**. (An earlier reading of the same measurement said
+`int(44 * 0.02) = 0` "on most steps", which is the *level* increment and not the *radius*
+move; the radius accumulates, so the two differ.)
+
+**The cost that makes it load-bearing is already on record.** A Shell actor displaying
+this art takes a file route (`St.TextureCache.load_file_sync`, PART 9 of
+`HARVEST-COUCOU.md`), at **12.4 ms per changed frame against a 16.6 ms budget**. 156
+re-encodes per turn is a frame budget spent; 51 is not.
+
+**`begin_work()` has two refusals, and neither is decoration.** *Held*:
+`begin_work()` sets `_held = False`, so running it mid-drag would let go of the mascot
+under the pointer. *Already working*: a mascot dropped 200 ms ago is mid-chew, and
+starting again rewinds `t` to `T_DROP` and **re-plays the entry pop** the person just
+watched. It fires on the **transition**, not on every `set_state` call — `set_state` is
+how a level feed and a turn both arrive, and a turn re-announcing itself would restart
+the timeline on every frame of it.
+
+**`_start_frames()` is part of the seam, not a detail.** The timeline only advances when
+something calls `engine.frame()`, the only caller is the frame timer, and `_on_drag_begin`
+is the only thing that starts it. Without it the mascot would enter `working`, never
+move, and never stop — because `working` is what ends the turn.
+
+`tests/test_mascot_three_seams.py` (30) drives each seam through the product path that
+reaches it rather than the helper behind it; `tools/mutations/three_seams.py` (14).
