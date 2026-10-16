@@ -187,13 +187,33 @@ MUTATIONS = [
         # Measured on this tree: 4 pair-anchor mutations across 3 sets and 0
         # halves that fail to parse alone - so a per-pair parse breaks nothing
         # *today*, and this is the only witness for the shape.
-        "old": "        assert new != old, (\n",
+        # **The first anchor was a PREFIX of a multi-line statement, and that is
+        # the hazard `--check-anchors` cannot catch.** It was
+        # `"        assert new != old, (\n"` - which occurs exactly once, so the
+        # anchor check was green - but the statement it matched *continues on
+        # the next line*, so the insertion landed inside an open parenthesis:
+        #
+        #     assert new != old, (
+        #     try:
+        #         ast.parse(text)
+        #
+        # Measured: `mutate.py` refused to write it with `invalid syntax (line
+        # 507)`, and because the refusal was a bare `AssertionError` at that
+        # time it **aborted the whole set** - `0 mutations, 0 caught, 0
+        # survivors` over a run that had already measured two. The commit
+        # reported "3 mutations, 3 caught" from a probe that never saw this
+        # one, and the full-set run that would have caught it could not run past
+        # its own first mutation.
+        #
+        # **Two rules, and the second is the one that generalises.** `count == 1`
+        # is necessary and not sufficient - it counts occurrences, not whether the
+        # match respects the surrounding construct. And a mutation set can be
+        # *green on its own anchors* while being unable to be applied, so the
+        # anchor check is necessary and not sufficient either.
+        "old": "        text = text.replace(old, new)\n",
         "new": (
-            "        assert new != old, (\n"
-            "        try:\n"
-            "            ast.parse(text)\n"
-            "        except SyntaxError as exc:\n"
-            "            raise AssertionError('refused per pair') from exc\n"
+            "        text = text.replace(old, new)\n"
+            "        ast.parse(text)\n"
         ),
         "label": "each pair is parsed as it is applied, so a pair that is only "
                  "jointly valid is refused",
@@ -203,5 +223,160 @@ MUTATIONS = [
         "expect": [
             "test_a_pair_anchor_whose_halves_do_not_parse_alone_still_applies",
         ],
+    },
+
+    # -- a malformed mutation costs one mutation, not the set ----------------
+    # The parse guard above refuses a bad splice, and the refusal was originally
+    # a bare `AssertionError` - so it **aborted the set**. Measured 2026-10-16:
+    # one mutation whose anchor matched a *prefix* of a multi-line statement
+    # landed its insertion inside an open parenthesis, and the run reported
+    # **`0 mutations, 0 caught, 0 survivors`** over a set that had already
+    # measured two. That is a finished-looking tally for a run that produced no
+    # evidence, reached *through* the guard added to prevent a different one.
+    #
+    # Four mutations and four sites, because each of them is a separate way for
+    # the set to lose the entries behind the bad one.
+    {
+        "file": _RUNNER,
+        # **The shipped behaviour, verbatim.** A rotated anchor is still a bare
+        # `AssertionError` in `_apply` and still stops the set, which is right -
+        # but a splice that does not parse is a statement about *this mutation*,
+        # and giving it that type made it one too.
+        "old": "        raise MalformedMutation(\n",
+        "new": "        raise AssertionError(\n",
+        "label": "a malformed mutation aborts the whole set instead of costing "
+                 "one mutation",
+        # Three levels: the refusal itself, the run's report, and the set
+        # carrying on. `test_a_malformed_mutation_is_refused_before_it_is_run`
+        # is the one that moved - its tally changed from `0 mutations` to
+        # `1 unmeasurable`, so it was rewritten against the measured output
+        # rather than the designed one.
+        "expect": [
+            "test_a_malformed_mutation_is_refused_before_it_is_run",
+            "test_one_malformed_mutation_does_not_cost_the_rest_of_the_set",
+            "test_a_malformed_mutation_never_reaches_the_file",
+            "test_the_refusal_says_why_rather_than_only_that_it_failed",
+        ],
+    },
+    {
+        "file": _RUNNER,
+        # **The catch tuple, and the mutation is the one-line version of the
+        # above.** Dropping `MalformedMutation` from it does not change what
+        # `_apply` raises - it changes what survives, which is why these are two
+        # mutations and not one: the class could be raised and not caught, or
+        # caught and not raised, and only running the set tells them apart.
+        "old": ("        except (MutationDidNotParse, MalformedMutation) as "
+                "unmeasurable_run:\n"),
+        "new": "        except MutationDidNotParse as unmeasurable_run:\n",
+        "label": "only a run that could not measure is caught, so a malformed "
+                 "mutation escapes the set",
+        "expect": [
+            "test_a_malformed_mutation_is_refused_before_it_is_run",
+            "test_one_malformed_mutation_does_not_cost_the_rest_of_the_set",
+        ],
+    },
+    {
+        "file": _RUNNER,
+        # **The set continues, and the mutation is invisible.** No exception
+        # escapes, no report line prints, and the set carries on to its next
+        # entry having measured nothing - so the tally loses a column without
+        # losing a row, which is the arithmetic invariant holding over a count
+        # that quietly excludes one mutation.
+        "old": ("            unmeasurable.append((entry[\"label\"], "
+                "unmeasurable_run))\n"),
+        "new": "            pass  # a malformed mutation nobody is told about\n",
+        "label": "a malformed mutation is swallowed silently, so the tally "
+                 "excludes it without saying so",
+        "expect": [
+            "test_a_malformed_mutation_is_refused_before_it_is_run",
+        ],
+    },
+    {
+        "file": _RUNNER,
+        # **The over-fix.** Catching it is half of it; `continue` is the other
+        # half. Without it the entry falls through the `finally` into the
+        # survivor path and is reported **against unmutated code** - the same
+        # false evidence as a no-op mutation, produced by a guard that works.
+        "old": "            continue\n        finally:\n",
+        "new": "        finally:\n",
+        "label": "a malformed mutation falls through and is reported as a "
+                 "survivor measured against unmutated code",
+        "expect": [
+            "test_a_malformed_mutation_is_refused_before_it_is_run",
+            "test_one_malformed_mutation_does_not_cost_the_rest_of_the_set",
+        ],
+    },
+
+    # -- the cap ends the tree, not the child --------------------------------
+    # `subprocess.run(timeout=)` terminates the direct child and raises;
+    # anything that child started keeps running. Measured 2026-10-16 on this
+    # set: its first mutation makes a test's second `mutate.py` **take** the
+    # lock rather than refuse it, so the pytest run exceeded `RUN_TIMEOUT`,
+    # pytest was killed, and a `mutate.py --quiet` grandchild went on applying
+    # mutations with no parent and no lock. The mechanism that produced the
+    # "two overlapping runs left two mutations stuck applied" incident was this
+    # file's own timeout.
+    {
+        "file": _RUNNER,
+        "old": ("    proc = subprocess.Popen(cmd, start_new_session=True, "
+                "**kwargs)\n"),
+        "new": "    proc = subprocess.Popen(cmd, **kwargs)\n",
+        "label": "the child shares the runner's process group, so the group kill "
+                 "never reaches what it started",
+        # **One witness, and the control is deliberately NOT named here.** The
+        # first version named it and the runner reported `NOT caught by` - which
+        # is correct: the control drives plain `subprocess.run` and never calls
+        # `_run_capped`, so removing `start_new_session` from the helper cannot
+        # change it. The control's job is to prove the **marker** discriminates,
+        # not to witness this line, and naming it was the over-claim this
+        # repository records for `asleep_state`. It stays as a test of its own.
+        "expect": ["test_a_capped_run_leaves_no_grandchild_behind"],
+    },
+    {
+        "file": _RUNNER,
+        # **A mistyped signal constant, which is the realistic shape of this
+        # defect.** `killpg(pid, 0)` is a liveness probe and kills nothing, so
+        # the code still *reads* as a kill and the grandchild survives.
+        #
+        # Not "remove the killpg entirely": that leaves `communicate()` waiting
+        # on a process that is still running, so the test would **hang** rather
+        # than fail - and a mutation run that hangs measures nothing.
+        "old": "            os.killpg(proc.pid, signal.SIGKILL)\n",
+        "new": "            os.killpg(proc.pid, 0)  # a probe, not a kill\n",
+        "label": "the group is probed rather than killed, so a grandchild "
+                 "outlives the cap",
+        "expect": [
+            "test_a_capped_run_leaves_no_grandchild_behind",
+        ],
+    },
+    {
+        "file": _RUNNER,
+        # **The call site, and the mutation is invisible to every behavioural
+        # test in the class** - all of them drive `_run_capped` directly, so a
+        # perfect helper nothing calls is green throughout. This is why
+        # `test_both_call_sites_go_through_the_helper` is a source check: a
+        # runtime witness costs `RUN_TIMEOUT` = 300 s to measure two lines.
+        "old": ("    out = _run_capped(\n"
+                "        [sys.executable, \"-m\", \"pytest\", test_file, \"-q\",\n"),
+        "new": ("    out = subprocess.run(\n"
+                "        [sys.executable, \"-m\", \"pytest\", test_file, \"-q\",\n"),
+        "label": "the measurement call site goes back to subprocess.run, so a "
+                 "capped run leaves its grandchild applying mutations",
+        "expect": ["test_both_call_sites_go_through_the_helper"],
+    },
+    {
+        "file": _RUNNER,
+        # The `--collect-only` site runs **once per set** rather than once per
+        # mutation, so it is the one that gets forgotten - and nothing else in
+        # this file would notice.
+        "old": ("    out = _run_capped(\n"
+                "        [sys.executable, \"-m\", \"pytest\", test_file, "
+                "\"--collect-only\", \"-q\",\n"),
+        "new": ("    out = subprocess.run(\n"
+                "        [sys.executable, \"-m\", \"pytest\", test_file, "
+                "\"--collect-only\", \"-q\",\n"),
+        "label": "the collection call site goes back to subprocess.run, so a "
+                 "capped collect-only leaves its grandchild behind",
+        "expect": ["test_both_call_sites_go_through_the_helper"],
     },
 ]

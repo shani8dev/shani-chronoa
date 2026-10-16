@@ -31,10 +31,12 @@ test touches the real package.
 from __future__ import annotations
 
 import ast
+import inspect
 import os
 import textwrap
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -111,6 +113,45 @@ def _run(*args, cwd=REPO, timeout=600):
         [sys.executable, str(RUNNER), *args],
         capture_output=True, text=True, cwd=str(cwd), timeout=timeout,
     )
+
+
+#: **Fresh on every call, and that is deliberate in both directions.**
+#:
+#: *One exec per test* is what gives `pytest.raises(cls)` a class it can match:
+#: a second `exec` of the same file builds a **second class object**, so fetching
+#: the class from one exec and raising through another leaves the exception
+#: uncaught - the assertion failing for the wrong reason and looking exactly like
+#: "the guard stopped raising". Each test therefore takes **one** namespace and
+#: uses it for both.
+#:
+#: *Fresh per test* is also what keeps these tests isolated. `mutate.py`'s
+#: functions read their module globals - `STATE_DIR`, `ROOT` - from the very
+#: namespace they were exec'd into, so a shared one would let one test's
+#: `ns["STATE_DIR"] = tmp_path` answer for the next. Memoising the whole file was
+#: tried and left 65 green, which is the trap: every current test sets those
+#: keys before using them, so the contamination is invisible until a test relies
+#: on one being *unset*.
+#:
+#: At module level because three classes need it, and a second copy would be a
+#: third thing to keep in step - the same reason `_named_set` and `_fixture` are
+#: not methods. (Two of the three classes had their own identical copy.)
+def _runner():
+    """The runner's own module namespace, exec'd fresh from its file.
+
+    Deliberately the real module and not a re-implementation. Returned whole
+    rather than just the one function because the assertions name the **exception
+    class** each refusal raises, and that is not decoration: `MalformedMutation`
+    is a plain `Exception` and deliberately **not** an `AssertionError` subclass,
+    so that a future `except AssertionError` around `_apply` cannot quietly
+    absorb a malformed mutation and turn it back into the set-aborting failure.
+    A test asserting only `AssertionError` would not have noticed either way -
+    and separating them had to be measured, because three assertions in this file
+    went red when it landed.
+    """
+    namespace = {"__file__": str(RUNNER)}
+    exec(compile(RUNNER.read_text(encoding="utf-8"), str(RUNNER), "exec"),
+         namespace)
+    return namespace
 
 
 #: A module with two independent functions, so a pair-anchor has two places to
@@ -451,16 +492,7 @@ class TestAMutationThatChangesNothingIsRefused:
     _ANCHOR = "    return sum(items)\n"
 
     def _apply(self):
-        """The runner's own `_apply`, exec'd from its file.
-
-        Deliberately the real function and not a re-implementation, and
-        deliberately *not* called through `run_set` - see the class docstring for
-        why the two levels are not interchangeable.
-        """
-        namespace = {"__file__": str(RUNNER)}
-        exec(compile(RUNNER.read_text(encoding="utf-8"), str(RUNNER), "exec"),
-             namespace)
-        return namespace["_apply"]
+        return _runner()["_apply"]
 
     def _pair_fixture(self, tmp_path):
         _fixture(tmp_path)
@@ -505,9 +537,29 @@ class TestAMutationThatChangesNothingIsRefused:
 
         Downstream, `MutationDidNotParse` already reports UNMEASURABLE for this -
         so the guard is not making a *new* claim, it is making the same claim
-        **without writing the file**. The distinction is visible in the tally: with
-        the guard in place nothing reaches that state at all, so `0 unmeasurable`
-        is the post-condition rather than the outcome.
+        **without writing the file**, and the report says which of the two
+        happened.
+
+        **The tally here is the whole of the second guard**, and it is the
+        version measured after the change rather than asserted from the design.
+        The first version of the parse guard raised a bare `AssertionError`, so a
+        malformed mutation aborted the set and the report read
+
+            0 mutations, 0 caught, 0 survivors, 0 equivalent, 0 unmeasurable
+
+        over a run whose two earlier mutations had already been measured. That
+        is a finished-looking tally for a set that produced no evidence, which is
+        the failure `MutationDidNotParse`'s per-mutation handling was written to
+        prevent - reached *through* the guard added to prevent a different one.
+        Measured now:
+
+            1 mutations, 0 caught, 0 survivors, 0 equivalent, 1 unmeasurable,
+            0 stale witness(es), 1 of 1 sets
+            INCOMPLETE: the 1 above is a partial inventory and NOT the full one
+            UNMEASURABLE [selfcheck] leaves the call open
+
+        so the arithmetic invariant still holds, the label is carried, and the set
+        reports itself **reached**.
         """
         _fixture(tmp_path)
         name = _write_fixture_set(tmp_path, [{
@@ -526,11 +578,79 @@ class TestAMutationThatChangesNothingIsRefused:
         # whole difference between a bad mutation and a coverage gap.
         assert "malformed, not uncovered" in report, report
         assert "the file was not written" in report, report
-        assert "0 mutations, 0 caught, 0 survivors" in report, (
-            "a malformed mutation was reported as a result:\n" + report)
-        assert "0 unmeasurable" in report, (
-            "the malformed mutation reached MutationDidNotParse instead of being "
-            "refused at the source, so the file was written first:\n" + report)
+
+        # Counted as unmeasurable, which is the bucket that says *nothing was
+        # measured* - and emphatically not as caught or as a survivor, since a
+        # mutation that was never applied cannot be evidence about coverage.
+        assert "0 caught, 0 survivors" in report, (
+            "a mutation that was never applied was reported as a result:\n"
+            + report)
+        assert "1 unmeasurable" in report, report
+        # And named by its own label, so a set with three malformed entries does
+        # not produce three identical lines.
+        assert "UNMEASURABLE [" in report and "leaves the call open" in report, (
+            "the unmeasurable entry was not attributed to its mutation:\n"
+            + report)
+        # The set is still counted as reached. This is the claim: one mutation
+        # that cannot be measured is a result about that mutation, not a reason
+        # to abandon the set.
+        assert "1 of 1 sets" in report, (
+            "the set was not counted as reached, so a malformed entry still "
+            f"cost the set:\n{report}")
+        # INCOMPLETE is what makes the partial inventory say so in words rather
+        # than only in a column.
+        assert "INCOMPLETE" in report, report
+
+    def test_one_malformed_mutation_does_not_cost_the_rest_of_the_set(
+            self, tmp_path):
+        """**The claim the previous test cannot make: the set carries on.**
+
+        A one-mutation set that is refused still reports `1 of 1 sets`, because
+        there was nothing after it to lose. Put a **real, caught** mutation behind
+        the malformed one and the distinction is the whole thing: under the bare
+        `AssertionError` this reported `0 mutations` and measured nothing at all,
+        while here the good mutation is applied, its witness fails, and the tally
+        reads `2 mutations, 1 caught, 1 unmeasurable`.
+
+        Ordered deliberately: the malformed entry is first, so a set that aborts
+        on it cannot reach the second by accident.
+        """
+        _fixture(tmp_path)
+        name = _write_fixture_set(tmp_path, [
+            {
+                "file": "usr/lib/fixture_module.py",
+                "old": "TOTAL = 3\n",
+                "new": "TOTAL = (3\n",
+                "label": "malformed: the signature never closes",
+                "expect": ["test_the_total_is_what_the_docstring_says"],
+            },
+            {
+                "file": "usr/lib/fixture_module.py",
+                "old": self._ANCHOR,
+                "new": "    return sum(items) + 1\n",
+                "label": "and this one is real",
+                "expect": ["test_the_total_is_what_the_docstring_says"],
+            },
+        ])
+        out = _run(name, cwd=tmp_path)
+        report = out.stdout + out.stderr
+
+        assert out.returncode == 1, report
+        # The whole claim, in one line: both mutations were accounted for, and
+        # the one after the malformed entry was measured rather than skipped.
+        assert "2 mutations, 1 caught" in report, (
+            "a malformed mutation cost the set the entries after it:\n"
+            + report)
+        assert "1 unmeasurable" in report, report
+        assert "0 survivors" in report, report
+        assert "1 of 1 sets" in report, report
+        # And both labels are named, so which one was refused is answerable.
+        assert "malformed: the signature never closes" in report, report
+        assert "and this one is real" in report, report
+        # The fixture tree is byte-identical afterwards: the good mutation was
+        # restored, and the bad one never landed.
+        ast.parse((tmp_path / "usr" / "lib" / "fixture_module.py").read_text(
+            encoding="utf-8"))
 
     # -- level two: what reaches the disk ---------------------------------
 
@@ -544,9 +664,14 @@ class TestAMutationThatChangesNothingIsRefused:
         """
         target = self._pair_fixture(tmp_path)
         before = target.read_bytes()
+        # One namespace for the class *and* the raiser: a second `exec` builds a
+        # second `MalformedMutation`, and `pytest.raises` would then let a real
+        # malformed mutation escape as an uncaught exception.
+        ns = _runner()
+        malformed = ns["MalformedMutation"]
 
-        with pytest.raises(AssertionError) as caught:
-            self._apply()(target, [(self._ANCHOR, "    return sum(items\n")])
+        with pytest.raises(malformed) as caught:
+            ns["_apply"](target, [(self._ANCHOR, "    return sum(items\n")])
 
         assert "does not parse" in str(caught.value), caught.value
         assert target.read_bytes() == before, (
@@ -580,17 +705,21 @@ class TestAMutationThatChangesNothingIsRefused:
         both shapes rather than on the presence of an exception.
         """
         target = self._pair_fixture(tmp_path)
+        ns = _runner()
 
         with pytest.raises(AssertionError) as no_op:
-            self._apply()(target, [(self._ANCHOR, self._ANCHOR)])
+            ns["_apply"](target, [(self._ANCHOR, self._ANCHOR)])
         message = str(no_op.value)
         assert "survivor" in message, (
             "the refusal does not say what it is preventing:\n" + message)
         assert "fixture_module.py" in message, (
             "the refusal does not name the file:\n" + message)
 
-        with pytest.raises(AssertionError) as malformed:
-            self._apply()(target, [(self._ANCHOR, "    return sum(items\n")])
+        # Same namespace as the no-op half above: the class and the raiser have to
+        # come from one exec or `pytest.raises` cannot match.
+        malformed_refusal = ns["MalformedMutation"]
+        with pytest.raises(malformed_refusal) as malformed:
+            ns["_apply"](target, [(self._ANCHOR, "    return sum(items\n")])
         message = str(malformed.value)
         assert "malformed, not uncovered" in message, message
         assert "fixture_module.py" in message, message
@@ -683,6 +812,161 @@ class TestAMutationThatChangesNothingIsRefused:
         ast.parse(target.read_text(encoding="utf-8"))
 
 
+class TestATimedOutRunLeavesNothingBehind:
+    """A cap that kills only the child is not a cap.
+
+    `subprocess.run(..., timeout=...)` terminates the **direct child** and
+    raises; anything that child started keeps running. For a mutation harness
+    that is not a tidiness question - the thing that survives is a process
+    still rewriting the tree, with no parent and no lock.
+
+    Measured 2026-10-16 on this repository's own `harness` set, and it is how
+    the malformed mutation above was found: the set's first mutation makes a
+    test's second `mutate.py` **take** the lock instead of refusing it, so the
+    pytest run overran `RUN_TIMEOUT`, pytest was killed, and a
+    `mutate.py --quiet` grandchild went on applying mutations alone. That is the
+    "two overlapping runs left two mutations stuck applied" incident the
+    `harness` set's own docstring records as re-established **by hand** - and
+    the mechanism that produced it was the harness's own timeout.
+
+    The control is the point of the first test and is **the other direction**: the
+    same scenario run through `subprocess.run` must leave the marker behind. A
+    marker that never appears because the grandchild never started would make
+    every assertion below pass forever.
+    """
+
+    #: A parent that spawns a grandchild and then idles. The grandchild writes
+    #: `marker` two seconds later - after the one-second cap - so the marker can
+    #: only exist if something beyond the parent survived the cap.
+    _PARENT = (
+        "import subprocess, sys, time;"
+        "subprocess.Popen([sys.executable, '-c',"
+        " \"import sys, time; time.sleep(2);"
+        " open(sys.argv[1], 'w').write('survived')\","
+        " sys.argv[1]]);"
+        "time.sleep(30)"
+    )
+
+    _settle = 3.0   # past the grandchild's 2s write
+    _cap = 1
+
+    def _scenario(self, tmp_path, runner, label):
+        """Run the tree-spawning parent under `runner`; True if it survived.
+
+        `runner` is called as `runner(cmd, cap)` so the same helper shape serves
+        `subprocess.run` and the runner's own `_run_capped`, which takes its
+        timeout as a positional argument.
+        """
+        marker = tmp_path / f"{label}.marker"
+        assert not marker.exists(), f"{label}: a stale marker answers for us"
+        cmd = [sys.executable, "-c", self._PARENT, str(marker)]
+        raised = False
+        try:
+            runner(cmd, self._cap)
+        except subprocess.TimeoutExpired:
+            raised = True
+        assert raised, (
+            f"{label}: the parent finished inside the cap, so nothing was "
+            f"tested - a scenario that does not time out proves nothing")
+        time.sleep(self._settle)
+        return marker.exists()
+
+    def test_the_control_first_because_it_is_what_gives_the_marker_meaning(
+            self, tmp_path):
+        """The negative direction, asserted first.
+
+        `subprocess.run` with a timeout leaves the grandchild alive: the marker
+        appears. Without this the test below would pass on a scenario where the
+        grandchild never started at all.
+        """
+        survived = self._scenario(
+            tmp_path, lambda cmd, cap: subprocess.run(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, timeout=cap),
+            "control")
+        assert survived, (
+            "the grandchild did not survive subprocess.run, so the marker "
+            "cannot distinguish the helper from a scenario that never ran it")
+
+    def test_a_capped_run_leaves_no_grandchild_behind(self, tmp_path):
+        """The claim: the cap ends the child **and everything it started**."""
+        survived = self._scenario(
+            tmp_path, _runner()["_run_capped"], "capped")
+        assert not survived, (
+            "the grandchild outlived the cap and would still be rewriting the "
+            "tree - which is the incident this helper exists to close")
+
+    def test_a_command_that_finishes_is_not_killed(self, tmp_path):
+        """The other half, and what stops the first test being a blanket kill.
+
+        A helper that SIGKILLed everything unconditionally would pass the two
+        above and break every ordinary mutation run in this repository.
+        """
+        out = _runner()["_run_capped"](
+            [sys.executable, "-c", "print('done')"],
+            timeout=self._cap,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        assert out.returncode == 0, out
+        assert "done" in out.stdout, out
+
+    def test_stdout_and_stderr_are_both_captured(self, tmp_path):
+        """`capture_output` is a `run` convenience; the helper takes the pipes.
+
+        A conversion that dropped one of them would make `_failures` blind to
+        whichever stream pytest used - and `subprocess.run` gives both under one
+        argument, so the loss would be silent.
+        """
+        out = _runner()["_run_capped"](
+            [sys.executable, "-c",
+             "import sys; print('on-out'); print('on-err', file=sys.stderr)"],
+            timeout=self._cap,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        assert "on-out" in out.stdout, out
+        assert "on-err" in out.stderr, out
+
+    def test_both_call_sites_go_through_the_helper(self):
+        """**A source check, and the reason it is one is the timeout.**
+
+        The four tests above drive `_run_capped` **directly**, so they are all
+        green if the helper is perfect and nothing calls it - which is exactly
+        the shape of the defect, because `subprocess.run(timeout=)` is what both
+        call sites used and what the orphan incident went through.
+
+        A runtime witness here would have to time out a real pytest run, and the
+        budget is `RUN_TIMEOUT = 300`, so one test would cost five minutes to
+        measure the same two lines. **A check that is expensive and says the same
+        thing as a cheap one is not worth running**, so the wiring is read off
+        the source - and both directions are asserted, because "mentions
+        `subprocess.run`" alone is satisfied by a module docstring.
+
+        The `--collect-only` site is included because it is the one that is
+        forgotten: it runs once per set rather than per mutation, so a revert
+        there is invisible to every behavioural test in this class.
+        """
+        ns = _runner()
+        for name in ("_failures", "_collected_ids"):
+            source = inspect.getsource(ns[name])
+            assert "_run_capped(" in source, (
+                f"{name} does not go through the helper, so a capped run leaves "
+                f"whatever it started behind:\n{source}")
+            assert "subprocess.run(" not in source, (
+                f"{name} calls subprocess.run directly, which kills the child and "
+                f"leaves its children running:\n{source}")
+
+    def test_the_timeout_budget_is_still_a_positive_int(self):
+        """Both call sites pass `RUN_TIMEOUT`, and `int` is what it is.
+
+        `communicate(timeout=...)` raises `TypeError` on a `None` and accepts a
+        float, so a cap that silently became "no cap" would surface as a hang
+        rather than as a failure - and the orphan above was a hang.
+        """
+        cap = _runner()["RUN_TIMEOUT"]
+        assert isinstance(cap, int) and not isinstance(cap, bool), cap
+        assert 0 < cap <= 3600, (
+            f"a cap of {cap}s is not a cap: measured, 300s is four times the "
+            f"slowest real set")
+
+
 class TestTheTreeIsOnlyEverHeldByOneRun:
     """**Two rules added because this harness itself corrupted the repository.**
 
@@ -702,14 +986,8 @@ class TestTheTreeIsOnlyEverHeldByOneRun:
     run says so". These are the controls that can tell it.
     """
 
-    def _runner(self):
-        namespace = {"__file__": str(RUNNER)}
-        exec(compile(RUNNER.read_text(encoding="utf-8"), str(RUNNER), "exec"),
-             namespace)
-        return namespace
-
     def test_a_second_run_is_refused_and_says_whose(self, tmp_path):
-        ns = self._runner()
+        ns = _runner()
         ns["STATE_DIR"] = tmp_path / "build" / "mutate"
         first = ns["_Lock"]()
         first.__enter__()
@@ -730,7 +1008,7 @@ class TestTheTreeIsOnlyEverHeldByOneRun:
         """A crashed run must not deadlock the next attempt - and taking its lock
         silently would be the same class as silently deleting a rotated anchor.
         """
-        ns = self._runner()
+        ns = _runner()
         state = tmp_path / "build" / "mutate"
         state.mkdir(parents=True)
         # **This line was missing in the first version, and the test passed
@@ -763,7 +1041,7 @@ class TestTheTreeIsOnlyEverHeldByOneRun:
         So the pre-run text is journalled before the first mutation, and the next
         run restores it and says which files it touched.
         """
-        ns = self._runner()
+        ns = _runner()
         tree = tmp_path / "usr" / "lib"
         tree.mkdir(parents=True)
         target = tree / "fixture_module.py"
@@ -794,7 +1072,7 @@ class TestTheTreeIsOnlyEverHeldByOneRun:
         and the journal still says otherwise - and a run killed in that gap
         recovers nothing, which is the failure the journal exists to catch.
         """
-        ns = self._runner()
+        ns = _runner()
         tree = tmp_path / "usr" / "lib"
         tree.mkdir(parents=True)
         target = tree / "fixture_module.py"
@@ -1091,15 +1369,9 @@ class TestTheTallyCannotBeQuietlyWrong:
     there is no flag that can take the failures with it.
     """
 
-    def _runner(self):
-        namespace = {"__file__": str(RUNNER)}
-        exec(compile(RUNNER.read_text(encoding="utf-8"), str(RUNNER), "exec"),
-             namespace)
-        return namespace
-
     def test_a_run_reports_its_failures_and_its_skips_together(self, tmp_path):
         """The regression guard. Both numbers, from the same run."""
-        ns = self._runner()
+        ns = _runner()
         probe = tmp_path / "test__mixed.py"
         probe.write_text(MIXED_TEST, encoding="utf-8")
         ns["STATE_DIR"] = tmp_path / "build" / "mutate"

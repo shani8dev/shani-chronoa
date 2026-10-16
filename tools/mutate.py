@@ -71,6 +71,7 @@ import argparse
 import ast
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -129,6 +130,25 @@ class MutationDidNotParse(Exception):
 
     Raised rather than returned as "no summary", so it is reported as an
     **error** and not as a survivor - see `_failures` for the measurement.
+    """
+
+
+class MalformedMutation(Exception):
+    """This mutation's own anchor and replacement do not make the file it claims.
+
+    **A statement about one mutation, not about the tree**, which is why it is a
+    separate class from `MutationDidNotParse` and is caught beside it per
+    mutation. A rotated anchor (`count == 1`) stays a bare `AssertionError` and
+    still stops the set, because that *is* a statement about the file every
+    remaining mutation is aimed at.
+
+    The distinction was measured: the first version of the parse guard raised
+    `AssertionError`, so one mutation whose anchor matched a **prefix** of a
+    multi-line statement landed its insertion inside an open parenthesis, and the
+    whole set aborted with **`0 mutations, 0 caught`** over a run that had
+    already measured two. That is the exact failure the per-mutation
+    `MutationDidNotParse` handling exists to prevent, reached through the guard
+    that was added to prevent a different one.
     """
 
 
@@ -308,9 +328,45 @@ def _test_env() -> dict:
     return env
 
 
+def _run_capped(cmd: list, timeout: int, **kwargs) -> "subprocess.CompletedProcess":
+    """`subprocess.run` with a timeout that also ends what the child started.
+
+    **`subprocess.run(timeout=...)` kills the direct child and raises; a
+    grandchild it spawned survives.** Measured 2026-10-16 on this very set: its
+    first mutation makes a test's second `mutate.py` **take** the lock rather
+    than refuse it, so the pytest run exceeded `RUN_TIMEOUT`,
+    `subprocess.run` killed pytest, and the `mutate.py --quiet` grandchild
+    carried on applying mutations with no parent and no lock. That is the
+    "two overlapping runs left two mutations stuck applied" incident
+    `harness.py`'s own docstring records as re-established **by hand** - and
+    the mechanism that produced it is this file's own timeout.
+
+    `start_new_session=True` puts the child in its own process group, so a
+    single `os.killpg` ends the child *and* everything it started. SIGKILL
+    rather than SIGTERM because the thing being cleaned up is a process that has
+    already had its whole budget: giving it a chance to tidy up is the wrong
+    trade for a runner whose contract is that the tree is restored afterwards.
+
+    **`proc.pid` is the group id**, which is exactly what `start_new_session`
+    guarantees and the reason the pid is read before the group is killed.
+    """
+    proc = subprocess.Popen(cmd, start_new_session=True, **kwargs)
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        out, err = proc.communicate()
+        raise subprocess.TimeoutExpired(
+            cmd, timeout, output=out, stderr=err) from None
+    return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
+
+
 def _failures(test_file: str) -> tuple:
     """(the FAILED test ids, the summary line)."""
-    out = subprocess.run(
+    out = _run_capped(
         [sys.executable, "-m", "pytest", test_file, "-q",
          "-p", "no:cacheprovider", "--tb=no", "-rfE"],
           # **`-rfE`, not `-rf`.** Measured 2026-12 from the first complete
@@ -344,7 +400,8 @@ def _failures(test_file: str) -> tuple:
           # every set is reported as a survivor** - the harness becomes a stamp
           # that says nothing was caught. The skip count is read from the summary
           # line instead, which already carries it and costs no flag.
-        capture_output=True, text=True, env=_test_env(),
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, env=_test_env(),
         cwd=str(ROOT), timeout=RUN_TIMEOUT,
     )
     text = out.stdout + out.stderr
@@ -431,10 +488,11 @@ def _collected_ids(test_file: str) -> set:
     fraction of a second, against a mutation that costs one full test-file run
     each.
     """
-    out = subprocess.run(
+    out = _run_capped(
         [sys.executable, "-m", "pytest", test_file, "--collect-only", "-q",
          "-p", "no:cacheprovider"],
-        capture_output=True, text=True, env=_test_env(),
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, env=_test_env(),
         cwd=str(ROOT), timeout=RUN_TIMEOUT,
     )
     # **The bare method name, because that is what `_failures` stores.** The
@@ -543,7 +601,7 @@ def _apply(path: Path, pairs) -> None:
     try:
         ast.parse(text)
     except SyntaxError as exc:
-        raise AssertionError(
+        raise MalformedMutation(
             "the spliced text of %s does not parse (%s at line %s) - this "
             "mutation is malformed, not uncovered; the file was not written"
             % (path.name, exc.msg, exc.lineno)) from exc
@@ -597,7 +655,7 @@ def run_set(name: str, path: Path, verbose: bool = True) -> dict:
             if verbose:
                 print(f"  MUTATED: {entry['label']}")
             failed, summary, skipped = _failures(test_file)
-        except MutationDidNotParse as unmeasurable_run:
+        except (MutationDidNotParse, MalformedMutation) as unmeasurable_run:
             # **One mutation pytest could not measure is a result about that
             # mutation, not a reason to abandon the rest of the set.** Measured
             # 2026-12: `sense_budget`'s "the worker catches Exception instead of
@@ -607,10 +665,19 @@ def run_set(name: str, path: Path, verbose: bool = True) -> dict:
             # silently excluded them. Counting sets is not enough; a partial
             # inventory has to be able to say it is a fraction of a mutation too.
             #
-            # **Only `MutationDidNotParse` is caught.** `_apply`'s refusal on a
-            # rotated anchor still propagates and still stops the set, because
-            # that is a statement about the whole file the remaining mutations
-            # are aimed at, not about one run.
+            # **Exactly two things are caught, and the split is the point.**
+            # `MutationDidNotParse` is about the run and `MalformedMutation` is
+            # about *this mutation's own splice* - both are statements about one
+            # mutation, so both land in `unmeasurable` and the set continues.
+            # `_apply`'s `count == 1` refusal still propagates and still stops the
+            # set, because a rotated anchor is a statement about **the file every
+            # remaining mutation is aimed at**, not about one run: the other nine
+            # entries in this set would each report a survivor measured against a
+            # file none of their anchors is in.
+            #
+            # A bare `AssertionError` out of `_apply` used to be the third member
+            # of this tuple by accident rather than by decision, and it cost a
+            # whole set - see `MalformedMutation`.
             unmeasurable.append((entry["label"], unmeasurable_run))
             if verbose:
                 print(f"    -> UNMEASURABLE  ({unmeasurable_run})")
