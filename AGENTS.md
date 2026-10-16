@@ -26537,3 +26537,43 @@ implemented `zwlr_layer_shell_v1`, so `available()` is still `False` here and no
 of this reaches a surface on this desktop. What changed is the **precondition**: on a
 wlroots or KDE machine this was the second of two independent defects standing
 between the mascot and a working layer surface.
+
+**The mascot's art can go into a Shell actor without being rewritten — but the
+route is a file, and GJS has no byte route.** Measured in a private headless
+`gnome-shell` with real screenshots (`harness-study/HARVEST-COUCOU.md` PART 9):
+
+- **Stacking is a non-issue.** An `St` actor under `Main.uiGroup` draws over a
+  **fullscreen** window (57,600 / 57,600 px, against 0 for a hidden control).
+  `Main.layoutManager.overlayGroup` **does not exist** on GNOME 50 and is not
+  needed: `uiGroup` is a *sibling* of `Meta_WindowGroup`.
+- **There is no byte push from GJS.** `St.ImageContent.set_bytes`/`set_data`
+  require a `CoglContext`, and this build exposes no way to make one:
+  `Cogl.Context` is absent, `Clutter.get_default_backend()` returns a
+  `MetaClutterBackendNative` which GJS refuses, and it is not a global.
+  `Gdk.MemoryTexture.new` constructs (0.082 ms median) — construction, not
+  display, and its `download()` is not byte-identical.
+- **The working route is `St.TextureCache.get_default().load_file_sync(cache,
+  Gio.File, w, h, 1, 1)`**, which returns a **`ClutterActor`**, so `set_content`
+  is never involved — add the returned actor to the group. It wants **six**
+  arguments, cache first and `file` second.
+- **It is pixel-exact**: 69,696 / 69,696 for all three states against the
+  mascot's own SVG raster composited over the *measured* background, including
+  5,584–15,873 partial-alpha pixels.
+- **The cost is real: 12.4 ms per changed frame** (11.143 ms app-side `savev`,
+  1.253 ms Shell-side load) against a 16.6 ms budget. `gaze` produces a new
+  picture on 1000 / 1000 samples, so it must be split out — but it moves only
+  ≤415 px inside a ~40×37 box, so a Cairo `St.DrawingArea` over a file-loaded
+  body is the design that fits.
+
+Two traps here that cost real time, and both have a general shape:
+
+1. **`typeof St.ImageContent.set_bytes` is `undefined` for an instance method.**
+   A presence probe that asks only the constructor object reports half the API
+   as absent, and the conclusion drawn was "the Shell has no byte route" — which
+   was true, but for a different reason than the one given. Check
+   `Class.prototype[name]` too.
+2. **A measurement can be true and the conclusion still wrong.** "Pixels outside
+   the eye box are unchanged" was reported as proof the split worked, while the
+   box had been added at child index 0 — underneath an opaque body — and painted
+   **0 px**. The independent control (does the thing under test actually paint?)
+   is not optional when every other number checks out.
