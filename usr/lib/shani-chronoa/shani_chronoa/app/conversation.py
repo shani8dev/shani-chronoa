@@ -14,6 +14,7 @@ from gi.repository import Gio, GLib  # type: ignore
 
 
 from shani_chronoa import planmode, conversation_store, user_prompts, speech
+from shani_chronoa import mascot_events
 from shani_chronoa.assistant import Assistant
 from shani_chronoa.gui import AssistantState, ChronoaWindow
 from shani_chronoa.senses import memory
@@ -557,6 +558,17 @@ class ConversationMixin:
 
     def _on_tool_call(self, name: str, _arguments: dict) -> None:
         """Assistant callback - runs on AsyncBridge's background thread."""
+        # On screen too, where the person is looking - which is often not this
+        # window (desktop_cue.py).
+        from shani_chronoa import desktop_cue
+        cue = desktop_cue.for_tool(name, _arguments)
+        GLib.idle_add(lambda: (desktop_cue.show(cue), False)[1])
+        # The companion's own bubble, from the same words - so a long turn says
+        # *what* it is doing and not only that it is busy. The leading name is
+        # dropped because the bubble is already attached to the mascot; both go
+        # onto the loop because this callback runs on `AsyncBridge`'s thread.
+        step = cue.split(": ", 1)[1] if ": " in cue else cue
+        GLib.idle_add(lambda: (mascot_events.step(step), False)[1])
         GLib.idle_add(self._on_tool_call_main, name)
 
     def _on_tool_call_main(self, name: str) -> bool:
@@ -648,6 +660,12 @@ class ConversationMixin:
         later would need the same information in two places.
         """
         self._on_tool_result_main(name, arguments, result, ok, artifacts)
+        if name == "todo_list":
+            # The plan, on screen: which step, of how many (desktop_cue.py).
+            from shani_chronoa import desktop_cue
+            plan = desktop_cue.plan_text()
+            if plan:
+                GLib.idle_add(lambda: (desktop_cue.show(plan), False)[1])
 
     def _on_response_ready(self, result: object) -> bool:
         """Deliver an assistant response (or error) back on the GTK main thread."""
@@ -678,6 +696,11 @@ class ConversationMixin:
                 # label already says it; what the turn owes the detail line
                 # is the end of a progress reading.
                 self.window.set_progress("")
+            # The companion wore the concerned face for a failed turn: the same
+            # fact the notice row states, fetched from a face before the words
+            # are read. Emitted before `_turn_finished` starts anything queued,
+            # so it is this turn's ending that shows, not the next turn's start.
+            mascot_events.error(str(result))
             self._turn_finished()
             return GLib.SOURCE_REMOVE
 
@@ -716,5 +739,11 @@ class ConversationMixin:
                 queue.speak(speech.split_sentences(response))
             queue.close()
 
+        # The companion's "build-ok" face for an answered turn: the same fact
+        # the transcript already shows, fetched from a face before the words
+        # are read. Emitted before `_turn_finished` starts anything queued,
+        # so it is this turn's ending that shows, not the next turn's start -
+        # the same reason the failure path emits on its exit.
+        mascot_events.finished()
         self._turn_finished()
         return GLib.SOURCE_REMOVE

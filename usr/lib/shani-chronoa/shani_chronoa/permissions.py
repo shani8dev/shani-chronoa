@@ -927,7 +927,23 @@ def decide(action: str, resource: "str | None", consent_key: str,
         options,
         timeout=DECISION_TIMEOUT_SECONDS,
         preview=preview,
+        # The face while it waits is the *approval* one, not the generic question
+        # face `ask_bridge` defaults to - a gate the app raised is a different
+        # moment from a question the model chose to ask.
+        kind="meeting",
     ))
+    # **One face for the answer, wherever the branches below take it.** The
+    # decision has four exits (allow-turn, allow-once/session, feedback,
+    # refuse/cancel/timeout), and a face emitted at each would be four copies of
+    # one rule that could drift. So it is read once here: anything that lets the
+    # call proceed is the happy face, and a refusal, a cancel and a *timeout with
+    # nobody there* are all the concerned one - the same way `decide` itself
+    # treats those three as one "no". Failure direction: this runs *after* the
+    # answer, so a face can never precede the decision it reports.
+    from shani_chronoa import mascot_events
+    mascot_events.settled(reply.reply in (
+        Decision.ALLOW_ONCE, Decision.ALLOW_TURN, Decision.ALLOW_SESSION,
+        Decision.FEEDBACK))
 
     if reply.reply == Decision.ALLOW_TURN:
         label = _turn_label()

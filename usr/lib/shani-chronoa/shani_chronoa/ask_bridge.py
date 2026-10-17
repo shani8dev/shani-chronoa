@@ -108,11 +108,18 @@ def preview_for(question: str):
 
 
 def ask(question: str, options: list, timeout: float = DEFAULT_TIMEOUT_SECONDS,
-        preview=None) -> str:
+        preview=None, kind: str = "greet") -> str:
     """Put `question` to the user and return the chosen option.
 
     `preview` is what the answer is about, drawn under the question - so "may
     it edit greet.py?" is asked with the edit on screen, not after it.
+
+    `kind` is the face the companion wears while it waits, a `notice()` kind -
+    the default is a tool's own question, and `permissions.decide` passes the
+    approval face because a gate is not a question the model chose to ask. It
+    rides here, at the one chokepoint every question passes, rather than at each
+    caller: `ask_user`, a plan, the phone and the browser all come through here,
+    and a producer added later gets the face by default instead of by memory.
 
     Returns "" when there is nobody to answer, when the user dismisses the
     prompt, or when the wait times out - all three are "no answer was given",
@@ -129,6 +136,12 @@ def ask(question: str, options: list, timeout: float = DEFAULT_TIMEOUT_SECONDS,
         _pending.append(question)
         if preview is not None:
             _previews[question] = preview
+    # **The one place a face goes for a question.** Emitted before the presenter
+    # is called, so the expression is up as the widget appears rather than after
+    # the answer - the face is for the *waiting*, and there is none left by the
+    # time `ask` returns. No mascot listening is a no-op (`mascot_events`).
+    from shani_chronoa import mascot_events
+    mascot_events.emit(kind, question)
     try:
         done = _presenter(question, list(options))
     except Exception as exc:  # noqa: BLE001 - a broken presenter is not a choice

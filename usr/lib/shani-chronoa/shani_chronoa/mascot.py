@@ -8,9 +8,16 @@ window pinned to a corner, and makes it *live*:
   show "thinking" while the orb says "idle";
 - it **idles** with a gentle bob and an occasional blink, and the bob stops when
   the desktop asks for less animation;
-- it **reacts to an event** through `notice(kind, text)` - a landline call
-  today, others as they are wired - showing the matching expression and a short
-  speech bubble;
+- it **reacts to an event** through `notice(kind, text)` - a landline call, a
+  permission prompt and its outcome, a tool's question, a finished turn, a
+  failed one - each showing the matching expression and a short speech bubble.
+  The producers are the modules that *make* those decisions and they reach here
+  through `mascot_events`, because none of them holds this object;
+- it **follows a tool run** with a step bubble (`mascot_events.step`), the same
+  words the desktop cue pill shows, so a long turn says *what* it is doing
+  rather than only that it is busy;
+- it **falls asleep** after `_SLEEP_AFTER_MS` of an idle sprite and wakes on the
+  next state, event or pointer motion;
 - **clicking it starts listening** (`toggle-listening`), so it is a face *and* a
   button.
 
@@ -33,6 +40,7 @@ import logging
 #: those two reach for it a second way.
 from shani_chronoa import mascot_art
 from shani_chronoa import mascot_drag
+from shani_chronoa import mascot_events
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +105,15 @@ _DONE_HOLD_MS = 200
 #: 6.25s, grow from 6.50s to 6.95s after the release).
 _WORK_SECONDS = 3.0
 
+#: Idle before the sprite nods off. Coucou's `desktop-logic.ts` uses 120 s, and
+#: the exact number matters less than that it is longer than any pause a person
+#: makes mid-thought: a companion that falls asleep between two questions is a
+#: distraction, not a companion. The pointer-far condition their version also
+#: carries is implicit here - `_on_motion` fires only while the pointer is over
+#: the sprite, and any motion wakes it - so a reach for the mascot is always
+#: enough to find it awake.
+_SLEEP_AFTER_MS = 120_000
+
 
 def _clamp(value: float, low: float, high: float) -> float:
     """Hold `value` inside `[low, high]`, and tolerate `high < low`.
@@ -112,13 +129,15 @@ def _clamp(value: float, low: float, high: float) -> float:
 
 #: event kind -> the expression `mascot_art` draws for it.
 #:
-#: **One of these nine has a producer.** `call` is fired by `landline`, wired in
-#: `app/application.py`. Nothing anywhere calls `notice("meeting")`,
-#: `notice("build-ok")` or any of the other six, so the reactions this module used
-#: to promise in its docstring did not happen and the artwork was unreachable.
-#: They are kept because the expression is drawn and tested and because a
-#: producer is a product decision rather than a mechanical wire-up - but the count
-#: is stated here so the next reader greps for a producer instead of assuming one.
+#: **Five of these nine now have producers, through `mascot_events`.** `call` is
+#: fired by `landline`; `meeting` by an approval prompt, `build-ok`/`build-fail`
+#: by its answer and by a turn ending (well or badly), and `greet` by a tool's
+#: question. The names are the reference's own - `mascot_events.BY_NAME` is the
+#: one table, so the next reader greps there rather than guessing at call sites.
+#: The remaining four (`download`, `away`, `love`, `sleep`) are still drawn and
+#: tested with no producer, which is a product decision rather than a mechanical
+#: wire-up - they are kept so the artwork a state reaches is not deleted for
+#: want of a caller.
 _EVENT_FACE = {
     "meeting": "surprised", "call": "surprised",
     "build-ok": "excited", "build-fail": "concerned",
@@ -328,6 +347,17 @@ class Mascot:
         self._unblink_timer = 0
         self._bob_timer = 0
         self._bob = 0
+        self._sleep_timer = 0
+        # Whether the sprite is showing its `sleepy` face on the idle timer, and
+        # when it last did anything. `_last_activity` is a monotonic clock rather
+        # than a count of ticks: the tick that sleeps compares it to now, so a
+        # pause is measured in seconds and not in how often GLib happened to run.
+        self._asleep = False
+        self._last_activity = 0.0
+        # The thread the GTK loop runs on, recorded when `start()` builds the
+        # window. `mascot_events` producers call from the tool loop's thread, so
+        # `_on_event` compares against this to decide whether to hop.
+        self._main_thread = None
         # Where the mascot is looking, and the controller that moves it. Both are
         # cleared in `stop()` with the rest: the controller belongs to the window
         # being destroyed, and a bearing left over from a destroyed window would
@@ -370,15 +400,33 @@ class Mascot:
             return False
         self._watch_state()
         self._schedule()
+        # The bus is installed **after** the window exists, so a producer that
+        # fires during `_build` cannot reach a half-built tree, and cleared in
+        # `stop()` before the window is destroyed, so a late event cannot reach
+        # a dead one. `_main_thread` is read by `_on_event` to tell a producer on
+        # the tool loop's thread from one already on this one.
+        import threading
+        import time
+        self._main_thread = threading.get_ident()
+        self._last_activity = time.monotonic()
+        mascot_events.install(self._on_event)
         return True
 
     def stop(self) -> None:
         from gi.repository import GLib
+        # Cleared first, before the window is torn down: a producer already in
+        # flight on another thread must find no listener rather than reach a
+        # tree that is about to be destroyed. The `listener is _listener` guard
+        # in `uninstall` keeps a late stop from unlistening a newer mascot.
+        mascot_events.uninstall(self._on_event)
         # `_unblink_timer` belongs in this list and used not to be tracked at all,
         # which is why `stop()` could not cancel it: the blink schedules an
-        # un-blink and threw the source id away.
+        # un-blink and threw the source id away. `_sleep_timer` is the same debt
+        # for the idle nap: without it, a stop would leave a timeout that paints
+        # a sleepy face onto the next window.
         for tid in ("_blink_timer", "_bob_timer", "_expr_timer",
-                    "_bubble_timer", "_unblink_timer", "_frame_timer"):
+                    "_bubble_timer", "_unblink_timer", "_frame_timer",
+                    "_sleep_timer"):
             t = getattr(self, tid, 0)
             if t:
                 GLib.source_remove(t)
@@ -408,6 +456,8 @@ class Mascot:
         self._bubble = None
         self._blink = False
         self._shell = None
+        self._asleep = False
+        self._main_thread = None
 
     def _build(self) -> bool:
         import gi
@@ -700,6 +750,7 @@ class Mascot:
         state = state if state in mascot_art.states() else "idle"
         if state != self._state:
             self._state = state
+            self._note_activity()
             self._announce()
             self._render()
             # On the *transition*, not on every call: `set_state` is how a level
@@ -793,6 +844,7 @@ class Mascot:
 
     def notice(self, kind: str, text: str = "") -> None:
         """React to something that happened: an expression, and maybe a bubble."""
+        self._note_activity()
         expr = _EVENT_FACE.get(kind)
         if expr is None:
             # A misspelled or unwired kind used to show a surprise face for three
@@ -813,6 +865,10 @@ class Mascot:
         # read here rather than cached, so flipping it does not need a restart.
         if not _motion_is_reduced():
             self._bob_timer = GLib.timeout_add(_BOB_EVERY_MS, self._bob_tick)
+        # The idle nap. Armed here with the other timers, and re-armed by
+        # `_note_activity` whenever something happens - so the clock it measures
+        # is time since the *last* thing, not time since the window opened.
+        self._arm_sleep()
 
     def _blink_once(self) -> bool:
         from gi.repository import GLib
@@ -829,6 +885,93 @@ class Mascot:
         self._render()
         return False
 
+    # --- the idle nap ---------------------------------------------------------
+    def _arm_sleep(self) -> None:
+        """(Re)arm the one-shot timeout that puts the sprite to sleep."""
+        from gi.repository import GLib
+        if self._sleep_timer:
+            GLib.source_remove(self._sleep_timer)
+        self._sleep_timer = GLib.timeout_add(_SLEEP_AFTER_MS, self._sleep_tick)
+
+    def _note_activity(self) -> None:
+        """Something happened: reset the sleep clock, and wake if already asleep.
+
+        Called from `set_state`, `notice` and `_on_motion` - the three things
+        that mean "the person or the assistant is doing something". It does
+        **not** re-arm the timeout on every call, because motion fires far faster
+        than a nap needs to be rescheduled; instead it records *when*, and
+        `_sleep_tick` re-arms itself for whatever is left.
+        """
+        import time
+        self._last_activity = time.monotonic()
+        self._wake()
+
+    def _wake(self) -> None:
+        """Clear the sleepy face if it is showing. Idempotent."""
+        if not self._asleep:
+            return
+        self._asleep = False
+        if self._expr == "sleepy":
+            self._expr = ""
+        self._render()
+
+    def _sleep_tick(self) -> bool:
+        """Fall asleep once `_SLEEP_AFTER_MS` have passed with nothing happening.
+
+        **The condition is the live state, not a flag set somewhere else.** The
+        nap is shown only while the assistant is `idle` and nothing is being
+        expressed; a turn beginning (`thinking`) or a face (`notice`) reaches
+        `_note_activity`, which wakes it - so it cannot be seen asleep while the
+        orb says *thinking*, which is the one reading that would be a lie. When
+        the state is busy it re-arms rather than sleeping late, so the 120 s is
+        measured from the last real thing and not from when a tick happened to
+        land.
+        """
+        import time
+        self._sleep_timer = 0
+        if self._win is None:
+            return False
+        last = self._last_activity or time.monotonic()
+        idle_ms = (time.monotonic() - last) * 1000.0
+        if self._state == "idle" and not self._expr and idle_ms >= _SLEEP_AFTER_MS:
+            self._asleep = True
+            self._expr = "sleepy"
+            self._render()
+            return False
+        from gi.repository import GLib
+        remaining = max(_SLEEP_AFTER_MS - idle_ms, 1000.0)
+        self._sleep_timer = GLib.timeout_add(int(remaining), self._sleep_tick)
+        return False
+
+    # --- events from the rest of the app --------------------------------------
+    def _on_event(self, kind: str, text: str = "") -> None:
+        """One `mascot_events` event, from whichever thread produced it.
+
+        **Producers are not on the GTK thread.** A permission is decided on the
+        tool loop's executor thread, so touching a widget from here directly would
+        be the undefined behaviour `ask_bridge`'s own docstring warns about. The
+        thread recorded at `start()` is compared against the caller's, and a
+        producer off it is hopped onto the loop the same way the landline call
+        already is - `GLib.idle_add` is safe to call from any thread.
+        """
+        import threading
+        if self._main_thread is not None and threading.get_ident() != self._main_thread:
+            try:
+                from gi.repository import GLib
+                GLib.idle_add(self._on_event_here, kind, text)
+            except Exception:  # noqa: BLE001 - a missed face is not a failed turn
+                logger.debug("mascot: could not queue %r", kind, exc_info=True)
+            return
+        self._on_event_here(kind, text)
+
+    def _on_event_here(self, kind: str, text: str = "") -> None:
+        """Route one event on the GTK thread: a step is a bubble, the rest a face."""
+        if kind == "step":
+            self._note_activity()
+            self.say(text)
+            return
+        self.notice(kind, text)
+
     # --- gaze -----------------------------------------------------------------
     def _on_motion(self, _controller, x: float, y: float) -> None:
         """Move the eyes toward the pointer, if that is worth drawing.
@@ -844,7 +987,13 @@ class Mascot:
         needs to be seen moving, and every call here rasterises the whole SVG, so
         a per-event redraw is the most expensive thing this module could do.
         """
-        if self._win is None or _motion_is_reduced():
+        if self._win is None:
+            return
+        # Presence wakes it, and does so even when reduce-motion stops the eyes
+        # following - the setting is about animation, not about whether the
+        # person is there.
+        self._note_activity()
+        if _motion_is_reduced():
             return
         bearing = _gaze_for(x, y, self._win.get_width(), self._win.get_height())
         if not _gaze_moved(self._gaze, bearing):

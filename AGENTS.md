@@ -27392,3 +27392,19 @@ been wrong rather than merely unhelpful.
 
 `../harness-study/HARVEST-COUCOU.md` **PART 10** (:988-1078) carries the full
 record; PART 9 (:789) is the Shell-actor design this builds on.
+
+### The mascot listens through one slot (`mascot_events`)
+
+The decisions worth a face are made where the mascot object does not exist
+(`ask_bridge.ask`, `permissions.decide`, `app/conversation.py`'s turn ends and
+tool steps), so producers reach it through a module-level slot; `emit` never
+raises and an empty slot is a no-op **by design** - the companion is off by
+default and on Mutter never opens at all. `BY_NAME` is the single event-name →
+face-kind table; every value except `"step"` must be a key of
+`mascot._EVENT_FACE`, and `tests/test_mascot_events.py` pins the table, the
+`step`-is-a-bubble route, the off-thread `GLib.idle_add` hop and all five
+producer call sites (count==1 **and** position, so removal and reordering both
+fail). Faces for a turn's ending are emitted **before** `_turn_finished()`, so
+the ending this turn caused is what shows, not the next turn's start; the
+queue-reentry `_turn_finished()` in `_submit` is deliberately not a producer
+site - nothing ended there.
