@@ -48,6 +48,8 @@ CONTROLLED = {
     # the Voice output group: the neural voice's opt-in switch and SoX's three
     # timbre controls, all built by `_build_voice_output`
     "kokoro-tts-enabled", "tts-pitch", "tts-tempo", "tts-rate",
+    "piper-tts-enabled",       # a switch in the Voice group, set through
+                               # `tts.PiperTTS.PIPER_KEY` (settings_window/voice.py)
     # The two voice-cloning keys, rows in the same group. Hand-listed for the
     # reason the comment above this set gives for the GAction keys, and for a
     # second reason worth naming: `voice-clone-voice` is written through
@@ -190,6 +192,26 @@ CONTROLLED = {
 # Keys deliberately not in the window, each with the reason. A new entry here
 # is a decision someone has to write down.
 NOT_EXPOSED = {
+    # **Set where the thing they control lives** (added 2026-10-15). Each has a
+    # real control; it is simply not in the Settings window.
+    "lan-bridge-enabled": "a switch in Connect a device, beside the phone it "
+                          "lets ask Chronoa (gui/connect_device.py)",
+    "mcp-servers": "edited on the Connections panel, where the servers it "
+                   "starts are listed (gui/surfaces/connections.py)",
+    "project-dir": "chosen with Build mode's project picker; the window sets "
+                   "it (app/application.py `_set_project`)",
+    "sandbox-command-memory-mb": "the Limits group on the Sandbox panel "
+                                 "(gui/surfaces/sandbox.py)",
+    "sandbox-command-timeout": "the Limits group on the Sandbox panel "
+                               "(gui/surfaces/sandbox.py)",
+    "sandbox-command-cores": "the Limits group on the Sandbox panel "
+                             "(gui/surfaces/sandbox.py)",
+    "sandbox-command-low-priority": "the Limits group on the Sandbox panel "
+                                    "(gui/surfaces/sandbox.py)",
+    "speak-replies": "the speaker toggle beside the microphone in the main "
+                     "window (gui/window.py `_speak_toggle`, `app.speak-replies`)",
+    "thinking": "the `app.thinking` menu in the mode strip, beside \"Answers "
+                "with\" (gui/window.py `_thinking_button`)",
     # **Where the answer comes from, chosen in the mode strip rather than here.**
     # `answer-mode` is a real GAction (`answer-mode`, a string state) and the
     # strip draws a menu button for it beside the reply-style chip, appending

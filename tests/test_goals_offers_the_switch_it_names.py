@@ -52,6 +52,10 @@ class _Config:
     def __init__(self, allowed=None, explode=False):
         self._allowed = allowed
         self._explode = explode
+        self.written = []
+
+    def set(self, key, value):
+        self.written.append((key, value))
 
     def get(self, key, default=""):
         return str(default)
@@ -80,24 +84,22 @@ def test_a_shut_gate_offers_the_switch_that_opens_it(monkeypatch):
     """The positive case, asserted on the **route**, not the label. A button
     with the right words that opens nothing is the orb this repo treats as the
     standing example of reading as complete and doing nothing."""
-    reached = []
-    monkeypatch.setattr(pages, "show",
-                        lambda target, application=None, config=None:
-                        reached.append(target) or True)
-
-    button = goals._grant_route(_App(allowed=False))
-    assert button is not None, (
+    # Since the 2026-10-15 redesign the route is **Turn on, here**: the banner
+    # writes the switch itself instead of sending the person to Privacy
+    # settings to find it. Asserted on the write, not the label.
+    app = _App(allowed=False)
+    banner = goals._grant_route(app)
+    assert banner is not None, (
         "the empty state named the switch that grants goals and offered no way "
         "to reach it")
-    assert isinstance(button, Gtk.Button)
+    buttons = _route_buttons(banner)
+    assert len(buttons) == 1, "the banner has no Turn on button"
 
-    button.emit("clicked")
+    buttons[0].emit("clicked")
     # A literal, not a constant read from the module: asserting against the
     # module's own value moves both sides at once and passes after a change.
-    assert reached == ["settings:privacy"], (
-        f"the press reached {reached!r}, not the page that writes "
-        f"{goals.GOALS_KEY!r}. That key is written in settings_window/privacy.py "
-        "and nowhere else.")
+    assert app.config.written == [("goals-enabled", "true")], (
+        f"the press wrote {app.config.written!r}, not the goals switch")
 
 
 def test_an_already_granted_gate_gets_no_button(monkeypatch):
@@ -184,7 +186,7 @@ def _walk(node, out=None):
 
 def _route_buttons(page):
     return [w for w in _walk(page)
-            if isinstance(w, Gtk.Button) and w.get_label() == "Open Privacy settings"]
+            if isinstance(w, Gtk.Button) and w.get_label() == "Turn on"]
 
 
 @pytest.fixture

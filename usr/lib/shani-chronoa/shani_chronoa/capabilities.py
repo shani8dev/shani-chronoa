@@ -221,6 +221,9 @@ GATED: dict[str, str] = {
     # else* - the same reason `phone-messages-send-enabled` exists, and the same
     # reason the skill confirms before dialling.
     "bluetooth_call": "bluetooth-call-enabled",
+    # The JioFiber landline through the router (like JioJoin). Its own switch
+    # for the same reason as bluetooth_call: a call rings someone else.
+    "landline_call": "landline-enabled",
     # Running containers: a container is a whole computer as far as what it
     # does is concerned, so starting one or running a command inside it is
     # its own agreement, never the `containers-sense-enabled` read key that
@@ -449,6 +452,7 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "screen_to_phone": ("Devices", "Show this screen on a phone"),
     # PipeWire's `org.pipewire.Telephony`, which is where ofono's role ended up.
     "bluetooth_call": ("Devices", "Call through a paired phone, on this computer's speakers"),
+    "landline_call": ("Devices", "Call on your JioFiber landline, over Wi-Fi through the router"),
     "set_mic_mute": ("Sound", "Mute or unmute the microphone input"),
     "set_keyboard_layout": ("Pointer and keyboard", "Change the keyboard layout"),
     # Reads GNOME's two keybinding schemas rather than a copy of them, and says
@@ -865,6 +869,7 @@ GATE_NAMES: dict[str, str] = {
     "calendar-write-enabled": "Let Chronoa change your calendar",
     "bluetooth-gatt-enabled": "Let Chronoa read your Bluetooth devices",
     "bluetooth-call-enabled": "Let Chronoa call through your paired phone",
+    "landline-enabled": "Let Chronoa use your JioFiber landline",
     "phone-remote-enabled": "Let my phone pair this computer as a Bluetooth keyboard",
     "nfc-enabled": "Let Chronoa read and write NFC tags",
     "fm-radio-enabled": "Let Chronoa tune an FM radio",

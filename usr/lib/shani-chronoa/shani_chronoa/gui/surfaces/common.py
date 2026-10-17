@@ -623,8 +623,15 @@ def row(title: str, subtitle: str = "", suffix: Optional[Gtk.Widget] = None,
 
 def switch_row(title: str, subtitle: str = "", active: bool = False,
                on_changed: Optional[Callable[[bool], None]] = None) -> Gtk.Widget:
-    """A row whose suffix is a switch, wired to `on_changed`."""
-    toggle = Gtk.Switch(valign=Gtk.Align.CENTER)
+    """A row whose suffix is a switch, wired to `on_changed`.
+
+    **`active` is applied, before the handler is connected.** It was accepted
+    and never used, so every switch built here - 21 of them across the panels -
+    showed off whatever the setting said (found 2026-10-15: the Sandbox page's
+    low-priority switch read off while the setting was on). Set before
+    connecting, so drawing the row does not write the setting back.
+    """
+    toggle = Gtk.Switch(valign=Gtk.Align.CENTER, active=bool(active))
     if on_changed is not None:
         toggle.connect("notify::active", lambda _s, _p: on_changed(toggle.get_active()))
     widget = row(title, subtitle, suffix=toggle)

@@ -18,6 +18,7 @@ network at all.
 """
 from __future__ import annotations
 
+import socket
 import sys
 import time
 from pathlib import Path
@@ -249,7 +250,8 @@ def test_setup_adds_the_device_only_with_the_code_and_only_over_wifi(router):
     assert adds and all(q["nwk_intf"] == "wifi" for q in adds), "an add must be nwk_intf=wifi"
 
 
-def _line(router, monkeypatch, events, codecs=None, challenge_invite=True):
+def _line(router, monkeypatch, events, codecs=None, challenge_invite=True,
+          video_factory=None):
     """A started, registered Line against the (possibly rebuilt) fake router."""
     from shani_chronoa.landline.ua import Line
     _set_up(router)
@@ -259,7 +261,7 @@ def _line(router, monkeypatch, events, codecs=None, challenge_invite=True):
 
     def factory(host, c, inst, on_event, **kw):
         return Line(host, c, inst, on_event=on_event, port=router.sip_port,
-                    sound_factory=fake._Silence)
+                    sound_factory=fake._Silence, video_factory=video_factory)
     line = factory("127.0.0.1", creds, instance, on_event=lambda k, **i: events.append((k, i)))
     line.start()
     _wait(lambda: line.registered, "the line never registered", seconds=REGISTER_SECONDS)
@@ -478,5 +480,291 @@ def test_the_registration_carries_that_instance(router, monkeypatch):
         assert "+sip.instance=" in contact, "the contact carries no instance id"
         assert "urn:uuid" not in contact, "the instance must be the plain uuid form"
         assert ua.FEATURES.split(";")[0] in contact, "the contact advertises no telephony tag"
+    finally:
+        line.stop()
+
+
+# --- video --------------------------------------------------------------------------
+
+def _bare_line(video=False):
+    """A Line that has not connected to anything, for the offer's own shape."""
+    line = ua.Line("127.0.0.1", {"realm": "r", "user": "u", "password": "p"}, "aabbcc",
+                   video_factory=(lambda: ua.video.VideoRtpSession.bind("127.0.0.1"))
+                   if video else None)
+    line.local_ip, line.local_port, line.number = "127.0.0.1", 5060, "+912040001234"
+    call = ua.Call("cid", "tag", True, "+911234567890")
+    call.local_uri = call.remote_uri = "sip:+912040001234@br.wln.ims.jio.com"
+    call.route = []
+    call.rtp = media.RtpSession.bind("127.0.0.1", None)
+    if video:
+        call.video = line.video_factory()
+    line.calls.append(call)
+    return line, call
+
+
+def test_no_camera_means_no_picture_line_anywhere(monkeypatch):
+    """The regression guard. A machine with no ffmpeg or no camera must produce
+    the audio-only body it always did - offering `m=video` it cannot fill is how
+    a call gets answered with a blank rectangle and no sound."""
+    monkeypatch.setattr(ua.video, "available", lambda *a, **k: (False, "no camera"))
+    line, call = _bare_line()
+    try:
+        assert not line._video_capable(), "asked the machine and ignored it"
+        assert ";video" not in line._contact(), "the Contact claimed video"
+        assert "m=video" not in line._body(call), "the INVITE offered a picture"
+        assert "m=audio" in line._body(call), "and lost the sound doing it"
+    finally:
+        call.rtp.stop()
+
+
+def test_a_camera_puts_the_picture_after_the_sound(monkeypatch):
+    monkeypatch.setattr(ua.video, "available", lambda *a, **k: (True, "/dev/video0"))
+    line, call = _bare_line(video=True)
+    try:
+        assert line._video_capable(), "a machine with a camera said it had none"
+        assert ";video" in line._contact(), "the Contact never claimed video"
+        body = line._body(call)
+        # RFC 4566 puts session-level lines first and media sections last, and a
+        # body whose m=video precedes the m=audio it belongs after is a
+        # different document rather than a formatting choice.
+        assert "m=audio" in body and "m=video" in body, body
+        assert body.index("m=audio") < body.index("m=video"), body
+        assert body.count("c=IN IP4") == 1, "the video section repeated the address"
+    finally:
+        call.rtp.stop()
+        call.video.stop()
+
+
+def test_a_call_out_offers_and_takes_the_picture(router, monkeypatch, tmp_path):
+    """End to end: the INVITE carries `m=video`, the answer's video line is
+    taken, and audio still arrives. What is *not* asserted is pixels - this
+    router is a SIP peer and not a camera, and the pixels are measured by the
+    loopback in test_landline_video.py."""
+    monkeypatch.setattr(ua.video, "available", lambda *a, **k: (True, "/dev/video0"))
+    router.stop()
+    (tmp_path / "vid").mkdir()
+    r2 = fake.Router(tmp_path / "vid", video=True)
+    monkeypatch.setattr(provision, "ACCOUNT_PORT", r2.http_port)
+    monkeypatch.setattr(provision, "IMS_PORT", r2.https_port)
+    events = []
+    line = _line(r2, monkeypatch, events,
+                 video_factory=lambda: ua.video.VideoRtpSession.bind("127.0.0.1"))
+    try:
+        line.dial("+911234567890")
+        _wait(lambda: any(k == "answered" for k, _ in events), "the call was never answered")
+        call = line.call
+        assert call is not None and call.video is not None, "no video session was made"
+        assert "m=video" in r2.seen["invite"][-1].body, "the INVITE offered no picture"
+        _ip, their_port, _codecs = ua.video.parse_video(r2.seen["last_answer"])
+        assert their_port, "the router answered with no video port"
+        assert call.video.remote == ("127.0.0.1", their_port), (
+            f"our camera points at {call.video.remote}, not their {their_port}")
+        _wait(lambda: call.rtp.received > 0, "no audio arrived with the picture")
+        line.hangup()
+    finally:
+        line.stop()
+        r2.stop()
+
+
+def test_a_far_end_that_declines_video_leaves_the_sound_alone(router, monkeypatch, tmp_path):
+    """`m=video 0` is a decline and not a port. Taking it as one sends every
+    packet nowhere while reporting success, and a call that ends because the
+    picture was refused is worse than a call that carries sound."""
+    monkeypatch.setattr(ua.video, "available", lambda *a, **k: (True, "/dev/video0"))
+    router.stop()
+    (tmp_path / "declined").mkdir()
+    r2 = fake.Router(tmp_path / "declined", video=False)
+    monkeypatch.setattr(provision, "ACCOUNT_PORT", r2.http_port)
+    monkeypatch.setattr(provision, "IMS_PORT", r2.https_port)
+    events = []
+    line = _line(r2, monkeypatch, events,
+                 video_factory=lambda: ua.video.VideoRtpSession.bind("127.0.0.1"))
+    try:
+        line.dial("+911234567890")
+        _wait(lambda: any(k == "answered" for k, _ in events), "the call was never answered")
+        call = line.call
+        assert call is not None and call.video is not None
+        assert call.video.remote is None, (
+            f"our camera was pointed at {call.video.remote} - port 0 is a refusal")
+        _wait(lambda: call.rtp.received > 0, "the sound died with the picture")
+        line.hangup()
+    finally:
+        line.stop()
+        r2.stop()
+
+
+def test_the_registration_claims_video_only_where_the_machine_has_it(monkeypatch):
+    monkeypatch.setattr(ua.video, "available", lambda *a, **k: (False, "no camera"))
+    line, call = _bare_line()
+    try:
+        assert ";video" not in line._contact(expires=ua.EXPIRES), (
+            "a machine with no camera registered as a video caller")
+    finally:
+        call.rtp.stop()
+
+
+# --- hold and swap ----------------------------------------------------------------
+
+def test_a_second_number_holds_the_first_and_rings_the_second(router, monkeypatch, tmp_path):
+    """The whole point of hold: a second number while a call is live puts the
+    first aside rather than being refused, and the first is still a live dialog
+    waiting to come back."""
+    events = []
+    line = _line(router, monkeypatch, events)
+    try:
+        line.dial("+911234567890")
+        _wait(lambda: any(k == "answered" for k, _ in events), "the first call never connected")
+        first = line.call
+        line.dial("+919876543210")
+        _wait(lambda: len(line.calls) == 2, "the second call was never made")
+        second = next(c for c in line.calls if c is not first)
+        assert first.held, "the first call was not put aside"
+        assert first.rtp.held, "the first call kept sending while it was held"
+        assert not second.held, "the second call was born held"
+        assert line.call is second, "the line is not on the call it just dialled"
+        # The hold was a re-INVITE on the first dialog, not a new INVITE.
+        asked, _body = router.seen["re_offer"]
+        assert asked == "sendonly", f"the hold offered {asked}, not sendonly"
+        _wait(lambda: any(k == "ringing" for k, _ in events), "the second call never rang")
+    finally:
+        line.stop()
+
+
+def test_swap_trades_the_live_call_for_the_held_one(router, monkeypatch):
+    events = []
+    line = _line(router, monkeypatch, events)
+    try:
+        line.dial("+911234567890")
+        _wait(lambda: any(k == "answered" for k, _ in events), "the first call never connected")
+        first = line.call
+        line.dial("+919876543210")
+        _wait(lambda: len(line.calls) == 2, "the second call was never made")
+        second = next(c for c in line.calls if c is not first)
+        # A swap trades two *answered* calls, so the second has to be answered
+        # first - and `answered` on its own cannot tell the two calls apart, so
+        # this asks the call rather than the event log.
+        _wait(lambda: second.state == "active", "the second call never connected")
+        assert line.swap(), "swap refused with two answered calls"
+        assert first.state == "active" and not first.held, "the held call did not come back"
+        assert second.held and second.rtp.held, "the live call was not put aside"
+        assert not first.rtp.held, "the resumed call is still gated"
+        assert line.call is first, "the line is not back on the call it swapped to"
+        asked, _body = router.seen["re_offer"]
+        assert asked == "sendrecv", f"the resume offered {asked}, not sendrecv"
+    finally:
+        line.stop()
+
+
+def test_swap_with_one_call_is_a_refusal_not_a_no_op(router, monkeypatch):
+    """A hold with nothing to swap *to* is a mute with extra packets, so Swap
+    says no rather than quietly doing nothing."""
+    events = []
+    line = _line(router, monkeypatch, events)
+    try:
+        line.dial("+911234567890")
+        _wait(lambda: any(k == "answered" for k, _ in events), "the call never connected")
+        assert not line.swap(), "swap claimed it worked with only one call"
+        assert not line.call.held, "the one call was held by a no-op"
+    finally:
+        line.stop()
+
+
+def test_a_hold_the_far_end_refuses_is_reported_as_not_held(router, monkeypatch):
+    """A chip reading "held" while the machine is still on the call is the
+    two-widgets-disagree failure, so the re-offer's answer decides."""
+    events = []
+    line = _line(router, monkeypatch, events)
+    try:
+        line.dial("+911234567890")
+        _wait(lambda: any(k == "answered" for k, _ in events), "the call never connected")
+        before = line.call.cseq
+        real = ua.Line._request
+
+        def refuse(self, message, timeout=32.0):
+            if message.method == "INVITE":
+                return sip.Message("SIP/2.0 488 Not Acceptable Here",
+                                   [("To", message.get("To"))], "")
+            return real(self, message, timeout)
+
+        monkeypatch.setattr(ua.Line, "_request", refuse)
+        assert not line.hold(), "a refused hold was reported as a hold"
+        # The CSeq moved *forward* by exactly one. A CSeq that went backwards
+        # would collide with a transaction the far end has already answered,
+        # which is why the refused one is consumed rather than returned.
+        assert line.call.cseq == before + 1, (
+            f"the refused re-offer left the CSeq at {line.call.cseq}, from {before}")
+        assert not line.call.held and not line.call.rtp.held, "the call went quiet anyway"
+    finally:
+        line.stop()
+
+
+def test_a_held_call_sends_nothing_and_plays_nothing():
+    """The RTP half. `a=sendonly` is a claim about the wire; this is what the
+    wire does. Silence would still be a packet claiming a live microphone."""
+    session = media.RtpSession.bind("127.0.0.1", fake._Silence())
+    peer = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    peer.bind(("127.0.0.1", 0))
+    try:
+        session.start(("127.0.0.1", peer.getsockname()[1]), 0, 0)
+        session._stop.wait(0.25)
+        sent_before = sum(len(d) for d in _drain(peer))
+        # Drain anything still in flight from the pre-hold window so the held
+        # measurement is not polluted by packets that left before the hold.
+        _drain(peer)
+        held = fake._Silence()
+        session.sound = held
+        session.held = True
+        session._stop.wait(0.35)
+        # Any datagram already queued from before the hold is not a send that
+        # happened *while* held; drop it before measuring.
+        _drain(peer)
+        sent_while_held = _drain(peer)
+        session.held = False
+        session._stop.wait(0.25)
+        sent_after = _drain(peer)
+        assert sent_before, "no packets were flowing before the hold"
+        assert not sent_while_held, "the held call kept sending"
+        assert sent_after, "the resumed call did not send again"
+    finally:
+        session.stop()
+        peer.close()
+
+
+def _drain(sock, seconds=0.15):
+    # Bound by a wall-clock deadline rather than an idle gap: the fake
+    # router's silence source emits every 20 ms, so an idle-timeout of 50 ms
+    # never fires while packets are flowing and the socket blocks forever.
+    out = []
+    deadline = time.monotonic() + seconds
+    sock.settimeout(0.05)
+    while time.monotonic() < deadline and len(out) < 1000:
+        try:
+            out.append(sock.recv(2048))
+        except socket.timeout:
+            # Once packets have been seen, an idle gap means "done"; while
+            # nothing has arrived yet, keep waiting up to the deadline so a
+            # held call is observed for the whole window rather than quit on
+            # the first empty recv.
+            if out:
+                break
+    return out
+
+
+def test_swap_refuses_while_a_call_is_still_ringing(router, monkeypatch):
+    """The guard that held this open for one run. A ringing call has no session
+    whose direction could be changed, so resuming into one would report a call
+    came back that was never there."""
+    events = []
+    line = _line(router, monkeypatch, events)
+    try:
+        line.dial("+911234567890")
+        _wait(lambda: any(k == "answered" for k, _ in events), "the first call never connected")
+        first = line.call
+        line.dial("+919876543210")
+        _wait(lambda: len(line.calls) == 2, "the second call was never made")
+        second = next(c for c in line.calls if c is not first)
+        assert second.state != "active", "the second call answered too fast to test this"
+        assert not line.swap(), "swap claimed to resume a call that was still ringing"
+        assert second.state != "active" and not first.held is False
     finally:
         line.stop()

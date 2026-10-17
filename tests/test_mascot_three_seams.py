@@ -92,7 +92,12 @@ class _Shell:
         self.namespaces = []
         self.margins = []
         self.Layer = type("Layer", (), {"TOP": 1})
-        self.Edge = type("Edge", (), {"BOTTOM": 2, "RIGHT": 3})
+        # The real `GtkLayerShell.Edge` has all four, and a fake that carries two
+        # makes a top-anchored branch raise `AttributeError` rather than
+        # fail an assertion - so the under-specification reads as a product
+        # defect. `TOP` is what `mascot-corner=top-center` needs.
+        self.Edge = type("Edge", (), {"LEFT": 0, "RIGHT": 1,
+                                        "TOP": 2, "BOTTOM": 3})
         self.KeyboardMode = type("KeyboardMode", (), {"NONE": 0})
 
     def is_supported(self):

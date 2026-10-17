@@ -55,7 +55,11 @@ app.run([])
 class _Shell:
     """The private shell, and the processes it owns, by recorded PID."""
 
-    def __init__(self, root: Path, monitor: str = "1280x800") -> None:
+    def __init__(self, root: Path, monitor: str = "1280x800", extra=(), bin_dir=None) -> None:
+        """`extra`: more extension directories to install - read only at the
+        shell's start, so they have to be in place before it runs (the demo
+        recorder's screen-capture extension is one). `bin_dir`: put first on
+        the shell's PATH (stand-ins for programs an extension starts)."""
         self.root = root
         self.home = root / "home"
         self.home.mkdir()
@@ -66,8 +70,21 @@ class _Shell:
         ext_dir = self.home / ".local" / "share" / "gnome-shell" / "extensions"
         ext_dir.mkdir(parents=True)
         shutil.copytree(_EXTENSION, ext_dir / _UUID)
+        for path in extra:
+            shutil.copytree(path, ext_dir / Path(path).name)
+            # Its settings schema, which the package installs system-wide:
+            # compiled into the extension's own schemas/, where getSettings()
+            # looks first.
+            meta = json.loads((Path(path) / "metadata.json").read_text())
+            xml = _REPO / "usr/share/glib-2.0/schemas" / f"{meta.get('settings-schema', '')}.gschema.xml"
+            if meta.get("settings-schema") and xml.exists():
+                (ext_dir / Path(path).name / "schemas").mkdir(exist_ok=True)
+                shutil.copy(xml, ext_dir / Path(path).name / "schemas")
+                subprocess.run(["glib-compile-schemas", str(ext_dir / Path(path).name / "schemas")],
+                               check=True)
         self.env = {
-            "PATH": "/usr/bin:/bin", "HOME": str(self.home), "LANG": "C.UTF-8",
+            "PATH": (f"{bin_dir}:" if bin_dir else "") + "/usr/bin:/bin",
+            "HOME": str(self.home), "LANG": "C.UTF-8",
             "XDG_RUNTIME_DIR": str(self.run),
             "XDG_CONFIG_HOME": str(self.home / ".config"),
             "XDG_DATA_HOME": str(self.home / ".local" / "share"),
@@ -85,6 +102,12 @@ class _Shell:
             start_new_session=True)
         self.apps: dict = {}
         self._wait(lambda: self._owned("org.gnome.Shell"), 40, "gnome-shell did not start")
+        # What gnome-session does at login: tell the bus where the display is,
+        # so an app it starts by D-Bus activation (Calculator, Text Editor) can
+        # open a window. Without it they started, logged, and showed nothing.
+        subprocess.run(["dbus-update-activation-environment", "WAYLAND_DISPLAY=wl-0",
+                        "XDG_SESSION_TYPE=wayland", "XDG_CURRENT_DESKTOP=GNOME"],
+                       env=self.env, capture_output=True, timeout=20)
 
     def _owned(self, name: str) -> bool:
         out = subprocess.run(
@@ -297,3 +320,90 @@ def test_without_the_extension_the_accessibility_bus_does_what_it_can(on_that_de
     said = _skill("close_window", title_contains="gamma")
     assert said.startswith("Asked") and "accessibility bus" in said, said
     shell.apps["gamma-sheet"].wait(timeout=10)
+
+
+# ---------------------------------------------------------------------------
+# The top-bar indicator, in the same private shell.
+# ---------------------------------------------------------------------------
+
+#: A stand-in Chronoa: owns dev.shani.chronoa and exports the two actions the
+#: indicator watches. Each line on stdin sets `status` to that word; "mute"
+#: turns `speak-replies` off.
+_FAKE_CHRONOA = """
+import sys, gi
+from gi.repository import Gio, GLib
+app = Gio.Application(application_id="dev.shani.chronoa",
+                      flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
+status = Gio.SimpleAction.new_stateful("status", None, GLib.Variant("s", "idle"))
+status.set_enabled(False)
+speak = Gio.SimpleAction.new_stateful("speak-replies", None, GLib.Variant("b", True))
+speak.connect("change-state", lambda a, v: a.set_state(v))
+app.add_action(status)
+app.add_action(speak)
+def line(stream, _cond):
+    text = stream.readline().strip()
+    if not text:
+        app.quit(); return False
+    if text == "mute":
+        speak.set_state(GLib.Variant("b", False))
+    else:
+        status.set_state(GLib.Variant("s", text))
+    print("SET", text, flush=True)
+    return True
+app.hold()
+GLib.io_add_watch(GLib.IOChannel.unix_new(sys.stdin.fileno()),
+                  GLib.IO_IN | GLib.IO_HUP, lambda c, k: line(sys.stdin, k))
+app.run([])
+"""
+
+
+def _indicator(shell) -> dict:
+    out = subprocess.run(
+        ["gdbus", "call", "--session", "--dest", "org.shani.Chronoa.Windows",
+         "--object-path", "/org/shani/Chronoa/Windows", "--method",
+         "org.shani.Chronoa.Windows.Indicator"],
+        env=shell.env, capture_output=True, text=True, timeout=10, check=True).stdout.strip()
+    return json.loads(out[out.index("'") + 1:out.rindex("'")].encode().decode("unicode_escape"))
+
+
+def _until(shell, cond, why: str, timeout: float = 8.0) -> dict:
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        seen = _indicator(shell)
+        if cond(seen):
+            return seen
+        time.sleep(0.2)
+    raise AssertionError(f"{why}: {_indicator(shell)}")
+
+
+def test_the_indicator_follows_chronoa(shell):
+    """Its dot and words follow `app.status` over D-Bus, and say when it is gone."""
+    shell.extension(True)
+    assert _indicator(shell)["status"] == "Chronoa is not running"
+    script = shell.root / "fake_chronoa.py"
+    script.write_text(_FAKE_CHRONOA)
+    fake = subprocess.Popen([sys.executable, str(script)], env=shell.env, text=True,
+                            stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    try:
+        _until(shell, lambda i: i["status"] == "Chronoa: Ready",
+                "the indicator never saw Chronoa start")
+        assert "chronoa-idle" in _indicator(shell)["dot"]
+        assert _indicator(shell)["stop"] is False
+        fake.stdin.write("thinking\n"); fake.stdin.flush()
+        seen = _until(shell, lambda i: i["status"] == "Chronoa: Thinking",
+                "a state change did not reach the indicator")
+        assert "chronoa-thinking" in seen["dot"] and seen["stop"] is True, seen
+        fake.stdin.write("listening\n"); fake.stdin.flush()
+        _until(shell, lambda i: i.get("cue") == "Chronoa is listening",
+               "an open microphone was not said on screen")
+        fake.stdin.write("mute\n"); fake.stdin.flush()
+        _until(shell, lambda i: i["speak"] is False,
+                "turning replies off did not reach the switch")
+    finally:
+        fake.stdin.close()
+        try:
+            fake.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            fake.kill()
+    _until(shell, lambda i: i["status"] == "Chronoa is not running",
+            "the indicator kept claiming Chronoa after it quit")

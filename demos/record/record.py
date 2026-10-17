@@ -38,7 +38,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
-SCENARIOS = {"real-app": "real_app.py", "voice": "voice_app.py",
+SCENARIOS = {"real-app": "real_app.py", "voice": "voice_app.py", "devices": "devices_app.py",
              "scripted-flight": "scripted_flight.py", "scripted-trip": "scripted_trip.py"}
 
 
@@ -111,8 +111,13 @@ def _local_brain(shell, work, reuse: bool = False):
             # a different model answering "as" Chronoa's local brain.
             import filecmp
             running = _running_model_file()
-            cached = sorted((REPO / "cache" / "data-home" / "shani-chronoa" / "llm").glob("*.gguf"))
-            if running and cached and filecmp.cmp(running, cached[0], shallow=False):
+            # The model the app runs is `current.gguf`, not the alphabetically
+            # first GGUF in the folder (which picked a 0.6B base model over the
+            # 1.7B that was serving and refused a correct reuse).
+            llm = REPO / "cache" / "data-home" / "shani-chronoa" / "llm"
+            current = (llm / "current.gguf").resolve() if (llm / "current.gguf").exists() else None
+            cached = [current] if current else sorted(llm.glob("*.gguf"))
+            if running and cached and (running == cached[0] or filecmp.cmp(running, cached[0], shallow=False)):
                 print(f"reusing the running local model ({running.name}, identical to the cache)", flush=True)
                 return None
             raise SystemExit(f"something answers on {url}, but its model ({running}) is not the cached one")
@@ -149,6 +154,16 @@ def _audio_graph(shell, work):
     return procs
 
 
+def _pipewire(shell, work):
+    """PipeWire and WirePlumber in the private session (GNOME's screencast needs them)."""
+    procs = []
+    for argv, settle in ((["pipewire"], 1.5), (["wireplumber"], 2.0)):
+        procs.append(subprocess.Popen(argv, env=shell.env, stdout=open(work / f"{argv[0]}.log", "w"),
+                                      stderr=subprocess.STDOUT))
+        time.sleep(settle)
+    return procs
+
+
 def _shell_class():
     spec = importlib.util.spec_from_file_location("live", REPO / "tests" / "test_windows_gnome_live.py")
     live = importlib.util.module_from_spec(spec)
@@ -174,11 +189,24 @@ def main() -> int:
     ap.add_argument("--reuse-local-model", action="store_true",
                     help="local: use a llama-server already running on the port when its model file is "
                          "byte-identical to the cached one, instead of refusing")
+    ap.add_argument("--screen", action="store_true",
+                    help="film the whole screen (top bar, notifications, menus), not "
+                         "just Chronoa's window - through the demo-only capture extension")
     ap.add_argument("--brain", choices=("cloud", "local"), default="cloud",
                     help="real-app/voice: the free cloud chain, or the local model from cache/data-home")
     args = ap.parse_args()
 
     out = args.out.resolve()
+    # **A project under /tmp is invisible to its own commands.** The demo's home
+    # lives inside `out`, and the sandbox gives every command a private /tmp -
+    # measured 2026-10-15: run_command answered "<project> is not a folder" for
+    # a project seeded under the scratch /tmp, so the coding take never ran a
+    # test. Refused here, with the reason, instead of recording a dead take.
+    if os.environ.get("CHRONOA_DEMO_PROJECT") and str(out).startswith("/tmp/"):
+        print(f"{out} is under /tmp, which sandboxed commands cannot see - record "
+              "a project demo into a folder outside /tmp (e.g. cache/demo-code)",
+              file=sys.stderr)
+        return 2
     work = out / "run"
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)
@@ -189,7 +217,8 @@ def main() -> int:
     subprocess.run(["glib-compile-schemas", str(schemas)], check=True)
 
     Shell = _shell_class()
-    shell = Shell(work, monitor="1780x800")
+    capture_ext = HERE / "shell-capture@demo"
+    shell = Shell(work, monitor="1780x800", extra=[capture_ext] if args.screen else [])
     log = open(out / "demo.log", "w")
 
     def gd(*a):
@@ -231,6 +260,13 @@ def main() -> int:
                 recorders.append(subprocess.Popen(
                     ["pw-record", "--target", node, "--rate", "48000", "--channels", "1", str(out / name)],
                     env=shell.env))
+        if args.brain == "local" and args.scenario != "voice":
+            # The app looks for its model in its own data home; link the cache
+            # in, as the voice scenario does above.
+            target = Path(shell.env["XDG_DATA_HOME"]) / "shani-chronoa" / "llm"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if not target.exists():
+                os.symlink(REPO / "cache" / "data-home" / "shani-chronoa" / "llm", target)
         if args.brain == "local":
             brain = _local_brain(shell, work, reuse=args.reuse_local_model)
             if brain is not None:
@@ -243,7 +279,8 @@ def main() -> int:
                "SHANI_CHRONOA_KEYRING": "0", "PYTHONDONTWRITEBYTECODE": "1", "PYTHONUNBUFFERED": "1",
                # The scenario scripts' own switches (CHRONOA_DEMO_*) pass through.
                **{k: v for k, v in os.environ.items() if k.startswith("CHRONOA_DEMO_")},
-               "CHRONOA_DEMO_BRAIN": args.brain}
+               "CHRONOA_DEMO_BRAIN": args.brain,
+               **({"CHRONOA_DEMO_SCREEN": "1"} if args.screen else {})}
         go, done, frames = work / "go", work / "done", out / "frames"
         shutil.rmtree(frames, ignore_errors=True)
         argv = [sys.executable, str(HERE / SCENARIOS[args.scenario]), str(go), str(done), str(frames)]
@@ -264,7 +301,9 @@ def main() -> int:
                     for title, w in shell.windows().items():
                         if w["id"] in placed:
                             continue
-                        x, wd = (0, 470) if title == "Shani Chronoa" else (480, 1290)
+                        main_w = int(os.environ.get("CHRONOA_DEMO_MAIN_WIDTH", "470"))
+                        mains = os.environ.get("CHRONOA_DEMO_MAIN_TITLES", "Shani Chronoa").split(",")
+                        x, wd = (0, main_w) if title in mains else (main_w + 10, 1780 - main_w - 10)
                         for verb, a in (("Move", (x, 32)), ("Resize", (wd, 760))):
                             gd("--dest", "org.shani.Chronoa.Windows", "--object-path",
                                "/org/shani/Chronoa/Windows", "--method",
@@ -275,7 +314,53 @@ def main() -> int:
                 time.sleep(1)
 
         threading.Thread(target=arrange, daemon=True).start()
+        if args.screen:
+            # The whole screen, ~4 a second, through the demo-only extension
+            # (never packaged: it would let any program take screenshots).
+            subprocess.run(["gnome-extensions", "enable", capture_ext.name],
+                           env=shell.env, capture_output=True, timeout=20)
+            Shell._wait(lambda: shell._owned("org.shani.Demo.Capture"), 20,
+                        "the capture extension did not appear")
+            frames.mkdir(parents=True, exist_ok=True)
+
+            # GNOME's own screen recorder first - full frame rate, through the
+            # capture extension (its API takes calls from the shell only). It
+            # needs PipeWire in the session. Screenshots ~4 a second are the
+            # fallback when it will not start.
+            if not audio:
+                audio.extend(_pipewire(shell, work))
+            cast = {"file": None}
+
+            def film():
+                n = 0
+                while not go.exists() and not done.exists():
+                    time.sleep(0.1)
+                started = gd("--dest", "org.shani.Demo.Capture", "--object-path",
+                             "/org/shani/Demo/Capture", "--method",
+                             "org.shani.Demo.Capture.StartScreencast", str(out / "screen.webm"))
+                if started.returncode == 0:
+                    cast["file"] = out / "screen.webm"
+                    print("screen recording with GNOME's screencast", flush=True)
+                    while not done.exists():
+                        time.sleep(0.2)
+                    gd("--dest", "org.shani.Demo.Capture", "--object-path",
+                       "/org/shani/Demo/Capture", "--method",
+                       "org.shani.Demo.Capture.StopScreencast")
+                    return
+                print(f"screencast unavailable ({started.stderr.strip()[:160]}); "
+                      "falling back to screenshots", flush=True)
+                while not done.exists():
+                    gd("--dest", "org.shani.Demo.Capture", "--object-path",
+                       "/org/shani/Demo/Capture", "--method",
+                       "org.shani.Demo.Capture.Shot", str(frames / f"main_{n:05d}.png"))
+                    n += 1
+                    time.sleep(0.25)
+            filming = threading.Thread(target=film, daemon=True)
+            filming.start()
         Shell._wait(done.exists, args.timeout, "the demo did not finish")
+        if args.screen:
+            # The screencast is stopped (and its file finished) before the shell goes.
+            filming.join(timeout=30)
     finally:
         for proc in recorders + list(reversed(audio)):
             if proc.poll() is None:
@@ -291,6 +376,16 @@ def main() -> int:
         log.close()
 
     sys.path.insert(0, str(HERE))
+    if args.screen and (out / "screen.webm").exists() and (out / "screen.webm").stat().st_size > 0:
+        # The screencast is the video: constant 30 fps for players that dislike
+        # variable frame rate (it only records frames when the screen changes).
+        video = out / f"{args.scenario}.mp4"
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(out / "screen.webm"),
+                        "-vf", "fps=30,scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
+                        "-c:v", "libx264", "-crf", "22", "-movflags", "+faststart", str(video)],
+                       check=True)
+        print(video)
+        return 0
     import compose
     first_frame = compose.compose(out)
     video = out / f"{args.scenario}.mp4"

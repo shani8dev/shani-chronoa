@@ -123,7 +123,12 @@ class _Shell:
             pass
 
         self.Layer = type("Layer", (), {"TOP": 1})
-        self.Edge = type("Edge", (), {"BOTTOM": 2, "RIGHT": 3})
+        # The real `GtkLayerShell.Edge` has all four, and a fake that carries two
+        # makes a top-anchored branch raise `AttributeError` rather than
+        # fail an assertion - so the under-specification reads as a product
+        # defect. `TOP` is what `mascot-corner=top-center` needs.
+        self.Edge = type("Edge", (), {"LEFT": 0, "RIGHT": 1,
+                                        "TOP": 2, "BOTTOM": 3})
         self.KeyboardMode = type("KeyboardMode", (), {"NONE": 0})
 
     # the questions
@@ -355,7 +360,9 @@ def test_a_window_the_compositor_refused_is_destroyed_and_never_presented(monkey
 
     `init_for_window()` returning says the *call* worked. Whether the compositor
     agreed is a separate question, and presenting a window that failed it pins an
-    always-on-top rectangle to the bottom-right corner for the life of the app.
+    always-on-top rectangle to the screen edge for the life of the app - at the
+    notch's top centre today, and at the bottom-right corner when that is what
+    `mascot-corner` says.
     """
     shell = _Shell(supported=True, layered=False)
     monkeypatch.setattr(mascot, "_layer_shell", lambda: (shell, ""))

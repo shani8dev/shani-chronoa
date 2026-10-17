@@ -17,17 +17,20 @@ from shani_chronoa.skills import Skill
 from shani_chronoa.skills.list_windows import act, session_problem
 
 _ACTIONS = ("minimize", "maximize", "unmaximize", "fullscreen", "unfullscreen",
-            "move", "resize", "set_workspace")
+            "move", "resize", "set_workspace", "tile")
+_SIDES = ("left", "right", "top", "bottom")
 
 SCHEMA = {
     "type": "function",
     "function": {
         "name": "arrange_window",
         "description": (
-            "Minimize, maximize, unmaximize, make fullscreen, leave fullscreen, "
-            "move, resize, or send a window to another workspace, by window id "
-            "from list_windows or by part of its title. move takes x and y, "
-            "resize takes width and height (pixels), set_workspace takes a "
+            "Arrange a window: tile (snap it to the left, right, top or bottom "
+            "half of the screen - 'put it on the left half', side by side), "
+            "minimize, maximize, unmaximize, make fullscreen, leave fullscreen, "
+            "move, resize, or send it to another workspace - by window id "
+            "from list_windows or by part of its title. tile takes side; move "
+            "takes x and y, resize width and height (pixels), set_workspace a "
             "0-based workspace. Nothing is closed; close_window does that."
         ),
         "parameters": {
@@ -39,6 +42,8 @@ SCHEMA = {
                 "x": {"type": "integer"}, "y": {"type": "integer"},
                 "width": {"type": "integer"}, "height": {"type": "integer"},
                 "workspace": {"type": "integer", "description": "0-based workspace number."},
+                "side": {"type": "string", "enum": ["left", "right", "top", "bottom"],
+                         "description": "tile: which half of the screen."},
             },
             "required": ["action"],
         },
@@ -70,6 +75,11 @@ def _run(arguments: dict) -> str:
             if width < 1 or height < 1:
                 return "width and height must be positive."
             call, done = (lambda b, w: b.resize(w.id, width, height)), f"Resized {{label}} to {width}x{height}"
+        elif action == "tile":
+            side = str(arguments.get("side") or "left").strip().lower()
+            if side not in _SIDES:
+                return f"side must be one of {', '.join(_SIDES)}, not {side!r}."
+            call, done = (lambda b, w: b.tile(w.id, side)), f"Snapped {{label}} to the {side} half"
         elif action == "set_workspace":
             (index,) = _ints(arguments, "workspace")
             call, done = (lambda b, w: b.set_workspace(w.id, index)), f"Moved {{label}} to workspace {index}"

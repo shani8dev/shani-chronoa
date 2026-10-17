@@ -1,0 +1,27 @@
+/* The status dot beside Chronoa's icon in the top bar (indicator.js). */
+.chronoa-dot { font-size: 9px; padding-left: 2px; color: rgba(160, 160, 170, 0.9); }
+.chronoa-off { color: transparent; }
+.chronoa-idle { color: #4caf50; }
+.chronoa-listening, .chronoa-interrupting { color: #e53935; }
+.chronoa-queued, .chronoa-thinking { color: #f9a825; }
+.chronoa-speaking { color: #42a5f5; }
+.chronoa-error { color: #ff7043; }
+
+/* "Chronoa is doing this": the pill at the top of the screen and the click ripple. */
+.chronoa-cue {
+    background-color: rgba(28, 28, 34, 0.92);
+    color: #ffffff;
+    border: 1px solid #e66100;
+    border-radius: 999px;
+    padding: 6px 16px;
+    font-weight: bold;
+}
+.chronoa-ripple {
+    border: 3px solid #e66100;
+    border-radius: 999px;
+    background-color: rgba(230, 97, 0, 0.25);
+}
+.chronoa-window-flash {
+    border: 4px solid #e66100;
+    border-radius: 14px;
+}

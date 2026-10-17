@@ -24,12 +24,26 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "usr" / "lib" / "shani-chronoa"))
 
-from shani_chronoa.landline import media, sip  # noqa: E402
+from shani_chronoa.landline import media, sip, video  # noqa: E402
 
 CODE = "482913"
 NUMBER = "+912040001234"
 REALM = "br.wln.ims.jio.com"
 PASSWORD_SEED = "routerpass"
+
+
+def _free_udp_port() -> int:
+    """A UDP port the router can name in an answer without owning a session on.
+
+    Held open rather than picked at answer time, because two answers that name
+    different ports for one stream are a far end that moved.
+    """
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+    finally:
+        probe.close()
 
 
 def _tls_context(directory: Path) -> "tuple[ssl.SSLContext, str]":
@@ -47,17 +61,23 @@ class Router:
 
     def __init__(self, directory: Path, codecs=("PCMU/8000",), challenge_invite=True,
                  reoffer_mid_ring=False, empty_final_answer=False,
-                 reoffer_bandwidth_efficient=False):
+                 reoffer_bandwidth_efficient=False, video=None):
         self.tls, self.cert = _tls_context(directory)
         self.codecs = codecs
         self.challenge_invite = challenge_invite
         self.reoffer_mid_ring = reoffer_mid_ring
         self.empty_final_answer = empty_final_answer
         self.reoffer_bandwidth_efficient = reoffer_bandwidth_efficient
+        #: What this router does about the video m-line. `None` - the default, and
+        #: the shape every other test in this file assumes - is a voice-only peer
+        #: that says nothing about video at all. `True` answers with a real
+        #: `m=video` section, `False` with `m=video 0`, which is a *decline* and
+        #: not a port.
+        self.video = video
         self.update_refused = False
         self._ringed = None
         self.seen = {"http": [], "register": [], "invite": [], "rtp_in": 0,
-                     "update_answer": None}
+                     "update_answer": None, "last_answer": "", "re_offer": None}
         self.added: "set[str]" = set()
         self.password = ""              # the current fetched password, regenerated each fetch
         self._pending_alias = ""
@@ -65,9 +85,29 @@ class Router:
         self._stop = threading.Event()
         self._rtp = None
         self.registered_contact = ""
+        self._video_port = _free_udp_port()
+        #: Call-IDs of dialogs this router has answered, so a re-INVITE on one
+        #: is recognised as a hold rather than rung again.
+        self._dialogs: "set[str]" = set()
         self.http_port = self._http(tls=False)
         self.https_port = self._http(tls=True)
         self.sip_port, self._sip_srv = self._sip()
+
+    # --- the video half of an answer -------------------------------------------------
+    def _video_answer(self, body: str) -> str:
+        """This router's answer, with whatever it has to say about video added.
+
+        **No picture packets are sent.** This router is a SIP peer, not a
+        camera, and standing a second ffmpeg up to answer a question about
+        negotiation would be measuring the encoder twice - the pixels are
+        measured by the loopback in `test_landline_video.py`. What this pins is
+        which side offered what, and where each stream ended up.
+        """
+        if self.video is None:
+            return body
+        if not self.video:
+            return body.rstrip("\r\n") + "\r\nm=video 0 RTP/AVP 96\r\n"
+        return video.with_video(body, "127.0.0.1", self._video_port)
 
     # --- the account / OTP / credentials HTTP faces -----------------------------
     def _http(self, tls: bool) -> int:
@@ -245,6 +285,12 @@ class Router:
 
     def _on_invite(self, conn, req: sip.Message):
         self.seen["invite"].append(req)
+        tag = sip.param(req.get("To"), "tag")
+        if tag and req.call_id in self._dialogs:
+            # A re-INVITE inside a live dialog - a hold or a resume. Answered
+            # with the direction and no ring, because ringing again for a call
+            # that is already up is a second call and not a hold.
+            return self._answer_re_offer(conn, req, tag)
         if self.challenge_invite and not req.get("Proxy-Authorization"):
             nonce = secrets.token_hex(8)
             self._send(conn, sip.response(req, 407, to_tag=sip.new_tag(), extra=[
@@ -263,6 +309,7 @@ class Router:
             return self._send(conn, sip.response(req, 488, to_tag=to_tag))
         self._rtp = media.RtpSession.bind("127.0.0.1", _Silence())
         answer = media.offer("127.0.0.1", self._rtp.port, only=chosen[1])
+        answer = self._video_answer(answer)
         if self.reoffer_mid_ring:
             # What the callee's JUICE phone does on the real router: an UPDATE
             # carrying a fresh SDP offer while the INVITE is still ringing. It
@@ -272,6 +319,7 @@ class Router:
             # call returns rather than waiting for a message it is the one
             # reading.
             offer = media.offer("127.0.0.1", self._rtp.port, only=chosen[1])
+            offer = self._video_answer(offer)
             if self.reoffer_bandwidth_efficient:
                 offer = offer.replace("AMR/8000/1", "AMR/8000")
                 offer = offer.replace("mode-change-capability=1", "mode-change-capability=2")
@@ -289,10 +337,32 @@ class Router:
         self._ringed = None
         self._answer_ringing(conn, req, to_tag, answer, ip, port, chosen, "oa")
 
+    def _answer_re_offer(self, conn, req: sip.Message, tag: str) -> None:
+        """The answer to a hold or a resume: 200 OK carrying the direction back.
+
+        A hold offer of `a=sendonly` - "I will send, do not send me anything" -
+        is answered `a=recvonly`: we will receive and not send, which is what
+        tells the holder the far end has *taken* the hold. `a=sendrecv` is
+        answered `a=sendrecv` and resumes. A far end that answered a hold offer
+        with `a=sendrecv` has refused it while still answering.
+        """
+        asked = media.sdp_direction(req.body)
+        ip, port, codecs, _dtmf = media.parse_sdp(req.body)
+        allowed = {name.upper() for name in self.codecs}
+        chosen = media.pick([(pt, n) for pt, n in codecs if n.upper() in allowed])
+        if chosen is None:
+            return self._send(conn, sip.response(req, 488, to_tag=tag))
+        self.seen["re_offer"] = (asked, req.body)
+        body = media.offer("127.0.0.1", self._rtp.port, only=chosen[1],
+                           direction={"sendonly": "recvonly", "recvonly": "sendonly",
+                                      "sendrecv": "sendrecv",
+                                      "inactive": "inactive"}[asked])
+        self._send(conn, sip.response(req, 200, to_tag=tag, body=body, extra=[
+            ("Contact", f"<sip:far@127.0.0.1:{self.sip_port};transport=tls>")]))
+
     def _answer_ringing(self, conn, req, to_tag, answer, ip, port, chosen, packing) -> None:
         self._ringed_packing = packing
-        if packing == "be":
-            # A far end that re-offered bandwidth-efficient also answers the
+        if packing == "be":            # A far end that re-offered bandwidth-efficient also answers the
             # INVITE with it - the packing does not go back afterwards.
             answer = answer.replace("AMR/8000/1", "AMR/8000")
         self._rtp.start((ip, port), chosen[0], chosen[1], 0, packing)
@@ -305,6 +375,8 @@ class Router:
             body = answer
         self._send(conn, sip.response(req, 200, to_tag=to_tag, body=body, extra=[
             ("Contact", f"<sip:far@127.0.0.1:{self.sip_port};transport=tls>")]))
+        self.seen["last_answer"] = body
+        self._dialogs.add(req.call_id)
 
     def call_in(self, from_number: str = "+911112223334") -> None:
         """Ring the registered device (a call from the network to the line)."""

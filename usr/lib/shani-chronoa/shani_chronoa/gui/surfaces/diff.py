@@ -275,14 +275,6 @@ class _DiffLineBox(Gtk.Box):
         # five-line change filled the panel. The text stays selectable.
         self._selector: "Optional[_LineSelector]" = None
 
-    def _on_select(self, selector: _LineSelector, file: DiffFile, hunk_idx: int,
-                   line_idx: int) -> None:
-        key = f"{file.path}:{hunk_idx}:{line_idx}"
-        if key in file.selected_line_ids:
-            file.selected_line_ids.discard(key)
-        else:
-            file.selected_line_ids.add(key)
-
     @property
     def selected(self) -> bool:
         return bool(self._selector and self._selector.selected)

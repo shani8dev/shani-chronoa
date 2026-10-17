@@ -2,6 +2,8 @@
 
 from typing import Any
 
+import os
+
 import gi
 gi.require_version('Gio', '2.0')
 from gi.repository import Gio, GLib  # type: ignore
@@ -65,6 +67,79 @@ def _alive(pid: int) -> bool:
         return False
 
 
+#: How long a launch is given to put a window on screen.
+WINDOW_WAIT_SECONDS = 10.0
+
+
+def _launch_outside(desktop_id: str) -> str:
+    """Have the desktop start the app, not this skill; who did it, or "".
+
+    **Not as our child.** A skill runs under resource limits (an
+    address-space cap among them), and a process it starts inherits them:
+    measured 2026-10-15, GNOME Calculator launched from here died at once.
+    GNOME Shell (through Chronoa's extension) launches it as the app grid
+    would; elsewhere the user's systemd starts it with `gtk-launch`.
+    """
+    if not desktop_id:
+        return ""
+    try:
+        from shani_chronoa.windows import gnome, WindowError
+        shell = gnome.launch_backend()
+        if shell is not None:
+            shell.launch_app(desktop_id)
+            return "GNOME Shell"
+    except Exception:  # noqa: BLE001 - try the next way
+        pass
+    import shutil
+    import subprocess
+    if shutil.which("systemd-run") and shutil.which("gtk-launch"):
+        done = subprocess.run(["systemd-run", "--user", "--collect", "--quiet", "gtk-launch",
+                               desktop_id.removesuffix(".desktop")],
+                              capture_output=True, text=True, timeout=20)
+        if done.returncode == 0:
+            return "the session (systemd)"
+    return ""
+
+
+def _window_ids():
+    """Ids of the windows on screen now, or None when they cannot be listed."""
+    try:
+        from shani_chronoa.windows import detect
+        backend, _why = detect()
+        if backend is None:
+            return None
+        return {str(w.id) for w in backend.list()}
+    except Exception:  # noqa: BLE001 - no window list is "unknown", not "none"
+        return None
+
+
+def _wait_for_window(before, info, label: str) -> str:
+    """The title of a new window of this app, once one appears; "" if none does."""
+    import time
+    if before is None:
+        return ""
+    try:
+        from shani_chronoa.windows import detect
+        backend, _why = detect()
+    except Exception:  # noqa: BLE001
+        return ""
+    app_id = (info.get_id() or "").removesuffix(".desktop").lower() if hasattr(info, "get_id") else ""
+    wanted = {app_id, label.lower()}
+    end = time.monotonic() + WINDOW_WAIT_SECONDS
+    while time.monotonic() < end:
+        try:
+            windows = backend.list()
+        except Exception:  # noqa: BLE001
+            return ""
+        for w in windows:
+            fields = {str(getattr(w, k, "") or "").lower() for k in ("app_id", "wm_class", "title")}
+            if str(w.id) not in before and (fields & wanted or any(
+                    label.lower() in f or (app_id and app_id in f) for f in fields)):
+                return str(getattr(w, "title", "") or label)
+        time.sleep(0.4)
+    return ""
+
+
 def _run(arguments: dict) -> str:
     import time
     name = (arguments.get("name") or "").strip()
@@ -74,24 +149,48 @@ def _run(arguments: dict) -> str:
     if best is None:
         return f"Could not find an installed application matching '{name}'."
     label = best.get_display_name()
+    before = _window_ids()
     pids: list = []
+    desktop_id = best.get_id() if hasattr(best, "get_id") else ""
+    how = _launch_outside(desktop_id)
+    if how:
+        window = _wait_for_window(before, best, label)
+        if window:
+            return f"Opened {label}: its window '{window}' is on screen and has focus."
+        return (f"Asked {how} to open {label}, but no window of it appeared within "
+                f"{WINDOW_WAIT_SECONDS:.0f}s - do not type into it until list_windows shows it.")
     try:
         if isinstance(best, Gio.DesktopAppInfo):
-            launched = best.launch_uris_as_manager([], None, GLib.SpawnFlags.SEARCH_PATH, None, None,
-                                                   lambda _info, pid, *_: pids.append(pid), None)
+            # **Its output to /dev/null, not into this answer.** Launched as
+            # our child, the app inherited the skill's stdout: measured
+            # 2026-10-15, open_application's reply was GNOME Calculator's
+            # currency-rate log and Fontconfig warnings.
+            null = os.open(os.devnull, os.O_RDWR)
+            try:
+                launched = best.launch_uris_as_manager_with_fds(
+                    [], None, GLib.SpawnFlags.SEARCH_PATH, None, None,
+                    lambda _info, pid, *_: pids.append(pid), None, null, null, null)
+            finally:
+                os.close(null)
         else:
             launched = best.launch([], None)
     except GLib.Error as e:
         return f"Failed to launch {label}: {e.message}"
     if not launched:
         return f"Failed to launch {label}."
-    if not pids:
-        # D-Bus-activated apps are started by the session, not as our child
-        return f"Asked the desktop to open {label}."
-    time.sleep(ALIVE_SECONDS)
-    if _alive(pids[0]):
-        return f"Opened {label} (running)."
-    return f"{label} started but exited straight away - it may be broken or need something it lacks."
+    # **The window, not the launch, is what "opened" means.** The demo's
+    # model was told "Opened text_editor", typed straight away, and the text
+    # went into Chronoa's own message box: no window had appeared.
+    window = _wait_for_window(before, best, label)
+    if window:
+        return f"Opened {label}: its window '{window}' is on screen and has focus."
+    if pids and not _alive(pids[0]):
+        return f"{label} started but exited straight away - it may be broken or need something it lacks."
+    if before is None:
+        return (f"Asked the desktop to open {label}; this desktop cannot list windows, so "
+                f"whether it appeared is unknown.")
+    return (f"Asked the desktop to open {label}, but no window of it appeared within "
+            f"{WINDOW_WAIT_SECONDS:.0f}s - do not type into it until list_windows shows it.")
 
 
 def _post_condition(arguments: dict):

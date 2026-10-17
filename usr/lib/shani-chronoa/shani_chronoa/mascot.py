@@ -41,6 +41,7 @@ import logging
 from shani_chronoa import mascot_art
 from shani_chronoa import mascot_drag
 from shani_chronoa import mascot_events
+from shani_chronoa import mascot_sounds
 
 logger = logging.getLogger(__name__)
 
@@ -147,10 +148,9 @@ _EVENT_FACE = {
 
 _NO_SURFACE = (
     "the compositor did not create a layer surface. wlr-layer-shell is a "
-    "wlroots/KDE protocol and Mutter does not implement it, and gtk4-layer-shell "
-    "must also be linked *before* libwayland-client or it cannot initialise at "
-    "all - usr/bin/shani-chronoa does not preload it the way "
-    "usr/bin/shani-chronoa-overlay does. Nothing was shown."
+    "wlroots/KDE protocol and Mutter does not implement it. Nothing was shown. "
+    "(The link order gtk4-layer-shell needs is handled - both launchers re-exec "
+    "through layer_shell_preload - so this is the protocol, not the preload.)"
 )
 
 #: What each state is called in the accessible name. The words are the ones the
@@ -294,9 +294,10 @@ def available() -> tuple[bool, str]:
     missing"**:
 
     - **link order.** gtk4-layer-shell has to be loaded *before*
-      libwayland-client or it cannot initialise. `usr/bin/shani-chronoa` does
-      not preload it; `usr/bin/shani-chronoa-overlay` does, and re-execs for
-      exactly this reason.
+      libwayland-client or it cannot initialise. Both launchers re-exec through
+      `layer_shell_preload.preload_layer_shell()` for exactly this reason, so
+      this is a precondition that is met rather than a live cause - which is
+      what makes the remaining one the only one left to name.
     - **the compositor.** `zwlr_layer_shell_v1` is a wlroots/KDE protocol and
       **Mutter has never implemented it**.
 
@@ -377,6 +378,19 @@ class Mascot:
         self._drag_point = (0.0, 0.0)
 
     # --- lifecycle ------------------------------------------------------------
+    @property
+    def running(self) -> bool:
+        """Whether the companion is up.
+
+        `application.py` used to ask this by reaching for `self.mascot._win`,
+        which is a private attribute of *this* class - so the moment a second
+        surface existed (`mascot_notch.Notch`, which has no window at all), the
+        caller's question became "is there a `_win`", which is a statement about
+        the window rather than about the companion. `Notch` answers the same
+        question from its own proxy, so both are asked the same way.
+        """
+        return self._win is not None
+
     def _allowed(self) -> bool:
         config = getattr(self.app, "config", None)
         try:
@@ -470,6 +484,7 @@ class Mascot:
             return False
 
         win = Gtk.Window(application=self.app)
+        shell.init_for_window(win)
         # The window **is** the stage, not a frame around the sprite: the mascot
         # travels inside it, and the extra `SIZE + 2*_STAGE_TRAVEL - SIZE` of width
         # is transparent margin rather than anywhere the mascot can be seen. The
@@ -543,21 +558,35 @@ class Mascot:
         win.add_controller(drag)
         self._drag = drag
 
-        shell.init_for_window(win)
         shell.set_layer(win, shell.Layer.TOP)
         # **The protocol requires a namespace**, and this call was missing.
         shell.set_namespace(win, "chronoa-mascot")
-        shell.set_anchor(win, shell.Edge.BOTTOM, True)
-        shell.set_anchor(win, shell.Edge.RIGHT, True)
-        # **These stay `_BASE_MARGIN`, and that is load-bearing twice over.** They
-        # place the *window*, not the sprite: the TRAVEL of extra width is
-        # transparent margin, so holding the window's own margins is what holds
-        # the mascot where it was - it now rests TRAVEL px further in, which is a
-        # deliberate, deterministic shift with no jitter. And `_bob_tick` returns
-        # to `_BASE_MARGIN` every `_BOB_EVERY_MS`, so a different value here would
-        # make the bob's resting point and its return value disagree.
-        shell.set_margin(win, shell.Edge.BOTTOM, _BASE_MARGIN)
-        shell.set_margin(win, shell.Edge.RIGHT, _BASE_MARGIN)
+        corner = "bottom-right"
+        try:
+            cfg = getattr(self.app, "config", None)
+            if cfg is not None:
+                corner = str(cfg.get("mascot-corner", "bottom-right") or "bottom-right")
+        except Exception:  # noqa: BLE001
+            corner = "bottom-right"
+
+        # **The window is placed by the corner the person chose.** Bottom-right
+        # is the historical home; top-center is the notch-like strip a desktop
+        # without a notch still wants, and is what coucou calls its "top of
+        # screen" fallback. The two are different anchors, not different margins,
+        # so the resting margins below are only applied where they mean something.
+        if corner == "top-center":
+            shell.set_anchor(win, shell.Edge.TOP, True)
+            shell.set_margin(win, shell.Edge.TOP, _BASE_MARGIN)
+        elif corner == "top-right":
+            shell.set_anchor(win, shell.Edge.TOP, True)
+            shell.set_anchor(win, shell.Edge.RIGHT, True)
+            shell.set_margin(win, shell.Edge.TOP, _BASE_MARGIN)
+            shell.set_margin(win, shell.Edge.RIGHT, _BASE_MARGIN)
+        else:
+            shell.set_anchor(win, shell.Edge.BOTTOM, True)
+            shell.set_anchor(win, shell.Edge.RIGHT, True)
+            shell.set_margin(win, shell.Edge.BOTTOM, _BASE_MARGIN)
+            shell.set_margin(win, shell.Edge.RIGHT, _BASE_MARGIN)
         # `set_keyboard_interactivity` was the GTK 3 spelling and became a *mode*
         # in 1.x; calling the old name is an AttributeError that took the whole
         # layer down rather than leaving it unlayered.
@@ -571,6 +600,11 @@ class Mascot:
         # answering it here is the difference between a companion and a stray
         # always-on-top window. Measured here on GNOME with the library
         # installed: `is_layer_window()` False and the surface `0`.
+        self._win = win
+        self._shell = shell
+        self._render()
+        win.present()
+
         layered = bool(shell.is_layer_window(win)) and bool(
             shell.get_zwlr_layer_surface_v1(win))
         if not layered:
@@ -578,13 +612,9 @@ class Mascot:
             self._win = None
             self._picture = None
             self._bubble = None
+            self._shell = None
             logger.info("mascot: %s", _NO_SURFACE)
             return False
-
-        self._win = win
-        self._shell = shell
-        self._render()
-        win.present()
         return True
 
     # --- drag -----------------------------------------------------------------
@@ -845,6 +875,11 @@ class Mascot:
     def notice(self, kind: str, text: str = "") -> None:
         """React to something that happened: an expression, and maybe a bubble."""
         self._note_activity()
+        # The note rides the same map the face does: whatever is about to be
+        # shown is also what sounds, so the two can never describe the same
+        # moment differently. Silent when off, playerless, or kind unwired -
+        # the kinds with no file are the deliberate ones (see `SOUND_FOR`).
+        mascot_sounds.play(kind)
         expr = _EVENT_FACE.get(kind)
         if expr is None:
             # A misspelled or unwired kind used to show a surprise face for three
@@ -1037,3 +1072,45 @@ class Mascot:
     def _clicked(self) -> None:
         if self.app is not None:
             self.app.activate_action("toggle-listening", None)
+
+def create(app):
+    """The companion this machine can actually show, or the window if it cannot.
+
+    **The window is preferred, and that is the product decision rather than a
+    fallback order.** A layer-shell window can be dragged, clicked and moved;
+    the notch is a strip in the Shell's own composite with no input region of
+    its own (`mascot_notch`'s docstring says so), so it is strictly less
+    capable. Where the compositor allows the window, the window wins, and the
+    notch is what is left.
+
+    Both classes answer the same surface - `start`, `stop`, `set_state`,
+    `set_level`, `express`, `say`, `notice`, `running` - so the caller builds
+    one and never asks which it got. `mascot.create(app)` is therefore the only
+    construction site, and `application.py` holds the return value in
+    `self.mascot` either way.
+
+    **Nothing here decides whether it *runs*.** Both gates are honest and
+    neither can be answered at `do_startup`: `available()` asks the compositor
+    (`mascot.available`) or the bus (`mascot_notch.available`), and both answers
+    depend on a main loop that does not exist yet at construction time. So
+    `create()` only *picks a class* and the caller starts it in `do_activate`.
+
+    Returns the object either way - never `None` - because a caller that has to
+    handle absence cannot tell "no companion on this machine" from "nobody built
+    one", and the first is a fact about the machine while the second is a bug.
+    """
+    ok, why = available()
+    if ok:
+        return Mascot(app)
+    # The import is inside the function and not at module scope because
+    # `mascot_notch` imports this module: a top-level import would be a cycle.
+    from shani_chronoa import mascot_notch
+    notch_ok, notch_why = mascot_notch.available()
+    if notch_ok:
+        logger.info("mascot: %s (no layer-shell here, so the notch)", why)
+        return mascot_notch.Notch(app)
+    # Neither is available. Both reasons are kept, because they are different
+    # facts about the machine and one sentence has to name both to say anything
+    # a person can act on.
+    logger.info("mascot: no companion - %s; %s", why, notch_why)
+    return Mascot(app)

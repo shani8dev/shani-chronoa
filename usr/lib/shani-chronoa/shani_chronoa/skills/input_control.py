@@ -120,13 +120,14 @@ def _build_command(backend: tuple[str, list[str]], action: str, params: dict) ->
             # `--` ends option parsing so a leading `-` in the text is literal.
             return prefix + ["type", "--clearmodifiers", "--", params["text"]]
     elif name == "wtype":
-        # Syntax per wtype(1); unverified on this host (no Wayland compositor).
-        if action == "move":
-            return prefix + ["-m", str(params["x"]), str(params["y"])]
-        if action == "click":
-            return prefix + ["-c", params["button"]]
+        # **Typing only.** wtype(1) is a virtual *keyboard*: it has no pointer
+        # at all, and `-M` presses a modifier - so the old `wtype -M hello`
+        # failed with "Invalid modifier name 'hello'", and `-m`/`-c` for the
+        # pointer do not exist (measured 2026-10-15). `--` ends option parsing
+        # so text starting with '-' is typed, not read as a flag.
         if action == "type":
-            return prefix + ["-M", params["text"]]
+            return prefix + ["--", params["text"]]
+        return None
     elif name == "ydotool":
         # **All three of these were wrong, and the backend was dead with
         # them.** The module called a binary named `dotool`, which does not
@@ -185,6 +186,14 @@ def _run_action(action: str, params: dict, *, description: str) -> str:
     if not allowed:
         return f"Input control is not permitted: {reason}."
 
+    if action == "type":
+        refusal = chronoa_has_focus()
+        if refusal:
+            return refusal
+    gnome = _gnome_input()
+    if gnome is not None:
+        return _run_gnome(gnome, action, params, description)
+
     backend = _detect_backend()
     if backend is None:
         return (
@@ -210,6 +219,119 @@ def _run_action(action: str, params: dict, *, description: str) -> str:
     if result.returncode != 0:
         return f"Input control failed: {result.stderr.strip() or result.stdout.strip()}"
     return f"{description.capitalize()} done."
+
+
+#: How long the pasted text stays on the clipboard before yours is put back:
+#: long enough for the app to read it on Ctrl+V.
+PASTE_RESTORE_SECONDS = 1.0
+
+
+def paste_text(text: str, press_paste) -> bool:
+    """Put `text` on the clipboard, press paste, then put the clipboard back.
+
+    **The last resort, after keys and IBus**, as Handy does for every
+    dictation: typing reaches only what the layout produces, and with no IBus
+    a Devanagari word has no other way in. The person's clipboard is read
+    first and restored after `PASTE_RESTORE_SECONDS`; a clipboard that cannot
+    be read (an image, nothing) is cleared rather than left holding our text.
+    """
+    import shutil
+    import subprocess
+    import time
+    wayland = bool(os.environ.get("WAYLAND_DISPLAY"))
+    if wayland and shutil.which("wl-copy") and shutil.which("wl-paste"):
+        read, write, clear = ["wl-paste", "--no-newline"], ["wl-copy"], ["wl-copy", "--clear"]
+    elif shutil.which("xclip"):
+        read = ["xclip", "-selection", "clipboard", "-o"]
+        write = ["xclip", "-selection", "clipboard"]
+        clear = None
+    else:
+        return False
+    try:
+        before = subprocess.run(read, capture_output=True, timeout=3)
+        saved = before.stdout if before.returncode == 0 else None
+        subprocess.run(write, input=text.encode("utf-8"), timeout=3, check=True)
+        time.sleep(0.15)
+        press_paste()
+        time.sleep(PASTE_RESTORE_SECONDS)
+        if saved is not None:
+            subprocess.run(write, input=saved, timeout=3)
+        elif clear:
+            subprocess.run(clear, timeout=3)
+        return True
+    except Exception:  # noqa: BLE001 - a paste that could not happen is said by the caller
+        return False
+
+
+CHRONOA_APP_ID = "dev.shani.chronoa"
+
+
+def chronoa_has_focus() -> str:
+    """A refusal when Chronoa's own window holds focus; "" otherwise.
+
+    **Its own message box is never the target.** Measured 2026-10-15: asked to
+    write a note in Text Editor, the model typed while the editor had not yet
+    appeared, and both sentences landed in Chronoa's composer - and a Return
+    there would have sent them as a message. Read from the window list; when
+    no list can be had, nothing is refused on this account.
+    """
+    try:
+        from shani_chronoa.windows import detect
+        backend, _why = detect()
+        if backend is None:
+            return ""
+        focused = next((w for w in backend.list() if w.focused), None)
+    except Exception:  # noqa: BLE001 - an unreadable list refuses nothing
+        return ""
+    if focused is not None and (focused.app_id or "").lower() == CHRONOA_APP_ID:
+        return ("Nothing was typed: Chronoa's own window has focus, so it would have gone "
+                "into its message box. Focus the target window first (open_application "
+                "waits for it, or use focus_window).")
+    return ""
+
+
+def _gnome_input():
+    """Chronoa's GNOME Shell extension, when it can send input (see windows.gnome)."""
+    try:
+        from shani_chronoa.windows import gnome
+        return gnome.input_backend()
+    except Exception:  # noqa: BLE001 - no extension is "use another backend"
+        return None
+
+
+#: xdotool's numbers back to the names the extension takes.
+_BUTTON_NAMES = {"1": "left", "2": "middle", "3": "right"}
+
+
+def _run_gnome(gnome, action: str, params: dict, description: str) -> str:
+    from shani_chronoa.windows import WindowError
+    try:
+        if action == "move":
+            gnome.pointer_move(params["x"], params["y"])
+        elif action == "click":
+            button = str(params["button"])
+            gnome.pointer_click(_BUTTON_NAMES.get(button, button), int(params.get("count", 1)))
+        elif action == "type":
+            text = params["text"]
+            # Keys reach only what the layout can produce. Anything beyond
+            # Latin-1 (Devanagari, CJK, emoji) is committed through Chronoa's
+            # IBus engine instead, as dictation tools do (ibus_input.py).
+            if any(ord(c) > 0xff for c in text):
+                from shani_chronoa import ibus_input
+                if ibus_input.type_via_ibus(text):
+                    return f"{description.capitalize()} done (through Chronoa's IBus input)."
+                if paste_text(text, lambda: gnome.key_press("ctrl+v", 1)):
+                    return (f"{description.capitalize()} done (pasted - Chronoa's IBus input "
+                            f"is not running; your clipboard was put back).")
+                return ("Input control: that text has characters no key can type, "
+                        "Chronoa's IBus input is not running and the clipboard could not "
+                        "be used, so it was not typed.")
+            gnome.type_text(text)
+        else:
+            return f"Input control: the GNOME extension cannot perform '{description}'."
+    except WindowError as exc:
+        return f"Input control through Chronoa's GNOME Shell extension failed: {exc}"
+    return f"{description.capitalize()} done (through Chronoa's GNOME Shell extension)."
 
 
 def _run_portal(action: str, params: dict, description: str) -> str:
@@ -356,3 +478,78 @@ SKILLS = [
         run=_run_type_text,
     ),
 ]
+
+
+#: Reads the focused editable field's text through AT-SPI, in a child process:
+#: `Atspi.init()` in a process with no accessibility bus aborts it outright
+#: (measured - it took a whole test run down), and the app must never.
+_READ_FOCUSED = r'''
+import gi
+gi.require_version("Atspi", "2.0")
+from gi.repository import Atspi
+Atspi.init()
+def walk(node, depth=0):
+    if node is None or depth > 40:
+        return None
+    try:
+        states = node.get_state_set()
+        if states.contains(Atspi.StateType.FOCUSED) and states.contains(Atspi.StateType.EDITABLE):
+            return node
+        for i in range(min(node.get_child_count(), 200)):
+            found = walk(node.get_child_at_index(i), depth + 1)
+            if found is not None:
+                return found
+    except Exception:
+        return None
+    return None
+desktop = Atspi.get_desktop(0)
+for i in range(desktop.get_child_count()):
+    hit = walk(desktop.get_child_at_index(i))
+    if hit is not None:
+        print("TEXT" + Atspi.Text.get_text(hit, 0, -1))
+        break
+'''
+
+
+def _focused_text():
+    """What the focused editable field holds, or None when it cannot be read."""
+    import sys
+    try:
+        done = subprocess.run([sys.executable, "-c", _READ_FOCUSED], capture_output=True,
+                              text=True, timeout=8)
+    except Exception:  # noqa: BLE001 - unreadable is "cannot check", not "failed"
+        return None
+    out = done.stdout
+    return out[out.index("TEXT") + 4:].rstrip("\n") if "TEXT" in out else None
+
+
+def _post_condition(arguments: dict):
+    """**What actually happened on screen**, read back - not the skill's word.
+
+    Typing: the focused field must now contain the text (measured 2026-10-15:
+    a demo model was told "Text typed done" while the text had gone into
+    Chronoa's own composer, and it reported a note it never wrote). Moving the
+    pointer: where it is now. A click: nothing a generic check can confirm.
+    """
+    if "text" in arguments:
+        seen = _focused_text()
+        if seen is None:
+            return None
+        wanted = str(arguments.get("text") or "")
+        tail = seen[-80:]
+        return (wanted in seen, f"the focused field now reads {tail!r}")
+    if "x" in arguments and "y" in arguments:
+        try:
+            from shani_chronoa.windows import gnome
+            backend = gnome.input_backend()
+            if backend is None:
+                return None
+            x, y = backend._call("PointerPosition")
+        except Exception:  # noqa: BLE001
+            return None
+        ok = abs(x - int(arguments["x"])) <= 2 and abs(y - int(arguments["y"])) <= 2
+        return (ok, f"the pointer is at {x},{y}")
+    return None
+
+
+POST_CONDITION = _post_condition

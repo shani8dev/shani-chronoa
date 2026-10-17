@@ -155,10 +155,27 @@ class TestServerArgsContext:
         args_ctx = self._args_ctx()
         assert args_ctx == "32768"
 
-    def test_no_gpu_keeps_8192(self, tmp_path, monkeypatch):
+    def test_no_gpu_uses_the_cpu_fit(self, tmp_path, monkeypatch):
+        """A CPU machine's `-c` comes from RAM and the model, not a constant."""
         self._write_current(tmp_path, monkeypatch)
         args = local_llm.server_args(devices=[])
-        assert args[args.index("-c") + 1] == "8192"
+        assert args[args.index("-c") + 1] == local_llm._cpu_context_arg()
+
+    def test_the_cpu_ladder(self):
+        """1.7B-sized weights and KV (112 KB/token), trained for 40960."""
+        fit = lambda gb: local_llm.cpu_context_for(gb * 1024**3, 1_107_409_472, 114_688, 40_960)  # noqa: E731
+        assert (fit(8), fit(16), fit(32), fit(64)) == (8192, 16384, 32768, 40960), \
+            "64 GB should hold the whole 40960 the model was trained for"
+
+    def test_the_gpu_ladder_reaches_the_training_length(self):
+        ladder = local_llm.context_ladder(local_llm.GPU_CONTEXT_LADDER, 40960)
+        assert ladder[0] == 40960 and 65536 not in ladder
+        fit = lambda gb: ctxfit.context_that_fits(1_107_409_472, ladder, total_bytes=gb * 1024**3,  # noqa: E731
+                                                  per_token=114_688)
+        assert fit(4) == 16384 and fit(24) == 40960
+        assert local_llm.cpu_context_for(32 * 1024**3, 1, 114_688, 8192) == 8192, \
+            "a context above what the model was trained for was chosen"
+        assert local_llm.cpu_context_for(0, 1, 1, 1) == local_llm.CPU_CONTEXT
 
     def test_missing_metadata_keeps_8192(self, tmp_path, monkeypatch):
         (tmp_path / "model.gguf").write_bytes(b"not a gguf")

@@ -56,7 +56,28 @@ TIERS = (
 
 @pytest.fixture
 def machine(monkeypatch):
-    """The three facts `rows_for` reads, settable one at a time."""
+    """The facts the model row reads, settable one at a time.
+
+    **The server probe is faked too, and that is not optional.** The row asks
+    `local_llm.answering_key()`, which asks the **running `llama-server`** first
+    and falls back to the symlink - and this fixture used to control only the
+    symlink. Measured on the machine that found it:
+
+        _loaded_model_path() -> .../cache/data-home/.../Qwen3-1.7B-Q4_K_M.gguf
+        answering_key()      -> 'qwen3-1.7b'
+
+    so a real server on the box answered for a fixture that had declared
+    `installed={'qwen3-8b'}` and `active=''`, and two tests failed reading the
+    **bare key** where the chip read `8B`. A fixture that does not control its
+    environment describes the machine it ran on, and this one was describing a
+    live server it had never asked about.
+
+    The TTL is zeroed for the same reason and for a second one: `_LOADED_CACHE`
+    is module-global, so a warm entry from an earlier test would outlive this
+    fixture's own `state` - a second reader of the same answer, disagreeing with
+    the first. Nothing else in this file needs the cache's *contents*, only its
+    absence.
+    """
     from shani_chronoa import local_llm
 
     state = {"installed": {"qwen3-1.7b"}, "active": "qwen3-1.7b"}
@@ -65,6 +86,10 @@ def machine(monkeypatch):
                         lambda: set(state["installed"]), raising=False)
     monkeypatch.setattr(local_llm, "active",
                         lambda: state["active"], raising=False)
+    # No server on this machine, whatever this box happens to be running.
+    monkeypatch.setattr(local_llm, "_loaded_model_path", lambda: "",
+                        raising=False)
+    monkeypatch.setattr(local_llm, "_LOADED_TTL", 0.0, raising=False)
     return state
 
 

@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**259 skills in 24 groups.** Each is a named, schema-typed module; the model
+**260 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. The whitelist *is* the design, so a new capability is a
 new named skill. The one exception is `run_command`, for running a project's
 tests and builds: off by default, sandboxed (no network, nothing outside the
@@ -37,7 +37,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**94 of 259 are consent-gated and 17 are destructive.**
+**95 of 260 are consent-gated and 17 are destructive.**
 
 ## System
 
@@ -182,6 +182,7 @@ Hardware, peripherals, sensors and their state.
 | `fm_radio` | Listen to FM radio through a USB receiver | needs `fm-radio-enabled` |
 | `ir_remote` | Send or receive infrared remote-control codes | needs `ir-remote-enabled` |
 | `lan_phone` | Find phones on the same Wi-Fi network | needs `lan-phone-enabled` |
+| `landline_call` | Call on your JioFiber landline, over Wi-Fi through the router | needs `landline-enabled` |
 | `nfc` | Read an NFC tag, or write a link to a sticker | needs `nfc-enabled` |
 | `phone` | Find, ping or send a file to your paired phone | needs `phone-control-enabled` |
 | `phone_remote` | Press the phone camera shutter, media keys, or type on the phone | needs `phone-remote-enabled` |

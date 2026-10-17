@@ -52,8 +52,16 @@ def _run(arguments: dict) -> str:
 
     if action == "dial":
         number = str(arguments.get("number") or "").strip()
+        name = str(arguments.get("name") or "").strip()
+        if not number and name:
+            number = landline.resolve_name(name)
+            if not number:
+                return (f"No contact matching '{name}' is known for the landline. Say the number, "
+                        "or open the Phone page once with your phone connected so contacts are read. "
+                        "Nothing was dialled.")
         if not number:
-            return "Dial what? Pass number, e.g. number='+911234567890'. Nothing was dialled."
+            return ("Dial what? Pass number, e.g. number='+911234567890', or name='Amma'. "
+                    "Nothing was dialled.")
         if not number or any(ch not in _ALLOWED for ch in number):
             return ("That is not a dialable number - only digits, spaces and + * # , are allowed. "
                     "Nothing was dialled.")
@@ -120,6 +128,12 @@ SCHEMA = {
                     "type": "string",
                     "description": "For dial: the number to call, e.g. '+911234567890' or a local "
                                    "number. Only digits, spaces and + * # , are accepted.",
+                },
+                "name": {
+                    "type": "string",
+                    "description": "For dial: a contact's name instead of a number, e.g. "
+                                   "name='Amma' - resolved against the phone's contacts if they "
+                                   "have been read. Give number or name.",
                 },
             },
             "required": ["action"],

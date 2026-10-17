@@ -33,10 +33,12 @@ import time
 from collections import OrderedDict
 from pathlib import Path
 
+from shani_chronoa import provenance
 from shani_chronoa import (argfile, capabilities, config as config_mod,
                        permissions, planmode, verification)
 from shani_chronoa import outcome_model
 from shani_chronoa.reaction import ReactionLayer, destructive_tools
+from shani_chronoa.sandbox.profiles import command_profile
 from shani_chronoa.sandbox import (PROFILE_FULL_ACCESS, SandboxConfig,
                                    SandboxExecutor, SandboxLevel)
 
@@ -195,6 +197,12 @@ _TOOLCHAIN_DIRS = (".local", ".cargo", ".rustup", ".npm", ".nvm", ".pyenv",
 _CACHE_DIRS = (".cache",)
 
 
+def _command_timeout() -> int:
+    """The project-command time limit from the Sandbox page (sandbox-command-timeout)."""
+    from shani_chronoa.sandbox.profiles import command_limits
+    return command_limits()[1]
+
+
 def _run_command_sandbox(arguments: dict) -> SandboxConfig:
     """Where `run_command` runs, by its `where` argument.
 
@@ -213,7 +221,7 @@ def _run_command_sandbox(arguments: dict) -> SandboxConfig:
     where = str(arguments.get("where") or "sandbox").strip().lower()
     if where in ("container", "machine"):
         return SandboxConfig(level=SandboxLevel.LEVEL_3_HOST_USER,
-                             timeout_seconds=_SLOW_TOOLS["run_command"])
+                             timeout_seconds=_command_timeout())
     home = os.path.expanduser("~")
     project = buildmode.project()
     writable = [project] if project else []
@@ -224,7 +232,7 @@ def _run_command_sandbox(arguments: dict) -> SandboxConfig:
             writable.append(target)
     return SandboxConfig(
         level=SandboxLevel.LEVEL_2_ISOLATED_DEV,
-        timeout_seconds=_SLOW_TOOLS["run_command"],
+        timeout_seconds=_command_timeout(),
         allow_network=bool(arguments.get("network")),
         writable_dirs=writable + [os.path.join(home, d) for d in _CACHE_DIRS],
         # `/etc` and `/opt` too: git's config, CA certificates, resolv.conf and
@@ -1568,6 +1576,22 @@ def _dispatch_inner(name: str, arguments: dict, by_reference: bool = False,
     # the same `env` invocation rather than starting a second one - a second
     # `env` would work, and would make the reader wonder which one wins.
     env_prefix: "list[str]" = []
+    # **A switch that is on here is on in the child.** The child reads its own
+    # consent through GSettings, and a confined child may not see the settings
+    # store at all: measured 2026-10-15, `run_command` with
+    # `run-command-enabled=true` answered "running commands is turned off" from
+    # inside the sandbox, every time. This process read the switch, so it hands
+    # the child the same one-key grant a fresh "allow" would.
+    if granted_key is None:
+        on_key = _consent_key_for(name)
+        if on_key is not None and config_mod.ChronoaConfig().get_bool(on_key, False):
+            granted_key = on_key
+    # This call's own-words token (`provenance.content_follows`): fresh per
+    # call, so nothing the skill quotes can have been written to contain it.
+    import secrets as _secrets
+    own_words_token = _secrets.token_hex(12) if name in provenance.OWN_WORDS_SKILLS else ""
+    if own_words_token:
+        env_prefix.append(f"{provenance.OWN_WORDS_ENV}={own_words_token}")
     if granted_key:
         # Set on the child, not on this process. The dispatcher runs many calls
         # in one process, so a value set here would be whichever call happened
@@ -1603,7 +1627,7 @@ def _dispatch_inner(name: str, arguments: dict, by_reference: bool = False,
         # compiler or test runner under the default 512 MB address space dies
         # on allocation, which reads as a failing build. Only this tool.
         exit_code, output, duration_ms = _SANDBOX.execute(
-            argv, config, **({"profile": PROFILE_FULL_ACCESS}
+            argv, config, **({"profile": command_profile()}
                              if name in _HEAVY_TOOLS else {}))
         result = output if exit_code == 0 else f"ERROR(exit={exit_code}): {output}"
         if exit_code != 0:
@@ -1650,7 +1674,7 @@ def _dispatch_inner(name: str, arguments: dict, by_reference: bool = False,
         from shani_chronoa.capabilities import READ_ONLY_TOOLS
         suffix = "" if (name in READ_ONLY_TOOLS and checked.verdict is verification.Verdict.UNVERIFIED) \
             else checked.suffix
-        msg = output + suffix
+        msg = provenance.adopt_own_words(output, own_words_token) + suffix
         msg = _with_feedback(msg, _feedback_for_dispatch)
         # **Read the declaration from `output`, not `msg`.** This is the path a
         # subprocessed skill takes, and it used to be built with positional

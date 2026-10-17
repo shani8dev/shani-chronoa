@@ -89,9 +89,6 @@ GATE_NAMES = {
         "Let Chronoa call through your paired phone",
 }
 
-#: Both keys are written in `settings_window/privacy.py` and nowhere else, so it
-#: is the only page on which either answer can change.
-GATE_TARGET = "settings:privacy"
 
 SEND_KEY = "phone-messages-send-enabled"
 CALL_KEY = "bluetooth-call-enabled"
@@ -384,6 +381,15 @@ class PhonePanel:
         box = common.page_body(14)
         outer.set_child(box)
 
+        # The JioFiber landline strip: its state, and the way to add this
+        # computer to the line (the dialer below calls through it when it is up).
+        box.append(self._landline_strip())
+
+        # The far end's picture. Hidden until a call carries video, because a
+        # grey rectangle that is always on screen reads as a broken camera rather
+        # than as a call with no video in it.
+        box.append(self._video_surface())
+
         # The in-call bar: answer / end, and where the audio goes.
         incall = Gtk.Box(spacing=12, halign=Gtk.Align.CENTER)
         incall.add_css_class("card")
@@ -406,6 +412,44 @@ class PhonePanel:
         toggles.append(self.on_phone)
         route.append(toggles)
         incall.append(route)
+        # Mute, and the running call timer beside it.
+        self.mute_button = Gtk.ToggleButton(icon_name="microphone-sensitivity-muted-symbolic",
+                                            valign=Gtk.Align.CENTER, tooltip_text="Mute the microphone")
+        self.mute_button.add_css_class("circular")
+        self.mute_button.connect("toggled", self._on_mute)
+        self.mute_button.update_property([Gtk.AccessibleProperty.LABEL], ["Mute"])
+        incall.append(self.mute_button)
+        # Hold and Swap. They appear together because they are one gesture on a
+        # phone: Hold puts the live call aside and Swap trades it for whatever is
+        # aside. Both are hidden until there is something to hold, so a dialer
+        # with one call does not carry controls that would refuse.
+        self.hold_button = Gtk.Button(icon_name="media-playback-pause-symbolic",
+                                      valign=Gtk.Align.CENTER,
+                                      tooltip_text="Hold this call")
+        self.hold_button.add_css_class("circular")
+        self.hold_button.connect("clicked", lambda _b: self.call_action("hold"))
+        self.hold_button.update_property([Gtk.AccessibleProperty.LABEL], ["Hold"])
+        self.hold_button.set_visible(False)
+        incall.append(self.hold_button)
+        self.swap_button = Gtk.Button(icon_name="media-playlist-consecutive-symbolic",
+                                      valign=Gtk.Align.CENTER,
+                                      tooltip_text="Swap to the other call")
+        self.swap_button.add_css_class("circular")
+        self.swap_button.connect("clicked", lambda _b: self.call_action("swap"))
+        self.swap_button.update_property([Gtk.AccessibleProperty.LABEL], ["Swap"])
+        self.swap_button.set_visible(False)
+        incall.append(self.swap_button)
+        self.merge_button = Gtk.Button(icon_name="view-list-ordered-symbolic",
+                                       valign=Gtk.Align.CENTER,
+                                       tooltip_text="Merge all live calls")
+        self.merge_button.add_css_class("circular")
+        self.merge_button.connect("clicked", lambda _b: self.call_action("merge"))
+        self.merge_button.update_property([Gtk.AccessibleProperty.LABEL], ["Merge"])
+        self.merge_button.set_visible(False)
+        incall.append(self.merge_button)
+        self.call_timer = _label("", dim=True, wrap=False)
+        self.call_timer.set_valign(Gtk.Align.CENTER)
+        incall.append(self.call_timer)
         status = Gtk.Button(icon_name="view-refresh-symbolic", valign=Gtk.Align.CENTER,
                             tooltip_text="Call status")
         status.add_css_class("flat")
@@ -466,7 +510,200 @@ class PhonePanel:
         box.append(head)
         self.history = common.page_body(0)
         box.append(self.history)
+        self._wire_landline_events()
         return outer
+
+    # --- live landline call state ---------------------------------------------
+    def _wire_landline_events(self) -> None:
+        """Reflect the landline's own events in the dialer, live.
+
+        The call happens on the landline's thread; its events arrive there too,
+        so each one is marshalled onto the GTK loop before it touches a widget.
+        Subscribed through the facade (`landline.listen`), never the engine, so
+        the other session's work on the SIP layer cannot break this.
+        """
+        try:
+            from shani_chronoa import landline
+            if getattr(self, "_landline_unsub", None):
+                self._landline_unsub()
+            self._landline_unsub = landline.listen(self._on_landline_event)
+            # The picture rides its own channel: `listen` is for call state, and
+            # fifteen frames a second through the same list would put a copy of
+            # every frame in the event queue behind each one.
+            if getattr(self, "_video_unsub", None):
+                self._video_unsub()
+            self._video_unsub = landline.video_sink(self._on_frame)
+        except Exception:  # noqa: BLE001 - no landline is just a quiet dialer
+            self._landline_unsub = None
+            self._video_unsub = None
+
+    def _video_surface(self) -> Gtk.Widget:
+        """The far end's picture, fed a texture one decoded frame at a time.
+
+        Drawn rather than a `Gtk.Image` from a file: the frames arrive as raw
+        rgb24 off the decoder's thread fifteen times a second, and writing one
+        to disk per frame in order to show it is fifteen file writes to draw a
+        picture. `Gdk.MemoryTexture` wraps the bytes the decoder already has.
+
+        **No toggle, and that is deliberate.** A per-call video switch needs a
+        re-INVITE to add or drop the `m=video` line, and the offer decides at
+        INVITE time whether this machine has a camera at all. A button that
+        looks like it turns video off and does not is the dead-control class
+        this panel has been bitten by twice. When there is no picture the row
+        says which of the two reasons it is - here rather than left to guess.
+        """
+        frame = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        frame.add_css_class("card")
+        self.video_box = frame
+        self.video_placeholder = _label("", dim=True)
+        self.video_placeholder.set_xalign(0.5)
+        self.video_placeholder.set_vexpand(True)
+        self.video_placeholder.set_justify(Gtk.Justification.CENTER)
+        self.video_picture = Gtk.Picture()
+        self.video_picture.set_can_shrink(True)
+        # 16:9 held by the aspect frame rather than by the texture, so a
+        # differently-shaped source is letterboxed instead of stretched.
+        aspect = Gtk.AspectFrame(xalign=0.5, yalign=0.5, ratio=16.0 / 9.0,
+                                 obey_child=False)
+        aspect.set_size_request(-1, 170)
+        aspect.set_child(self.video_picture)
+        frame.append(self.video_placeholder)
+        frame.append(aspect)
+        frame.set_visible(False)
+        return frame
+
+    def _on_frame(self, rgb: bytes, width: int, height: int) -> None:
+        """A decoded picture, from the decoder's own worker thread.
+
+        Marshalled onto the GTK loop here rather than in the decoder, because the
+        decoder is a plain thread and building GTK objects on it would put every
+        other widget in this app one frame behind.
+        """
+        GLib.idle_add(self._paint_frame, bytes(rgb), int(width), int(height))
+
+    def _paint_frame(self, rgb: bytes, width: int, height: int) -> bool:
+        """One frame onto the picture; anything unusable leaves the last one up.
+
+        The length check is **exact**, and that is load-bearing rather than
+        tidiness: GLib refuses a buffer *shorter* than the stride it is given
+        (measured: `gdk_memory_texture_new` asserts and returns NULL), but it
+        accepts a longer one without complaint - so an over-long buffer would be
+        drawn as a stretched frame of someone else's pixels. The decoder hands
+        over exactly one picture, so exactly one picture is what is drawn.
+        """
+        if width < 1 or height < 1 or len(rgb) != width * height * 3:
+            return False
+        try:
+            texture = Gdk.MemoryTexture.new(
+                width, height, Gdk.MemoryFormat.R8G8B8,
+                GLib.Bytes.new(rgb), width * 3)
+        except Exception:  # noqa: BLE001 - a frame we cannot wrap is a dropped frame
+            logger.debug("landline: could not wrap a %dx%d frame", width, height)
+            return False
+        self.video_picture.set_paintable(texture)
+        self._video_seen = True
+        if self.video_placeholder is not None and self.video_placeholder.get_visible():
+            self.video_placeholder.set_visible(False)
+        if self.video_box is not None and not self.video_box.get_visible():
+            self.video_box.set_visible(True)
+        return False
+
+    def _show_video_state(self) -> None:
+        """When a call is up, say what the picture is doing - including nothing.
+
+        A hidden box and an empty one look the same to somebody who does not know
+        which to expect, and both say "this call has no video". Saying *which* of
+        the two reasons it is - no camera here, or the far end answered without
+        one - is the difference between a fact and a grey rectangle, and the two
+        have different remedies.
+        """
+        if self.video_box is None or getattr(self, "_video_seen", False):
+            return
+        try:
+            from shani_chronoa import landline
+            why = ("The other side answered this call without video."
+                   if landline.video_available() else
+                   "No picture: this computer has no camera to send one from "
+                   "(video needs ffmpeg and a camera).")
+        except Exception:  # noqa: BLE001 - no facade is still a reason
+            why = "No picture came through on this call."
+        self.video_placeholder.set_text(why)
+        self.video_box.set_visible(True)
+
+    def _hide_video(self) -> None:
+        self._video_seen = False
+        if self.video_placeholder is not None:
+            self.video_placeholder.set_visible(True)
+        if self.video_box is not None:
+            self.video_box.set_visible(False)
+
+    def _on_landline_event(self, kind: str, **info: Any) -> None:
+        from gi.repository import GLib
+        GLib.idle_add(self._apply_landline_event, kind, info)
+
+    def _apply_landline_event(self, kind: str, info: dict) -> bool:
+        who = info.get("name") or info.get("number") or ""
+        note = getattr(self, "call_note", None)
+        if note is not None:
+            text = {
+                "incoming": f"Incoming landline call from {who}",
+                "ringing": f"Calling {who} on your landline...",
+                "answered": f"On a landline call with {who}",
+                "ended": f"Landline call ended: {info.get('reason', '')}".rstrip(": "),
+            }.get(kind)
+            if text:
+                note.set_text(text)
+        # Answer only makes sense while a call is ringing in.
+        if getattr(self, "answer_button", None) is not None:
+            self.answer_button.set_sensitive(kind == "incoming")
+        if kind == "answered":
+            self._start_call_timer()
+            self._show_video_state()
+        elif kind == "ended":
+            self._stop_call_timer()
+            self._hide_video()
+        if kind in ("answered", "ended"):
+            self._refresh_call_controls()
+        if kind in ("registered", "unregistered") and hasattr(self, "_landline_status"):
+            self._refresh_landline()
+        if kind == "ended" and hasattr(self, "history"):
+            self.load_history()  # the call just logged; refresh recents
+        return False  # one-shot idle
+
+    def _on_mute(self, button: Gtk.ToggleButton) -> None:
+        from shani_chronoa import landline
+        on = button.get_active()
+        landline.set_muted(on)
+        button.set_tooltip_text("Unmute the microphone" if on else "Mute the microphone")
+        if getattr(self, "call_note", None) is not None and landline.in_call():
+            self.call_note.set_text("Microphone muted" if on else "Microphone on")
+
+    def _start_call_timer(self) -> None:
+        import time
+        from gi.repository import GLib
+        self._call_started = time.monotonic()
+        self._stop_call_timer(clear=False)
+
+        def tick() -> bool:
+            if getattr(self, "call_timer", None) is None:
+                return False
+            secs = int(time.monotonic() - self._call_started)
+            self.call_timer.set_text(f"{secs // 60}:{secs % 60:02d}")
+            return True
+        tick()
+        self._call_timer_id = GLib.timeout_add_seconds(1, tick)
+
+    def _stop_call_timer(self, clear: bool = True) -> None:
+        from gi.repository import GLib
+        tid = getattr(self, "_call_timer_id", 0)
+        if tid:
+            GLib.source_remove(tid)
+            self._call_timer_id = 0
+        if clear and getattr(self, "call_timer", None) is not None:
+            self.call_timer.set_text("")
+        # A call ending clears any mute, so the next call starts open.
+        if clear and getattr(self, "mute_button", None) is not None:
+            self.mute_button.set_active(False)
 
     @staticmethod
     def _round_button(icon: str, label: str, css: str, on_click: Callable[[], None]) -> Gtk.Button:
@@ -487,7 +724,7 @@ class PhonePanel:
         button = Gtk.Button(child=face)
         button.add_css_class("dialer-key")
         button.update_property([Gtk.AccessibleProperty.LABEL], [key])
-        button.connect("clicked", lambda _b: self.number.set_text(self.number.get_text() + key))
+        button.connect("clicked", lambda _b: self._key_pressed(key))
         # Hold 0 for "+", as every phone does.
         if key == "0":
             hold = Gtk.GestureLongPress()
@@ -495,19 +732,42 @@ class PhonePanel:
             button.add_controller(hold)
         return button
 
+    def _key_pressed(self, key: str) -> None:
+        """A keypad press: a tone down the live call, or a digit into the field.
+
+        During an active landline call the keypad is the phone's keypad - it
+        sends DTMF so you can work a menu ("press 1 for ...") - not a text field.
+        """
+        try:
+            from shani_chronoa import landline
+            if landline.in_call():
+                landline.dtmf(key)
+                self.number.set_text(self.number.get_text() + key)
+                return
+        except Exception:  # noqa: BLE001
+            pass
+        self.number.set_text(self.number.get_text() + key)
+
     def _show_match(self) -> None:
         """The contact the typed digits belong to, under the number."""
         typed = "".join(ch for ch in self.number.get_text() if ch.isdigit() or ch == "+")
         name = self.name_for(typed) if len(typed) >= 6 else ""
         self.match.set_text(name)
 
-    def _route_button(self, visible: bool = True) -> Gtk.Button:
-        """A wired route to the one page that writes all three gates."""
-        button = common.wire_page_button(
-            common.open_settings_button("Open Privacy settings", GATE_TARGET),
-            self.app, GATE_TARGET)
-        button.set_visible(visible)
-        return button
+    def _number_for_name(self, name: str) -> str:
+        """A number for a typed contact name: the loaded book first, then the cache."""
+        want = "".join(name.lower().split())
+        for cname, numbers in (self.book or []):
+            if numbers and "".join(str(cname).lower().split()) == want:
+                return str(numbers[0])
+        for cname, numbers in (self.book or []):
+            if numbers and want in "".join(str(cname).lower().split()):
+                return str(numbers[0])
+        try:
+            from shani_chronoa import landline
+            return landline.resolve_name(name)
+        except Exception:  # noqa: BLE001
+            return ""
 
     def _note_row(self) -> "tuple[Gtk.Box, Gtk.Button]":
         """A dim note that can also hold the way out of it.
@@ -561,6 +821,25 @@ class PhonePanel:
         number = (number or "").strip()
         if not number:
             self.call_note.set_text("Type a number first.")
+            return
+        # A typed name instead of a number: look it up in the contact book.
+        if any(ch.isalpha() for ch in number):
+            resolved = self._number_for_name(number)
+            if not resolved:
+                self.call_note.set_text(f"No contact matching '{number}'.")
+                return
+            number = resolved
+        # The JioFiber landline, when it is connected, is the same dialer's
+        # first line - it needs no phone and no Bluetooth (landline/__init__.py).
+        if self._landline_ready():
+            from shani_chronoa import landline
+            from shani_chronoa.landline.ua import dial_user
+            try:
+                landline.dial(number)
+                self.call_note.set_text(f"Calling {dial_user(number)} on your landline. "
+                                        "Hang up here when you are done.")
+            except (RuntimeError, ValueError) as exc:
+                self.call_note.set_text(f"Not called: {exc}")
             return
         if not self.ok(SEND_KEY):
             self._say_gate(self.call_note, self._call_note_btn,
@@ -621,13 +900,191 @@ class PhonePanel:
                    lambda r: self.call_note.set_text(str(r).split(" (unverified")[0]))
 
     def call_action(self, action: str) -> None:
+        # Answer and Hang up act on whichever line has the call. A landline call
+        # in progress is answered and ended on the landline; otherwise the
+        # paired phone, as before.
+        from shani_chronoa import landline
+        current = landline.line()
+        if action in ("hold", "swap", "merge"):
+            # Hold and Swap are landline-only: the paired phone's route toggle
+            # is a different control and there is no far-end call to hold here.
+            try:
+                if action == "hold":
+                    self.call_note.set_text(
+                        "Held - dial another number, or Swap."
+                        if landline.hold() else
+                        "That call was not held. It may already be held, or the "
+                        "other side would not take it.")
+                if action == "swap":
+                    self.call_note.set_text(
+                        "Swapped." if landline.swap() else
+                        "Not swapped: Swap needs two answered calls.")
+                else:
+                    self.call_note.set_text(
+                        "Merged." if landline.merge() else
+                        "Not merged: Merge needs at least two answered calls.")
+            except RuntimeError as exc:
+                self.call_note.set_text(str(exc))
+            self._refresh_call_controls()
+            return
+        if current is not None and (current.call is not None
+                                    or (action == "answer" and current.registered)):
+            try:
+                landline.answer() if action == "answer" else landline.hangup()
+                self.call_note.set_text("Answered." if action == "answer" else "Hung up.")
+            except RuntimeError as exc:
+                self.call_note.set_text(str(exc))
+            return
         self.call_note.set_text("...")
         _in_thread(lambda: _tool("bluetooth_call", {"action": action}),
                    lambda r: self.call_note.set_text(str(r)))
 
+    def _refresh_call_controls(self) -> None:
+        """Hold and Swap exist only while there is a call to put aside.
+
+        Shown from the line's own state rather than tracked here, because a
+        button that appears on a guess is a button nobody can rely on - and a
+        dialer with one call carrying a Hold that refuses is the dead-control
+        class this panel has been bitten by twice.
+        """
+        hold, swap, merge = (getattr(self, "hold_button", None),
+                            getattr(self, "swap_button", None),
+                            getattr(self, "merge_button", None))
+        if hold is None or swap is None:
+            return
+        try:
+            from shani_chronoa import landline
+            live = landline.calls()
+        except Exception:  # noqa: BLE001 - no facade is no calls
+            live = []
+        answerable = [c for c in live if c.state == "active"]
+        aside = [c for c in live if c.held]
+        # Swap needs two answered calls; Hold needs one that is not already aside.
+        swap.set_visible(bool(len(answerable) and aside))
+        hold.set_visible(bool(answerable and not aside) or bool(swap.get_visible()))
+        if merge is not None:
+            # Merge needs at least two answered calls.
+            merge.set_visible(bool(len(answerable) >= 2))
+
+    @staticmethod
+    def _landline_ready() -> bool:
+        try:
+            from shani_chronoa import landline
+            return landline.ready()
+        except Exception:  # noqa: BLE001
+            return False
+
+    # --- the landline strip ---------------------------------------------------
+    def _landline_strip(self) -> Gtk.Widget:
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        card.add_css_class("card")
+        card.set_margin_bottom(4)
+        for side in ("top", "bottom", "start", "end"):
+            getattr(card, f"set_margin_{side}")(10)
+        row = Gtk.Box(spacing=8)
+        icon = Gtk.Image.new_from_icon_name("network-wireless-symbolic")
+        self._landline_status = _label("", dim=True, wrap=True)
+        self._landline_status.set_hexpand(True)
+        self._landline_status.set_xalign(0)
+        self._landline_button = Gtk.Button(valign=Gtk.Align.CENTER)
+        self._landline_button.add_css_class("suggested-action")
+        #: "setup" while turning on or adding, "confirm" while a code is awaited.
+        self._landline_mode = "setup"
+        self._landline_button.connect("clicked", lambda _b: (
+            self._landline_confirm() if self._landline_mode == "confirm"
+            else self._landline_setup_clicked()))
+        row.append(icon)
+        row.append(self._landline_status)
+        row.append(self._landline_button)
+        card.append(row)
+        # Where the texted code is typed, shown only while adding this computer.
+        self._landline_code = Gtk.Entry(placeholder_text="Code from the text message",
+                                        input_purpose=Gtk.InputPurpose.DIGITS)
+        self._landline_code.connect("activate", lambda _e: self._landline_confirm())
+        self._landline_code.set_visible(False)
+        card.append(self._landline_code)
+        self._refresh_landline()
+        return card
+
+    def _refresh_landline(self) -> None:
+        from shani_chronoa import landline
+        on = self.ok("landline-enabled")
+        if not on:
+            self._landline_status.set_text("Your JioFiber landline can ring and dial here.")
+            self._landline_button.set_label("Turn on")
+        elif not landline.is_set_up():
+            self._landline_status.set_text("Add this computer to your JioFiber landline to call on it.")
+            self._landline_button.set_label("Set up")
+        else:
+            self._landline_status.set_text(landline.status())
+            self._landline_button.set_label("Forget")
+
+    def _landline_setup_clicked(self) -> None:
+        from shani_chronoa import landline
+        if not self.ok("landline-enabled"):
+            self.app.config.set("landline-enabled", "true")
+            self._refresh_landline()
+            return
+        if landline.is_set_up():
+            landline.forget()
+            self._refresh_landline()
+            return
+        self._landline_status.set_text("Asking your router to add this computer...")
+        self._landline_button.set_sensitive(False)
+
+        def work():
+            try:
+                return landline.setup_start()
+            except Exception as exc:  # noqa: BLE001
+                return exc
+
+        def done(result):
+            self._landline_button.set_sensitive(True)
+            if isinstance(result, Exception):
+                self._landline_status.set_text(f"Could not start: {result}")
+                self._refresh_landline()
+                return
+            self._landline_status.set_text(f"A code was texted to {result}. Type it here.")
+            self._landline_code.set_visible(True)
+            self._landline_code.grab_focus()
+            self._landline_button.set_label("Confirm")
+            self._landline_mode = "confirm"
+        _in_thread(work, done)
+
+    def _landline_confirm(self) -> None:
+        from shani_chronoa import landline
+        code = self._landline_code.get_text().strip()
+        self._landline_status.set_text("Confirming...")
+
+        def work():
+            try:
+                number = landline.setup_finish(code)
+                landline.start(self.app)
+                return number
+            except Exception as exc:  # noqa: BLE001
+                return exc
+
+        def done(result):
+            self._landline_mode = "setup"
+            self._landline_code.set_visible(False)
+            self._landline_code.set_text("")
+            if isinstance(result, Exception):
+                self._landline_status.set_text(f"Not added: {result}")
+            else:
+                self._landline_status.set_text(f"Landline {result} added. Connecting...")
+            self._refresh_landline()
+        _in_thread(work, done)
+
     def load_history(self) -> None:
+        # The landline keeps its own local log (placed / received / missed); show
+        # it whenever there is one, with or without a phone connected.
+        from shani_chronoa import landline
+        landline_rows = landline.history()
         if self.device is None or ph.backend() != "bluetooth":
-            self.notice(self.history, "Recent calls are read over Bluetooth only.")
+            if landline_rows:
+                self._show_landline_history(landline_rows)
+            else:
+                self.notice(self.history, "Recent calls are read over Bluetooth only.")
             return
         if not self.ok(READ_KEY):
             self.notice(self.history, f"Reading call history is off ('{READ_KEY}').")
@@ -648,6 +1105,20 @@ class PhonePanel:
                                 _button("Call", lambda n=c["number"]: self.call(n), icon="call-start-symbolic")))
             self.history.append(lb if result else _label("No recent calls.", dim=True))
         _in_thread(lambda: phone_bluez.call_history(dev.id, 30), done)
+
+    def _show_landline_history(self, rows: "list[dict]") -> None:
+        """Recent landline calls, newest first, each with one-tap redial."""
+        _clear(self.history)
+        lb = _list()
+        for c in rows[:30]:
+            number = c.get("number", "")
+            who = c.get("name") or self.name_for(number) or number or "Unknown"
+            kind = c.get("kind", "call")
+            when = _when(c.get("when", 0) * 1000) if c.get("when") else ""
+            lb.append(_item(who, f"{kind} · landline{(' · ' + when) if when else ''}",
+                            _button("Call", lambda n=number: self.call(n),
+                                    icon="call-start-symbolic")))
+        self.history.append(lb)
 
     # --- messages -------------------------------------------------------------
 
@@ -758,6 +1229,13 @@ class PhonePanel:
                 self.notice(self.contact_list, f"Could not read contacts: {result}")
                 return
             self.book = sorted(result, key=lambda c: c[0].lower())
+            # Remember them so the landline can be dialled by name later, even
+            # with no phone connected and from the headless skill.
+            try:
+                from shani_chronoa import landline
+                landline.cache_contacts(self.book)
+            except Exception:  # noqa: BLE001
+                pass
             self.show_contacts()
         _in_thread(lambda: ph.contacts(dev), done)
 

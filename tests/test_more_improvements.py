@@ -77,7 +77,7 @@ def test_an_app_that_dies_at_once_is_not_reported_as_opened(monkeypatch):
     fake = SimpleNamespace(get_display_name=lambda: "Broken")
     monkeypatch.setattr(oa, "find_app", lambda name: fake)
     monkeypatch.setattr(oa.Gio, "DesktopAppInfo", type(fake))  # isinstance(...) -> True for the fake
-    fake.launch_uris_as_manager = lambda *a: (a[5](None, 999_999_999), True)[1]
+    fake.launch_uris_as_manager_with_fds = lambda *a: (a[5](None, 999_999_999), True)[1]
     monkeypatch.setattr(oa, "ALIVE_SECONDS", 0.01)
     assert "exited straight away" in oa._run({"name": "broken"})
 

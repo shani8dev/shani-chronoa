@@ -259,6 +259,12 @@ class BrainMixin:
         self.llm = cloud_llm
         if self.assistant:
             self.assistant.llm = cloud_llm
+        # The composer's "Answers with" row names the engine; it was drawn
+        # before this one existed and kept saying "No model" (measured in the
+        # demo recorder, 2026-10-15), so it is redrawn now.
+        refresh = getattr(self, "_refresh_strip", None)
+        if callable(refresh) and getattr(self, "window", None) is not None:
+            GLib.idle_add(lambda: (refresh(), False)[1])
 
     def _cloud_gate_reason(self) -> str:
         """Why the cloud route is shut, or "" when it is open.
@@ -339,6 +345,12 @@ class BrainMixin:
         self.llm = chosen
         if self.assistant:
             self.assistant.llm = chosen
+        # The composer's "Answers with" row names the engine; it was drawn
+        # before this one existed and kept saying "No model" (measured in the
+        # demo recorder, 2026-10-15), so it is redrawn now.
+        refresh = getattr(self, "_refresh_strip", None)
+        if callable(refresh) and getattr(self, "window", None) is not None:
+            GLib.idle_add(lambda: (refresh(), False)[1])
         logger.warning("answering engine switched to %s (%s)", want,
                        type(chosen).__name__)
         return ""

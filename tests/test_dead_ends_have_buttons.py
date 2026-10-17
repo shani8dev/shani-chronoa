@@ -42,6 +42,11 @@ class _StubConfig:
 
     def __init__(self, **values):
         self._values = values
+        #: What a "Turn on" press wrote, in order.
+        self.written: list = []
+
+    def set(self, key, value):
+        self.written.append((key, value))
 
     def get(self, key, default=""):
         return str(self._values.get(key, default))
@@ -133,14 +138,17 @@ def test_the_refused_phone_gate_offers_the_privacy_switch(shown):
     """
     original = devices._permission
     devices._permission = lambda cfg: devices.State(devices.STATE_REFUSED)
+    app = _App()
     try:
-        page = devices.build(_App())
+        page = devices.build(app)
     finally:
         devices._permission = original
 
-    press(page, "Open Privacy settings", shown)
-    assert shown == ["settings:privacy"], (
-        f"the button reached {shown!r}, not the privacy page")
+    # Since the 2026-10-15 redesign the way out is **Turn on, here**: the
+    # banner writes the switch instead of sending the person to find it.
+    press(page, "Turn on", shown)
+    assert app.config.written == [("phone-control-enabled", "true")], (
+        f"Turn on wrote {app.config.written!r}, not the phone switch")
 
 
 def test_the_calendar_consent_gate_offers_the_senses_switch(shown, monkeypatch):
@@ -153,12 +161,14 @@ def test_the_calendar_consent_gate_offers_the_senses_switch(shown, monkeypatch):
     original = calendar._permitted
     monkeypatch.setattr(calendar, "_permitted",
                         lambda app: (False, calendar.CONSENT_DETAIL))
-    page = calendar.build(_App())
+    app = _App()
+    page = calendar.build(app)
 
     assert calendar._permitted is not original, "the gate was not actually shut"
-    press(page, "Open Senses settings", shown)
-    assert shown == ["settings:senses"], (
-        f"the button reached {shown!r}, not the senses page")
+    # Turned on here since the 2026-10-15 redesign, not routed to Senses.
+    press(page, "Turn on", shown)
+    assert app.config.written == [("calendar-read-enabled", "true")], (
+        f"Turn on wrote {app.config.written!r}, not the calendar switch")
 
 
 def test_the_empty_rule_list_offers_the_tool_activity_gate(shown):

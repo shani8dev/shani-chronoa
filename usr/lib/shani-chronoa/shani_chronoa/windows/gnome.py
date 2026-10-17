@@ -13,7 +13,7 @@ is not, with the command that turns it on.
 from __future__ import annotations
 
 import json
-from typing import List, Tuple
+from typing import Optional, List, Tuple
 
 from shani_chronoa.windows import Backend, Window, WindowError
 
@@ -102,6 +102,24 @@ class GnomeBackend(Backend):
     def set_workspace(self, wid, index):
         self._call("SetWorkspace", "ti", (_id(wid), int(index)))
 
+    def pointer_move(self, x: int, y: int) -> None:
+        self._call("PointerMove", "ii", (int(x), int(y)))
+
+    def pointer_click(self, button: str, count: int = 1) -> None:
+        self._call("PointerClick", "si", (str(button), int(count)))
+
+    def key_press(self, combo: str, repeat: int = 1) -> None:
+        self._call("KeyPress", "si", (str(combo), int(repeat)))
+
+    def launch_app(self, desktop_id: str) -> None:
+        self._call("LaunchApp", "s", (str(desktop_id),))
+
+    def type_text(self, text: str) -> None:
+        self._call("TypeText", "s", (str(text),))
+
+    def tile(self, wid, side):
+        self._call("Tile", "ts", (_id(wid), str(side)))
+
 
 def _id(wid) -> int:
     try:
@@ -116,3 +134,58 @@ def _plain(message: str) -> str:
         if marker in message:
             message = message.split(marker, 1)[1]
     return message.strip()
+
+
+#: The extension version that added pointer and keyboard input.
+INPUT_VERSION = 2
+
+
+#: The extension version that added LaunchApp.
+LAUNCH_VERSION = 3
+
+
+def _version() -> int:
+    try:
+        Gio, bus = _bus()
+        from gi.repository import GLib
+        reply = bus.call_sync(BUS_NAME, OBJECT_PATH, "org.freedesktop.DBus.Properties",
+                              "Get", GLib.Variant("(ss)", (INTERFACE, "Version")), None,
+                              Gio.DBusCallFlags.NONE, _TIMEOUT_MS, None)
+        return int(reply.unpack()[0])
+    except Exception:  # noqa: BLE001 - an unreadable version is an old extension
+        return 0
+
+
+def launch_backend() -> "Optional[GnomeBackend]":
+    """The extension, when GNOME Shell can launch apps for Chronoa (Version 3+)."""
+    backend, _why = available()
+    if isinstance(backend, GnomeBackend) and _version() >= LAUNCH_VERSION:
+        return backend
+    return None
+
+
+def input_backend() -> "Optional[GnomeBackend]":
+    """Chronoa's extension, when it is enabled and can send input; else None.
+
+    **Input from inside the shell**, because on GNOME Wayland nothing outside
+    it can: wtype needs a protocol Mutter does not speak, ydotool a root
+    daemon, the RemoteDesktop portal is not always present. Measured
+    2026-10-15 in a private headless shell: type_text, move_pointer and
+    click_pointer reached nothing; through the extension they reach the
+    focused window. Older extensions (Version 1) have no input methods, so the
+    version is read first rather than a call failing halfway through.
+    """
+    backend, _why = available()
+    if not isinstance(backend, GnomeBackend):
+        return None
+    try:
+        Gio, bus = _bus()
+        from gi.repository import GLib
+        reply = bus.call_sync(BUS_NAME, OBJECT_PATH, "org.freedesktop.DBus.Properties",
+                              "Get", GLib.Variant("(ss)", (INTERFACE, "Version")), None,
+                              Gio.DBusCallFlags.NONE, _TIMEOUT_MS, None)
+        version = int(reply.unpack()[0])
+    except Exception:  # noqa: BLE001 - an unreadable version is an old extension
+        return None
+    return backend if version >= INPUT_VERSION else None
+

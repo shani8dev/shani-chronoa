@@ -223,6 +223,23 @@ class VoiceMixin:
             self.window.set_state(AssistantState.LISTENING)
         return GLib.SOURCE_REMOVE
 
+    def _on_speak_replies(self, action: Gio.SimpleAction, value: GLib.Variant) -> None:
+        """Write the toggle, read it back, and hush a reply being said now."""
+        on = bool(value.get_boolean()) if value is not None else True
+        try:
+            self.config.set("speak-replies", "true" if on else "false")
+        except Exception:  # noqa: BLE001 - a refused write leaves the state as it was
+            logger.warning("could not change speak-replies", exc_info=True)
+        action.set_state(GLib.Variant("b", self.config.speak_replies))
+        if not self.config.speak_replies:
+            # **The voice, not the answer.** `_stop_speaking` is Esc - it also
+            # cancels a turn still thinking. Muting keeps the reply coming on
+            # screen; only what is being said, and what is queued to be, stops.
+            self.player.stop()
+            self._silence_reply()
+            if self.window and self.window.get_state() is AssistantState.SPEAKING:
+                self.window.set_state(AssistantState.IDLE)
+
     def _stop_speaking(self, _action: Gio.SimpleAction, _param: object) -> None:
         """Stop: the reply being spoken, or the turn still being thought about (Esc / the Stop button).
 
@@ -234,6 +251,10 @@ class VoiceMixin:
         """
         self.player.stop()
         self._silence_reply()
+        # Said where the person is looking: the window may be hidden, and a stop
+        # that is not seen to land reads as a stop that did not (desktop_cue.py).
+        from shani_chronoa import desktop_cue
+        desktop_cue.show("Chronoa stopped")
         future = getattr(self, "_turn_future", None)
         if future is not None and not future.done():
             future.cancel()
@@ -491,12 +512,44 @@ class VoiceMixin:
     def _on_playback_level_main(self, level: float) -> bool:
         if self.window:
             self.window.set_playback_level(level)
+        self._level_to_mascot(level)
         return GLib.SOURCE_REMOVE
 
     def _on_input_level_main(self, level: float) -> bool:
         if self.window:
             self.window.set_input_level(level)
+        self._level_to_mascot(level)
         return GLib.SOURCE_REMOVE
+
+    def _level_to_mascot(self, level: float) -> None:
+        """Hand the same level to the mascot, so its halo swells too.
+
+        **The orb and the mascot read two different feeds today**, and only the
+        orb was driven: `Mascot.set_level`'s own docstring said *"nothing calls
+        this yet"* and named these two lines as the whole of the remaining work.
+        They are the same two feeds - the recorder's level callback and the
+        player's level stream, both already hopping to the GTK thread because
+        `ChronoaWindow` is a widget - so this is **one call beside each of them**,
+        not a second subscription to the audio.
+
+        `getattr(self, "mascot", None)` rather than `self.mascot`, because the
+        mascot is built when the desktop companion starts and a voice turn can
+        begin before it. `Mascot.set_level` already ignores a level in any
+        state whose halo does not track one, so it is safe to call
+        unconditionally rather than asking the mascot what state it is in:
+        **one question, one owner**, with the state rule left in the module that
+        draws the halo.
+        """
+        mascot = getattr(self, "mascot", None)
+        if mascot is None:
+            return
+        try:
+            mascot.set_level(level)
+        except Exception:  # noqa: BLE001
+            # The mascot is decoration. A level it cannot draw must not be the
+            # thing that fails a recording, and the window has already been told
+            # either way by the two lines above.
+            logger.debug("mascot: level not drawn", exc_info=True)
 
     def _on_recording_done(self, audio_path: Optional[str]) -> None:
         """Recorder callback - runs on the recorder's own background thread."""
@@ -657,7 +710,8 @@ class VoiceMixin:
 
         def wrapped(question: str, options: list):
             done = present(question, options)
-            if self.tts and self.tts.is_available() and self.config.notification_enabled:
+            if (self.tts and self.tts.is_available() and self.config.notification_enabled
+                    and self.config.speak_replies):
                 threading.Thread(target=speak_then_listen, args=(question, list(options)), daemon=True).start()
             return done
         return wrapped
@@ -673,7 +727,7 @@ class VoiceMixin:
     def _new_speech_queue(self):
         """A sentence-by-sentence speaker for this turn, or None when replies are not spoken."""
         if not (self.tts and self.tts.is_available() and self.config.notification_enabled
-                and self.player.is_available()):
+                and self.config.speak_replies and self.player.is_available()):
             return None
         use_vad = self.config.barge_in_vad_enabled and self.barge_in_monitor.is_available()
 

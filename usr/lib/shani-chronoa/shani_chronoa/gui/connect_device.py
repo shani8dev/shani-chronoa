@@ -182,7 +182,7 @@ class ConnectDeviceWindow(Adw.Window):
         """The last page, replacing everything after the start page."""
         self._token += 1
         ns = self._page("done", "Connected" if ok else "Not connected",
-                        icon or ("emblem-ok-symbolic" if ok else "dialog-warning-symbolic"),
+                        icon or ("object-select-symbolic" if ok else "dialog-warning-symbolic"),
                         heading, body)
         for widget in extra:
             ns.content.append(widget)
@@ -435,7 +435,7 @@ class ConnectDeviceWindow(Adw.Window):
                          why[:1].upper() + why[1:] + ".", actions=actions)
             return
         self._finish(True, f"{device.name} is {'connected' if connect_only else 'paired'}",
-                     self._bt_next_words(device, why), icon=KIND_ICON.get(device.kind, "emblem-ok-symbolic"),
+                     self._bt_next_words(device, why), icon=KIND_ICON.get(device.kind, "object-select-symbolic"),
                      actions=self._bt_next_actions(device))
 
     def _bt_retry_connect(self, device) -> None:

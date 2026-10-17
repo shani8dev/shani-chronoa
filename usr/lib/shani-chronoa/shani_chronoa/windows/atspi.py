@@ -77,11 +77,39 @@ def _actions(frame) -> dict:
         return {}
 
 
+def _bus_answers() -> bool:
+    """Whether a session bus is there and the accessibility bus answers on it.
+
+    **Asked before libatspi is touched**, because libatspi does not fail
+    without them - it aborts the process (`Atspi.init` -> abort, measured
+    2026-10-15: `tests/test_input_skills.py` died mid-run, taking the whole
+    pytest process with it). In the app that would be Chronoa itself.
+    """
+    try:
+        from gi.repository import Gio, GLib
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        address = bus.call_sync("org.a11y.Bus", "/org/a11y/bus", "org.a11y.Bus", "GetAddress",
+                                None, GLib.VariantType.new("(s)"), Gio.DBusCallFlags.NONE,
+                                2000, None).unpack()[0]
+        # The address answering is not enough: libatspi aborted with "Couldn't
+        # connect to accessibility bus" after GetAddress had replied. Connecting
+        # to it is the step that aborts, so that is what is asked.
+        conn = Gio.DBusConnection.new_for_address_sync(
+            address, Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT
+            | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION, None, None)
+        conn.close_sync(None)
+        return True
+    except Exception:  # noqa: BLE001 - no bus, no a11y bus: either way, not usable
+        return False
+
+
 def available(why_not_better: str = "") -> Tuple[Optional[Backend], str]:
     try:
         _atspi()
     except (ImportError, ValueError) as exc:
         return None, f"{why_not_better}; and the accessibility library is missing ({exc})".lstrip("; ")
+    if not _bus_answers():
+        return None, f"{why_not_better}; and the accessibility bus is not running".lstrip("; ")
     return AtspiBackend(why_not_better), ""
 
 

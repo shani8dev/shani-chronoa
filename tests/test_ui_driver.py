@@ -64,6 +64,16 @@ def _count(root) -> int:
                if ui_driver._actionable(n))
 
 
+
+@pytest.fixture(autouse=True)
+def _no_real_accessibility_bus(monkeypatch):
+    """`_secure_field` asks the real AT-SPI bus what holds focus. In the test
+    environment `Atspi.init()` there aborted the whole process - "Fatal Python
+    error: Aborted" in test_delivery_is_only_claimed_when_it_is_read_back, and
+    every test after it never ran (2026-10-15). Answered "an ordinary field"
+    here; a test about the password guard sets its own verdict."""
+    monkeypatch.setattr(ui_driver, "_secure_field", lambda: ("clear", ""))
+
 def test_a_control_this_deep_is_found() -> None:
     """Depth 17, measured: gnome-text-editor's own buttons."""
     root = _deep_tree(17)

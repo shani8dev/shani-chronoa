@@ -30,5 +30,8 @@ if os.environ.get("CHRONOA_TESTS_REAL_SYSTEM_BUS") != "1":
     os.environ["DBUS_SYSTEM_BUS_ADDRESS"] = "unix:path=/nonexistent/chronoa-tests-no-system-bus"
     # bluetoothctl aborts (0.16s, measured) on the unreachable bus rather than
     # waiting - which is the point - but each abort would leave a core dump.
+    # The *soft* limit only: a hard limit of 0 cannot be raised again, and
+    # tests/test_sandbox_core_dumps.py raises it on purpose to prove the
+    # sandbox lowers it for children (3 failures, measured, with (0, 0)).
     import resource
-    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    resource.setrlimit(resource.RLIMIT_CORE, (0, resource.getrlimit(resource.RLIMIT_CORE)[1]))

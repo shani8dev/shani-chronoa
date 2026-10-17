@@ -117,6 +117,19 @@ def _find_app(Atspi, name: str):
     partial = [a for a in apps if want in a.get_name().lower()]
     pick = exact or partial
     if not pick:
+        # **By its window's title, too.** An app's accessible name is often its
+        # program (`python3`, `soffice.bin`), which a model asked about "the
+        # UI target window" has no way to guess - measured 2026-10-15.
+        for a in apps:
+            try:
+                titles = [a.get_child_at_index(i).get_name() or ""
+                          for i in range(min(a.get_child_count(), 20))]
+            except Exception:  # noqa: BLE001 - a dying app has no windows
+                continue
+            if any(want in t.lower() for t in titles):
+                pick = [a]
+                break
+    if not pick:
         raise UIError(f"no app named {name!r} is on the accessibility bus; reachable: "
                       + ", ".join(sorted({a.get_name() for a in apps})[:20]))
     return pick[0]
@@ -474,7 +487,30 @@ def _run(arguments: dict) -> str:
             return f"Chose {' > '.join(used)} in {app.get_name()} ({done})."
         element_id = (arguments.get("id") or "").strip()
         if not element_id:
-            return "Give the element's id from inspect."
+            # **By name, when it names one thing.** A small model sends
+            # `query: "Save"` far more often than the id inspect printed; one
+            # match is unambiguous, several are listed, none is said.
+            query = (arguments.get("query") or arguments.get("text") or "").strip().lower() \
+                if action != "set_text" else (arguments.get("query") or "").strip().lower()
+            found = [(cid, acc) for cid, acc, _d in _walk(app, Atspi)
+                     if query and query in (acc.get_name() or "").lower()]
+            # A button's own text label matches too: the outermost match is
+            # the control, so anything inside another match is dropped.
+            found = [(cid, acc) for cid, acc in found
+                     if not any(cid.startswith(other + "/") for other, _a in found)]
+            if action == "set_text":
+                editable = [(cid, acc) for cid, acc, _d in _walk(app, Atspi)
+                            if _has(acc, "EditableText") and "editable" in _states(acc, Atspi)]
+                found = [f for f in found if f in editable] or (editable if len(editable) == 1 else [])
+            if len(found) == 1:
+                element_id = found[0][0]
+            elif found:
+                listing = "; ".join(f"[{cid}] {acc.get_role_name()} {acc.get_name()!r}"
+                                    for cid, acc in found[:8])
+                return f"More than one element matches {query!r}: {listing}. Give the id."
+            else:
+                return ("Give the element's id from inspect" +
+                        (f" - nothing is named {query!r}." if query else "."))
         acc = _resolve(app, element_id)
         _check_same(acc, element_id, (arguments.get("query") or "").strip())
         label = f"{acc.get_role_name()} {acc.get_name()!r}"

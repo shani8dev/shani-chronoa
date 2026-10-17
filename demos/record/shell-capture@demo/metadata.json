@@ -1,0 +1,6 @@
+{
+  "uuid": "shell-capture@demo",
+  "name": "Demo screen capture (recorder only)",
+  "description": "Used only inside demos/record's private headless shell: whole-screen frames for a video, and a way to open Chronoa's indicator on cue. Never packaged - on a real desktop it would let any program in the session take screenshots.",
+  "shell-version": ["45", "46", "47", "48", "49", "50"]
+}

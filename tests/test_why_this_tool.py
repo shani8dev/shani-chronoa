@@ -329,8 +329,7 @@ class TestEachDecisionIsStated:
         have been different numbers in this file's own history.
         """
         record = _recorded("what is the time")
-        assert record.budget_tokens == int(tool_select.WINDOW_TOKENS
-                                           * tool_select.SELECTION_SHARE)
+        assert record.budget_tokens == tool_select.selection_budget()
         assert record.budget_tokens == 1536
 
     def test_the_earliest_rule_is_the_one_reported(self, no_learning):
@@ -895,3 +894,27 @@ class TestTheRecordReachesTheCard:
 # boundary, for the same reason the argument grid does: a folded revealer still
 # lends the card its child's minimum width, and one long line pushes the whole
 # card off the right of the column.
+
+
+def test_the_tool_budget_follows_the_answering_brain():
+    """Sized to the window being served, capped by brain: a CPU model pays
+    prefill for every schema, a 1M-token cloud model does not."""
+    from shani_chronoa import cloud_llm
+    try:
+        tool_select.set_window(0, local=True)
+        assert tool_select.selection_budget() == tool_select.MIN_BUDGET_TOKENS
+        tool_select.set_window(8192, local=True)
+        assert tool_select.selection_budget() == 2048
+        tool_select.set_window(65536, local=True)
+        assert tool_select.selection_budget() == tool_select.MAX_BUDGET_TOKENS
+        tool_select.set_window(cloud_llm.context_window("gemini-2.5-pro"), local=False)
+        assert tool_select.selection_budget() == tool_select.MAX_CLOUD_BUDGET_TOKENS
+    finally:
+        tool_select.set_window(0, local=True)
+    assert cloud_llm.context_window("unknown-model") == cloud_llm.DEFAULT_CLOUD_CONTEXT
+
+
+def test_each_part_of_a_two_part_request_keeps_its_tool():
+    req = "How much battery do I have left? Then set a 25 minute timer called focus."
+    sent = [t["function"]["name"] for t in tool_select.select_tools(req, TOOLS)]
+    assert "get_battery_status" in sent and "set_timer" in sent, sent

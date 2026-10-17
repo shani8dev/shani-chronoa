@@ -1,0 +1,1 @@
+Run the tests in my shop project with pytest and tell me if they pass.

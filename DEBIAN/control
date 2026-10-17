@@ -3,7 +3,10 @@ Version: 0.1.0
 Section: utils
 Priority: optional
 Architecture: all
-Depends: python3, python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1, python3-httpx, espeak-ng, pipewire, wireplumber, libnotify-bin, upower, tesseract-ocr, tesseract-ocr-eng, bubblewrap, libsecret-1-0, psmisc, i2c-tools, policykit-1, bluez, pciutils, usbutils, smartmontools, power-profiles-daemon, udisks2, cups-client, sane-utils, nmap, network-manager, libglib2.0-bin
+Depends: python3, python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1, python3-httpx, espeak-ng, pipewire, wireplumber, libnotify-bin, upower, tesseract-ocr, tesseract-ocr-eng, bubblewrap, libsecret-1-0, psmisc, i2c-tools, policykit-1, bluez, pciutils, usbutils, smartmontools, power-profiles-daemon, udisks2, cups-client, sane-utils, nmap, network-manager, libglib2.0-bin, libgtk4-layer-shell0, wl-clipboard, xdg-utils
+Provides: shani-circle-to-search
+Replaces: shani-circle-to-search
+Conflicts: shani-circle-to-search
 Suggests: soundtouch, rubberband, whisper.cpp, piper-tts, sox, python3-mcp, translate-shell, gir1.2-webkit-6.0, python3-onnxruntime, avahi-utils, libnss-mdns, iproute2, fwupd
 Maintainer: Shrinivas Vishnu Kumbhar <shrinivas.v.kumbhar@gmail.com>
 Description: Local AI assistant with privacy-first design, integrated into Shanios

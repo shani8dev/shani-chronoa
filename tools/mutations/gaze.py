@@ -197,8 +197,32 @@ _MUTATIONS = [
     {
         "label": "`_on_motion` ignores the reduce-motion preference",
         "file": _MASCOT,
-        "old": "        if self._win is None or _motion_is_reduced():\n            return",
-        "new": "        if self._win is None:\n            return",
+        # **Re-anchored 2026-10-17: this needle rotted in `1cf655c`, which is
+        # mine.** It read the two guards as one line,
+        # `if self._win is None or _motion_is_reduced(): return`, and
+        # `mascot_events` inserted `self._note_activity()` *between* them - which
+        # is the correct behaviour, because presence must wake the mascot even
+        # when reduce-motion stops the eyes following, and the comment it left
+        # says so. So the split is a fix and the anchor was the thing that
+        # described the old shape. Verified against HEAD rather than assumed:
+        # `git show HEAD:...mascot.py | grep -c '_win is None or
+        # _motion_is_reduced'` is **0**, so this was never rot in the working
+        # tree alone - it was committed that way, by me.
+        #
+        # The new needle is the guard and the line it guards, which is what the
+        # claim is about, and it was checked in **both** directions: `count(old)
+        # == 1`, the match at a line start, the splice parses, the splice
+        # changes the text, and `count(new) == 1` both before and after.
+        # The old `new` was `if self._win is None:\n            return`, which the
+        # split made a duplicate of text already in the file - so a reverse
+        # replace would have been ambiguous, which is the half of the anchor
+        # rule that is only checked in one direction by mistake.
+        "old": "        if _motion_is_reduced():\n"
+               "            return\n"
+               "        bearing = _gaze_for(x, y, self._win.get_width(),"
+               " self._win.get_height())\n",
+        "new": "        bearing = _gaze_for(x, y, self._win.get_width(),"
+               " self._win.get_height())\n",
         "why": "**The call site**, and it is a separate mutation from the helper "
                "because both can be removed independently. The gaze is continuous "
                "motion and the bob is the other half of it; a setting honoured for "

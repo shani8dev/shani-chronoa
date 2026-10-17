@@ -153,11 +153,31 @@ def parse_problem(text: str, path) -> str:
 PROJECT_ENV = "CHRONOA_PROJECT"
 
 
+def project_dir() -> str:
+    """The Build-mode project: the env a confined child is given, else the app's own.
+
+    **Both processes have to agree.** A skill runs in a child that receives
+    `CHRONOA_PROJECT`; its post-condition is checked back in the app, which
+    never set that variable. Measured 2026-10-15: `edit_file path=pricing.py`
+    changed ~/shop/pricing.py, then verification resolved `pricing.py` against
+    the app's working directory and reported VERIFICATION FAILED - so every
+    relative edit in Build mode read as a failure to the model.
+    """
+    base = os.environ.get(PROJECT_ENV, "").strip()
+    if base:
+        return base
+    try:
+        from shani_chronoa import buildmode  # lazy: buildmode is light, files is everywhere
+        return buildmode.project()
+    except Exception:  # noqa: BLE001 - no project is the answer, not an error
+        return ""
+
+
 def _in_project(text: str) -> str:
     """`text`, joined to the project folder when it is relative and one is set."""
     if os.path.isabs(text):
         return text
-    base = os.environ.get(PROJECT_ENV, "").strip()
+    base = project_dir()
     return os.path.join(base, text) if base else text
 
 
@@ -170,9 +190,47 @@ def resolve(raw: str) -> Path:
         raise PathProblem("No path was given.")
     text = _in_project(os.path.expandvars(os.path.expanduser(str(raw).strip())))
     try:
-        return Path(text).resolve()
+        return _project_file_for(Path(text).resolve())
     except (OSError, RuntimeError) as exc:
         raise PathProblem(f"Could not resolve {raw!r}: {exc}") from exc
+
+
+def _project_file_for(path: Path) -> Path:
+    """`path`, or the project's one file of that name when `path` cannot exist.
+
+    Measured 2026-10-15 with Qwen3-1.7B in Build mode on ~/shop: it edited
+    `~/<half of the project's absolute path>/pricing.py` twice, and both edits
+    went nowhere. The folder it named does not exist, and the project has
+    exactly one `pricing.py`. **Only when the parent folder is missing** - a
+    new file in a real folder is the model's to name - and only for a single
+    match, so the correction can never pick between two candidates.
+    """
+    base = project_dir()
+    if not base or path.exists() or path.parent.exists():
+        return path
+    root = Path(base).resolve()
+    matches = []
+    for found in walk_limited_names(root, path.name, limit=2):
+        matches.append(found)
+    if len(matches) == 1:
+        logger.info("%s does not exist; using the project's %s", path, matches[0])
+        return matches[0]
+    return path
+
+
+def walk_limited_names(root: Path, name: str, limit: int = 2, max_entries: int = 5000):
+    """Up to `limit` files called `name` under `root`, skipping hidden folders."""
+    seen = 0
+    for folder, dirs, names in os.walk(root):
+        dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("node_modules", "__pycache__")]
+        seen += len(names)
+        if name in names:
+            yield Path(folder) / name
+            limit -= 1
+            if limit <= 0:
+                return
+        if seen > max_entries:
+            return
 
 
 def expand(raw: str) -> Path:
@@ -858,7 +916,10 @@ def withheld_note(what: str, count: int, widen: str = "") -> str:
     if count <= 0:
         return ""
     plural = "" if count == 1 else "s"
-    return (f"... and {count} more {what}{plural} not shown."
+    # "Not shown" alone reads as a footnote; a small model answered "there is
+    # none" from a list that stopped short. The list is incomplete, said so.
+    return (f"... and {count} more {what}{plural} not shown - this list is "
+            f"incomplete, so do not say something is not in it."
             + (f" {widen}" if widen else ""))
 
 

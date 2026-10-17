@@ -18,7 +18,7 @@ Honesty rules:
 from __future__ import annotations
 
 
-from shani_chronoa import files
+from shani_chronoa import files, provenance
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
 from shani_chronoa.skills.undo_last_change import record_preimage
@@ -122,10 +122,15 @@ def _run(arguments: dict) -> str:
                     f"binary data ({files.human_size(len(current))}). Pass "
                     f"overwrite to replace it anyway, if that is really what you want."
                 )
+            # Its own words, not data: outside the fence (`provenance`), so the
+            # way forward it names is one the model may take.
             return (
                 f"Refusing to replace {target}: it already has "
                 f"{files.human_size(len(current))} of content, which would be "
-                f"lost. Pass overwrite to replace it, or append to add to the end."
+                f"lost. To change part of it, use edit_file. To replace all of "
+                f"it, call write_text_file again with overwrite set to true; to "
+                f"add to the end, with append set to true."
+                + provenance.content_follows()
             )
 
     note = ""

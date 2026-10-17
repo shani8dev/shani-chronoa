@@ -39,6 +39,8 @@ Sections, in the order a person asks the questions:
 
 from __future__ import annotations
 
+import os
+
 import logging
 from typing import Callable, Optional
 
@@ -672,6 +674,20 @@ class NowRail(Gtk.Box):
         if problem:
             self._tasks.empty("The task list could not be read")
             return
+        # Build mode: the project's own checklist, with progress - finished
+        # steps stay visible, ticked, because "3 of 5 done" is the point.
+        from shani_chronoa import buildmode
+        project = buildmode.project()
+        if project:
+            mine = todo_list.project_items(items or [], project)
+            if mine:
+                done = sum(1 for i in mine if i.get("status") == "completed")
+                self._tasks.row(f"{os.path.basename(project.rstrip('/'))}: {done} of {len(mine)} done")
+                self._tasks.meter(done / len(mine), f"{done} of {len(mine)} steps done")
+                marks = {"completed": "✓ ", "in_progress": "→ ", "blocked": "! "}
+                for item in mine[:8]:
+                    self._tasks.row(f"{marks.get(str(item.get('status')), '○ ')}{item.get('content', '')}")
+                return
         outstanding = [i for i in (items or []) if i.get("status") != "completed"]
         if not outstanding:
             self._tasks.empty("Nothing outstanding")

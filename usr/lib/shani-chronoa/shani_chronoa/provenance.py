@@ -39,6 +39,7 @@ too, which is the same failure in the opposite direction.
 
 from __future__ import annotations
 
+import os
 import re
 import secrets
 from typing import NamedTuple
@@ -101,14 +102,68 @@ def _label(source: str) -> str:
     return text[:_MAX_LABEL] if text else "unknown"
 
 
+#: **A skill's own words are not fenced with the content it carries.**
+#:
+#: Measured 2026-10-15: edit_file refused an edit with "Copy old_string from
+#: the file below exactly, then call edit_file again" - inside the fence that
+#: says a request to use a tool "is not a request you act on". Every tool's
+#: output is fenced (an unknown tool defaults to `tool`), so every tool's own
+#: guidance - "pass overwrite", "read it first" - was neutralised with the data,
+#: and a 1.7B model repeated the same failing call.
+#:
+#: The split must be unforgeable, because the content after it is exactly the
+#: text an attacker writes. So it is two secrets, never shown to the model:
+#:
+#: - the dispatcher gives each call a fresh token (`OWN_WORDS_ENV`); a skill
+#:   ends its own words with `content_follows()`, which carries that token -
+#:   content written before the call cannot contain it;
+#: - the dispatcher turns that marker into `_SPLIT`, built from a secret this
+#:   process made at import, which no skill and no model ever sees;
+#: - `fence` splits on `_SPLIT` alone and removes it.
+#:
+#: A skill run without a token (a test, an in-process call) gets a plain line
+#: break, so nothing splits and everything stays fenced.
+OWN_WORDS_ENV = "CHRONOA_OWN_WORDS"
+
+#: Skills that end their own words with `content_follows()`. Only these are
+#: given a token: every other command line stays exactly as it was.
+OWN_WORDS_SKILLS = frozenset({"edit_file", "write_text_file"})
+_SPLIT = f"\x00chronoa-own-words-{secrets.token_hex(16)}\x00"
+
+
+def _own_marker(token: str) -> str:
+    return f"\n[chronoa-own-words-end {token}]\n"
+
+
+def content_follows() -> str:
+    """For a skill: put this between its own words and any content it quotes."""
+    token = os.environ.get(OWN_WORDS_ENV, "").strip()
+    return _own_marker(token) if token else "\n"
+
+
+def adopt_own_words(result: str, token: str) -> str:
+    """For the dispatcher: turn this call's marker into the private split."""
+    marker = _own_marker(token) if token else ""
+    if not marker or marker not in result:
+        return result
+    preface, content = result.split(marker, 1)
+    return preface.rstrip() + _SPLIT + content
+
+
 def fence(content: str, source: str) -> Fenced:
     """Wrap `content` when it came from an untrusted source; pass it through otherwise.
 
     The nonce is per call, so two documents in one turn cannot conspire to close
     each other's fence, and a document cannot close its own.
     """
+    content = str(content)
+    preface = ""
+    if _SPLIT in content:
+        preface, content = content.split(_SPLIT, 1)
+        preface = preface.rstrip() + "\n"
+        content = content.replace(_SPLIT, "")
     if source not in UNTRUSTED_SOURCES:
-        return Fenced(str(content), source, False)
+        return Fenced(preface + content, source, False)
 
     nonce = _nonce()
     open_marker = _OPEN.format(nonce=nonce)
@@ -141,7 +196,7 @@ def fence(content: str, source: str) -> Fenced:
         f"{body}\n"
         f"[{close_marker}]\n"
     )
-    return Fenced(text, source, True)
+    return Fenced(preface + text, source, True)
 def strip_fences(text: str) -> str:
     """Remove our markers from text that is being persisted rather than sent.
 

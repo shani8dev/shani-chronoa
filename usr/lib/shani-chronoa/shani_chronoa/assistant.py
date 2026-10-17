@@ -878,6 +878,49 @@ class Assistant:
         finally:
             _done(activity)
 
+    async def _keep_going(self, reply, on_tool_call, deadline, loop, attempts,
+                          on_text, on_tool_result, origin, sink):
+        """Build mode's continuation: while steps this turn wrote are open, go on.
+
+        Bounded three ways - `buildmode.MAX_CONTINUATIONS`, the turn's own
+        deadline, and the round budget of each `_run_turn` - so a model that
+        never ticks its steps off ends the turn instead of looping.
+        """
+        from shani_chronoa import buildmode
+        for _ in range(buildmode.MAX_CONTINUATIONS):
+            steps = buildmode.open_steps(getattr(self, "_steps_before", set()))
+            if not steps or self._over_budget(deadline):
+                break
+            logger.info("build mode: %d step(s) open, continuing", len(steps))
+            self._record({"role": "user", "content": buildmode.continuation(steps)})
+            reply = await self._run_turn(
+                buildmode.continuation(steps), on_tool_call, deadline, loop, attempts,
+                on_text, on_tool_result, max_rounds=_rounds_for_origin(origin),
+                sink=sink, origin=origin)
+        return reply
+
+    def _local_gpu(self) -> bool:
+        """Whether the local model runs on a GPU - asked once per assistant."""
+        if not hasattr(self, "_gpu_known"):
+            try:
+                from shani_chronoa import local_llm
+                self._gpu_known = bool(local_llm.gpu_devices())
+            except Exception:  # noqa: BLE001 - unknown is "no", the cheaper cap
+                self._gpu_known = False
+        return self._gpu_known
+
+    def context_limit(self) -> int:
+        """Tokens the answering brain accepts: the local server's served
+        context (read once, cached), or the cloud model's window; 0 unknown."""
+        try:
+            if getattr(self.llm, "local", False):
+                from shani_chronoa import local_llm
+                return int(local_llm.context_tokens())
+            window = getattr(self.llm, "context_window", None)
+            return int(window) if window else 0
+        except Exception:  # noqa: BLE001 - unknown is an answer, not a crash
+            return 0
+
     def _measure_context(self, messages, tools) -> None:
         """Record what this request actually costs, for the UI to show.
 
@@ -893,9 +936,9 @@ class Assistant:
         try:
             limit = None
             reserve = 0
+            limit = self.context_limit() or None
             if getattr(self.llm, "local", False):
                 from shani_chronoa import local_llm
-                limit = local_llm.context_tokens()
                 reserve = local_llm.REPLY_RESERVE
             real = None
             reported = getattr(self.llm, "last_usage", None)
@@ -967,6 +1010,14 @@ class Assistant:
         if routine is not None:
             logger.info("Running the %r routine: %s", routine[0], routine[1])
             text = routine[1]
+        # **A Build-mode turn keeps going until its own checklist is done**
+        # (`_keep_going`). The rules - plan, prove, be honest - are in Build
+        # mode's prompt clause. A subagent's turn is its parent's to continue.
+        from shani_chronoa import buildmode
+        self._keeps_going = (bool(buildmode.project())
+                             and not getattr(self, "_inherited_turn", ""))
+        if self._keeps_going:
+            self._steps_before = buildmode.snapshot()
         self._record({"role": "user", "content": text})
         self._trim_history()
         self._channel = channel
@@ -1031,10 +1082,15 @@ class Assistant:
         loop = LoopDetector()
 
         try:
-            return await self._run_turn(
+            reply = await self._run_turn(
                 text, on_tool_call, deadline, loop, attempts, on_text,
                 on_tool_result, max_rounds=_rounds_for_origin(origin),
                 sink=sink, origin=origin)
+            if self._keeps_going:
+                reply = await self._keep_going(
+                    reply, on_tool_call, deadline, loop, attempts, on_text,
+                    on_tool_result, origin, sink)
+            return reply
         except BaseException:
             # One guard for the whole turn, and it is here rather than at each
             # site because the sites are easy to forget: a model call that
@@ -1070,6 +1126,8 @@ class Assistant:
             else:
                 tools_module.clear_current_turn()
                 tools_module.set_current_channel("")
+            # The window this turn sized its tools to is this turn's alone.
+            tool_select.set_window(0, local=True)
 
     async def _run_turn(
         self,
@@ -1121,6 +1179,12 @@ class Assistant:
                 # **One selection, two outputs.** Calling `select_tools` and
                 # then `explain` would run the whole thing twice and could
                 # disagree with itself; this asks once.
+                # The served window, read once and cached, so the tool budget
+                # is sized to it (`tool_select.selection_budget`) from the
+                # first turn rather than from the second.
+                local = bool(getattr(self.llm, "local", False))
+                tool_select.set_window(self.context_limit(), local=local,
+                                       gpu=local and self._local_gpu())
                 sent, selection = select_with_reason(
                     text, TOOLS, in_use=tuple(in_use) + _build_tools_this_turn())
             # Fired from **both** branches, and read from `sink` - the

@@ -1,0 +1,1 @@
+test_pricing.py fails: total([10, 10], discount) should treat the discount as a percentage. Fix pricing.py, then run pytest to show the tests pass.

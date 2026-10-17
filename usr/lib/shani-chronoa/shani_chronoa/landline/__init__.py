@@ -13,7 +13,9 @@ no bridge, no other program.
 """
 from __future__ import annotations
 
+import json
 import logging
+import pathlib
 import threading
 from typing import Callable, Dict
 
@@ -26,8 +28,8 @@ CONSENT_KEY = "landline-enabled"
 NOTIFY = ("org.freedesktop.Notifications", "/org/freedesktop/Notifications",
           "org.freedesktop.Notifications")
 
-_STATE: Dict = {"line": None, "app": None, "listeners": [], "pending": None, "nid": 0,
-                "subscribed": False, "starting": False}
+_STATE: Dict = {"line": None, "app": None, "listeners": [], "sinks": [], "pending": None,
+                "nid": 0, "subscribed": False, "starting": False}
 
 
 # --- setting up, once ----------------------------------------------------------
@@ -91,6 +93,46 @@ def listen(callback: Callable[..., None]) -> Callable[[], None]:
     return lambda: callback in _STATE["listeners"] and _STATE["listeners"].remove(callback)
 
 
+def video_sink(sink: Callable[[bytes, int, int], None]) -> Callable[[], None]:
+    """`sink(rgb24, width, height)` for every picture the line decodes.
+
+    The decoder's own thread calls this, so anything GTK-shaped has to marshal
+    onto the main loop before touching a widget - the same rule `listen`'s
+    events follow, for the same reason. A machine with no camera still
+    *receives* a picture, so this is not gated on being able to send one.
+    """
+    _STATE["sinks"].append(sink)
+    return lambda: sink in _STATE["sinks"] and _STATE["sinks"].remove(sink)
+
+
+def _frame(rgb: bytes, width: int, height: int) -> None:
+    """One decoded picture, handed to every screen that is listening."""
+    for sink in list(_STATE["sinks"]):
+        try:
+            sink(rgb, width, height)
+        except Exception:  # noqa: BLE001 - one broken viewer is not a broken call
+            logger.exception("landline: a video sink raised")
+
+
+def _video_session():
+    """A bound video session: a camera to send, and a decoder feeding the screens.
+
+    Both halves are optional, and `video.available()` is what says which of them
+    this machine has - a camera with no ffmpeg is no camera at all. The decoder
+    is what the panel sees, so it exists whether or not there is anything to
+    send, and its sink fans out to the screens through `_frame`.
+    """
+    try:
+        from shani_chronoa.landline import video
+        ok, device = video.available()
+        camera = video.Camera(device) if ok else None
+        return video.VideoRtpSession.bind("127.0.0.1", camera=camera,
+                                          decoder=video.Decoder(sink=_frame))
+    except Exception as exc:  # noqa: BLE001 - no video session is a voice call
+        logger.warning("landline: no video session: %s", exc)
+        return None
+
+
 def _allowed(app) -> bool:
     config = getattr(app, "config", None)
     try:
@@ -117,8 +159,11 @@ def start(app=None, line_factory=None) -> bool:
             creds = provision.credentials(saved["host"], saved["alias"])
             _, instance = provision.device_id(saved["alias"])
             from shani_chronoa.landline.ua import Line
-            factory = line_factory or Line
-            current = factory(saved["host"], creds, instance, on_event=_event)
+            if line_factory is None:
+                current = Line(saved["host"], creds, instance, on_event=_event,
+                               video_factory=_video_session)
+            else:
+                current = line_factory(saved["host"], creds, instance, on_event=_event)
             _STATE["line"] = current
             current.start()
         except Exception as exc:  # noqa: BLE001
@@ -174,6 +219,75 @@ def dtmf(digit: str) -> bool:
     return bool(current and current.dtmf(digit))
 
 
+# --- in-call controls that do not need the SIP engine -------------------------------------
+# Mute is done at PipeWire, not in the RTP sender: it is the same microphone the
+# rest of the desktop shares, muting it is instant and visible in the system
+# tray, and it stays off the engine the other session is still shaping.
+
+def set_muted(on: bool) -> bool:
+    """Mute or unmute the microphone the call uses. True on success."""
+    try:
+        from shani_chronoa import pipewire
+        pipewire.run_wpctl("set-mute", "@DEFAULT_AUDIO_SOURCE@", "1" if on else "0")
+        _STATE["muted"] = bool(on)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def muted() -> bool:
+    try:
+        from shani_chronoa import pipewire
+        out = pipewire.run_wpctl("get-volume", "@DEFAULT_AUDIO_SOURCE@")
+        return "MUTED" in (getattr(out, "stdout", "") or "")
+    except Exception:  # noqa: BLE001
+        return bool(_STATE.get("muted"))
+
+
+def in_call() -> bool:
+    """Whether a call is active right now (for the in-call controls)."""
+    current = _STATE["line"]
+    return bool(current and current.call and current.call.state == "active")
+
+
+def hold() -> bool:
+    """Put the live call aside; the next number rings instead of being refused."""
+    current = _need()
+    return bool(current.hold())
+
+
+def swap() -> bool:
+    """Trade the live call for the one on hold."""
+    current = _need()
+    return bool(current.swap())
+
+
+def merge() -> bool:
+    """Put every live call into one conference."""
+    current = _need()
+    return bool(current.merge())
+
+def calls() -> "list":
+    """Every live call, oldest first, as the panel sees them (a facade-type view)."""
+    current = _STATE["line"]
+    return list(getattr(current, "calls", []) or [])
+
+
+def video_available() -> bool:
+    """Whether this machine can *send* a picture (a camera plus ffmpeg).
+
+    Asked by the panel to say why a call has no video, rather than it guessing
+    between "no camera here" and "the other side declined" - which are two
+    different things to be told.
+    """
+    try:
+        from shani_chronoa.landline import video
+        ok, _why = video.available()
+        return ok
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _need():
     current = _STATE["line"]
     if current is None:
@@ -181,9 +295,103 @@ def _need():
     return current
 
 
+# --- call history (placed / received / missed), kept locally ------------------------------
+
+HISTORY_MAX = 100
+
+
+def _history_file():
+    import os
+    base = os.environ.get("XDG_DATA_HOME") or str(pathlib.Path.home() / ".local" / "share")
+    return pathlib.Path(base) / "shani-chronoa" / "landline-calls.json"
+
+
+def history() -> "list[dict]":
+    """Recent landline calls, newest first: {number, name, kind, when, seconds}."""
+    try:
+        return json.loads(_history_file().read_text())
+    except (OSError, ValueError):
+        return []
+
+
+def _log_history(kind: str, info: dict) -> None:
+    # One row per call, written when it ends: an ended call that was never
+    # 'answered' and came in is a missed call; an outgoing one is 'placed'.
+    if kind == "ringing":
+        _STATE["dir"] = "placed"
+    elif kind == "incoming":
+        _STATE["dir"] = "received"
+    elif kind == "answered":
+        _STATE["answered"] = True
+    elif kind == "ended":
+        import time
+        direction = _STATE.pop("dir", "placed")
+        answered = _STATE.pop("answered", False)
+        row = {"number": info.get("number", ""), "name": info.get("name", ""),
+               "kind": direction if answered or direction == "placed" else "missed",
+               "when": int(time.time()), "seconds": int(info.get("seconds", 0))}
+        try:
+            rows = history()
+            rows.insert(0, row)
+            path = _history_file()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(rows[:HISTORY_MAX]))
+        except OSError:
+            logger.debug("could not log the landline call", exc_info=True)
+
+
+# --- contacts cache, so a name can be dialled (headless skill included) --------------------
+
+def _contacts_file():
+    import os
+    base = os.environ.get("XDG_CACHE_HOME") or str(pathlib.Path.home() / ".cache")
+    return pathlib.Path(base) / "shani-chronoa" / "landline-contacts.json"
+
+
+def cache_contacts(book: "list") -> None:
+    """Remember the phone's contact book so a name can be dialled later.
+
+    `book` is the GUI's `[(name, (number, ...)), ...]`. Written by the Phone
+    page when it loads contacts; read by `resolve_name` here and by the skill,
+    which has no phone link of its own.
+    """
+    try:
+        path = _contacts_file()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps([[n, list(nums)] for n, nums in book]))
+    except OSError:
+        logger.debug("could not cache contacts", exc_info=True)
+
+
+def resolve_name(name: str) -> str:
+    """The best number for a contact `name` (case/space-insensitive), or ""."""
+    want = "".join(name.lower().split())
+    if not want:
+        return ""
+    best = ""
+    for entry in history_contacts():
+        cname, numbers = entry[0], entry[1]
+        flat = "".join(str(cname).lower().split())
+        if not numbers:
+            continue
+        if flat == want:
+            return str(numbers[0])
+        if not best and want in flat:
+            best = str(numbers[0])
+    return best
+
+
+def history_contacts() -> "list":
+    try:
+        return json.loads(_contacts_file().read_text())
+    except (OSError, ValueError):
+        return []
+
+
 # --- events, the call card, the cue --------------------------------------------------------
 
 def _event(kind: str, **info) -> None:
+    _log_history(kind, info)
     for callback in list(_STATE["listeners"]):
         try:
             callback(kind, **info)

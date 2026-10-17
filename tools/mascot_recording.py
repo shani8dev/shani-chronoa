@@ -31,6 +31,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import re
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -85,6 +86,64 @@ def parse_tuple(text, n):
     return [int(p) for p in parts]
 
 
+def notch_geometry() -> dict:
+    """The strip's own constants, read out of `extension.js`.
+
+    A second copy of `NOTCH_W` here would be a number nobody re-measures, which
+    is the shape this repository keeps paying for - and `tools/` is not packaged,
+    so a stale copy would not even fail a test. The source is parsed instead, and
+    each name must occur exactly once as a `const` binding.
+    """
+    src = Path(__file__).resolve().parent.parent / (
+        "usr/share/gnome-shell/extensions/chronoa-mascot@shani.dev/extension.js")
+    text = src.read_text()
+    wanted = {"NOTCH_W", "NOTCH_H", "NOTCH_PAD", "SIZE", "MARGIN"}
+    exprs = {}
+    # The trailing comment is part of the line on some of these, so it is
+    # allowed and dropped rather than making a declaration unreadable - which is
+    # what happened on the first run, where `NOTCH_PAD` silently vanished from
+    # the set and the reader refused rather than guessing a default.
+    for name, body in re.findall(r"^const ([A-Z_]+) = ([^;/]+);\s*(?://.*)?$",
+                                 text, re.M):
+        if name in wanted:
+            if name in exprs:
+                raise RuntimeError(f"{name} is declared twice in {src}")
+            exprs[name] = body.strip()
+    missing = wanted - set(exprs)
+    if missing:
+        raise RuntimeError(f"{src} does not declare {sorted(missing)}")
+
+    # The constants are **derived** - `NOTCH_H = SIZE + 2 * NOTCH_PAD` is what
+    # keeps the strip tall enough for its sprite - so the reader resolves them
+    # rather than pattern-matching digits. Every expression here is arithmetic
+    # over other constants, and anything else is refused rather than `eval`ed
+    # blind: a body that is not ints, `+ - *` and names would be a second place
+    # the geometry could be described.
+    out: dict = {}
+    for _ in range(len(exprs) + 1):
+        progressed = False
+        for name, body in exprs.items():
+            if name in out:
+                continue
+            if re.fullmatch(r"[A-Z_0-9 +*-]+", body) is None:
+                raise RuntimeError(f"{name} = {body!r} is not plain arithmetic")
+            try:
+                value = eval(body, {"__builtins__": {}}, out)  # noqa: S307
+            except NameError:
+                continue
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                raise RuntimeError(f"{name} = {body!r} did not resolve to a number")
+            out[name] = value
+            progressed = True
+        if not progressed:
+            break
+    unresolved = wanted - set(out)
+    if unresolved:
+        raise RuntimeError(f"could not resolve {sorted(unresolved)} from {src}: "
+                           f"{ {k: exprs[k] for k in unresolved} }")
+    return out
+
+
 def shoot(shell, path, timeout=30):
     _, err = call(shell, CAPTURE_DBUS, "Shot", path, timeout=timeout)
     if not path.exists():
@@ -117,12 +176,20 @@ def render_art(shell, script, gx, gy, out):
     return r.stdout.strip()
 
 
-def diff_box(a_path, b_path, region=None):
+def diff_box(a_path, b_path, region=None, exclude=()):
     """Differing-pixel count and bbox, optionally restricted to a rect.
 
     Returns None for the count when the image cannot be read, so "could not
     measure" is never reported as zero - a blank PNG matches no colour at all and
     would otherwise pass every 'nothing moved' check.
+
+    `exclude` masks rects. It exists for the **pointer**, and without it the
+    whole-screen measure is not measuring what its own printout claims: the
+    recording drives a real cursor to a different place in each of the two frames
+    it compares, so 400-odd pixels of "changed outside the actor" were the
+    cursor moving - which is the harness, not the mascot, and which would have
+    been reported as a defect in the product. The two read-back positions are
+    known, so they are masked rather than guessed at.
     """
     try:
         from PIL import Image
@@ -139,6 +206,8 @@ def diff_box(a_path, b_path, region=None):
     for y in range(h):
         for x in range(w):
             if region and not (region[0] <= x < region[2] and region[1] <= y < region[3]):
+                continue
+            if any(r[0] <= x < r[2] and r[1] <= y < r[3] for r in exclude):
                 continue
             if pa[x, y] != pb[x, y]:
                 n += 1
@@ -197,6 +266,9 @@ def main() -> int:
     ap.add_argument("--monitor", default="1600x1000")
     ap.add_argument("--fps", type=int, default=12)
     ap.add_argument("--no-video", action="store_true")
+    ap.add_argument("--corner", default="top-center",
+                    choices=("top-center", "top-right", "bottom-right"),
+                    help="which mascot-corner the recording is checking")
     args = ap.parse_args()
 
     outdir = Path(args.outdir or (Path(tempfile.mkdtemp(prefix="mascot-rec."))))
@@ -242,17 +314,77 @@ def main() -> int:
     time.sleep(2.0)
     shoot(shell, root / "warmup.png")
 
+    # The strip is given its words before the first capture, so the very first
+    # frame shows what the notch is for rather than a bare bar.
+    for title, detail in (("Reading src/invoice.ts", "step 1 of 4"),
+                          ("Reading src/invoice.ts", "edits 12 lines"),
+                          ("Finishing up", "step 4 of 4")):
+        _, err = call(shell, MASCOT_DBUS, "Status", title, detail)
+        if err:
+            raise RuntimeError(f"Status() failed: {err}")
+        render_art(shell, script, 0.35, -0.2, art)
+        loaded, err = call(shell, MASCOT_DBUS, "Art", art)
+        if loaded != "(true,)":
+            raise RuntimeError(f"Art() did not load the actor: {loaded} {err}")
+        time.sleep(0.6)
+        shoot(shell, root / f"notch-{detail.split()[-1]}-{detail.split()[0]}.png")
+
+    geo = notch_geometry()
+    if geo["SIZE"] != mascot.SIZE:
+        raise RuntimeError(f"extension.js draws {geo['SIZE']}px, mascot.SIZE is "
+                           f"{mascot.SIZE} - the two must agree or a recording "
+                           f"measures a different sprite from the one that ships")
+    if geo["MARGIN"] != mascot._BASE_MARGIN:
+        raise RuntimeError(f"extension.js's margin is {geo['MARGIN']}, "
+                           f"mascot._BASE_MARGIN is {mascot._BASE_MARGIN}")
+
     rect = rect_of(shell)
+    strip = parse_tuple(call(shell, MASCOT_DBUS, "Notch")[0], 4)
+    bar_text, bar_err = call(shell, MASCOT_DBUS, "PanelHeight")
+    # `gdbus call` prints `(32,)` even for a single out-arg, so the strip of
+    # the brackets leaves a trailing comma. `parse_tuple` is the reader that
+    # already handles every other reply this file asks for.
+    bar = parse_tuple(bar_text, 1)[0] if bar_text else 0
     screen_w, screen_h = (int(v) for v in args.monitor.split("x"))
-    want = (screen_w - mascot.SIZE - mascot._BASE_MARGIN,
-            screen_h - mascot.SIZE - mascot._BASE_MARGIN)
-    print(f"[ok] actor rect from the Shell: {rect}")
-    print(f"     anchored corner is {want} and the actor is "
-          f"{mascot.SIZE}x{mascot.SIZE}")
-    if (rect[2], rect[3]) != (mascot.SIZE, mascot.SIZE):
-        raise RuntimeError(f"actor is {rect[2]}x{rect[3]}, mascot.SIZE is {mascot.SIZE}")
-    if (rect[0], rect[1]) != want:
-        raise RuntimeError(f"actor is at {(rect[0], rect[1])}, not the anchored {want}")
+    # The expectation follows the corner, so the harness can record any of the
+    # three and the check still says which one it looked at.
+    corner = args.corner
+    nw, nh, pad = geo["NOTCH_W"], geo["NOTCH_H"], geo["NOTCH_PAD"]
+    size, margin = mascot.SIZE, mascot._BASE_MARGIN
+    # **This is extension.js's own arithmetic, restated** - the strip's origin,
+    # then the mascot's place inside it. Restated rather than imported because
+    # `tools/` cannot import a JS file, and the check exists precisely to catch
+    # the two disagreeing, which it cannot do if it reads the answer rather than
+    # computing it.
+    if corner == "top-center":
+        strip_xy = ((screen_w - nw) // 2, bar)
+        mascot_xy = (strip_xy[0] + pad, strip_xy[1] + pad)
+    elif corner == "top-right":
+        strip_xy = (screen_w - nw - margin, bar)
+        mascot_xy = (strip_xy[0] + pad, strip_xy[1] + pad)
+    else:                      # bottom-right: the mascot keeps its old home and
+        strip_xy = (screen_w - nw - margin, screen_h - nh - margin)   # the strip
+        mascot_xy = (strip_xy[0] + (nw - size) // 2, strip_xy[1] - size - pad)  # sits above it
+    # A strip drawn at y=0 is drawn *behind the Shell's clock*, and the first
+    # recording proved it: "Oct 17 15:38" was legible through the panel. The bar
+    # height is read from the Shell rather than assumed, because it is a theme
+    # decision (measured 27 here) and a strip that assumes is a strip that is
+    # wrong on somebody else's theme.
+    if corner != "bottom-right" and not bar:
+        raise RuntimeError(f"PanelHeight() answered {bar_text!r} {bar_err!r} - "
+                           f"without it the strip cannot be placed below the "
+                           f"top bar and this check cannot mean anything")
+    print(f"[ok] notch strip from the Shell: {strip} ({nw}x{nh}), corner={corner}")
+    print(f"     the Shell's own top bar is {bar}px tall and the strip starts below it")
+    print(f"     expected at {strip_xy}; the mascot at {mascot_xy}, "
+          f"{size}x{size} inside it")
+    if tuple(strip[:2]) != strip_xy:
+        raise RuntimeError(f"strip is at {strip[:2]}, not {strip_xy}")
+    if (rect[2], rect[3]) != (size, size):
+        raise RuntimeError(f"actor is {rect[2]}x{rect[3]}, mascot.SIZE is {size}")
+    if (rect[0], rect[1]) != mascot_xy:
+        raise RuntimeError(f"actor is at {(rect[0], rect[1])}, not {mascot_xy}")
+    print(f"[ok] the actor rect from the Shell: {rect} - inside the strip")
 
     # The mascot is the origin of the gaze, so the pointer orbits the mascot, not
     # the screen. r_max is large enough to saturate the bearing on every axis and
@@ -311,7 +443,17 @@ def main() -> int:
     left = min(range(len(xs)), key=lambda i: xs[i])
     right = max(range(len(xs)), key=lambda i: xs[i])
     print("\n[measure] pixels that move between the two opposing gaze extremes")
-    whole = diff_box(frames_dir / f"f{left:04d}.png", frames_dir / f"f{right:04d}.png")
+    # Where the Shell says the pointer really was in each of the two frames -
+    # read back, not the coordinate that was asked for. A 40px box around each
+    # is masked, because a cursor that moved is the harness and not the mascot.
+    cursor_boxes = []
+    for idx in (left, right):
+        rx, ry = bearings[idx][1]
+        cursor_boxes.append((rx - 40, ry - 40, rx + 40, ry + 40))
+    print(f"  masking the pointer, read back at {bearings[left][1]} and "
+          f"{bearings[right][1]}")
+    whole = diff_box(frames_dir / f"f{left:04d}.png", frames_dir / f"f{right:04d}.png",
+                     exclude=cursor_boxes)
     print(f"  whole screen : {whole}")
     inside = diff_box(frames_dir / f"f{left:04d}.png", frames_dir / f"f{right:04d}.png",
                       region=(rect[0], rect[1], rect[0] + rect[2], rect[1] + rect[3]))

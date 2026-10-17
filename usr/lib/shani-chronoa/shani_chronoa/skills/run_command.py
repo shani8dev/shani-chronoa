@@ -123,17 +123,37 @@ def run_command(arguments: dict) -> str:
     program = Path(argv[0]).name
     if program in REFUSED_PROGRAMS:
         return f"Not run: `{program}` is not something this skill runs."
+    # **Correct, don't refuse, when the intent is clear.** Measured 2026-10-15
+    # with Qwen3-1.7B in Build mode: it passed an invented `cwd` and
+    # `where: "machine"` with no machine, three times, and every call was
+    # refused - so the tests never ran. A bad optional argument with an
+    # obvious right answer (the project folder, the sandbox) is corrected and
+    # the correction is said; a refusal is kept for what has no right answer.
+    notes = []
     cwd, why = _workdir(str(arguments.get("cwd") or ""))
+    if cwd is None and os.environ.get(files.PROJECT_ENV, "").strip() and arguments.get("cwd"):
+        cwd, _why = _workdir("")
+        if cwd is not None:
+            notes.append(f"ran in the project folder {cwd}, not {arguments.get('cwd')!r} ({why})")
     if cwd is None:
         return f"Not run: {why}"
     where = str(arguments.get("where") or "sandbox").strip().lower()
     if where not in ("sandbox", "container", "machine"):
-        return "Not run: `where` is sandbox, container or machine."
+        notes.append(f"`where` {where!r} is not one of sandbox/container/machine - used the sandbox")
+        where = "sandbox"
+    if where == "machine" and not str(arguments.get("machine") or "").strip():
+        notes.append("no machine was named - ran in the sandbox instead")
+        where = "sandbox"
+    # A container with no image stays a refusal: the image decides what the
+    # command runs on, so there is no right default to correct to.
     try:
         timeout = int(arguments.get("timeout_seconds") or DEFAULT_TIMEOUT)
     except (TypeError, ValueError):
         timeout = DEFAULT_TIMEOUT
-    timeout = max(5, min(timeout, MAX_TIMEOUT))
+    # The ceiling is the Sandbox page's setting, not a constant: a higher
+    # setting must not be cut back to 600 here without a word.
+    from shani_chronoa.sandbox.profiles import command_limits
+    timeout = max(5, min(timeout, command_limits()[1]))
     started = time.monotonic()
     network = bool(arguments.get("network"))
     if where == "container":
@@ -179,9 +199,10 @@ def run_command(arguments: dict) -> str:
                     + _clip(partial))
         place = f"{cwd}, sandboxed" + ("" if network else ", no network")
     took = time.monotonic() - started
+    note = ("(" + "; ".join(notes) + ")\n") if notes else ""
     output = (proc.stdout or "") + (("\n" + proc.stderr) if proc.stderr else "")
     verdict = "succeeded" if proc.returncode == 0 else f"failed (exit {proc.returncode})"
-    return (f"`{raw}` {verdict} in {took:.1f}s ({place}).\n"
+    return (f"`{raw}` {verdict} in {took:.1f}s ({place}).\n" + note
             + (_clip(output.strip()) or "(no output)"))
 
 

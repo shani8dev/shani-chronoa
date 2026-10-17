@@ -100,11 +100,20 @@ def _run(arguments: dict) -> str:
         )
     chosen = lines[start - 1: start - 1 + want]
     header = f"{target}  ({len(lines)} line(s), showing {len(chosen)} from line {start})"
+    # What edit_file checks against (`read_ledger`): the version read here.
+    from shani_chronoa import read_ledger
+    read_ledger.record(target, raw)
     body = "\n".join(chosen)
     if len(chosen) < len(lines) - (start - 1):
+        first, last = start + len(chosen), len(lines)
+        # **Partial, said so.** Measured 2026-10-15: shown 400 of 521 lines, a
+        # 1.7B model answered "the file does not contain a line starting with
+        # KEY:" - the line was 521. "Raise max_lines" told it how to read on,
+        # not that it had not read everything.
         body += (
-            f"\n... {len(lines) - (start - 1) - len(chosen)} more line(s) not "
-            f"shown. Raise max_lines or pass start_line to continue."
+            f"\n... lines {first}-{last} were NOT read. This is not the whole "
+            f"file: do not say something is missing from it until you have read "
+            f"them (start_line={first})."
         )
     return f"{header}\n{body}"
 

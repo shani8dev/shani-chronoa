@@ -195,8 +195,10 @@ def broadway():
     if daemon is None or not runtime:
         pytest.skip("no gtk4-broadwayd or no XDG_RUNTIME_DIR, so no headless display")
     base = pathlib.Path(runtime)
-    number = next((n for n in range(40, 260)
-                   if not (base / f"broadway{n + 1}.socket").exists()), None)
+    # A free display is a missing socket *and* a free port: tests/_broadway.py.
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from _broadway import free_display
+    number = free_display(base, 40, 260)
     if number is None:
         pytest.skip("no free Broadway display number")
     proc = subprocess.Popen([daemon, f":{number}"], stdout=subprocess.DEVNULL,

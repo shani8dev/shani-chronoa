@@ -44,6 +44,9 @@ PKG = pathlib.Path(__file__).resolve().parents[1] / "usr" / "lib" / "shani-chron
 #: (`show-page`, `show-window`) are in here: they are registered like every other
 #: action and reached over the bus, which is why nothing in the tree names them.
 EXPECTED = [
+    # 2026-10-15: a question answered from its notification; the top-bar
+    # indicator's state (read-only); the composer's speaker toggle.
+    "answer-question", "status", "speak-replies",
     "answer-ambient", "answer-cloud-model", "answer-egress", "answer-mode",
     "answer-model",
     "answer-permission", "answer-presence", "answer-rules",

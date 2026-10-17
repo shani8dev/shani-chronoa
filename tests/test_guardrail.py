@@ -188,7 +188,7 @@ class TestAValueOutsideTheDeclaredEnumIsRefusedBeforeDispatch:
     """**The enum is the only schema constraint nothing was checking.**
 
     Measured over the whole registry: 682 property nodes across 256 tools, of
-    which **90 declare an `enum`** in **73 tools**, and **zero** declare a
+    which **94 declare an `enum`** in **76 tools**, and **zero** declare a
     numeric or string bound. So `enum` is the entire gap - there is nothing else
     in these schemas left to validate.
 
@@ -254,7 +254,7 @@ class TestAValueOutsideTheDeclaredEnumIsRefusedBeforeDispatch:
 class TestEveryEnumToolDeclaresWhatItsSkillAccepts:
     """**Why the gate above is safe, over the whole population.**
 
-    Two of the 73 accept values **outside** their declared enum, through an alias
+    Two of the 76 accept values **outside** their declared enum, through an alias
     table - `alarm` accepts 14 while declaring 6, `calendar_edit` accepts 10
     while declaring 3. So an enum gate written against the declaration alone
     would refuse `alarm action=remove` and `calendar_edit action=schedule`, which
@@ -285,8 +285,8 @@ class TestEveryEnumToolDeclaresWhatItsSkillAccepts:
         """The number the reason above quotes, so a schema change that shrinks
         it cannot leave the reason quietly wrong."""
         tools = dict(self._enum_tools())
-        assert len(tools) == 73, len(tools)
-        assert sum(len(v) for v in tools.values()) == 90, (
+        assert len(tools) == 76, len(tools)
+        assert sum(len(v) for v in tools.values()) == 94, (
             sum(len(v) for v in tools.values()))
 
     def test_every_alias_a_skill_accepts_is_declared_in_its_enum(self):

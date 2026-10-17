@@ -91,6 +91,9 @@ class Backend:
     def set_workspace(self, wid: str, index: int) -> None:
         raise WindowError(f"{self.name} cannot move a window to another workspace")
 
+    def tile(self, wid: str, side: str) -> None:
+        raise WindowError(f"{self.name} cannot snap a window to half the screen")
+
 
 def _desktop() -> str:
     return " ".join(os.environ.get(k, "") for k in

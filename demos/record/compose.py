@@ -21,6 +21,24 @@ def _fit(path: Path) -> Image.Image:
     return image.resize((round(image.width * HEIGHT / image.height), HEIGHT), Image.LANCZOS)
 
 
+def _widest_main(frames: Path) -> int:
+    """The widest main frame of the take, at the video's height.
+
+    **Not the first frame's width.** The window opens at 460x640 and the
+    recorder then resizes it (to `CHRONOA_DEMO_MAIN_WIDTH`, 1300 for the coding
+    demo); sizing the canvas from the first frame cut every later frame to its
+    left 518 px - measured 2026-10-15, the orb, the request and every tool row
+    ran off the right edge for the whole take.
+    """
+    widest = 0
+    for name in os.listdir(frames):
+        if name.startswith("main_"):
+            with Image.open(frames / name) as image:
+                w, h = image.size
+            widest = max(widest, round(w * HEIGHT / h))
+    return widest or 520
+
+
 def compose(out: Path) -> float:
     """Write the joined frames and `concat.txt`; return the first frame's time."""
     frames, comp = out / "frames", out / "comp"
@@ -28,7 +46,7 @@ def compose(out: Path) -> float:
     ticks = sorted({f.split("_")[1][:5] for f in os.listdir(frames)})
     two = any(f.startswith("browser_") for f in os.listdir(frames))
     last = {"main": None, "browser": None}
-    times, main_width = [], None
+    times, main_width = [], _widest_main(frames)
     for i, tick in enumerate(ticks):
         stamp = None
         for kind in ("main", "browser"):
@@ -38,12 +56,13 @@ def compose(out: Path) -> float:
                 stamp = stamp or path.stat().st_mtime
         times.append(stamp)
         main = last["main"]
-        main_width = main_width or (main.width if main else 520)
         width = main_width + (BROWSER_WIDTH + 12 if two else 0)
         width += width % 2
         canvas = Image.new("RGB", (width, HEIGHT), (36, 36, 40))
         if main:
-            canvas.paste(main, (0, 0))
+            # A narrower frame (before the window was resized) is centred in
+            # the main column, never stretched and never cropped.
+            canvas.paste(main, ((main_width - main.width) // 2, 0))
         if two and last["browser"]:
             b = last["browser"]
             canvas.paste(b.crop((0, 0, min(BROWSER_WIDTH, b.width), HEIGHT)), (main_width + 12, 0))

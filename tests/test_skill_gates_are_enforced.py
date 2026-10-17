@@ -62,6 +62,7 @@ _CONSENT_NAMES = (
 
 # tool -> module that implements it
 _IMPL = {
+    "run_command": "shani_chronoa.skills.run_command",
     "screenshot": "shani_chronoa.skills.screenshot",
     "cleanup_apply": "shani_chronoa.skills.cleanup_apply",
     # Gated on `memory-sense-enabled` and does **not** consult it itself - the
@@ -212,6 +213,7 @@ _IMPL = {
     # Places a call over Bluetooth. Also gates on `get_bool`, so it needs the
     # same visible `_consent` helper the reader can see.
     "bluetooth_call": "shani_chronoa.skills.bluetooth_call",
+    "landline_call": "shani_chronoa.skills.landline_call",
 }
 
 

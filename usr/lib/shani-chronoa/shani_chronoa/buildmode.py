@@ -35,11 +35,14 @@ _project = ""
 #: pretend. Verified present in this build: all seven.
 BUILD_TOOLS = (
     "list_directory",
+    "read_text_file",
     "read_document",
     "search_documents",
     "find_files",
     "write_text_file",
     "edit_file",
+    # Its own checklist for a several-step job (see `prompt_clause`).
+    "todo_list",
     "find_and_replace",
     # Closing the loop: run the tests the edit was for. Gated by its own key.
     "run_command",
@@ -82,10 +85,21 @@ def prompt_clause() -> str:
     folder = project()
     if not folder:
         return ""
+    # **The loop, as steps.** Measured 2026-10-15 with Qwen3-1.7B: asked to
+    # fix a failing test, it ran pytest three times and never opened the file -
+    # "after changing code, check it" told it when to test, not how to fix.
     return (f"You are working on the project in {folder}. Relative paths are "
-            "inside it. After changing code, check it: run the project's tests "
-            "or build with run_command and read the result before saying it is "
-            "done.")
+            "inside it, and run_command already runs there. To fix or change "
+            "code: 1) read the file with read_text_file, 2) change it with "
+            "edit_file, 3) run the tests or build with run_command and read the "
+            "result, 4) if it still fails, read the error and repeat from 2. "
+            "Do not say it is done until the result says it passes. For a job "
+            "with several steps, first write them with todo_list (action add, "
+            "one per step), set each to in_progress when you start it and "
+            "completed only after you have seen it work - reading your own "
+            "change is not checking it. If a step cannot be done, set it to "
+            "blocked and say why; never mark one completed just to finish. "
+            "Do not stop while a step is still open.")
 
 
 def extra_tools() -> "tuple":
@@ -125,3 +139,43 @@ def read_only_note() -> str:
     return ("Read only is not on the strip any more - it is Settings > Privacy "
             "> Explore first, which refuses anything that is not a read-only "
             "tool.")
+
+
+# ---------------------------------------------------------------------------
+# Keeping going: a Build-mode turn does not stop while its own steps are open.
+# ---------------------------------------------------------------------------
+
+#: Extra rounds the assistant may start on its own after the model stops.
+MAX_CONTINUATIONS = 3
+
+
+def _items() -> list:
+    try:
+        from shani_chronoa.skills import todo_list
+        items, _problem = todo_list._load()  # noqa: SLF001 - the one reader
+        return list(items or [])
+    except Exception:  # noqa: BLE001 - an unreadable list is no open steps
+        return []
+
+
+def snapshot() -> set:
+    """Ids already on the list when the turn began."""
+    return {int(i.get("id") or 0) for i in _items()}
+
+
+def open_steps(before: set) -> list:
+    """Steps written during this turn that are neither completed nor blocked.
+
+    Only this turn's steps: an old personal to-do never keeps a turn running.
+    """
+    return [str(i.get("content") or "") for i in _items()
+            if int(i.get("id") or 0) not in before
+            and i.get("status") not in ("completed", "blocked")]
+
+
+def continuation(steps: list) -> str:
+    """What the assistant says to itself to keep going."""
+    listed = "; ".join(steps[:6]) + (f"; and {len(steps) - 6} more" if len(steps) > 6 else "")
+    return (f"You stopped with {len(steps)} step(s) still open: {listed}. "
+            "Continue with the next one. Mark a step completed only after you "
+            "have seen it work; if it cannot be done, mark it blocked and say why.")

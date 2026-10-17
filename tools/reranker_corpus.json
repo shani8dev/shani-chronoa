@@ -4,13 +4,13 @@
   "seed": 20261013,
   "counts": {
     "requests": 220,
-    "pairs": 1660,
+    "pairs": 1661,
     "train": 165,
     "held_out": 55
   },
   "recall": {
-    "offered": 215,
-    "not_offered": 5,
+    "offered": 214,
+    "not_offered": 6,
     "with_args": 111
   },
   "train": [
@@ -43,12 +43,12 @@
           "desc": "manage_triggers: Arm, list, or remove automatic rules that run a Chronoa action when a perception matches - for example, notify when the battery sense reports low. A rule names one already-whitelisted skill; it cannot run an arbitrary command or an LLM-authored prompt. Listing needs no permission; arming or disarming requires the 'trigger-control-enabled' consent key. (arguments: action, name, sense, match_mode, substring, keywords, actuator, arguments, cooldown_seconds, event_type, source, params, ask_first, retry_policy, debounce_seconds)"
         },
         {
-          "tool": "sync_folder",
-          "desc": "sync_folder: Sync one folder to another, sending only what changed - and show the plan first, before anything is copied. Use for 'copy my files to the server', 'sync these folders', 'what would change if I synced'. Does not delete anything at the destination unless you ask it to, and asks first even then. (arguments: source, destination, apply, delete)"
-        },
-        {
           "tool": "todo_list",
           "desc": "todo_list: Keep a list of tasks that survives between turns and restarts: add an item, change its status, mark what it is blocked by, or list what is outstanding. Use this to track a multi-step job rather than holding it in the conversation. Requires the 'todo-list-enabled' consent key. (arguments: action, id, content, status, blocked_by)"
+        },
+        {
+          "tool": "sync_folder",
+          "desc": "sync_folder: Sync one folder to another, sending only what changed - and show the plan first, before anything is copied. Use for 'copy my files to the server', 'sync these folders', 'what would change if I synced'. Does not delete anything at the destination unless you ask it to, and asks first even then. (arguments: source, destination, apply, delete)"
         }
       ],
       "offered": [
@@ -58,8 +58,8 @@
         "directory_tree",
         "empty_directories",
         "manage_triggers",
-        "sync_folder",
-        "todo_list"
+        "todo_list",
+        "sync_folder"
       ],
       "recall_hit": true
     },
@@ -87,15 +87,15 @@
         },
         {
           "tool": "lan_phone",
-          "desc": "lan_phone: Find phones on the SAME Wi-Fi network, using the KDE Connect protocol directly - so it works without KDE Connect or GSConnect installed. 'devices': what announced itself on this network in the last few seconds (phones, tablets, other computers). 'announce': make this computer findable by a phone's KDE Connect app. 'status': what this computer can and cannot do on the LAN. 'pair': what the pairing half of the protocol is and why it is not here. Needs the 'lan-phone-enabled' consent key. (arguments: action, seconds)"
+          "desc": "lan_phone: Find phones on the SAME Wi-Fi network, using the KDE Connect protocol directly - so it works without KDE Connect or GSConnect installed. 'devices': what announced itself on this network in the last few seconds (phones, tablets, other computers). 'announce': make this computer findable by a phone's KDE Connect app. 'status': what this computer can and cannot do on the LAN. 'pair': pair with the device 'devices' found (the phone asks its owner). Needs the 'lan-phone-enabled' consent key. (arguments: action, seconds)"
+        },
+        {
+          "tool": "landline_call",
+          "desc": "landline_call: Place and answer calls on the JioFiber broadband landline over Wi-Fi, through the router - the same line the JioJoin app uses, the house's own landline number. 'status' says whether the line is connected and what call is on. 'dial' places a call - 'dial number=\"+911234567890\"' - asking you to confirm first, because it rings someone. 'answer' picks up a ringing call; 'hangup' ends, cancels or declines the current call. The voice is on this computer's speaker and microphone, nothing is recorded, and the landline handset keeps working. Needs this computer added to the line on the Phone page and the 'landline-enabled' consent key. This is the landline, not a mobile over Bluetooth - that is 'bluetooth_call'. (arguments: action, number, name)"
         },
         {
           "tool": "login_history",
           "desc": "login_history: Recent logins to this machine: which user, from which terminal or remote address, when they started and how long they lasted, and recent reboots. Use for 'who logged in', 'has anyone used my computer'. Requires the 'sessions-sense-enabled' consent key, because it reports other people's presence. Read-only. (arguments: limit)"
-        },
-        {
-          "tool": "maps",
-          "desc": "maps: OpenStreetMap maps: find where a place is ('find'), driving/walking/cycling directions ('directions') or just distance and time ('travel_time') between places, the nearest kind of place such as petrol pump, hotel, ATM or hospital ('nearby'), or open a place or route on the map in the browser ('open'). Times are typical, without live traffic. With no origin, 'here' is this computer's location. Requires the web sense and privacy mode off; 'here' also needs the location sense. (arguments: action, place, destination, origin, mode, what, near, limit)"
         }
       ],
       "offered": [
@@ -104,9 +104,9 @@
         "disk_activity",
         "fm_radio",
         "lan_phone",
+        "landline_call",
         "get_location",
-        "login_history",
-        "maps"
+        "login_history"
       ],
       "recall_hit": true
     },
@@ -536,7 +536,7 @@
       "positive_args": {
         "action": "*"
       },
-      "positives_desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)",
+      "positives_desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'find' (make the watch ring), 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)",
       "negatives": [
         {
           "tool": "power_action",
@@ -590,6 +590,10 @@
           "desc": "files_by_name: Find every file with a given name under a directory, with sizes and modification dates, so you can see whether they are copies. Use for 'where are all my report.docx', 'how many copies of this do I have', 'which is the newest'. Reports the newest and whether the sizes agree, and does NOT claim the contents match - duplicate_files answers that. Deletes nothing. (arguments: name, path, case_sensitive)"
         },
         {
+          "tool": "landline_call",
+          "desc": "landline_call: Place and answer calls on the JioFiber broadband landline over Wi-Fi, through the router - the same line the JioJoin app uses, the house's own landline number. 'status' says whether the line is connected and what call is on. 'dial' places a call - 'dial number=\"+911234567890\"' - asking you to confirm first, because it rings someone. 'answer' picks up a ringing call; 'hangup' ends, cancels or declines the current call. The voice is on this computer's speaker and microphone, nothing is recorded, and the landline handset keeps working. Needs this computer added to the line on the Phone page and the 'landline-enabled' consent key. This is the landline, not a mobile over Bluetooth - that is 'bluetooth_call'. (arguments: action, number, name)"
+        },
+        {
           "tool": "recording",
           "desc": "recording: Make subtitles or a transcript of a video or audio file, tell speakers apart, or remove background noise. Works on the sound, on this computer. text: what was said; subtitles: save an .srt beside it; speakers: who said what, turn by turn; clean: a copy with background noise removed; sounds: what can be heard in it (music, a dog, traffic...); listen: what can be heard around the computer right now (the microphone, a few seconds); streams: which applications are carrying audio right now, and the name to capture one by (a call in a browser is one); capture: record one of those for 5-600 seconds and transcribe it - which records the room, so it needs the sound consent like the microphone does. (arguments: action, path, language, people, seconds)"
         },
@@ -608,21 +612,17 @@
         {
           "tool": "fm_radio",
           "desc": "fm_radio: FM and AM broadcast radio. Five actions: 'hardware' for whether this computer can receive anything at all (a laptop usually cannot, and that is a true answer rather than a failure - it needs an RTL2832U USB dongle), 'bands' for the coverage, 'tune' to a frequency, 'decode' to demodulate a recorded IQ capture, and 'scan' to look for carriers in one. A frequency is given in MHz, e.g. 98.6. rtl_fm is narrowband and retunes per channel, so it cannot scan - scanning needs a wideband recording. No station names are guessed: a carrier gives a frequency, and naming it would need a table for your region. Requires the 'fm-radio-enabled' consent key. (arguments: action, frequency, seconds, file, centre_mhz, out, deemphasis_us)"
-        },
-        {
-          "tool": "lan_phone",
-          "desc": "lan_phone: Find phones on the SAME Wi-Fi network, using the KDE Connect protocol directly - so it works without KDE Connect or GSConnect installed. 'devices': what announced itself on this network in the last few seconds (phones, tablets, other computers). 'announce': make this computer findable by a phone's KDE Connect app. 'status': what this computer can and cannot do on the LAN. 'pair': what the pairing half of the protocol is and why it is not here. Needs the 'lan-phone-enabled' consent key. (arguments: action, seconds)"
         }
       ],
       "offered": [
         "files_by_name",
+        "landline_call",
         "recording",
         "set_hostname",
         "bluetooth_call",
         "data_usage",
         "disk_activity",
-        "fm_radio",
-        "lan_phone"
+        "fm_radio"
       ],
       "recall_hit": true
     },
@@ -841,7 +841,7 @@
         },
         {
           "tool": "watch",
-          "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
+          "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'find' (make the watch ring), 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
         },
         {
           "tool": "alarm",
@@ -885,6 +885,10 @@
       "positives_desc": "container: Run containers on this machine with podman (run an image, run a command inside a running container, stop it, read its logs, list what is running, list local images, pull one) and start/stop nspawn machines with machinectl. A container started with display=x11 draws on this desktop, and the ui_elements tool is what drives it by name with a visible cursor; this tool starts it, and stops it. Needs 'container-control-enabled', off by default. (arguments: action, image, name, command, detach, display, share_bus, publish, all, tail)",
       "negatives": [
         {
+          "tool": "run_command",
+          "desc": "run_command: Run one program in the project folder and get its exit code and output - the project's tests (pytest, npm test, cargo test), its build or linter - to check that a change works. One program per call: no pipes, redirections or shell syntax. Requires the 'run-command-enabled' consent key; asks each time. (arguments: command, cwd, timeout_seconds, where, image, machine, network)"
+        },
+        {
           "tool": "list_containers",
           "desc": "list_containers: List this machine's containers: distroboxes (by name, with their image and whether they are running) and podman/docker containers, including any that exited because they ran out of memory, plus how much disk the images use. Use for 'what distroboxes do I have', 'is my container running', 'why did my container die'. The podman details use the 'containers-sense-enabled' switch. Read-only."
         },
@@ -907,21 +911,17 @@
         {
           "tool": "edit_image",
           "desc": "edit_image: Edit a picture (for faces or backgrounds use photo_video) and save the result as a new file next to it: resize (width and/or height, or percent), compress (quality, or to under a size in KB), crop, upscale (2-4x), rotate, flip, grayscale, a look (sepia, vignette, sketch, paint, enhance), strip metadata (location/camera), or convert format. Several edits can be combined in one call. For effects that depend on what is in the picture (blur faces, blur the background) use photo_video. (arguments: path, width, height, percent, upscale, quality, max_kb, crop, rotate, flip, grayscale, look, strip_metadata, format)"
-        },
-        {
-          "tool": "generate_image",
-          "desc": "generate_image: Make a new picture from a text description, or change a photo the way a description says (from_photo, e.g. 'make it snowy', 'as a watercolour'), drawn locally by stable-diffusion.cpp. Describe it in English. Saves a PNG and returns its path. (arguments: prompt, avoid, size, steps, seed, output, from_photo, strength)"
         }
       ],
       "offered": [
+        "run_command",
         "container",
         "list_containers",
         "explain_command",
         "manage_triggers",
         "web_search",
         "ui_elements",
-        "edit_image",
-        "generate_image"
+        "edit_image"
       ],
       "recall_hit": true
     },
@@ -986,7 +986,7 @@
         },
         {
           "tool": "lan_phone",
-          "desc": "lan_phone: Find phones on the SAME Wi-Fi network, using the KDE Connect protocol directly - so it works without KDE Connect or GSConnect installed. 'devices': what announced itself on this network in the last few seconds (phones, tablets, other computers). 'announce': make this computer findable by a phone's KDE Connect app. 'status': what this computer can and cannot do on the LAN. 'pair': what the pairing half of the protocol is and why it is not here. Needs the 'lan-phone-enabled' consent key. (arguments: action, seconds)"
+          "desc": "lan_phone: Find phones on the SAME Wi-Fi network, using the KDE Connect protocol directly - so it works without KDE Connect or GSConnect installed. 'devices': what announced itself on this network in the last few seconds (phones, tablets, other computers). 'announce': make this computer findable by a phone's KDE Connect app. 'status': what this computer can and cannot do on the LAN. 'pair': pair with the device 'devices' found (the phone asks its owner). Needs the 'lan-phone-enabled' consent key. (arguments: action, seconds)"
         },
         {
           "tool": "phone_remote",
@@ -1089,12 +1089,12 @@
           "desc": "office_document: Word (.docx), Excel (.xlsx) and PowerPoint (.pptx) files; also reads .odt/.ods/.odp. read: text with headings, tables, one section per sheet or slide (sheet, cell_range like A1:D20, formulas=true to see formulas). create: a new file from content - for .docx Markdown-style text (# headings, - bullets, 1. lists, | tables |, **bold**); for .xlsx rows (list of lists), or sheets {name: rows}, or CSV/Markdown-table text in content, '=...' cells are formulas; for .pptx slides [{title, bullets[], subtitle}]. set_cells: values {'B12': 42, 'C1': 'Total'} in a sheet. replace_text / append: change a .docx. pdf_images: save a PDF's embedded pictures to a folder. Changing an existing file needs 'file-edit-enabled' and can be undone with undo_last_change. (arguments: action, path, content, rows, sheets, slides, values, sheet, cell_range, formulas, find, replace, title, overwrite, output_dir)"
         },
         {
-          "tool": "browse",
-          "desc": "browse: Open a website and do things on it for the person: find information, fill in forms, click through. Drive a web browser: navigate, read the page's text (get_text), click, type, select options, scroll, move through history, take screenshots and wait for conditions. While Chronoa's window is open this is the in-app browser the user can watch: there it opens only http(s) pages the egress policy allows, and key, hover, drag, upload_file, tabs and evaluate are not available. Otherwise it is a headless Chromium with all actions. Requires the web sense to be enabled and privacy mode to be off. (arguments: action, url, selector, text, key, value, label, files, x, y, to_x, to_y, to_selector, delta_x, delta_y, steps, repeat, tab_id, path, wait_for, timeout, settle)"
-        },
-        {
           "tool": "resolve_conflict",
           "desc": "resolve_conflict: Work out what is conflicting in a git repository and resolve it. 'show' lists every unmerged file and prints all three sides git holds - the common ancestor, your side and theirs - so there is no guessing about which is which; 'ours' and 'theirs' take a whole side of the named files and mark them resolved; 'mark' marks files you have edited by hand; 'abort' abandons the merge, rebase or cherry-pick and leaves the commits to try again. There is no automatic merge, because deciding which line is right is a judgement about the code and only you can make it. Reading needs 'git-sense-enabled'; changing the working tree needs 'git-write-enabled'. (arguments: action, path, paths)"
+        },
+        {
+          "tool": "browse",
+          "desc": "browse: Open a website and do things on it for the person: find information, fill in forms, click through. Drive a web browser: navigate, read the page's text (get_text), click, type, select options, scroll, move through history, take screenshots and wait for conditions. While Chronoa's window is open this is the in-app browser the user can watch: there it opens only http(s) pages the egress policy allows, and key, hover, drag, upload_file, tabs and evaluate are not available. Otherwise it is a headless Chromium with all actions. Requires the web sense to be enabled and privacy mode to be off. (arguments: action, url, selector, text, key, value, label, files, x, y, to_x, to_y, to_selector, delta_x, delta_y, steps, repeat, tab_id, path, wait_for, timeout, settle)"
         },
         {
           "tool": "boot_report",
@@ -1113,8 +1113,8 @@
         "pdf_pages",
         "take_photo",
         "office_document",
-        "browse",
         "resolve_conflict",
+        "browse",
         "boot_report",
         "process_cost",
         "apply_patch"
@@ -1133,7 +1133,7 @@
         },
         {
           "tool": "arrange_window",
-          "desc": "arrange_window: Minimize, maximize, unmaximize, make fullscreen, leave fullscreen, move, resize, or send a window to another workspace, by window id from list_windows or by part of its title. move takes x and y, resize takes width and height (pixels), set_workspace takes a 0-based workspace. Nothing is closed; close_window does that. (arguments: action, window_id, title_contains, x, y, width, height, workspace)"
+          "desc": "arrange_window: Arrange a window: tile (snap it to the left, right, top or bottom half of the screen - 'put it on the left half', side by side), minimize, maximize, unmaximize, make fullscreen, leave fullscreen, move, resize, or send it to another workspace - by window id from list_windows or by part of its title. tile takes side; move takes x and y, resize width and height (pixels), set_workspace a 0-based workspace. Nothing is closed; close_window does that. (arguments: action, window_id, title_contains, x, y, width, height, workspace, side)"
         },
         {
           "tool": "list_windows",
@@ -1399,7 +1399,7 @@
       "negatives": [
         {
           "tool": "watch",
-          "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
+          "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'find' (make the watch ring), 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
         },
         {
           "tool": "fm_radio",
@@ -1611,7 +1611,7 @@
         },
         {
           "tool": "watch",
-          "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
+          "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'find' (make the watch ring), 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
         },
         {
           "tool": "capture_video",
@@ -1903,7 +1903,7 @@
         },
         {
           "tool": "arrange_window",
-          "desc": "arrange_window: Minimize, maximize, unmaximize, make fullscreen, leave fullscreen, move, resize, or send a window to another workspace, by window id from list_windows or by part of its title. move takes x and y, resize takes width and height (pixels), set_workspace takes a 0-based workspace. Nothing is closed; close_window does that. (arguments: action, window_id, title_contains, x, y, width, height, workspace)"
+          "desc": "arrange_window: Arrange a window: tile (snap it to the left, right, top or bottom half of the screen - 'put it on the left half', side by side), minimize, maximize, unmaximize, make fullscreen, leave fullscreen, move, resize, or send it to another workspace - by window id from list_windows or by part of its title. tile takes side; move takes x and y, resize width and height (pixels), set_workspace a 0-based workspace. Nothing is closed; close_window does that. (arguments: action, window_id, title_contains, x, y, width, height, workspace, side)"
         },
         {
           "tool": "list_windows",
@@ -1929,12 +1929,12 @@
       "positives_desc": "get_battery_status: Get the current battery charge percentage and charging state.",
       "negatives": [
         {
-          "tool": "backup_status",
-          "desc": "backup_status: Whether this machine's files are actually backed up off it: how many restic snapshots exist, when the most recent was taken, what it covered, and whether the repository still passes restic's own integrity check. Use for 'is my backup working', 'when did I last back up', 'do I have a copy of my files'. A machine with no repository configured says so plainly, because that means there is no backup. Read-only: it never writes to the repository. (arguments: repository)"
-        },
-        {
           "tool": "set_power_profile",
           "desc": "set_power_profile: Switch the machine between its power profiles - typically power-saver, balanced and performance - and report which one is active now. The profile list is read from the machine rather than assumed, because which profiles exist depends on the CPU driver: switching to one the machine does not have is refused with the valid names listed. Changes the CPU and platform power behaviour, not a per-application setting. (arguments: profile)"
+        },
+        {
+          "tool": "backup_status",
+          "desc": "backup_status: Whether this machine's files are actually backed up off it: how many restic snapshots exist, when the most recent was taken, what it covered, and whether the repository still passes restic's own integrity check. Use for 'is my backup working', 'when did I last back up', 'do I have a copy of my files'. A machine with no repository configured says so plainly, because that means there is no backup. Read-only: it never writes to the repository. (arguments: repository)"
         },
         {
           "tool": "desktop_setting",
@@ -1953,19 +1953,19 @@
           "desc": "set_timer: Set a countdown timer that sends a desktop notification when it finishes; list pending timers, say how much time is left, add or take off time, pause, resume, reset to the original length, and cancel. With one timer pending, 'my timer' needs no id. The countdown is owned by systemd, so it fires even if the assistant is closed. It is refused rather than silently accepted when systemd is unavailable, because a timer recorded as pending that will never fire is the same lie as a camera reported as disabled when it is not. (arguments: action, seconds, label, id)"
         },
         {
-          "tool": "click_pointer",
-          "desc": "click_pointer: Click a mouse button at the current pointer position. Requires the 'input-control-enabled' consent key (separate from the vision sense) to be enabled. (arguments: button, count)"
+          "tool": "arrange_window",
+          "desc": "arrange_window: Arrange a window: tile (snap it to the left, right, top or bottom half of the screen - 'put it on the left half', side by side), minimize, maximize, unmaximize, make fullscreen, leave fullscreen, move, resize, or send it to another workspace - by window id from list_windows or by part of its title. tile takes side; move takes x and y, resize width and height (pixels), set_workspace a 0-based workspace. Nothing is closed; close_window does that. (arguments: action, window_id, title_contains, x, y, width, height, workspace, side)"
         }
       ],
       "offered": [
         "get_battery_status",
-        "backup_status",
         "set_power_profile",
+        "backup_status",
         "desktop_setting",
         "power_action",
         "vm",
         "set_timer",
-        "click_pointer"
+        "arrange_window"
       ],
       "recall_hit": true
     },
@@ -1978,43 +1978,43 @@
       "positives_desc": "bluetooth_call: Use a paired Android phone as a Bluetooth speakerphone, with no cable and no app on the phone. 'status' says whether a phone is connected as a hands-free unit, whether a call is in progress, and which audio profile its call audio arrived on. 'dial' places a call - 'dial number=\"+441234567890\"' - asking you to confirm first, because it rings someone. 'answer' and 'hangup' work on a call already in progress. 'audio' reports where the call's voice is going and names anything missing from that path, and 'profile' switches the card between wide-band hfp_hf and narrow-band hsp_hs. The phone stays the radio; this routes the voice to this computer's speakers and microphone. Needs the phone connected over Bluetooth, not merely paired, and the 'bluetooth-call-enabled' consent key. (arguments: action, card, profile, to, number)",
       "negatives": [
         {
+          "tool": "landline_call",
+          "desc": "landline_call: Place and answer calls on the JioFiber broadband landline over Wi-Fi, through the router - the same line the JioJoin app uses, the house's own landline number. 'status' says whether the line is connected and what call is on. 'dial' places a call - 'dial number=\"+911234567890\"' - asking you to confirm first, because it rings someone. 'answer' picks up a ringing call; 'hangup' ends, cancels or declines the current call. The voice is on this computer's speaker and microphone, nothing is recorded, and the landline handset keeps working. Needs this computer added to the line on the Phone page and the 'landline-enabled' consent key. This is the landline, not a mobile over Bluetooth - that is 'bluetooth_call'. (arguments: action, number, name)"
+        },
+        {
           "tool": "phone",
           "desc": "phone: The user's paired phone via GSConnect/KDE Connect: status (reachable, battery), ring it to find it, ping it, share a file or link to it; read text messages ('messages': latest, from a contact, or unread only); send a text message ('send': to a contact name or number, or omit contact to reply to the latest conversation) with exactly the text given - draft it first; or 'call' a contact or number (opens the phone's dialer). The user confirms every message and call before it goes. Requires the 'phone-control-enabled' consent key; reading needs 'phone-messages-read-enabled', sending and calling 'phone-messages-send-enabled'. (arguments: action, device, target, contact, text, unread_only, limit)"
         },
         {
           "tool": "lan_phone",
-          "desc": "lan_phone: Find phones on the SAME Wi-Fi network, using the KDE Connect protocol directly - so it works without KDE Connect or GSConnect installed. 'devices': what announced itself on this network in the last few seconds (phones, tablets, other computers). 'announce': make this computer findable by a phone's KDE Connect app. 'status': what this computer can and cannot do on the LAN. 'pair': what the pairing half of the protocol is and why it is not here. Needs the 'lan-phone-enabled' consent key. (arguments: action, seconds)"
+          "desc": "lan_phone: Find phones on the SAME Wi-Fi network, using the KDE Connect protocol directly - so it works without KDE Connect or GSConnect installed. 'devices': what announced itself on this network in the last few seconds (phones, tablets, other computers). 'announce': make this computer findable by a phone's KDE Connect app. 'status': what this computer can and cannot do on the LAN. 'pair': pair with the device 'devices' found (the phone asks its owner). Needs the 'lan-phone-enabled' consent key. (arguments: action, seconds)"
         },
         {
           "tool": "screen_to_phone",
           "desc": "screen_to_phone: Show this computer's screen on a paired phone, over the Bluetooth network. 'status': could this be shared here at all, and what is missing if not. 'start': ask the desktop to share the screen and serve it to the phone - the desktop shows its own 'Share screen' dialog, which only the person can answer. 'stop': end it and close the portal session. The picture goes over Bluetooth, so it is not on Wi-Fi, but it is the whole screen - which is why this needs the 'screen-share-enabled' consent key. (arguments: action)"
         },
         {
-          "tool": "recording",
-          "desc": "recording: Make subtitles or a transcript of a video or audio file, tell speakers apart, or remove background noise. Works on the sound, on this computer. text: what was said; subtitles: save an .srt beside it; speakers: who said what, turn by turn; clean: a copy with background noise removed; sounds: what can be heard in it (music, a dog, traffic...); listen: what can be heard around the computer right now (the microphone, a few seconds); streams: which applications are carrying audio right now, and the name to capture one by (a call in a browser is one); capture: record one of those for 5-600 seconds and transcribe it - which records the room, so it needs the sound consent like the microphone does. (arguments: action, path, language, people, seconds)"
-        },
-        {
           "tool": "phone_remote",
           "desc": "phone_remote: Press keys on the paired phone as a Bluetooth keyboard: 'press' the camera 'shutter' (takes a photo in the camera app), play_pause, next, previous, volume_up/down, mute; or 'type' text into whatever field is focused on the phone. The phone must have paired 'Chronoa Remote'. Requires the 'phone-remote-enabled' consent key. (arguments: action, key, text)"
         },
         {
-          "tool": "bluetooth_gatt",
-          "desc": "bluetooth_gatt: Read what a paired Bluetooth Low Energy device says about itself - a watch's or headset's battery, a heart-rate strap's live reading, which services a band offers. 'list': every paired device and whether it speaks this protocol. 'services': what one exposes. 'read': one stored value. 'listen': a live reading of something the device only pushes, e.g. heart rate - 'nothing arrived' is the truthful answer when the device is not measuring. Speakers, headphones and car stereios are older Bluetooth and expose nothing here, which is a true answer, not a failure; wearables, bands, straps, smart tags and thermometers answer. Needs 'bluetooth-gatt-enabled' and the device must be connected. (arguments: action, device, seconds, characteristic)"
+          "tool": "recording",
+          "desc": "recording: Make subtitles or a transcript of a video or audio file, tell speakers apart, or remove background noise. Works on the sound, on this computer. text: what was said; subtitles: save an .srt beside it; speakers: who said what, turn by turn; clean: a copy with background noise removed; sounds: what can be heard in it (music, a dog, traffic...); listen: what can be heard around the computer right now (the microphone, a few seconds); streams: which applications are carrying audio right now, and the name to capture one by (a call in a browser is one); capture: record one of those for 5-600 seconds and transcribe it - which records the room, so it needs the sound consent like the microphone does. (arguments: action, path, language, people, seconds)"
         },
         {
-          "tool": "audio_output",
-          "desc": "audio_output: List the speakers/headphones (outputs) and microphones (inputs) and which one is the default, or switch the default output or input - 'play through my headphones', 'use the USB microphone', 'send sound to the HDMI monitor'. Pick a device by its number or part of its name. (arguments: action, device, kind)"
+          "tool": "bluetooth_gatt",
+          "desc": "bluetooth_gatt: Read what a paired Bluetooth Low Energy device says about itself - a watch's or headset's battery, a heart-rate strap's live reading, which services a band offers. 'list': every paired device and whether it speaks this protocol. 'services': what one exposes. 'read': one stored value. 'listen': a live reading of something the device only pushes, e.g. heart rate - 'nothing arrived' is the truthful answer when the device is not measuring. Speakers, headphones and car stereios are older Bluetooth and expose nothing here, which is a true answer, not a failure; wearables, bands, straps, smart tags and thermometers answer. Needs 'bluetooth-gatt-enabled' and the device must be connected. (arguments: action, device, seconds, characteristic)"
         }
       ],
       "offered": [
         "bluetooth_call",
+        "landline_call",
         "phone",
         "lan_phone",
         "screen_to_phone",
-        "recording",
         "phone_remote",
-        "bluetooth_gatt",
-        "audio_output"
+        "recording",
+        "bluetooth_gatt"
       ],
       "recall_hit": true
     },
@@ -2229,7 +2229,11 @@
         },
         {
           "tool": "watch",
-          "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
+          "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'find' (make the watch ring), 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
+        },
+        {
+          "tool": "run_command",
+          "desc": "run_command: Run one program in the project folder and get its exit code and output - the project's tests (pytest, npm test, cargo test), its build or linter - to check that a change works. One program per call: no pipes, redirections or shell syntax. Requires the 'run-command-enabled' consent key; asks each time. (arguments: command, cwd, timeout_seconds, where, image, machine, network)"
         },
         {
           "tool": "analyze_table",
@@ -2240,12 +2244,8 @@
           "desc": "kill_process: Stop a running process by pid, asking it to exit cleanly. Use list_processes to find the pid first. Requires the 'process-kill-enabled' consent key. (arguments: pid, signal_name)"
         },
         {
-          "tool": "check_internet",
-          "desc": "check_internet: Check whether the internet is working and, if not, which step fails: network connection, router, internet, DNS, or websites. Also reports the delay to the router and to the internet."
-        },
-        {
-          "tool": "undo_last_change",
-          "desc": "undo_last_change: Put a file back the way Chronoa last found it, by restoring the content recorded just before Chronoa's own last edit to it. Undoes Chronoa's recent writes only - NOT git history, NOT changes you made in an editor or a shell, and only while a recorded pre-image is still held. Requires the 'file-edit-enabled' consent key. (arguments: path, list, steps)"
+          "tool": "delegate",
+          "desc": "delegate: Hand a self-contained task to a subagent that works in a fresh conversation with the same tools, and get back only its summary. Use it to research, investigate, or read many files or pages, when the details would crowd this conversation; the subagent cannot see this conversation, so put everything it needs in `task`. Not for one quick tool call. (arguments: task, context)"
         }
       ],
       "offered": [
@@ -2253,10 +2253,10 @@
         "routines",
         "todo_list",
         "watch",
+        "run_command",
         "analyze_table",
         "kill_process",
-        "check_internet",
-        "undo_last_change"
+        "delegate"
       ],
       "recall_hit": true
     },
@@ -2415,7 +2415,7 @@
         },
         {
           "tool": "arrange_window",
-          "desc": "arrange_window: Minimize, maximize, unmaximize, make fullscreen, leave fullscreen, move, resize, or send a window to another workspace, by window id from list_windows or by part of its title. move takes x and y, resize takes width and height (pixels), set_workspace takes a 0-based workspace. Nothing is closed; close_window does that. (arguments: action, window_id, title_contains, x, y, width, height, workspace)"
+          "desc": "arrange_window: Arrange a window: tile (snap it to the left, right, top or bottom half of the screen - 'put it on the left half', side by side), minimize, maximize, unmaximize, make fullscreen, leave fullscreen, move, resize, or send it to another workspace - by window id from list_windows or by part of its title. tile takes side; move takes x and y, resize width and height (pixels), set_workspace a 0-based workspace. Nothing is closed; close_window does that. (arguments: action, window_id, title_contains, x, y, width, height, workspace, side)"
         },
         {
           "tool": "list_windows",
@@ -2554,6 +2554,10 @@
           "desc": "press_key: Press a key or key combination in the focused window, e.g. 'Return', 'Escape', 'Tab' or 'ctrl+shift+t'. This sends a key, not text - use type_text to type a string. Requires the 'input-control-enabled' consent key. X11 only. (arguments: key, repeat)"
         },
         {
+          "tool": "run_command",
+          "desc": "run_command: Run one program in the project folder and get its exit code and output - the project's tests (pytest, npm test, cargo test), its build or linter - to check that a change works. One program per call: no pipes, redirections or shell syntax. Requires the 'run-command-enabled' consent key; asks each time. (arguments: command, cwd, timeout_seconds, where, image, machine, network)"
+        },
+        {
           "tool": "apply_patch",
           "desc": "apply_patch: Apply a .patch or .diff file to files on this machine. Use for 'apply this diff', 'here is a patch', 'merge this change in'. Runs a dry run by default and changes nothing until asked. Reports when the patch is already applied, which is a refusal rather than a reverse-applied change, and lists the .rej files patch leaves for hunks it could not apply. Never prompts. (arguments: patch, path, strip, action)"
         },
@@ -2564,10 +2568,6 @@
         {
           "tool": "backup_status",
           "desc": "backup_status: Whether this machine's files are actually backed up off it: how many restic snapshots exist, when the most recent was taken, what it covered, and whether the repository still passes restic's own integrity check. Use for 'is my backup working', 'when did I last back up', 'do I have a copy of my files'. A machine with no repository configured says so plainly, because that means there is no backup. Read-only: it never writes to the repository. (arguments: repository)"
-        },
-        {
-          "tool": "bandwidth_to_host",
-          "desc": "bandwidth_to_host: Measure how fast this machine can send data to another machine over the network, using a controlled iperf3 transfer. Use for 'why is my NAS slow', 'how fast is my network to the server', 'is the bottleneck the network or the disk'. Needs iperf3 running on the other machine - ask for loopback to measure this machine against itself. Read-only: it transfers data and writes nothing. (arguments: host, port, seconds)"
         }
       ],
       "offered": [
@@ -2575,10 +2575,10 @@
         "browse",
         "machine_capabilities",
         "press_key",
+        "run_command",
         "apply_patch",
         "autostart_entries",
-        "backup_status",
-        "bandwidth_to_host"
+        "backup_status"
       ],
       "recall_hit": true
     },
@@ -2833,7 +2833,7 @@
       "negatives": [
         {
           "tool": "lan_phone",
-          "desc": "lan_phone: Find phones on the SAME Wi-Fi network, using the KDE Connect protocol directly - so it works without KDE Connect or GSConnect installed. 'devices': what announced itself on this network in the last few seconds (phones, tablets, other computers). 'announce': make this computer findable by a phone's KDE Connect app. 'status': what this computer can and cannot do on the LAN. 'pair': what the pairing half of the protocol is and why it is not here. Needs the 'lan-phone-enabled' consent key. (arguments: action, seconds)"
+          "desc": "lan_phone: Find phones on the SAME Wi-Fi network, using the KDE Connect protocol directly - so it works without KDE Connect or GSConnect installed. 'devices': what announced itself on this network in the last few seconds (phones, tablets, other computers). 'announce': make this computer findable by a phone's KDE Connect app. 'status': what this computer can and cannot do on the LAN. 'pair': pair with the device 'devices' found (the phone asks its owner). Needs the 'lan-phone-enabled' consent key. (arguments: action, seconds)"
         },
         {
           "tool": "ping_host",
@@ -2885,6 +2885,10 @@
           "desc": "git_commit: Commit the files you name in a git repository, with a message. Only the paths given are staged - nothing is swept up from the rest of the tree. Requires the 'git-write-enabled' consent key. Pushing is a separate skill: that publishes. (arguments: files, message, path)"
         },
         {
+          "tool": "run_command",
+          "desc": "run_command: Run one program in the project folder and get its exit code and output - the project's tests (pytest, npm test, cargo test), its build or linter - to check that a change works. One program per call: no pipes, redirections or shell syntax. Requires the 'run-command-enabled' consent key; asks each time. (arguments: command, cwd, timeout_seconds, where, image, machine, network)"
+        },
+        {
           "tool": "calculate",
           "desc": "calculate: Evaluate arithmetic and percentages ('15% of 2400'), or convert between units. Handles the four operations, powers, parentheses, factorial, permutations and combinations (perm/nPr, comb/nCr), gcd, lcm, sqrt, exp, log, ln, trig and inverse trig, and pi/e/tau - exact for whole numbers. For algebra with variables, derivatives, integrals, limits or equations, use solve_math. Converts length, mass, volume, time, data, pressure, frequency, power, energy and temperature, in the units a person actually meets - say '200 km to miles' or '70kg in lb'. Runs entirely on this machine with no network call. Refuses to guess: a percentage needs a number to apply to, and converting between quantities that measure different things is an error rather than a number. (arguments: expression)"
         },
@@ -2903,21 +2907,17 @@
         {
           "tool": "ask_user",
           "desc": "ask_user: Ask the user a clarifying question and wait for their answer, with 2 to 4 short options they can pick. Use this whenever a request is genuinely ambiguous - especially when several files or devices could match. Do not guess instead, and do not ask when one option is obviously right. In a headless session there is nobody to answer and this will say so. (arguments: question, options)"
-        },
-        {
-          "tool": "list_apps",
-          "desc": "list_apps: List the applications installed on this machine, optionally filtered by a search term, so a request to open something can be answered with what actually exists rather than a guess. (arguments: search)"
         }
       ],
       "offered": [
         "routines",
         "git_commit",
+        "run_command",
         "calculate",
         "analyze_table",
         "kill_process",
         "manage_goals",
-        "ask_user",
-        "list_apps"
+        "ask_user"
       ],
       "recall_hit": true
     },
@@ -3027,7 +3027,7 @@
       "negatives": [
         {
           "tool": "watch",
-          "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
+          "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'find' (make the watch ring), 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
         },
         {
           "tool": "notify",
@@ -3241,23 +3241,23 @@
           "desc": "open_application: Open or launch an installed application by name or by kind, e.g. 'firefox', 'files', 'settings', 'music player', 'text editor'. Not for websites: use browse to open a site and work on it. (arguments: name)"
         },
         {
-          "tool": "read_video",
-          "desc": "read_video: Read a video's basics out loud (for subtitles or what was said use recording): how long it is, its resolution, its video codec, whether it has audio, and its bitrate. Add keyframes=true to also save the moments the image changes. The original is never modified. (arguments: path, keyframes)"
+          "tool": "landline_call",
+          "desc": "landline_call: Place and answer calls on the JioFiber broadband landline over Wi-Fi, through the router - the same line the JioJoin app uses, the house's own landline number. 'status' says whether the line is connected and what call is on. 'dial' places a call - 'dial number=\"+911234567890\"' - asking you to confirm first, because it rings someone. 'answer' picks up a ringing call; 'hangup' ends, cancels or declines the current call. The voice is on this computer's speaker and microphone, nothing is recorded, and the landline handset keeps working. Needs this computer added to the line on the Phone page and the 'landline-enabled' consent key. This is the landline, not a mobile over Bluetooth - that is 'bluetooth_call'. (arguments: action, number, name)"
         },
         {
-          "tool": "edit_video",
-          "desc": "edit_video: Edit a video and save the result as a new file next to it (never overwriting the original): trim between times, resize to a width, rotate, mute or keep only the audio, or change the speed. End times accept seconds ('95'), or 'MM:SS' / 'HH:MM:SS'. (arguments: path, start, end, width, rotate, mute, audio_only, speed, output)"
+          "tool": "read_video",
+          "desc": "read_video: Read a video's basics out loud (for subtitles or what was said use recording): how long it is, its resolution, its video codec, whether it has audio, and its bitrate. Add keyframes=true to also save the moments the image changes. The original is never modified. (arguments: path, keyframes)"
         }
       ],
       "offered": [
         "convert_media",
-        "recording",
         "media_control",
+        "recording",
         "meeting",
         "edit_audio",
         "open_application",
-        "read_video",
-        "edit_video"
+        "landline_call",
+        "read_video"
       ],
       "recall_hit": true
     },
@@ -3390,7 +3390,7 @@
         },
         {
           "tool": "lan_phone",
-          "desc": "lan_phone: Find phones on the SAME Wi-Fi network, using the KDE Connect protocol directly - so it works without KDE Connect or GSConnect installed. 'devices': what announced itself on this network in the last few seconds (phones, tablets, other computers). 'announce': make this computer findable by a phone's KDE Connect app. 'status': what this computer can and cannot do on the LAN. 'pair': what the pairing half of the protocol is and why it is not here. Needs the 'lan-phone-enabled' consent key. (arguments: action, seconds)"
+          "desc": "lan_phone: Find phones on the SAME Wi-Fi network, using the KDE Connect protocol directly - so it works without KDE Connect or GSConnect installed. 'devices': what announced itself on this network in the last few seconds (phones, tablets, other computers). 'announce': make this computer findable by a phone's KDE Connect app. 'status': what this computer can and cannot do on the LAN. 'pair': pair with the device 'devices' found (the phone asks its owner). Needs the 'lan-phone-enabled' consent key. (arguments: action, seconds)"
         },
         {
           "tool": "cleanup_apply",
@@ -3441,7 +3441,7 @@
         },
         {
           "tool": "lan_phone",
-          "desc": "lan_phone: Find phones on the SAME Wi-Fi network, using the KDE Connect protocol directly - so it works without KDE Connect or GSConnect installed. 'devices': what announced itself on this network in the last few seconds (phones, tablets, other computers). 'announce': make this computer findable by a phone's KDE Connect app. 'status': what this computer can and cannot do on the LAN. 'pair': what the pairing half of the protocol is and why it is not here. Needs the 'lan-phone-enabled' consent key. (arguments: action, seconds)"
+          "desc": "lan_phone: Find phones on the SAME Wi-Fi network, using the KDE Connect protocol directly - so it works without KDE Connect or GSConnect installed. 'devices': what announced itself on this network in the last few seconds (phones, tablets, other computers). 'announce': make this computer findable by a phone's KDE Connect app. 'status': what this computer can and cannot do on the LAN. 'pair': pair with the device 'devices' found (the phone asks its owner). Needs the 'lan-phone-enabled' consent key. (arguments: action, seconds)"
         }
       ],
       "offered": [
@@ -4051,20 +4051,20 @@
           "desc": "phone: The user's paired phone via GSConnect/KDE Connect: status (reachable, battery), ring it to find it, ping it, share a file or link to it; read text messages ('messages': latest, from a contact, or unread only); send a text message ('send': to a contact name or number, or omit contact to reply to the latest conversation) with exactly the text given - draft it first; or 'call' a contact or number (opens the phone's dialer). The user confirms every message and call before it goes. Requires the 'phone-control-enabled' consent key; reading needs 'phone-messages-read-enabled', sending and calling 'phone-messages-send-enabled'. (arguments: action, device, target, contact, text, unread_only, limit)"
         },
         {
-          "tool": "alarm",
-          "desc": "alarm: Alarm clock: set an alarm at a time of day (once, or repeating daily/weekdays/weekends/chosen days), list alarms, say when the next one is, change one's time or label, snooze the one that just rang, or delete one. Examples: 'set an alarm for 7am', 'alarm for 6:30 on weekdays', 'when is my next alarm?', 'change my 7am alarm to 7:30', 'snooze', 'delete the 7am alarm'. Times may be words ('7am', '7:30 pm', 'tomorrow 6:45'). It rings with a notification and the alarm sound even if the assistant is closed; it is held by systemd --user, so a reboot drops it until alarms are next listed, which re-arms it. (arguments: action, time, label, repeat, id, new_time, new_label, minutes)"
-        },
-        {
-          "tool": "calendar_edit",
-          "desc": "calendar_edit: Change the user's calendar: 'create' adds an event to the default calendar (title, start, optional duration or end, location); 'move' reschedules an event found by its current time and/or title to new_start; 'cancel' deletes one. Times in words: 'tomorrow 3pm', 'friday 5 pm', '2026-10-09 14:00'. Move and cancel ask the person to confirm. Ambiguous matches are refused with the candidates. Requires the 'calendar-write-enabled' consent key (move/cancel also 'calendar-read-enabled'). No invitations are sent. (arguments: action, title, start, duration, end, new_start, location, notes)"
-        },
-        {
           "tool": "encode_text",
           "desc": "encode_text: Encode or decode text: base64, url (percent-encoding), hex, binary, rot13, morse. (arguments: text, scheme, direction)"
         },
         {
           "tool": "type_text",
           "desc": "type_text: Type text at the currently focused window. Requires the 'input-control-enabled' consent key (separate from the vision sense) to be enabled. (arguments: text)"
+        },
+        {
+          "tool": "read_text_file",
+          "desc": "read_text_file: Read a text file and return its contents, optionally a range of lines. Use this to see what a file actually says. (arguments: path, start_line, max_lines)"
+        },
+        {
+          "tool": "write_text_file",
+          "desc": "write_text_file: Write text to a file, creating it or replacing its contents. Refuses to replace a non-empty file unless asked to overwrite, and refuses binary data. (arguments: path, content, overwrite, append)"
         }
       ],
       "offered": [
@@ -4072,10 +4072,10 @@
         "translate_text",
         "undo_last_change",
         "phone",
-        "alarm",
-        "calendar_edit",
         "encode_text",
-        "type_text"
+        "type_text",
+        "read_text_file",
+        "write_text_file"
       ],
       "recall_hit": true
     },
@@ -4101,7 +4101,7 @@
         },
         {
           "tool": "watch",
-          "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
+          "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'find' (make the watch ring), 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
         },
         {
           "tool": "desktop_setting",
@@ -4243,7 +4243,7 @@
         },
         {
           "tool": "lan_phone",
-          "desc": "lan_phone: Find phones on the SAME Wi-Fi network, using the KDE Connect protocol directly - so it works without KDE Connect or GSConnect installed. 'devices': what announced itself on this network in the last few seconds (phones, tablets, other computers). 'announce': make this computer findable by a phone's KDE Connect app. 'status': what this computer can and cannot do on the LAN. 'pair': what the pairing half of the protocol is and why it is not here. Needs the 'lan-phone-enabled' consent key. (arguments: action, seconds)"
+          "desc": "lan_phone: Find phones on the SAME Wi-Fi network, using the KDE Connect protocol directly - so it works without KDE Connect or GSConnect installed. 'devices': what announced itself on this network in the last few seconds (phones, tablets, other computers). 'announce': make this computer findable by a phone's KDE Connect app. 'status': what this computer can and cannot do on the LAN. 'pair': pair with the device 'devices' found (the phone asks its owner). Needs the 'lan-phone-enabled' consent key. (arguments: action, seconds)"
         },
         {
           "tool": "desktop_setting",
@@ -4380,7 +4380,7 @@
         },
         {
           "tool": "watch",
-          "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
+          "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'find' (make the watch ring), 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
         },
         {
           "tool": "dissect_traffic",
@@ -4425,7 +4425,7 @@
       "negatives": [
         {
           "tool": "watch",
-          "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
+          "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'find' (make the watch ring), 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
         },
         {
           "tool": "firmware_updates",
@@ -4617,11 +4617,15 @@
       "negatives": [
         {
           "tool": "watch",
-          "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
+          "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'find' (make the watch ring), 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
         },
         {
           "tool": "bluetooth_call",
           "desc": "bluetooth_call: Use a paired Android phone as a Bluetooth speakerphone, with no cable and no app on the phone. 'status' says whether a phone is connected as a hands-free unit, whether a call is in progress, and which audio profile its call audio arrived on. 'dial' places a call - 'dial number=\"+441234567890\"' - asking you to confirm first, because it rings someone. 'answer' and 'hangup' work on a call already in progress. 'audio' reports where the call's voice is going and names anything missing from that path, and 'profile' switches the card between wide-band hfp_hf and narrow-band hsp_hs. The phone stays the radio; this routes the voice to this computer's speakers and microphone. Needs the phone connected over Bluetooth, not merely paired, and the 'bluetooth-call-enabled' consent key. (arguments: action, card, profile, to, number)"
+        },
+        {
+          "tool": "landline_call",
+          "desc": "landline_call: Place and answer calls on the JioFiber broadband landline over Wi-Fi, through the router - the same line the JioJoin app uses, the house's own landline number. 'status' says whether the line is connected and what call is on. 'dial' places a call - 'dial number=\"+911234567890\"' - asking you to confirm first, because it rings someone. 'answer' picks up a ringing call; 'hangup' ends, cancels or declines the current call. The voice is on this computer's speaker and microphone, nothing is recorded, and the landline handset keeps working. Needs this computer added to the line on the Phone page and the 'landline-enabled' consent key. This is the landline, not a mobile over Bluetooth - that is 'bluetooth_call'. (arguments: action, number, name)"
         },
         {
           "tool": "alarm",
@@ -4638,21 +4642,17 @@
         {
           "tool": "phone",
           "desc": "phone: The user's paired phone via GSConnect/KDE Connect: status (reachable, battery), ring it to find it, ping it, share a file or link to it; read text messages ('messages': latest, from a contact, or unread only); send a text message ('send': to a contact name or number, or omit contact to reply to the latest conversation) with exactly the text given - draft it first; or 'call' a contact or number (opens the phone's dialer). The user confirms every message and call before it goes. Requires the 'phone-control-enabled' consent key; reading needs 'phone-messages-read-enabled', sending and calling 'phone-messages-send-enabled'. (arguments: action, device, target, contact, text, unread_only, limit)"
-        },
-        {
-          "tool": "date_math",
-          "desc": "date_math: Date arithmetic: days until a date ('how many days until 25 December'), the date N days/weeks/months from a date ('what date is 45 days from now'), days between two dates, or the weekday of a date. (arguments: operation, date, other_date, amount, unit)"
         }
       ],
       "offered": [
         "reminders",
         "watch",
         "bluetooth_call",
+        "landline_call",
         "alarm",
         "calendar_edit",
         "calendar_events",
-        "phone",
-        "date_math"
+        "phone"
       ],
       "recall_hit": true
     },
@@ -5045,6 +5045,10 @@
           "desc": "search_my_files: Search your own files by meaning - documents, notes, code - in a directory you choose, or your home if you name none. 'search': what matches a few words. 'reindex': read the directory and build or refresh the index (needed before the first search). 'status': what would be indexed and whether this machine can search by meaning. Needs the 'file-index-enabled' consent key. (arguments: action, query, path, limit)"
         },
         {
+          "tool": "run_command",
+          "desc": "run_command: Run one program in the project folder and get its exit code and output - the project's tests (pytest, npm test, cargo test), its build or linter - to check that a change works. One program per call: no pipes, redirections or shell syntax. Requires the 'run-command-enabled' consent key; asks each time. (arguments: command, cwd, timeout_seconds, where, image, machine, network)"
+        },
+        {
           "tool": "cloud_files",
           "desc": "cloud_files: See what is in this machine's configured cloud storage remotes - which remotes rclone knows, how many objects and bytes each holds, and what is at the top level of one. Use for 'what is in my cloud drive', 'is anything in the bucket', 'how big is my remote'. Read-only: it never copies, syncs or deletes anything. A machine with no remotes says so, because that means there is nowhere off-machine for anything to go. (arguments: remote, path)"
         },
@@ -5059,21 +5063,17 @@
         {
           "tool": "files_by_name",
           "desc": "files_by_name: Find every file with a given name under a directory, with sizes and modification dates, so you can see whether they are copies. Use for 'where are all my report.docx', 'how many copies of this do I have', 'which is the newest'. Reports the newest and whether the sizes agree, and does NOT claim the contents match - duplicate_files answers that. Deletes nothing. (arguments: name, path, case_sensitive)"
-        },
-        {
-          "tool": "find_files",
-          "desc": "find_files: Find files and folders by name under a directory, using a wildcard pattern such as '*.log' or 'report*'. Matches on the name only and never opens the files. To see what is in one folder, use list_directory. (arguments: pattern, path, include_hidden, max_results)"
         }
       ],
       "offered": [
         "project_outline",
         "qr_code",
         "search_my_files",
+        "run_command",
         "cloud_files",
         "compare_files",
         "duplicate_files",
-        "files_by_name",
-        "find_files"
+        "files_by_name"
       ],
       "recall_hit": true
     },
@@ -5186,6 +5186,10 @@
           "desc": "cpu_frequency: What the processor is doing right now: which speed governor it is in, roughly what speed it is running at, and the range its hardware allows. Use after setting a power mode, to see whether the machine actually took it up - 'why is my fan so loud', 'is my CPU being throttled', 'did performance mode do anything'. Read-only; changes nothing."
         },
         {
+          "tool": "arrange_window",
+          "desc": "arrange_window: Arrange a window: tile (snap it to the left, right, top or bottom half of the screen - 'put it on the left half', side by side), minimize, maximize, unmaximize, make fullscreen, leave fullscreen, move, resize, or send it to another workspace - by window id from list_windows or by part of its title. tile takes side; move takes x and y, resize width and height (pixels), set_workspace a 0-based workspace. Nothing is closed; close_window does that. (arguments: action, window_id, title_contains, x, y, width, height, workspace, side)"
+        },
+        {
           "tool": "click_pointer",
           "desc": "click_pointer: Click a mouse button at the current pointer position. Requires the 'input-control-enabled' consent key (separate from the vision sense) to be enabled. (arguments: button, count)"
         },
@@ -5200,21 +5204,17 @@
         {
           "tool": "read_video",
           "desc": "read_video: Read a video's basics out loud (for subtitles or what was said use recording): how long it is, its resolution, its video codec, whether it has audio, and its bitrate. Add keyframes=true to also save the moments the image changes. The original is never modified. (arguments: path, keyframes)"
-        },
-        {
-          "tool": "system_history",
-          "desc": "system_history: What this machine's CPU, disk, memory or paging was doing earlier, from the sysstat accounting records rather than a live reading. Use for 'was this busy last night', 'what was using the disk at lunchtime', 'why was the fan loud earlier'. Says plainly when no history has been recorded, because that is not the same as the machine having been idle. Read-only. (arguments: topic)"
         }
       ],
       "offered": [
         "get_volume",
         "set_volume",
         "cpu_frequency",
+        "arrange_window",
         "click_pointer",
         "read_audio",
         "read_image",
-        "read_video",
-        "system_history"
+        "read_video"
       ],
       "recall_hit": true
     },
@@ -5224,7 +5224,7 @@
       "positive_args": {
         "action": "*"
       },
-      "positives_desc": "arrange_window: Minimize, maximize, unmaximize, make fullscreen, leave fullscreen, move, resize, or send a window to another workspace, by window id from list_windows or by part of its title. move takes x and y, resize takes width and height (pixels), set_workspace takes a 0-based workspace. Nothing is closed; close_window does that. (arguments: action, window_id, title_contains, x, y, width, height, workspace)",
+      "positives_desc": "arrange_window: Arrange a window: tile (snap it to the left, right, top or bottom half of the screen - 'put it on the left half', side by side), minimize, maximize, unmaximize, make fullscreen, leave fullscreen, move, resize, or send it to another workspace - by window id from list_windows or by part of its title. tile takes side; move takes x and y, resize width and height (pixels), set_workspace a 0-based workspace. Nothing is closed; close_window does that. (arguments: action, window_id, title_contains, x, y, width, height, workspace, side)",
       "negatives": [
         {
           "tool": "close_window",
@@ -5683,7 +5683,7 @@
         },
         {
           "tool": "watch",
-          "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
+          "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'find' (make the watch ring), 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
         },
         {
           "tool": "open_file",
@@ -5739,6 +5739,10 @@
           "desc": "control_service: Start, stop, restart, reload, enable or disable a system service, then read its state back so the reply says whether it actually came up. Requires the 'service-control-enabled' consent key. (arguments: unit, action)"
         },
         {
+          "tool": "delegate",
+          "desc": "delegate: Hand a self-contained task to a subagent that works in a fresh conversation with the same tools, and get back only its summary. Use it to research, investigate, or read many files or pages, when the details would crowd this conversation; the subagent cannot see this conversation, so put everything it needs in `task`. Not for one quick tool call. (arguments: task, context)"
+        },
+        {
           "tool": "dns_lookup",
           "desc": "dns_lookup: Look a hostname or address up in DNS and report what came back: the addresses, or the mail servers, name servers, TXT records, certificate records or other records a name publishes, and whether the answer is DNSSEC-signed and valid. Distinguishes 'this name does not exist' from 'the resolver did not answer', because those have different fixes. Obeys privacy mode, since the query goes to a resolver outside this machine. Read-only. (arguments: name, type)"
         },
@@ -5753,21 +5757,17 @@
         {
           "tool": "list_windows",
           "desc": "list_windows: List the windows currently open, with their title, class and geometry. Pass title_contains to narrow the list to windows matching some text in their title or application - a desktop usually has more windows open than are worth reading. Where xdotool cannot see the session it falls back to the accessibility bus and says so, because that list is not complete. (arguments: title_contains)"
-        },
-        {
-          "tool": "snapshot_status",
-          "desc": "snapshot_status: Whether this Shanios machine can roll back: the OS version, which blue/green slot was booted, which slot boots next, the previous slot a rollback would return to, any recorded boot failure or pending reboot, and the btrfs snapshots on disk. Use for 'can I undo the update', 'which slot am I on', 'is an update waiting'. The snapshot list uses the 'snapshots-sense-enabled' switch. Read-only."
         }
       ],
       "offered": [
         "browse",
         "backup_status",
         "control_service",
+        "delegate",
         "dns_lookup",
         "driver_build",
         "graphics_stack",
-        "list_windows",
-        "snapshot_status"
+        "list_windows"
       ],
       "recall_hit": false
     },
@@ -5879,7 +5879,7 @@
         },
         {
           "tool": "arrange_window",
-          "desc": "arrange_window: Minimize, maximize, unmaximize, make fullscreen, leave fullscreen, move, resize, or send a window to another workspace, by window id from list_windows or by part of its title. move takes x and y, resize takes width and height (pixels), set_workspace takes a 0-based workspace. Nothing is closed; close_window does that. (arguments: action, window_id, title_contains, x, y, width, height, workspace)"
+          "desc": "arrange_window: Arrange a window: tile (snap it to the left, right, top or bottom half of the screen - 'put it on the left half', side by side), minimize, maximize, unmaximize, make fullscreen, leave fullscreen, move, resize, or send it to another workspace - by window id from list_windows or by part of its title. tile takes side; move takes x and y, resize width and height (pixels), set_workspace a 0-based workspace. Nothing is closed; close_window does that. (arguments: action, window_id, title_contains, x, y, width, height, workspace, side)"
         },
         {
           "tool": "focus_window",
@@ -6019,16 +6019,16 @@
           "desc": "open_files: Find which programs have a file, directory or network socket open. Use for 'what is using this file', 'why can't I delete this', 'what has my disk open', 'which process is holding that socket'. Names the holding program with its full command line, and flags deleted files whose space cannot be reclaimed. Reads only this user's processes unless run as root. Read-only: it lists open handles and never closes one. (arguments: path, pid, limit)"
         },
         {
+          "tool": "identify_file",
+          "desc": "identify_file: Identify a file by reading its first bytes rather than trusting its name. Use for 'why won't this open', 'what is this file', 'is this really a PNG', 'this file has no extension'. Reports the detected format and whether the filename agrees with it, which is the usual cause of a file refusing to open in the program its name implies. Says plainly when a signature is unrecognised. Read-only. (arguments: path)"
+        },
+        {
           "tool": "open_application",
           "desc": "open_application: Open or launch an installed application by name or by kind, e.g. 'firefox', 'files', 'settings', 'music player', 'text editor'. Not for websites: use browse to open a site and work on it. (arguments: name)"
         },
         {
           "tool": "open_settings",
           "desc": "open_settings: Open the system Settings app at a specific page, e.g. 'wifi', 'bluetooth', 'display', 'sound', 'power', 'privacy', 'keyboard', 'mouse', 'touchpad', 'printers', 'users', 'about', 'date_time', 'region', 'notifications', 'background', 'accessibility'. GNOME and KDE Plasma. Use open_application for Settings without a page. (arguments: page)"
-        },
-        {
-          "tool": "identify_file",
-          "desc": "identify_file: Identify a file by reading its first bytes rather than trusting its name. Use for 'why won't this open', 'what is this file', 'is this really a PNG', 'this file has no extension'. Reports the detected format and whether the filename agrees with it, which is the usual cause of a file refusing to open in the program its name implies. Says plainly when a signature is unrecognised. Read-only. (arguments: path)"
         },
         {
           "tool": "android_device",
@@ -6046,9 +6046,9 @@
       "offered": [
         "open_file",
         "open_files",
+        "identify_file",
         "open_application",
         "open_settings",
-        "identify_file",
         "android_device",
         "conversations",
         "browse"
@@ -6074,6 +6074,10 @@
           "desc": "scan_network: Find which devices are on the local network, with their names, addresses and hardware vendors. Local addresses only. Requires the network sense to be enabled. (arguments: range, resolve_names)"
         },
         {
+          "tool": "landline_call",
+          "desc": "landline_call: Place and answer calls on the JioFiber broadband landline over Wi-Fi, through the router - the same line the JioJoin app uses, the house's own landline number. 'status' says whether the line is connected and what call is on. 'dial' places a call - 'dial number=\"+911234567890\"' - asking you to confirm first, because it rings someone. 'answer' picks up a ringing call; 'hangup' ends, cancels or declines the current call. The voice is on this computer's speaker and microphone, nothing is recorded, and the landline handset keeps working. Needs this computer added to the line on the Phone page and the 'landline-enabled' consent key. This is the landline, not a mobile over Bluetooth - that is 'bluetooth_call'. (arguments: action, number, name)"
+        },
+        {
           "tool": "discover_hosts",
           "desc": "discover_hosts: Find which devices are on this network right now, by asking rather than by reading the cache - so devices that have never talked to this machine are found too. Reports an address and a hardware address for each, and counts devices answering on more than one address. The range is always the private network this machine is on; pass network= for a different private range, and a public one is refused. Connects to nothing it finds and reads no packet contents. Needs raw-socket access, so unprivileged it may report that rather than a partial sweep. (arguments: interface, network)"
         },
@@ -6084,10 +6088,6 @@
         {
           "tool": "broken_symlinks",
           "desc": "broken_symlinks: Find symbolic links that point at nothing under a directory. Use for 'this shortcut does not work', 'clean up my dead links', 'what is broken in here'. Separates four cases: resolving links, dangling ones, cycles, and links whose target lies OUTSIDE the searched tree - which are not broken, only unverified from here. Never removes anything. (arguments: path)"
-        },
-        {
-          "tool": "binary_hardening",
-          "desc": "binary_hardening: Report whether a binary is hardened: PIE, RELRO, full RELRO (BIND_NOW), stack canary and no-execute stack, each with what it stops. Use for 'is /path/to/this safe to run', 'is this binary hardened', 'does this have a stack canary', 'is this ASLR enabled'. Works on executables and shared libraries alike, and says 'not applicable' where a property genuinely has no answer rather than reporting it as missing. Read-only; nothing is loaded or written. (arguments: path)"
         }
       ],
       "offered": [
@@ -6095,10 +6095,10 @@
         "dns_lookup",
         "nfc",
         "scan_network",
+        "landline_call",
         "discover_hosts",
         "phone",
-        "broken_symlinks",
-        "binary_hardening"
+        "broken_symlinks"
       ],
       "recall_hit": true
     },
@@ -6270,16 +6270,16 @@
           "desc": "nfc: Read and write NFC tags. 'scan': is there a reader here (most laptops have none, and that is a true answer). 'read': tap a tag and be told what is written on it. 'write': put a link on an Ultralight/NTAG sticker - a bank card, transit pass or hotel key is refused, not rewritten. 'emulate': present a tag to a phone. Needs the 'nfc-enabled' consent key. (arguments: action, url, text, seconds, target)"
         },
         {
+          "tool": "landline_call",
+          "desc": "landline_call: Place and answer calls on the JioFiber broadband landline over Wi-Fi, through the router - the same line the JioJoin app uses, the house's own landline number. 'status' says whether the line is connected and what call is on. 'dial' places a call - 'dial number=\"+911234567890\"' - asking you to confirm first, because it rings someone. 'answer' picks up a ringing call; 'hangup' ends, cancels or declines the current call. The voice is on this computer's speaker and microphone, nothing is recorded, and the landline handset keeps working. Needs this computer added to the line on the Phone page and the 'landline-enabled' consent key. This is the landline, not a mobile over Bluetooth - that is 'bluetooth_call'. (arguments: action, number, name)"
+        },
+        {
           "tool": "phone",
           "desc": "phone: The user's paired phone via GSConnect/KDE Connect: status (reachable, battery), ring it to find it, ping it, share a file or link to it; read text messages ('messages': latest, from a contact, or unread only); send a text message ('send': to a contact name or number, or omit contact to reply to the latest conversation) with exactly the text given - draft it first; or 'call' a contact or number (opens the phone's dialer). The user confirms every message and call before it goes. Requires the 'phone-control-enabled' consent key; reading needs 'phone-messages-read-enabled', sending and calling 'phone-messages-send-enabled'. (arguments: action, device, target, contact, text, unread_only, limit)"
         },
         {
           "tool": "cloud_files",
           "desc": "cloud_files: See what is in this machine's configured cloud storage remotes - which remotes rclone knows, how many objects and bytes each holds, and what is at the top level of one. Use for 'what is in my cloud drive', 'is anything in the bucket', 'how big is my remote'. Read-only: it never copies, syncs or deletes anything. A machine with no remotes says so, because that means there is nowhere off-machine for anything to go. (arguments: remote, path)"
-        },
-        {
-          "tool": "install_app",
-          "desc": "install_app: Search Flathub for an app, or install / remove one for this user by its app ID (e.g. org.videolan.VLC, from a search). Installing and removing need the 'app-install-enabled' consent key. (arguments: action, query, app_id)"
         }
       ],
       "offered": [
@@ -6288,9 +6288,9 @@
         "manage_triggers",
         "browse",
         "nfc",
+        "landline_call",
         "phone",
-        "cloud_files",
-        "install_app"
+        "cloud_files"
       ],
       "recall_hit": true
     },
@@ -6314,7 +6314,7 @@
         },
         {
           "tool": "watch",
-          "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
+          "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'find' (make the watch ring), 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
         },
         {
           "tool": "desktop_setting",
@@ -6361,7 +6361,7 @@
         },
         {
           "tool": "lan_phone",
-          "desc": "lan_phone: Find phones on the SAME Wi-Fi network, using the KDE Connect protocol directly - so it works without KDE Connect or GSConnect installed. 'devices': what announced itself on this network in the last few seconds (phones, tablets, other computers). 'announce': make this computer findable by a phone's KDE Connect app. 'status': what this computer can and cannot do on the LAN. 'pair': what the pairing half of the protocol is and why it is not here. Needs the 'lan-phone-enabled' consent key. (arguments: action, seconds)"
+          "desc": "lan_phone: Find phones on the SAME Wi-Fi network, using the KDE Connect protocol directly - so it works without KDE Connect or GSConnect installed. 'devices': what announced itself on this network in the last few seconds (phones, tablets, other computers). 'announce': make this computer findable by a phone's KDE Connect app. 'status': what this computer can and cannot do on the LAN. 'pair': pair with the device 'devices' found (the phone asks its owner). Needs the 'lan-phone-enabled' consent key. (arguments: action, seconds)"
         },
         {
           "tool": "boot_report",
@@ -6946,7 +6946,7 @@
         },
         {
           "tool": "arrange_window",
-          "desc": "arrange_window: Minimize, maximize, unmaximize, make fullscreen, leave fullscreen, move, resize, or send a window to another workspace, by window id from list_windows or by part of its title. move takes x and y, resize takes width and height (pixels), set_workspace takes a 0-based workspace. Nothing is closed; close_window does that. (arguments: action, window_id, title_contains, x, y, width, height, workspace)"
+          "desc": "arrange_window: Arrange a window: tile (snap it to the left, right, top or bottom half of the screen - 'put it on the left half', side by side), minimize, maximize, unmaximize, make fullscreen, leave fullscreen, move, resize, or send it to another workspace - by window id from list_windows or by part of its title. tile takes side; move takes x and y, resize width and height (pixels), set_workspace a 0-based workspace. Nothing is closed; close_window does that. (arguments: action, window_id, title_contains, x, y, width, height, workspace, side)"
         },
         {
           "tool": "calendar_edit",
@@ -7157,7 +7157,7 @@
       "negatives": [
         {
           "tool": "arrange_window",
-          "desc": "arrange_window: Minimize, maximize, unmaximize, make fullscreen, leave fullscreen, move, resize, or send a window to another workspace, by window id from list_windows or by part of its title. move takes x and y, resize takes width and height (pixels), set_workspace takes a 0-based workspace. Nothing is closed; close_window does that. (arguments: action, window_id, title_contains, x, y, width, height, workspace)"
+          "desc": "arrange_window: Arrange a window: tile (snap it to the left, right, top or bottom half of the screen - 'put it on the left half', side by side), minimize, maximize, unmaximize, make fullscreen, leave fullscreen, move, resize, or send it to another workspace - by window id from list_windows or by part of its title. tile takes side; move takes x and y, resize width and height (pixels), set_workspace a 0-based workspace. Nothing is closed; close_window does that. (arguments: action, window_id, title_contains, x, y, width, height, workspace, side)"
         },
         {
           "tool": "close_window",
@@ -7351,6 +7351,10 @@
       "positives_desc": "explain_command: Explain a Linux shell command (not a general topic) from the local manuals (tldr, man), e.g. 'what does tar do', 'how do I use rsync'; or find which command does something, e.g. 'which command shows disk usage'. (arguments: command, task)",
       "negatives": [
         {
+          "tool": "run_command",
+          "desc": "run_command: Run one program in the project folder and get its exit code and output - the project's tests (pytest, npm test, cargo test), its build or linter - to check that a change works. One program per call: no pipes, redirections or shell syntax. Requires the 'run-command-enabled' consent key; asks each time. (arguments: command, cwd, timeout_seconds, where, image, machine, network)"
+        },
+        {
           "tool": "find_device",
           "desc": "find_device: Make a paired Bluetooth watch, band or tag buzz or ring so the person can find it - 'where is my watch', 'find my band'. Works on devices with the standard Immediate Alert service and on MoYoung (Da Fit) watches; anything else is refused rather than sent an unknown command. The device must be in range. Requires the 'bluetooth-gatt-enabled' consent key. (arguments: device)"
         },
@@ -7373,21 +7377,17 @@
         {
           "tool": "machine_capabilities",
           "desc": "machine_capabilities: Report what this machine can actually do: which of the commands Chronoa knows how to use are really present, which Python modules import here, and which services are enabled. Asks the live machine rather than reading the shipped inventory, which describes the image it was built from and not necessarily this one. Use it before offering to convert a file, edit an image, read a document or capture audio, to find out whether that is even possible here."
-        },
-        {
-          "tool": "manage_triggers",
-          "desc": "manage_triggers: Arm, list, or remove automatic rules that run a Chronoa action when a perception matches - for example, notify when the battery sense reports low. A rule names one already-whitelisted skill; it cannot run an arbitrary command or an LLM-authored prompt. Listing needs no permission; arming or disarming requires the 'trigger-control-enabled' consent key. (arguments: action, name, sense, match_mode, substring, keywords, actuator, arguments, cooldown_seconds, event_type, source, params, ask_first, retry_policy, debounce_seconds)"
         }
       ],
       "offered": [
         "explain_command",
+        "run_command",
         "find_device",
         "container",
         "dissect_traffic",
         "ir_remote",
         "list_processes",
-        "machine_capabilities",
-        "manage_triggers"
+        "machine_capabilities"
       ],
       "recall_hit": true
     },
@@ -7557,16 +7557,16 @@
           "desc": "cpu_per_core: Which individual processor cores are busy right now, and how much of each is user time versus waiting on disk. Use when the machine feels slow but nothing looks busy - a single process pinning one core looks idle in every system-wide average. Read-only; starts nothing."
         },
         {
+          "tool": "arrange_window",
+          "desc": "arrange_window: Arrange a window: tile (snap it to the left, right, top or bottom half of the screen - 'put it on the left half', side by side), minimize, maximize, unmaximize, make fullscreen, leave fullscreen, move, resize, or send it to another workspace - by window id from list_windows or by part of its title. tile takes side; move takes x and y, resize width and height (pixels), set_workspace a 0-based workspace. Nothing is closed; close_window does that. (arguments: action, window_id, title_contains, x, y, width, height, workspace, side)"
+        },
+        {
           "tool": "open_files",
           "desc": "open_files: Find which programs have a file, directory or network socket open. Use for 'what is using this file', 'why can't I delete this', 'what has my disk open', 'which process is holding that socket'. Names the holding program with its full command line, and flags deleted files whose space cannot be reclaimed. Reads only this user's processes unless run as root. Read-only: it lists open handles and never closes one. (arguments: path, pid, limit)"
         },
         {
           "tool": "process_detail",
           "desc": "process_detail: What one running process is doing right now: its state (running, sleeping, stopped, zombie), and the kernel function it is waiting on if it is blocked. Answers 'why is that window frozen', 'what is this program stuck on', 'is this process hung'. Read-only: it attaches to nothing, runs nothing, and never needs root for your own processes. (arguments: pid)"
-        },
-        {
-          "tool": "list_percepts",
-          "desc": "list_percepts: Show what Chronoa is currently perceiving - every fact held about this machine and the user right now, with its age, what expires it, and whether it would be included in the next reply. Use this to check what the assistant actually knows rather than what it says. (arguments: sense_filter, include_expired)"
         }
       ],
       "offered": [
@@ -7575,9 +7575,9 @@
         "cpu_frequency",
         "thread_activity",
         "cpu_per_core",
+        "arrange_window",
         "open_files",
-        "process_detail",
-        "list_percepts"
+        "process_detail"
       ],
       "recall_hit": true
     },
@@ -7810,6 +7810,10 @@
       "positives_desc": "list_containers: List this machine's containers: distroboxes (by name, with their image and whether they are running) and podman/docker containers, including any that exited because they ran out of memory, plus how much disk the images use. Use for 'what distroboxes do I have', 'is my container running', 'why did my container die'. The podman details use the 'containers-sense-enabled' switch. Read-only.",
       "negatives": [
         {
+          "tool": "run_command",
+          "desc": "run_command: Run one program in the project folder and get its exit code and output - the project's tests (pytest, npm test, cargo test), its build or linter - to check that a change works. One program per call: no pipes, redirections or shell syntax. Requires the 'run-command-enabled' consent key; asks each time. (arguments: command, cwd, timeout_seconds, where, image, machine, network)"
+        },
+        {
           "tool": "container",
           "desc": "container: Run containers on this machine with podman (run an image, run a command inside a running container, stop it, read its logs, list what is running, list local images, pull one) and start/stop nspawn machines with machinectl. A container started with display=x11 draws on this desktop, and the ui_elements tool is what drives it by name with a visible cursor; this tool starts it, and stops it. Needs 'container-control-enabled', off by default. (arguments: action, image, name, command, detach, display, share_bus, publish, all, tail)"
         },
@@ -7832,21 +7836,17 @@
         {
           "tool": "generate_image",
           "desc": "generate_image: Make a new picture from a text description, or change a photo the way a description says (from_photo, e.g. 'make it snowy', 'as a watercolour'), drawn locally by stable-diffusion.cpp. Describe it in English. Saves a PNG and returns its path. (arguments: prompt, avoid, size, steps, seed, output, from_photo, strength)"
-        },
-        {
-          "tool": "read_image",
-          "desc": "read_image: Read a picture's basics out loud: width by height, format, and colour type, plus file size. For what the picture says, use read_document on it. The original is never modified. (arguments: path)"
         }
       ],
       "offered": [
+        "run_command",
         "list_containers",
         "container",
         "explain_command",
         "manage_triggers",
         "ui_elements",
         "edit_image",
-        "generate_image",
-        "read_image"
+        "generate_image"
       ],
       "recall_hit": true
     },
@@ -8459,12 +8459,12 @@
           "desc": "browse: Open a website and do things on it for the person: find information, fill in forms, click through. Drive a web browser: navigate, read the page's text (get_text), click, type, select options, scroll, move through history, take screenshots and wait for conditions. While Chronoa's window is open this is the in-app browser the user can watch: there it opens only http(s) pages the egress policy allows, and key, hover, drag, upload_file, tabs and evaluate are not available. Otherwise it is a headless Chromium with all actions. Requires the web sense to be enabled and privacy mode to be off. (arguments: action, url, selector, text, key, value, label, files, x, y, to_x, to_y, to_selector, delta_x, delta_y, steps, repeat, tab_id, path, wait_for, timeout, settle)"
         },
         {
-          "tool": "process_cost",
-          "desc": "process_cost: What each running program is COSTING this machine right now, measured over the last second rather than as a snapshot: percent CPU split into user and system time, how much memory it holds, page faults (including the major ones that mean it is thrashing), and how many kB a second it is reading and writing. Answers 'what is using my CPU', 'what is making my computer slow', 'what is writing to my disk all the time', 'which program is swapping', 'why did everything freeze'. Use this when the machine feels slow; use list_processes to see what is running and disk_activity to see whether the disk itself is busy. Read-only; nothing is started, stopped or changed."
+          "tool": "landline_call",
+          "desc": "landline_call: Place and answer calls on the JioFiber broadband landline over Wi-Fi, through the router - the same line the JioJoin app uses, the house's own landline number. 'status' says whether the line is connected and what call is on. 'dial' places a call - 'dial number=\"+911234567890\"' - asking you to confirm first, because it rings someone. 'answer' picks up a ringing call; 'hangup' ends, cancels or declines the current call. The voice is on this computer's speaker and microphone, nothing is recorded, and the landline handset keeps working. Needs this computer added to the line on the Phone page and the 'landline-enabled' consent key. This is the landline, not a mobile over Bluetooth - that is 'bluetooth_call'. (arguments: action, number, name)"
         },
         {
-          "tool": "web_search",
-          "desc": "web_search: Look something up on the web and return what the pages actually say: facts, prices, how-tos, anything no more specific tool covers. Give a search query, a specific URL, or both. For a scholarly question - a paper, a preprint, prior work, 'what does the research say' - set source=arxiv and it searches the arXiv preprint archive instead of the web. For news headlines use news; to click, fill in or book something on a site use browse. Requires the web sense to be enabled and privacy mode to be off. (arguments: query, url, source)"
+          "tool": "process_cost",
+          "desc": "process_cost: What each running program is COSTING this machine right now, measured over the last second rather than as a snapshot: percent CPU split into user and system time, how much memory it holds, page faults (including the major ones that mean it is thrashing), and how many kB a second it is reading and writing. Answers 'what is using my CPU', 'what is making my computer slow', 'what is writing to my disk all the time', 'which program is swapping', 'why did everything freeze'. Use this when the machine feels slow; use list_processes to see what is running and disk_activity to see whether the disk itself is busy. Read-only; nothing is started, stopped or changed."
         }
       ],
       "offered": [
@@ -8474,8 +8474,8 @@
         "fm_radio",
         "read_document",
         "browse",
-        "process_cost",
-        "web_search"
+        "landline_call",
+        "process_cost"
       ],
       "recall_hit": true
     },
@@ -8577,6 +8577,10 @@
       "positives_desc": "container: Run containers on this machine with podman (run an image, run a command inside a running container, stop it, read its logs, list what is running, list local images, pull one) and start/stop nspawn machines with machinectl. A container started with display=x11 draws on this desktop, and the ui_elements tool is what drives it by name with a visible cursor; this tool starts it, and stops it. Needs 'container-control-enabled', off by default. (arguments: action, image, name, command, detach, display, share_bus, publish, all, tail)",
       "negatives": [
         {
+          "tool": "run_command",
+          "desc": "run_command: Run one program in the project folder and get its exit code and output - the project's tests (pytest, npm test, cargo test), its build or linter - to check that a change works. One program per call: no pipes, redirections or shell syntax. Requires the 'run-command-enabled' consent key; asks each time. (arguments: command, cwd, timeout_seconds, where, image, machine, network)"
+        },
+        {
           "tool": "list_containers",
           "desc": "list_containers: List this machine's containers: distroboxes (by name, with their image and whether they are running) and podman/docker containers, including any that exited because they ran out of memory, plus how much disk the images use. Use for 'what distroboxes do I have', 'is my container running', 'why did my container die'. The podman details use the 'containers-sense-enabled' switch. Read-only."
         },
@@ -8599,21 +8603,17 @@
         {
           "tool": "ui_elements",
           "desc": "ui_elements: Use another app's controls by what they are, through the accessibility tree. apps: which apps are reachable. inspect: list a window's buttons, fields, menus and labels with ids (app = its name; query narrows by text). press: activate an element by id (a button, checkbox, link, menu item). set_text: put text in a field by id. read: an element's text or value. menu: open a menu path like 'File > Export'. drive: one turn of driving - give an action and a control number and the reply is the app's new state in the same short numbered form, which is what a small model can act on. act: click, type or key an app by name or position, with a visible cursor. state: the numbered controls an app is showing. Works on a container's app and on this desktop's own apps alike. Requires 'input-control-enabled'; drive start also runs a container, so it needs 'container-control-enabled' as well. (arguments: action, app, id, text, query, path, do, how, number, image, keys, x, y)"
-        },
-        {
-          "tool": "edit_image",
-          "desc": "edit_image: Edit a picture (for faces or backgrounds use photo_video) and save the result as a new file next to it: resize (width and/or height, or percent), compress (quality, or to under a size in KB), crop, upscale (2-4x), rotate, flip, grayscale, a look (sepia, vignette, sketch, paint, enhance), strip metadata (location/camera), or convert format. Several edits can be combined in one call. For effects that depend on what is in the picture (blur faces, blur the background) use photo_video. (arguments: path, width, height, percent, upscale, quality, max_kb, crop, rotate, flip, grayscale, look, strip_metadata, format)"
         }
       ],
       "offered": [
+        "run_command",
         "container",
         "list_containers",
         "print_file",
         "print_queue",
         "explain_command",
         "manage_triggers",
-        "ui_elements",
-        "edit_image"
+        "ui_elements"
       ],
       "recall_hit": true
     },
@@ -8646,12 +8646,12 @@
           "desc": "android_device: An Android phone connected with USB debugging (adb). devices: which are connected; info: model, Android version, battery, storage; screenshot: save the phone's screen as a PNG; apps: installed apps (query filters); push: copy a file to the phone (to, default /sdcard/Download); pull: copy a file from the phone; open_url: open a web link on the phone. Requires 'phone-control-enabled'. (arguments: action, serial, path, to, url, query, output)"
         },
         {
-          "tool": "container",
-          "desc": "container: Run containers on this machine with podman (run an image, run a command inside a running container, stop it, read its logs, list what is running, list local images, pull one) and start/stop nspawn machines with machinectl. A container started with display=x11 draws on this desktop, and the ui_elements tool is what drives it by name with a visible cursor; this tool starts it, and stops it. Needs 'container-control-enabled', off by default. (arguments: action, image, name, command, detach, display, share_bus, publish, all, tail)"
+          "tool": "arrange_window",
+          "desc": "arrange_window: Arrange a window: tile (snap it to the left, right, top or bottom half of the screen - 'put it on the left half', side by side), minimize, maximize, unmaximize, make fullscreen, leave fullscreen, move, resize, or send it to another workspace - by window id from list_windows or by part of its title. tile takes side; move takes x and y, resize width and height (pixels), set_workspace a 0-based workspace. Nothing is closed; close_window does that. (arguments: action, window_id, title_contains, x, y, width, height, workspace, side)"
         },
         {
-          "tool": "move_pointer",
-          "desc": "move_pointer: Move the pointer to absolute screen coordinates. Requires the 'input-control-enabled' consent key (separate from the vision sense) to be enabled. (arguments: x, y)"
+          "tool": "container",
+          "desc": "container: Run containers on this machine with podman (run an image, run a command inside a running container, stop it, read its logs, list what is running, list local images, pull one) and start/stop nspawn machines with machinectl. A container started with display=x11 draws on this desktop, and the ui_elements tool is what drives it by name with a visible cursor; this tool starts it, and stops it. Needs 'container-control-enabled', off by default. (arguments: action, image, name, command, detach, display, share_bus, publish, all, tail)"
         }
       ],
       "offered": [
@@ -8661,8 +8661,8 @@
         "accessibility",
         "set_privacy",
         "android_device",
-        "container",
-        "move_pointer"
+        "arrange_window",
+        "container"
       ],
       "recall_hit": true
     },
@@ -8681,6 +8681,10 @@
           "desc": "autostart_entries: Report everything on this machine that starts automatically: the autostart .desktop files in this user's home and /etc/xdg, the enabled systemd user units and timers, and the crontab. Use for 'what starts automatically', 'what runs at login', 'what is scheduled', 'why does this thing keep running', 'what did I set to start on its own'. Honours Hidden, OnlyShowIn and NotShowIn, and says 'cannot tell' rather than guessing when the desktop is unknown - which is the normal state outside a login session. Read-only; nothing is enabled, disabled or changed."
         },
         {
+          "tool": "run_command",
+          "desc": "run_command: Run one program in the project folder and get its exit code and output - the project's tests (pytest, npm test, cargo test), its build or linter - to check that a change works. One program per call: no pipes, redirections or shell syntax. Requires the 'run-command-enabled' consent key; asks each time. (arguments: command, cwd, timeout_seconds, where, image, machine, network)"
+        },
+        {
           "tool": "check_units",
           "desc": "check_units: Check whether systemd unit files are valid and say what is wrong with them - a missing ExecStart binary, an unknown key, a dependency that does not exist - by running systemd-analyze verify on just the units you name. With no unit named, lists the services this machine has. This is a static check of the file: it does not know whether a dependency is down or a path is mounted, so a clean report does not promise the service will start. Reading only; nothing is started, stopped or changed. (arguments: unit)"
         },
@@ -8695,21 +8699,17 @@
         {
           "tool": "print_queue",
           "desc": "print_queue: Show the printers, which one is the default, the print jobs still waiting, and what this machine can print to even when nothing is configured; or cancel a waiting job by its id. Use for 'what's printing', 'why isn't my printer there', 'what can I print to', 'cancel that print'. Cancelling requires the 'print-control-enabled' consent key; listing does not. (arguments: action, job, printer, option)"
-        },
-        {
-          "tool": "crash_report",
-          "desc": "crash_report: Programs that crashed recently on this machine (core dumps recorded by systemd-coredump): which program, when, and the signal that killed it. Use for 'what crashed', 'why did that app close'. Uses the 'coredumps-sense-enabled' switch. Read-only."
         }
       ],
       "offered": [
         "scheduled_tasks",
         "set_timer",
         "autostart_entries",
+        "run_command",
         "check_units",
         "list_services",
         "set_sleep_inhibit",
-        "print_queue",
-        "crash_report"
+        "print_queue"
       ],
       "recall_hit": true
     },
@@ -8866,7 +8866,7 @@
       "negatives": [
         {
           "tool": "watch",
-          "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
+          "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'find' (make the watch ring), 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
         },
         {
           "tool": "power_action",
@@ -9046,12 +9046,16 @@
       "positives_desc": "git_branch: Create a branch in a git repository and switch to it, or switch to a branch that already exists. Requires the 'git-write-enabled' consent key. (arguments: name, path)",
       "negatives": [
         {
+          "tool": "login_history",
+          "desc": "login_history: Recent logins to this machine: which user, from which terminal or remote address, when they started and how long they lasted, and recent reboots. Use for 'who logged in', 'has anyone used my computer'. Requires the 'sessions-sense-enabled' consent key, because it reports other people's presence. Read-only. (arguments: limit)"
+        },
+        {
           "tool": "bluetooth_call",
           "desc": "bluetooth_call: Use a paired Android phone as a Bluetooth speakerphone, with no cable and no app on the phone. 'status' says whether a phone is connected as a hands-free unit, whether a call is in progress, and which audio profile its call audio arrived on. 'dial' places a call - 'dial number=\"+441234567890\"' - asking you to confirm first, because it rings someone. 'answer' and 'hangup' work on a call already in progress. 'audio' reports where the call's voice is going and names anything missing from that path, and 'profile' switches the card between wide-band hfp_hf and narrow-band hsp_hs. The phone stays the radio; this routes the voice to this computer's speakers and microphone. Needs the phone connected over Bluetooth, not merely paired, and the 'bluetooth-call-enabled' consent key. (arguments: action, card, profile, to, number)"
         },
         {
-          "tool": "login_history",
-          "desc": "login_history: Recent logins to this machine: which user, from which terminal or remote address, when they started and how long they lasted, and recent reboots. Use for 'who logged in', 'has anyone used my computer'. Requires the 'sessions-sense-enabled' consent key, because it reports other people's presence. Read-only. (arguments: limit)"
+          "tool": "landline_call",
+          "desc": "landline_call: Place and answer calls on the JioFiber broadband landline over Wi-Fi, through the router - the same line the JioJoin app uses, the house's own landline number. 'status' says whether the line is connected and what call is on. 'dial' places a call - 'dial number=\"+911234567890\"' - asking you to confirm first, because it rings someone. 'answer' picks up a ringing call; 'hangup' ends, cancels or declines the current call. The voice is on this computer's speaker and microphone, nothing is recorded, and the landline handset keeps working. Needs this computer added to the line on the Phone page and the 'landline-enabled' consent key. This is the landline, not a mobile over Bluetooth - that is 'bluetooth_call'. (arguments: action, number, name)"
         },
         {
           "tool": "phone",
@@ -9059,7 +9063,7 @@
         },
         {
           "tool": "watch",
-          "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
+          "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'find' (make the watch ring), 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
         },
         {
           "tool": "browse",
@@ -9068,21 +9072,17 @@
         {
           "tool": "accessibility",
           "desc": "accessibility: Turn an accessibility feature on or off, or report them all: screen reader, on-screen keyboard, magnifier (zoom), large text, high contrast, reduce motion (animations), sticky keys. (arguments: feature, enabled)"
-        },
-        {
-          "tool": "autostart_entries",
-          "desc": "autostart_entries: Report everything on this machine that starts automatically: the autostart .desktop files in this user's home and /etc/xdg, the enabled systemd user units and timers, and the crontab. Use for 'what starts automatically', 'what runs at login', 'what is scheduled', 'why does this thing keep running', 'what did I set to start on its own'. Honours Hidden, OnlyShowIn and NotShowIn, and says 'cannot tell' rather than guessing when the desktop is unknown - which is the normal state outside a login session. Read-only; nothing is enabled, disabled or changed."
         }
       ],
       "offered": [
         "git_branch",
-        "bluetooth_call",
         "login_history",
+        "bluetooth_call",
+        "landline_call",
         "phone",
         "watch",
         "browse",
-        "accessibility",
-        "autostart_entries"
+        "accessibility"
       ],
       "recall_hit": true
     },
@@ -9113,7 +9113,7 @@
         },
         {
           "tool": "arrange_window",
-          "desc": "arrange_window: Minimize, maximize, unmaximize, make fullscreen, leave fullscreen, move, resize, or send a window to another workspace, by window id from list_windows or by part of its title. move takes x and y, resize takes width and height (pixels), set_workspace takes a 0-based workspace. Nothing is closed; close_window does that. (arguments: action, window_id, title_contains, x, y, width, height, workspace)"
+          "desc": "arrange_window: Arrange a window: tile (snap it to the left, right, top or bottom half of the screen - 'put it on the left half', side by side), minimize, maximize, unmaximize, make fullscreen, leave fullscreen, move, resize, or send it to another workspace - by window id from list_windows or by part of its title. tile takes side; move takes x and y, resize width and height (pixels), set_workspace a 0-based workspace. Nothing is closed; close_window does that. (arguments: action, window_id, title_contains, x, y, width, height, workspace, side)"
         },
         {
           "tool": "calendar_edit",
@@ -9297,7 +9297,7 @@
         },
         {
           "tool": "lan_phone",
-          "desc": "lan_phone: Find phones on the SAME Wi-Fi network, using the KDE Connect protocol directly - so it works without KDE Connect or GSConnect installed. 'devices': what announced itself on this network in the last few seconds (phones, tablets, other computers). 'announce': make this computer findable by a phone's KDE Connect app. 'status': what this computer can and cannot do on the LAN. 'pair': what the pairing half of the protocol is and why it is not here. Needs the 'lan-phone-enabled' consent key. (arguments: action, seconds)"
+          "desc": "lan_phone: Find phones on the SAME Wi-Fi network, using the KDE Connect protocol directly - so it works without KDE Connect or GSConnect installed. 'devices': what announced itself on this network in the last few seconds (phones, tablets, other computers). 'announce': make this computer findable by a phone's KDE Connect app. 'status': what this computer can and cannot do on the LAN. 'pair': pair with the device 'devices' found (the phone asks its owner). Needs the 'lan-phone-enabled' consent key. (arguments: action, seconds)"
         },
         {
           "tool": "phone",
@@ -9677,7 +9677,7 @@
         },
         {
           "tool": "lan_phone",
-          "desc": "lan_phone: Find phones on the SAME Wi-Fi network, using the KDE Connect protocol directly - so it works without KDE Connect or GSConnect installed. 'devices': what announced itself on this network in the last few seconds (phones, tablets, other computers). 'announce': make this computer findable by a phone's KDE Connect app. 'status': what this computer can and cannot do on the LAN. 'pair': what the pairing half of the protocol is and why it is not here. Needs the 'lan-phone-enabled' consent key. (arguments: action, seconds)"
+          "desc": "lan_phone: Find phones on the SAME Wi-Fi network, using the KDE Connect protocol directly - so it works without KDE Connect or GSConnect installed. 'devices': what announced itself on this network in the last few seconds (phones, tablets, other computers). 'announce': make this computer findable by a phone's KDE Connect app. 'status': what this computer can and cannot do on the LAN. 'pair': pair with the device 'devices' found (the phone asks its owner). Needs the 'lan-phone-enabled' consent key. (arguments: action, seconds)"
         },
         {
           "tool": "phone",
@@ -9760,6 +9760,10 @@
       "positives_desc": "list_capabilities: Report what this assistant can do right now, and which of those need a setting switched on first. Reads the live skill registry and the live consent values rather than a fixed list, so a skill that is not installed, or a permission that is off, is shown as such. Changes nothing.",
       "negatives": [
         {
+          "tool": "arrange_window",
+          "desc": "arrange_window: Arrange a window: tile (snap it to the left, right, top or bottom half of the screen - 'put it on the left half', side by side), minimize, maximize, unmaximize, make fullscreen, leave fullscreen, move, resize, or send it to another workspace - by window id from list_windows or by part of its title. tile takes side; move takes x and y, resize width and height (pixels), set_workspace a 0-based workspace. Nothing is closed; close_window does that. (arguments: action, window_id, title_contains, x, y, width, height, workspace, side)"
+        },
+        {
           "tool": "click_pointer",
           "desc": "click_pointer: Click a mouse button at the current pointer position. Requires the 'input-control-enabled' consent key (separate from the vision sense) to be enabled. (arguments: button, count)"
         },
@@ -9789,16 +9793,16 @@
         }
       ],
       "offered": [
+        "arrange_window",
         "click_pointer",
         "ask_user",
         "browse",
         "cpu_frequency",
         "cpu_per_core",
         "discover_hosts",
-        "disk_activity",
-        "list_capabilities"
+        "disk_activity"
       ],
-      "recall_hit": true
+      "recall_hit": false
     },
     {
       "say": "Tailscale.",
@@ -9868,7 +9872,11 @@
       "negatives": [
         {
           "tool": "lan_phone",
-          "desc": "lan_phone: Find phones on the SAME Wi-Fi network, using the KDE Connect protocol directly - so it works without KDE Connect or GSConnect installed. 'devices': what announced itself on this network in the last few seconds (phones, tablets, other computers). 'announce': make this computer findable by a phone's KDE Connect app. 'status': what this computer can and cannot do on the LAN. 'pair': what the pairing half of the protocol is and why it is not here. Needs the 'lan-phone-enabled' consent key. (arguments: action, seconds)"
+          "desc": "lan_phone: Find phones on the SAME Wi-Fi network, using the KDE Connect protocol directly - so it works without KDE Connect or GSConnect installed. 'devices': what announced itself on this network in the last few seconds (phones, tablets, other computers). 'announce': make this computer findable by a phone's KDE Connect app. 'status': what this computer can and cannot do on the LAN. 'pair': pair with the device 'devices' found (the phone asks its owner). Needs the 'lan-phone-enabled' consent key. (arguments: action, seconds)"
+        },
+        {
+          "tool": "watch",
+          "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'find' (make the watch ring), 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
         },
         {
           "tool": "find_device",
@@ -9889,21 +9897,17 @@
         {
           "tool": "discover_hosts",
           "desc": "discover_hosts: Find which devices are on this network right now, by asking rather than by reading the cache - so devices that have never talked to this machine are found too. Reports an address and a hardware address for each, and counts devices answering on more than one address. The range is always the private network this machine is on; pass network= for a different private range, and a public one is refused. Connects to nothing it finds and reads no packet contents. Needs raw-socket access, so unprivileged it may report that rather than a partial sweep. (arguments: interface, network)"
-        },
-        {
-          "tool": "maps",
-          "desc": "maps: OpenStreetMap maps: find where a place is ('find'), driving/walking/cycling directions ('directions') or just distance and time ('travel_time') between places, the nearest kind of place such as petrol pump, hotel, ATM or hospital ('nearby'), or open a place or route on the map in the browser ('open'). Times are typical, without live traffic. With no origin, 'here' is this computer's location. Requires the web sense and privacy mode off; 'here' also needs the location sense. (arguments: action, place, destination, origin, mode, what, near, limit)"
         }
       ],
       "offered": [
         "scan_network",
         "lan_phone",
+        "watch",
         "find_device",
         "bluetooth_devices",
         "usb_devices",
         "set_hostname",
-        "discover_hosts",
-        "maps"
+        "discover_hosts"
       ],
       "recall_hit": true
     },
@@ -10032,23 +10036,23 @@
           "desc": "process_cost: What each running program is COSTING this machine right now, measured over the last second rather than as a snapshot: percent CPU split into user and system time, how much memory it holds, page faults (including the major ones that mean it is thrashing), and how many kB a second it is reading and writing. Answers 'what is using my CPU', 'what is making my computer slow', 'what is writing to my disk all the time', 'which program is swapping', 'why did everything freeze'. Use this when the machine feels slow; use list_processes to see what is running and disk_activity to see whether the disk itself is busy. Read-only; nothing is started, stopped or changed."
         },
         {
-          "tool": "list_shortcuts",
-          "desc": "list_shortcuts: List this machine's keyboard shortcuts, or find what one key does. Reads GNOME's two keybinding schemas, so it covers both window management and the hardware media keys, and reports that the scheme does not apply on a desktop that does not use it rather than listing defaults for a desktop that is not running. Reading a shortcut is not a change and needs no permission. (arguments: action, keys)"
+          "tool": "run_command",
+          "desc": "run_command: Run one program in the project folder and get its exit code and output - the project's tests (pytest, npm test, cargo test), its build or linter - to check that a change works. One program per call: no pipes, redirections or shell syntax. Requires the 'run-command-enabled' consent key; asks each time. (arguments: command, cwd, timeout_seconds, where, image, machine, network)"
         },
         {
-          "tool": "maps",
-          "desc": "maps: OpenStreetMap maps: find where a place is ('find'), driving/walking/cycling directions ('directions') or just distance and time ('travel_time') between places, the nearest kind of place such as petrol pump, hotel, ATM or hospital ('nearby'), or open a place or route on the map in the browser ('open'). Times are typical, without live traffic. With no origin, 'here' is this computer's location. Requires the web sense and privacy mode off; 'here' also needs the location sense. (arguments: action, place, destination, origin, mode, what, near, limit)"
+          "tool": "list_shortcuts",
+          "desc": "list_shortcuts: List this machine's keyboard shortcuts, or find what one key does. Reads GNOME's two keybinding schemas, so it covers both window management and the hardware media keys, and reports that the scheme does not apply on a desktop that does not use it rather than listing defaults for a desktop that is not running. Reading a shortcut is not a change and needs no permission. (arguments: action, keys)"
         }
       ],
       "offered": [
-        "get_datetime",
         "set_sleep_inhibit",
+        "get_datetime",
         "get_world_time",
         "print_queue",
         "alarm",
         "process_cost",
-        "list_shortcuts",
-        "maps"
+        "run_command",
+        "list_shortcuts"
       ],
       "recall_hit": true
     },

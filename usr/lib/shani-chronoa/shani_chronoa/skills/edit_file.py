@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import difflib
 
+from shani_chronoa import provenance
 from shani_chronoa import files
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
@@ -247,6 +248,45 @@ def _restore_kept_lines(region: str, new: str) -> str:
     return "\n".join(out)
 
 
+#: A file this small is shown whole when an edit misses; a larger one shows
+#: only the lines nearest to what was asked for.
+_SHOW_WHOLE_LINES = 60
+_SHOW_WHOLE_CHARS = 3000
+
+
+def _what_is_there(text: str, wanted: str, whole: bool = False) -> str:
+    """What the file actually holds, so a missed edit can be retried at once.
+
+    **"Read the file first" was the whole help.** Measured 2026-10-15 with
+    Qwen3-1.7B: it tried to replace `total([10, 10], discount)` - a phrase from
+    the test's description, not from pricing.py - was told to read the file,
+    and moved on to other steps instead. Shown the lines, the next try can copy
+    the real text. Numbered so the model can see where it is, and marked so it
+    does not paste the numbers into old_string.
+    """
+    lines = text.splitlines()
+    if whole and len(text) > _SHOW_WHOLE_CHARS * 4:
+        return ("It is too long to show here; read it with read_text_file "
+                "(start_line and max_lines for a part), then edit.")
+    if whole or (len(lines) <= _SHOW_WHOLE_LINES and len(text) <= _SHOW_WHOLE_CHARS):
+        picked = range(len(lines))
+        intro = "The whole file is (line numbers are not part of the text):"
+    else:
+        import difflib
+        first = (wanted.strip().splitlines() or [""])[0].strip()
+        ratio = {i: difflib.SequenceMatcher(None, first, lines[i].strip()).ratio()
+                 for i in range(len(lines))}
+        # Only lines that resemble it: the five "best" of a file with nothing
+        # alike are five unrelated lines, which read as a lead.
+        picked = sorted(i for i in sorted(ratio, key=ratio.get, reverse=True)[:5]
+                        if ratio[i] >= 0.5)
+        if not picked:
+            return "Nothing in it looks like that text; read_text_file shows what is there."
+        intro = ("The lines most like it are (line numbers are not part of "
+                 "the text; read_text_file shows the rest):")
+    return intro + "\n" + "\n".join(f"{i + 1:>4}| {lines[i]}" for i in picked)
+
+
 def _run(arguments: dict) -> str:
     allowed, reason = _consent(ChronoaConfig())
     if not allowed:
@@ -301,6 +341,25 @@ def _run(arguments: dict) -> str:
             f"something this can do to it safely. Nothing was written."
         )
 
+    # **Edits are made against what was read** (`read_ledger`). The refusal
+    # shows the file and counts as the read, so the next call can succeed. A
+    # preview is the app asking, not the model, so it neither checks nor records.
+    if not arguments.get("preview"):
+        from shani_chronoa import read_ledger
+        seen = read_ledger.last(target)
+        if seen != read_ledger.revision(raw):
+            why = ("you have not read it yet" if seen is None else
+                   "it changed after you read it")
+            shown = _what_is_there(text, old, whole=True)
+            if shown.startswith("The whole file"):
+                # Shown in full, so it has now been read. A file too long to
+                # show is not: the next edit is refused again until it is.
+                read_ledger.record(target, raw)
+                return (f"Nothing was edited: {why}. Copy old_string from the "
+                        f"file below exactly, then call edit_file again."
+                        + provenance.content_follows() + shown)
+            return f"Nothing was edited: {why}. " + shown
+
     count = text.count(old)
     fuzzy = False
     if count == 0:
@@ -328,8 +387,10 @@ def _run(arguments: dict) -> str:
     if count == 0:
         return (
             f"{target} does not contain that text, so nothing was edited. "
-            f"Read the file first - the text has to match exactly, including "
-            f"whitespace."
+            f"Copy old_string exactly from the file below, including "
+            f"whitespace, then call edit_file again."
+            + provenance.content_follows()
+            + _what_is_there(text, arguments.get("old_string") or "")
         )
 
     replace_all = bool(arguments.get("replace_all"))
@@ -371,6 +432,8 @@ def _run(arguments: dict) -> str:
     except OSError as exc:
         return f"Edited {target} but could not check the result: {exc}"
 
+    from shani_chronoa import read_ledger
+    read_ledger.record(target, updated.encode("utf-8"))  # its own edit is seen
     verb = "Replaced all" if replace_all else "Replaced"
     detail = f"{count} occurrence(s) of the" if replace_all else "the"
     return (

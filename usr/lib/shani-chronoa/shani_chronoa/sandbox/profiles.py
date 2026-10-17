@@ -123,6 +123,9 @@ class AgentProfile:
     network_access: bool
     allowed_tools: list[str] = field(default_factory=list)
     timeout_seconds: int = 300
+    #: Run at lower CPU and I/O priority (nice 10, idle I/O class): a build still
+    #: uses every free core but gives way to whatever the person is doing.
+    low_priority: bool = False
 
     def __post_init__(self) -> None:
         # A nonsensical limit is caught here rather than at `setrlimit` time,
@@ -416,3 +419,58 @@ def profile_for_origin(origin: str) -> AgentProfile:
             "because the permissive one must be asked for by name", origin)
         return PROFILE_RESTRICTED
     return PROFILE_DEFAULT
+
+
+#: Settings for project commands (run_command) - the Sandbox page writes them.
+COMMAND_MEMORY_KEY = "sandbox-command-memory-mb"
+COMMAND_TIMEOUT_KEY = "sandbox-command-timeout"
+COMMAND_CORES_KEY = "sandbox-command-cores"
+COMMAND_LOW_PRIORITY_KEY = "sandbox-command-low-priority"
+
+
+def command_limits(config=None) -> "tuple[int, int]":
+    """(memory MB, timeout s) for project commands, from the settings.
+
+    **Configurable because the fixed 2 GB / 10 min did not fit every build** -
+    a Rust or C++ project's compile can need more of both. Read per call, so a
+    change on the Sandbox page applies to the next command. An unreadable
+    setting is the built-in profile's own number, never "unlimited".
+    """
+    memory, timeout = PROFILE_FULL_ACCESS.memory_limit, PROFILE_FULL_ACCESS.timeout_seconds
+    try:
+        if config is None:
+            from shani_chronoa.config import ChronoaConfig
+            config = ChronoaConfig()
+        memory = int(config.get_double(COMMAND_MEMORY_KEY, float(memory)) or memory)
+        timeout = int(config.get_double(COMMAND_TIMEOUT_KEY, float(timeout)) or timeout)
+    except Exception:  # noqa: BLE001 - the built-in numbers stand
+        pass
+    return max(512, memory), max(60, timeout)
+
+
+def command_cpu(config=None) -> "tuple[int, bool]":
+    """(cores, low priority) for project commands, from the settings.
+
+    Cores become `cpu_limit` shares, so the CPU-time cap is cores x the time
+    limit (`cpu_seconds_budget`); the low-priority switch is on by default.
+    """
+    cores, low = PROFILE_FULL_ACCESS.cpu_limit // SHARES_PER_CPU, True
+    try:
+        if config is None:
+            from shani_chronoa.config import ChronoaConfig
+            config = ChronoaConfig()
+        cores = int(config.get_double(COMMAND_CORES_KEY, float(cores)) or cores)
+        low = bool(config.get_bool(COMMAND_LOW_PRIORITY_KEY, True))
+    except Exception:  # noqa: BLE001 - the built-in numbers stand
+        pass
+    return max(1, cores), low
+
+
+def command_profile(config=None) -> "AgentProfile":
+    """PROFILE_FULL_ACCESS with memory, time, cores and priority from the settings."""
+    import dataclasses
+    memory, timeout = command_limits(config)
+    cores, low = command_cpu(config)
+    return dataclasses.replace(PROFILE_FULL_ACCESS, memory_limit=memory, timeout_seconds=timeout,
+                               cpu_limit=cores * SHARES_PER_CPU, low_priority=low)
+

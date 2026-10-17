@@ -1,0 +1,1 @@
+Using the Calculator app and its own buttons, work out 1234 times 56. Then open the Wikipedia page about Pune in the browser and read its population. Finally open Text Editor and type a short note with both results.

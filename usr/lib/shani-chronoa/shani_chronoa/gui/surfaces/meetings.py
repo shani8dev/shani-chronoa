@@ -162,13 +162,19 @@ class _MeetingsView(Gtk.Box):
             self.status_recorder.set(common.STATUS_OFF)
             kept = (f" The {len(found)} already recorded can still be read and "
                     "written up - that needs no microphone." if found else "")
-            self._status_slot.append(common.consent_banner(
+            banner = common.consent_banner(
                 self._app, CONSENT_KEY,
                 "The microphone will not be opened to record." + kept,
-                on_change=self._after_consent))
+                on_change=self._after_consent)
+            # The banner *is* the status line here, so it carries the class the
+            # sidebar dot is read against - otherwise the dot says "off" about
+            # a row nothing drew.
+            banner.add_css_class(common.STATUS_CLASSES[common.STATUS_OFF])
+            self._status_slot.append(banner)
             return
         if not found:
-            self._status_slot.append(common.status_row(
+            # Through the recorder, so the dot says what this row says.
+            self._status_slot.append(self.status_recorder.row(
                 common.STATUS_OK, NOTHING_YET,
                 f"{meeting.recordings_dir()} is empty"))
             return

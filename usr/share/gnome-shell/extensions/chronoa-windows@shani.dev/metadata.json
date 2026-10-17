@@ -1,7 +1,14 @@
 {
   "uuid": "chronoa-windows@shani.dev",
-  "name": "Chronoa window control",
-  "description": "Lets Shani Chronoa list, focus, close, arrange and move your windows. GNOME gives other programs no way to do this on Wayland; turning this extension on is that permission, and turning it off takes it back.",
-  "shell-version": ["45", "46", "47", "48", "49", "50"],
+  "name": "Chronoa",
+  "description": "Chronoa in the top bar - what it is doing (listening, thinking, speaking) and its main actions one click away - and window control: lets Shani Chronoa list, focus, close, arrange and move your windows. GNOME gives other programs no way to do that on Wayland; turning this extension on is that permission, and turning it off takes it back.",
+  "shell-version": [
+    "45",
+    "46",
+    "47",
+    "48",
+    "49",
+    "50"
+  ],
   "url": "https://github.com/shani8dev/shani-chronoa"
 }

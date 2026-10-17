@@ -135,6 +135,22 @@ _INTERNAL_BINARIES = ("shani-skills", "shani-plugins", "shani-settings",
                       "shani", "pkill", "killall")
 
 
+
+import re as _re
+
+#: GLib/GTK's own log lines - `(prog:123): GLib-GIO-WARNING **: ...` - which a
+#: library prints to stderr whatever the command did. They reached the model
+#: as part of a tool's answer (measured 2026-10-15: a run_command result read
+#: "Not run: ..." followed by a GIO file-monitor warning), and a small model
+#: reads them as the result. Real errors and the command's own stderr stay.
+_LIBRARY_LOG_LINE = _re.compile(r"^\(\S+:\d+\): [\w-]+-(?:WARNING|CRITICAL|Message|DEBUG|INFO) \*\*")
+
+
+def _without_library_noise(stderr: str) -> str:
+    lines = (stderr or "").splitlines()
+    kept = [line for line in lines if not _LIBRARY_LOG_LINE.match(line.strip())]
+    return "\n".join(kept)
+
 class SandboxExecutionError(Exception):
     pass
 
@@ -529,6 +545,7 @@ class SandboxExecutor:
         _PENDING_CEILING["limits"] = limits
         _PENDING_CEILING["profile"] = active.name
         _PENDING_CEILING["cpu_seconds"] = ceiling.cpu_seconds
+        _PENDING_CEILING["low_priority"] = bool(getattr(active, "low_priority", False))
         _PENDING_SECCOMP["enabled"] = seccomp_applies
         _report = None
         if seccomp_applies:
@@ -848,7 +865,10 @@ class SandboxExecutor:
                     tmp_out.seek(0)
                     tmp_err.seek(0)
                     out_text = tmp_out.read().strip()
-                    err_text = tmp_err.read().strip()
+                    # GLib's own warnings are the library talking, not the
+                    # command: measured 2026-10-15, a keyfile monitor warning
+                    # was appended to a todo_list answer the model then read.
+                    err_text = _without_library_noise(tmp_err.read()).strip()
                     combined = (out_text + "\n" + err_text).strip()
 
                     if retcode in (126, 127) and elevated:
@@ -883,7 +903,7 @@ class SandboxExecutor:
                     tmp_out.seek(0)
                     tmp_err.seek(0)
                     partial_out = tmp_out.read().strip()
-                    partial_err = tmp_err.read().strip()
+                    partial_err = _without_library_noise(tmp_err.read()).strip()
                     combined_partial = (partial_out + "\n" + partial_err).strip()
 
                     msg = f"Command started and continues running in the background (PID: {proc.pid})."
@@ -956,7 +976,7 @@ class SandboxExecutor:
                 timeout=timeout,
                 env=redactor.child_env(),
             )
-            out = (res.stdout + "\n" + res.stderr).strip()
+            out = (res.stdout + "\n" + _without_library_noise(res.stderr)).strip()
             retcode = res.returncode
 
             # Check for graphical display connection failures

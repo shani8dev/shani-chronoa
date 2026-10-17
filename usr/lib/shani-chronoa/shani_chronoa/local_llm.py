@@ -24,6 +24,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import Callable, Dict, Optional
 
@@ -160,9 +161,6 @@ def effective_bandwidth() -> Optional[float]:
     # and on this box that is the 1.7B, which reports the machine at 7 GiB/s
     # when it will do 17. A model change is a deliberate act, so it is the one
     # moment worth spending a four-second decode on.
-    current = _loaded_model_path()
-    if _BANDWIDTH_CACHE is not None and _BANDWIDTH_MODEL == current:
-        return _BANDWIDTH_CACHE
     try:
         props = httpx.get(f"http://{HOST}:{PORT}/props", timeout=3).json() or {}
     except Exception:  # noqa: BLE001 - no server, no measurement
@@ -174,6 +172,9 @@ def effective_bandwidth() -> Optional[float]:
         weights = 0
     if not weights:
         return None
+    current = os.path.realpath(path) if path else None
+    if _BANDWIDTH_CACHE is not None and _BANDWIDTH_MODEL == current:
+        return _BANDWIDTH_CACHE
     try:
         body = httpx.post(
             f"http://{HOST}:{PORT}/completion",
@@ -212,7 +213,7 @@ def effective_bandwidth() -> Optional[float]:
         _BANDWIDTH_CACHE = measured
     # The path we already fetched, not a third `/props` round trip: the panel
     # asks per card, and this ran three GETs for one measurement before.
-    _BANDWIDTH_MODEL = current or (os.path.realpath(path) if path else None)
+    _BANDWIDTH_MODEL = current
     return _BANDWIDTH_CACHE
 
 
@@ -289,13 +290,108 @@ def installed() -> "list[str]":
     return [key for key, spec in SPECS.items() if (model_dir() / spec.filename).is_file()]
 
 
+def _key_for_file(name: str) -> str:
+    """The tier whose pinned filename is `name`, or "".
+
+    **One definition, because the answer is asked twice.** `active()` used to
+    carry this lookup inline and the new reader below would have carried a copy
+    of a copy; the two would agree the day they were written and drift the week
+    after, which is the shape this repository records for `wpctl` (three copies)
+    and the finite check (four).
+    """
+    return next((k for k, s in SPECS.items() if s.filename == name), "")
+
+
 def active() -> str:
     target = current_link()
     try:
         name = os.readlink(target)
     except OSError:
         return ""
-    return next((k for k, s in SPECS.items() if s.filename == Path(name).name), "")
+    return _key_for_file(Path(name).name)
+
+
+#: `(monotonic, path)` - what `/props` last named, and when it was read. The
+#: cache is here because the **server is an HTTP GET**: one strip refresh asks
+#: `answering_key()` three to five times (`_model_rows`, `_read_model`, and
+#: `_model_word` twice - once for the label, once for the tooltip), and
+#: `effective_bandwidth`'s own comment records having run three `/props` round
+#: trips for one measurement before, which is the same trap reached here.
+_LOADED_CACHE: tuple = (0.0, None)
+_LOADED_TTL = 5.0
+
+
+def _loaded_path_cached() -> str:
+    """What the server has loaded, for at most `_LOADED_TTL` seconds.
+
+    **The cache holds the server's answer, not the key, and that is the whole
+    design rather than a detail.** The two halves of `answering_key()` cost
+    wildly different amounts - `/props` is a round trip to the model server, and
+    `active()` is a `readlink` and a dict lookup - and the first version cached
+    the *key*, which bought the same five seconds of staleness for both.
+
+    That was not free, and the cost was measured rather than reasoned about.
+    The cache was module-global, so a test that faked the machine with
+    `local_llm.active` monkeypatched read the **previous test's model** for up to
+    five seconds - which is what `tests/test_model_picker.py` reported against
+    this change, and the shape this repository records for global state no test
+    can see.
+
+    Caching only the expensive half removes both problems at once: a machine
+    with **no server** reads its own symlink live and is never stale, and a
+    faked machine needs no cache reset to be believed. What remains cached is the
+    only half that was ever worth not re-asking.
+    """
+    global _LOADED_CACHE
+    now = time.monotonic()
+    stamp, path = _LOADED_CACHE
+    if now - stamp < _LOADED_TTL:
+        return path or ""
+    path = _loaded_model_path()
+    _LOADED_CACHE = (now, path)
+    return path or ""
+
+
+def answering_key() -> str:
+    """The tier whose weights are loaded **right now**, or "" when none is.
+
+    **`active()` cannot answer this, and the difference is a shipped lie.**
+    `active()` reads `current.gguf` - a **symlink in this process's own data
+    home**. The model that is answering is the one the *server* has loaded, and
+    those are two different files in two different places whenever the data home
+    and the server disagree. Measured on the demo run that produced this (a
+    throwaway profile with no model in it, pointed at a server another session
+    had started):
+
+        installed()        -> []
+        active()           -> ''
+        is_up()            -> True
+        _loaded_model_path -> .../Qwen3-1.7B-Q4_K_M.gguf
+
+    and the composer's model row read **"No model"** while every reply in the
+    recording came from the 1.7B. A chip that says the assistant cannot answer,
+    on a window where it is visibly answering, is the two-widgets-disagree
+    failure this repository records more than any other - reached here by asking
+    the filesystem a question about the network.
+
+    **The server is asked first and the symlink is the fallback**, in that order,
+    because the server is what is actually being sent the prompt. When both
+    agree - the ordinary case, where the service loads what `current.gguf`
+    points at - the answer is the same either way, so nothing regresses for a
+    machine that is simply correct.
+
+    **Only the server's half is cached** (`_loaded_path_cached`), so the fallback
+    stays live. A model switched by hand - `current.gguf` repointed, no server
+    restarted - is visible on the very next read rather than five seconds later.
+    """
+    path = _loaded_path_cached()
+    answer = _key_for_file(Path(path).name) if path else ""
+    if not answer:
+        # Nothing is loaded, or the loaded file is not one `SPECS` describes.
+        # Either way the symlink is the next best answer, and is the whole
+        # answer on a machine with no server running.
+        answer = active()
+    return answer
 
 
 def server_binary() -> str:
@@ -1024,6 +1120,7 @@ def start_service() -> str:
     if not current_link().exists():
         return "no model is downloaded yet"
     write_env()
+    _N_CTX.clear()  # the served window may change with the restart
     proc = _systemctl("enable", "--now", UNIT)
     if proc is None or proc.returncode != 0:
         return (proc.stderr.strip() if proc else "systemctl is not available")[:200]
@@ -1091,15 +1188,24 @@ def gpu_devices() -> "list[str]":
     return out
 
 
+#: Contexts a GPU may be given, largest first; filtered by the model's
+#: training length in `_context_arg`.
+GPU_CONTEXT_LADDER = (131072, 65536, 32768, 16384, 8192, 4096, 2048)
+
+
 def _context_arg() -> str:
     """The `-c` size for llama-server, chosen for this machine's actual build.
 
     A GPU takes the fit computed by `ctxfit` (weights on disk, the model's own
     KV cost per token from its GGUF header, total GPU memory); anything that
     cannot be measured (no model installed, unparseable header, unknown VRAM)
-    keeps the historical 8192 rather than guessing. A CPU-only machine keeps
-    8192: llama.cpp's KV pages are allocated on load, and 8k of weights+cache
-    already fits where a smaller CPU tier picked this package.
+    keeps the historical 8192 rather than guessing. A CPU-only machine uses
+    `_cpu_context_arg` (RAM and the same header).
+
+    **The ladder runs to 131072 and stops at what the model was trained for.**
+    It stopped at 32768, so a 24 GB card running a long-context model was
+    served a quarter of what it could hold; and it ignored the training length,
+    so a model trained for 8k could be served 32k, past what it was trained on.
     """
     try:
         info = ctxfit.gguf_model_info(current_link())
@@ -1127,8 +1233,11 @@ def _context_arg() -> str:
 
         if info and weights and total:
             per_token = ctxfit.kv_bytes_per_token(info) or None
+            arch = str(info.get("general.architecture") or "")
+            trained = int(info.get(f"{arch}.context_length") or 0)
+            ladder = context_ladder(GPU_CONTEXT_LADDER, trained)
             chosen = ctxfit.context_that_fits(
-                weights, total_bytes=total, per_token=per_token)
+                weights, ladder, total_bytes=total, per_token=per_token)
             # **The cache type is a lever, not a measurement.** The context
             # ladder has bottomed out and the KV cache is still f16 - which is
             # llama.cpp's default and 2x the bytes of `q8_0`. Rather than ship a
@@ -1147,7 +1256,7 @@ def _context_arg() -> str:
                     per_token_at_f16=per_token)
                 if cache_type != "f16":
                     chosen = ctxfit.context_that_fits(
-                        weights, total_bytes=total,
+                        weights, ladder, total_bytes=total,
                         per_token=ctxfit.kv_bytes_per_token(info, cache_type))
                     logger.info(
                         "llama-server context: KV cache quantised to %s so the "
@@ -1194,11 +1303,63 @@ def kv_cache_type() -> str:
     return _KV_CACHE_TYPE[0]
 
 
+#: CPU context, chosen per machine and per model rather than fixed at 8192.
+#: llama.cpp allocates the KV cache on load, so `-c` is RAM taken whether a
+#: conversation uses it or not: the step chosen is the largest whose cache
+#: stays within `CPU_KV_RAM_SHARE` of RAM, with weights + cache within half of
+#: it, and never above what the model was trained for.
+CPU_CONTEXT = 8192
+CPU_CONTEXT_LADDER = (65536, 32768, 16384, 8192)
+CPU_KV_RAM_SHARE = 0.125
+
+
+def context_ladder(ladder: "tuple[int, ...]", trained: int) -> "tuple[int, ...]":
+    """`ladder` without rungs above the training length, with that length
+    itself as the top rung - so a machine that can hold all of it gets all of
+    it (40960 for Qwen3), not the power of two below."""
+    if not trained:
+        return ladder
+    kept = tuple(c for c in ladder if c < trained)
+    return (trained,) + kept if trained > 0 else ladder
+
+
+def cpu_context_for(total_ram: int, weights: int, per_token: int, trained: int) -> int:
+    """The `-c` a CPU-only machine can afford for this model (see above)."""
+    if not (total_ram and per_token):
+        return CPU_CONTEXT
+    for context in context_ladder(CPU_CONTEXT_LADDER, trained):
+        kv = context * per_token
+        if kv <= total_ram * CPU_KV_RAM_SHARE and weights + kv <= total_ram * 0.5:
+            return max(context, CPU_CONTEXT)
+    return CPU_CONTEXT
+
+
+def _cpu_context_arg() -> str:
+    """`-c` for a CPU-only server, worked out from RAM and the model's header.
+
+    Measured 2026-10-15: Qwen3-1.7B (trained for 40960, 112 KB of KV a token)
+    was served at a fixed 8192 on a 32 GB laptop - long conversations were
+    trimmed far earlier than the model or the machine required. That machine
+    now gets 32768 (3.7 GB of cache); 16 GB gets 16384; 8 GB keeps 8192.
+    """
+    try:
+        total = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+        link = current_link()
+        info = ctxfit.gguf_model_info(link) or {}
+        weights = os.path.getsize(link) if link.exists() else 0
+        arch = str(info.get("general.architecture") or "")
+        trained = int(info.get(f"{arch}.context_length") or 0)
+        per_token = ctxfit.kv_bytes_per_token(info) if info else 0
+    except Exception:  # noqa: BLE001 - anything unreadable keeps the default
+        return str(CPU_CONTEXT)
+    return str(cpu_context_for(total, weights, per_token, trained))
+
+
 def server_args(devices: "Optional[list[str]]" = None) -> "list[str]":
     """The llama-server command line for this machine: GPU offload only when a GPU is listed."""
     devices = gpu_devices() if devices is None else devices
     args = ["-m", str(current_link()), "--host", HOST, "--port", str(PORT), "--jinja",
-            "-c", _context_arg() if devices else "8192", "--no-webui"]
+            "-c", _context_arg() if devices else _cpu_context_arg(), "--no-webui"]
     # Physical cores, measured - see `physical_cores`. Not `os.cpu_count() - 1`.
     args += ["-ngl", "99"] if devices else ["-ngl", "0", "-t", str(physical_cores())]
     # Only when the decision actually moved off the default. An f16 server gets
@@ -1216,6 +1377,37 @@ def write_env(devices: "Optional[list[str]]" = None) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("LLAMA_ARGS=" + " ".join(server_args(devices)) + "\n", encoding="utf-8")
     return path
+
+
+def refresh_env() -> bool:
+    """Rewrite llm.env when this build would start the server differently.
+
+    **A file written once is a decision frozen once.** The unit is enabled at
+    login and starts from `llm.env`; only `start_service` rewrote it, and the
+    app never calls that while the server is already up. Measured 2026-10-15:
+    the context sizing was made RAM-aware (32768 on this 30 GB machine) and the
+    rail still showed 8,192, because llm.env had been written the day before.
+    Returns True when the file changed. A machine that never set the service up
+    has no file and gets none - that is Setup's decision, not this one's.
+    """
+    path = files.config_home() / "shani-chronoa" / "llm.env"
+    if not path.exists():
+        return False
+    wanted = "LLAMA_ARGS=" + " ".join(server_args()) + "\n"
+    try:
+        if path.read_text(encoding="utf-8") == wanted:
+            return False
+    except OSError:
+        pass
+    path.write_text(wanted, encoding="utf-8")
+    logger.info("llm.env was out of date; rewritten: %s", wanted.strip())
+    return True
+
+
+def restart_service() -> None:
+    """Restart the language model server so it reads llm.env again."""
+    _N_CTX.clear()
+    _systemctl("restart", UNIT)
 
 
 def recommended_for_machine() -> str:
@@ -2004,7 +2196,48 @@ def fit_to_context(messages: "list[dict]", n_ctx: int, reserved_chars: int = 0) 
         else:
             kept.insert(0, note)
         logger.info("Left out %d old message(s) to fit a %d-token context", dropped, n_ctx)
-    return head + lead + kept
+    out = head + lead + kept
+    over = size(out) - budget
+    if over > 0:
+        out = _clip_tool_results(out, over)
+    return out
+
+
+#: What stays of a clipped tool result: its start, and this much of its end.
+CLIP_TAIL_CHARS = 1500
+
+
+def _clip_tool_results(messages: "list[dict]", over: int) -> "list[dict]":
+    """Last resort: shorten the largest tool results until `over` chars are gone.
+
+    **The newest turn was always kept whole, so it could not fit.** Measured
+    2026-10-15 on an 8192-token server: one `read_text_file` of a 28 KB file
+    was 11,894 tokens, every older turn was dropped, and llama-server still
+    refused the request ("exceeds the available context size") - the turn
+    ended in an error. A tool result is the one thing here that is both large
+    by nature and safe to shorten: its start and its end are kept, and the
+    note in the gap says how much is missing and how to ask for it, so the
+    model reads a partial view as partial rather than as the whole file.
+    """
+    out = list(messages)
+    order = sorted((i for i, m in enumerate(out) if m.get("role") == "tool"),
+                   key=lambda i: len(str(out[i].get("content") or "")), reverse=True)
+    for i in order:
+        if over <= 0:
+            break
+        text = str(out[i].get("content") or "")
+        keep = max(len(text) - over - 200, 800)  # 200: room for the note itself
+        if keep >= len(text):
+            continue
+        tail = min(CLIP_TAIL_CHARS, keep // 3)
+        cut = len(text) - keep
+        note = (f"\n[... {cut:,} characters of this result were left out to fit the "
+                f"model's memory - ask for a smaller part (for a file: start_line "
+                f"and max_lines) to see them ...]\n")
+        out[i] = {**out[i], "content": text[:keep - tail] + note + text[len(text) - tail:]}
+        over -= cut - len(note)
+        logger.info("Clipped a %d-char tool result by %d to fit the context", len(text), cut)
+    return out
 
 
 class LocalLLM:

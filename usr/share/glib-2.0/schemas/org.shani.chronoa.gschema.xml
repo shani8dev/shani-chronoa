@@ -198,6 +198,11 @@
       <summary>Start hidden at login</summary>
       <description>When true (and auto-start is on), the autostart entry launches Chronoa with --hidden: the wake word and tray are live, but no window is shown until it is asked for.</description>
     </key>
+    <key name="speak-replies" type="b">
+      <default>true</default>
+      <summary>Speak replies aloud</summary>
+      <description>The speaker toggle beside the microphone in the main window. When false, replies are shown on screen only; timers and notifications are not affected (that is notification-enabled). Replies are spoken only when both are on, so turning either off is silence.</description>
+    </key>
     <key name="notification-enabled" type="b">
       <default>true</default>
       <summary>Enable spoken replies and timer notifications</summary>
@@ -617,6 +622,36 @@
       <default>true</default>
       <summary>Let Chronoa make and answer calls on your paired phone</summary>
       <description>When true, Chronoa may place, answer and end calls on a phone connected to this computer over Bluetooth, and hear the call through this computer's speakers and microphone. Off by default, and its own switch: reading a device's battery and dialling someone's phone are not the same agreement, and the phone stays the radio in both cases. Chronoa asks you to confirm before it places a call, because a call rings another person. The phone must be connected over Bluetooth, not merely paired - a paired-but-disconnected phone has nothing to call through, and that is reported as such.</description>
+    </key>
+    <key name="landline-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa use your JioFiber landline</summary>
+      <description>When true, Chronoa connects to your JioFiber router as an added device - the same way the JioJoin app does - and can place and answer calls on your broadband landline number over Wi-Fi, through this computer's speaker and microphone. Off by default and set up once from the Phone page: the account owner enters a one-time code Jio texts to the registered mobile, which is what tells the router to allow this computer on the line. No call is ever placed without you starting it, and Chronoa asks you to confirm before dialling, because a call rings another person. Nothing is recorded. Chronoa never registers directly to Jio's network, which would displace your landline handset; it only ever goes through the router.</description>
+    </key>
+    <key name="mascot-enabled" type="b">
+      <default>false</default>
+      <summary>Show the Chronoa desktop companion</summary>
+      <description>When true, Chronoa's mascot - the orbit-sprite - floats in a corner of your screen as a small always-on overlay. It mirrors what Chronoa is doing (listening, thinking, speaking), reacts to events like a meeting starting or a build finishing, and clicking it starts listening. Off by default, because it is an always-present overlay and ShaniOS stays quiet unless you ask; turning it on is one switch. Needs a Wayland session with layer-shell support.</description>
+    </key>
+    <key name="mascot-sounds" type="b">
+      <default>false</default>
+      <summary>Play the mascot's little sounds</summary>
+      <description>When true, the companion makes a short sound on the events that already change its face: a greeting when it appears or is called, a warm two-tone when a build succeeds, and a finishing flourish when a job it watched completes. Off by default, because a computer that chirps on its own is exactly the always-on noise ShaniOS stays quiet about - the mascot's face changes carry the same news silently. Failing to play never disturbs the mascot: no speaker, no sound files, or an unwired event stays silent.</description>
+    </key>
+    <key name="mascot-sounds-volume" type="d">
+      <default>0.6</default>
+      <summary>Volume of the mascot's sounds</summary>
+      <description>Linear gain applied to the mascot's sounds, 0.0 to 1.0. The default of 0.6 keeps them clearly audible but softer than typical media playback; it is a starting choice, not a measured optimum. Read fresh on every play, so a slider finds the next sound immediately. Only applies when sounds are enabled.</description>
+    </key>
+    <key name="mascot-corner" type="s">
+      <choices>
+        <choice value="bottom-right"/>
+        <choice value="top-right"/>
+        <choice value="top-center"/>
+      </choices>
+      <default>"top-center"</default>
+      <summary>Where the companion lives</summary>
+      <description>Where the companion sits: top-center (the notch, a wide strip along the top edge carrying the mascot, what it is doing and the tool step it is on), top-right, or bottom-right. The layer-shell window in mascot.py and the GNOME Shell actor in chronoa-mascot@shani.dev both read this key, so the two cannot disagree, and top-center is what ships - a desktop with no hardware notch still wants the strip rather than a sprite in a corner.</description>
     </key>
     <key name="bluetooth-gatt-enabled" type="b">
       <default>true</default>
@@ -1102,6 +1137,26 @@
       <default>false</default>
       <summary>Let Chronoa arm automatic rules</summary>
       <description>When true, Chronoa may add, remove and clear rules that run a whitelisted action when a perception matches. Off by default, and this is the sharpest edge in the schema: an armed rule acts without asking again, so a rule written once from a spoken instruction keeps firing unattended long after the conversation that created it. Listing what is already armed needs no such permission - only changing it does. A rule can name only an already-whitelisted skill; it cannot run an arbitrary command or an LLM-authored prompt.</description>
+    </key>
+    <key name="sandbox-command-memory-mb" type="d">
+      <default>2048</default>
+      <summary>Memory a project command may use (MB)</summary>
+      <description>The address-space limit for run_command - a project's tests, build or linter - in megabytes. 2048 by default; large builds (Rust, C++, Android) may need more. Set on the Sandbox page. Kept between 512 and 65536.</description>
+    </key>
+    <key name="sandbox-command-timeout" type="d">
+      <default>600</default>
+      <summary>How long a project command may run (seconds)</summary>
+      <description>The time limit for run_command, in seconds; a command asking for longer is cut to this. 600 by default. Set on the Sandbox page. Kept between 60 and 7200.</description>
+    </key>
+    <key name="sandbox-command-cores" type="d">
+      <default>4</default>
+      <summary>CPU cores' worth of time a project command may use</summary>
+      <description>run_command's CPU-time budget is this many cores for its whole time limit (sandbox-command-timeout). 4 by default. Set on the Sandbox page. Kept between 1 and 256.</description>
+    </key>
+    <key name="sandbox-command-low-priority" type="b">
+      <default>true</default>
+      <summary>Run project commands at low priority</summary>
+      <description>When true, run_command's programs run at nice 10 and idle I/O priority: a build still uses every free core, but gives way to what you are doing. Set on the Sandbox page.</description>
     </key>
     <key name="sandbox-seccomp-enabled" type="b">
       <default>false</default>

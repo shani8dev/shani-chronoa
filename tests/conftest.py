@@ -122,6 +122,13 @@ def _hermetic_env(tmp_path, monkeypatch):
     xdg = home / ".config"
     xdg.mkdir()
     monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+    # **Nor the developer's own model server.** `local_llm.answering_key()`
+    # asks a running llama-server what it has loaded, and on a machine where
+    # one is up every "nothing installed" test read its model ("1.7B" where the
+    # test said "No model"). A test that wants a server fakes one itself.
+    from shani_chronoa import local_llm
+    monkeypatch.setattr(local_llm, "_loaded_model_path", lambda *a, **k: "")
+    monkeypatch.setattr(local_llm, "_LOADED_TTL", 0.0)
 
 
 @pytest.fixture(scope="session")
@@ -615,7 +622,33 @@ def _mutation_in_flight() -> "str | None":
         f"{MUTATION_MARKER} is set and this check does not apply.")
 
 
+@pytest.fixture(autouse=True)
+def _files_count_as_read(request, monkeypatch):
+    """`edit_file` refuses a file the model has not read (`read_ledger`).
+
+    Tests about *other* parts of an edit - the diff, the codecheck, the gates,
+    undo - would each need a read first, which is not what they are about. So
+    by default every existing file counts as read at its current contents. A
+    test about the read check itself marks itself `read_guard` and gets the
+    real ledger.
+    """
+    if request.node.get_closest_marker("read_guard"):
+        return
+    from shani_chronoa import read_ledger
+
+    def last(path):
+        try:
+            return read_ledger.revision(Path(path).read_bytes())
+        except OSError:
+            return None
+    monkeypatch.setattr(read_ledger, "last", last)
+
+
 def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "read_guard: use the real read ledger, so edit_file refuses a file "
+        "that was not read first (tests of that check)")
     held = _mutation_in_flight()
     if held is not None:
         # **`pytest.exit`, not a raise.** A raise here is an INTERNALERROR, which

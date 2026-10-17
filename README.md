@@ -4,12 +4,14 @@
 
 <h1 align="center">Chronoa</h1>
 
-<p align="center"><b>A private AI assistant that lives on your computer — and can actually use it.</b><br>
-Talk to it, type to it, hand it a job. It answers on your own hardware, acts through 259 named skills,<br>
-asks before anything risky, and every action runs in a sandbox.</p>
+<p align="center"><b>Hand your computer a job. It does it — on your machine, not someone else's.</b><br>
+Fix the failing test. Tidy the screen for focus. Transcribe the call and write the notes.<br>
+Pair the phone, read the watch, keep your rules running while you're away.<br>
+Your data never leaves the desk, every action can be undone, and it asks before anything risky.</p>
 
 <p align="center">
   <a href="CAPABILITIES.md">259 skills</a> ·
+  free (GPL-3.0) ·
   runs offline ·
   no account, no telemetry ·
   GTK4 + libadwaita ·
@@ -40,6 +42,20 @@ through skills you can read, switch off, and undo.
   pairing); MoYoung/Da Fit watches with steps, sleep, stress and heart rate.
 - 🎙️ **Meetings and transcription.** Record a meeting or capture what an app
   is playing — who said what, then notes, all on this computer.
+- 🖱️ **It drives your desktop - and you can watch it.** Opens apps and waits
+  for their windows, types (in any script - Devanagari included, through
+  IBus), presses keys, moves and clicks, presses buttons by name through the
+  accessibility tree. On GNOME it does this from inside the shell, with
+  Chronoa's extension as the permission; it will not type into its own window.
+- 🔔 **In the top bar, not just a window.** A status dot (listening, thinking,
+  speaking) and its main actions one click away; an approval it needs while
+  its window is hidden arrives as a notification you can answer.
+- 🔁 **It keeps going.** In Build mode it writes a plan, works through it,
+  and does not stop while a step is open — a step counts as
+  done when it was seen working, and one that cannot be done is marked
+  blocked, with the reason. Goals park when they need you and pick up later;
+  background mode keeps your rules running with the window closed and asks
+  for approval by notification.
 - 📊 **See what it sees.** Your watch, battery, disks, what Chronoa did and
   where your data went — as charts, not log lines.
 
@@ -62,6 +78,30 @@ through skills you can read, switch off, and undo.
   </tr>
 </table>
 
+## Chronoa and the cloud agents
+
+Cloud assistants that act for you are arriving — booking, shopping, sending
+mail, running in a "private" machine in someone's data centre, on a monthly
+plan. Chronoa is a different bet:
+
+| | Chronoa | A typical cloud agent |
+|---|---|---|
+| Where your data and the agent live | **Your computer** | The vendor's servers |
+| Account, telemetry, training on your chats | **None** | Account required; training is opt-out |
+| Works offline | **Yes**, local model by default | No |
+| Price | **Free**, GPL-3.0 | Free tier, then paid plans |
+| What it may do | 259 typed skills you can read and switch off | Whatever the vendor's integrations allow |
+| Risky actions | Asks first, **sandboxed** (bubblewrap, Landlock, seccomp) | Asks first |
+| Undo | **Revert a file or a whole turn** | — |
+| Code | Edits, tests, diffs and revert in Build mode | Usually not the focus |
+| Your phone and watch | Bluetooth, KDE Connect, ADB, MoYoung watches | Through vendor apps |
+| Keeps working | Background rules, parked goals, Build-mode turns that finish their plan | Tasks run in the cloud after you close the app |
+| Payments, bookings, sending email for you | **Not done** | Yes |
+
+The last row is honest on purpose: Chronoa does not spend your money or
+speak for you by email. When it does something, it does it on a machine you
+own, and you can see — and undo — what it did.
+
 ## Security: an assistant you can let near your computer
 
 An assistant that can act is only as good as the walls around it. Chronoa's are
@@ -70,13 +110,15 @@ real, layered, and tested by running them:
 | Layer | What it does |
 |---|---|
 | **Named skills, not a shell** | The model can only call typed skills from a whitelist. The single command runner (`run_command`, for your tests and builds) is off by default, takes one program per call — no pipes, no `$(…)` — and asks every time. |
-| **bubblewrap** | Each command runs in fresh PID, IPC, UTS and network namespaces, with a private `/tmp` and runtime dir and a read-only system. Your project is writable; the rest of your home — `~/.ssh`, keyrings, browser profiles — is not even readable. |
+| **bubblewrap** | Each command runs in fresh PID, IPC, UTS and network namespaces, with a private `/tmp` and runtime dir and a read-only system. Your project is writable; files in the rest of your home — `~/.ssh`, keyrings, browser profiles — cannot be opened (their names can still be listed). |
 | **Landlock (ABI up to 8)** | Kernel-enforced file rules pinned to file descriptors, plus scoping that blocks abstract-socket and signal escapes — and it still applies where user namespaces are unavailable. |
-| **seccomp** | An optional filter denying 28 syscalls (mount, kexec, bpf, ptrace, io_uring, unshare, …); with it on, a machine that cannot install it runs nothing. |
+| **seccomp** | An optional filter denying 28 syscalls (mount, kexec, bpf, ptrace, io_uring, unshare, …); with it on, a machine that cannot install it runs nothing. Under bubblewrap it is skipped, because bubblewrap's own setup needs `mount` — there the namespaces stand in. |
 | **Containers and VMs** | Run a project's commands in a rootless podman container with no network, or in a systemd-nspawn / vmspawn machine. |
 | **Consent per switch, per action** | 94 skills sit behind a named switch; the 17 destructive ones ask first, showing the exact command or the diff it will apply. "Allow for this turn" covers one turn, never a session. |
 | **Remote turns need the desk** | A message from your phone or a chat app can ask, but cannot edit, delete or run commands unless someone at the computer approves it. |
 | **Undo** | Every file Chronoa writes is snapshotted; revert one file or a whole turn. |
+| **Limits you set** | Memory, time limit and CPU for project commands, and whether they run at low priority (on by default: nice 10, idle disk), on the Sandbox page. |
+| **See it hold** | The **Sandbox** page lists the layers this machine provides and has a **Test the sandbox** button: it runs a probe inside the same sandbox your commands use and shows whether your files stayed closed, the network was cut and the system stayed read-only. |
 | **Nothing leaves silently** | Every outbound request is logged with its destination. Privacy mode is local-only, and a request that breaks it raises an alarm. |
 
 Details: [Confinement](#confinement) · [What leaves this machine](#what-leaves-this-machine) · [Untrusted text](#untrusted-text).

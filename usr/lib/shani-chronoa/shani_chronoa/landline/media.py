@@ -30,7 +30,7 @@ import struct
 import subprocess
 import threading
 import time
-from typing import List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -455,8 +455,14 @@ def codec_for(pt: int, packing: str = "oa") -> Optional[Codec]:
 
 # --- SDP ---------------------------------------------------------------------
 
-def offer(ip: str, port: int, only: Optional[int] = None) -> str:
-    """Our SDP: every codec we can play (an offer), or just `only` (an answer)."""
+def offer(ip: str, port: int, only: Optional[int] = None,
+          direction: str = "sendrecv") -> str:
+    """Our SDP: every codec we can play (an offer), or just `only` (an answer).
+
+    `direction` is what a hold offer changes and nothing else: a held call is
+    `sendonly`, and re-offering the same codec list with the same ports and a
+    different direction is what makes it a hold rather than a new session.
+    """
     chosen = [c for c in offers() if only is None or c[0] == only]
     pts = " ".join(str(pt) for pt, _ in chosen) + f" {DTMF_PT}"
     session = random.randint(10 ** 9, 10 ** 10)
@@ -466,8 +472,23 @@ def offer(ip: str, port: int, only: Optional[int] = None) -> str:
     if any(pt == AMR_PT for pt, _name in chosen):
         lines.append(f"a=fmtp:{AMR_PT} {AMR_FMTP}")
     lines += [f"a=rtpmap:{DTMF_PT} telephone-event/8000", f"a=fmtp:{DTMF_PT} 0-15",
-              "a=ptime:20", "a=sendrecv"]
+              "a=ptime:20", f"a={direction}"]
     return "\r\n".join(lines) + "\r\n"
+
+
+def sdp_direction(text: str) -> str:
+    """The direction an SDP asks for (`sendrecv`, `sendonly`, `recvonly`,
+    `inactive`), or the RFC 3264 default of `sendrecv` when it says nothing.
+
+    Read from anywhere in the body rather than from inside the audio section,
+    because a hold offer repeats the line at session level on some far ends -
+    and a direction read from the wrong scope is the wrong answer.
+    """
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if line in ("a=sendrecv", "a=sendonly", "a=recvonly", "a=inactive"):
+            return line[2:]
+    return "sendrecv"
 
 
 def parse_sdp(text: str) -> Tuple[str, int, List[Tuple[int, str]], int]:
@@ -538,6 +559,112 @@ def local_ip_towards(host: str) -> str:
 
 # --- sound ---------------------------------------------------------------------
 
+# --- conferencing -----------------------------------------------------------------
+
+def mix_sum(frames: Sequence[bytes]) -> bytes:
+    """The saturating sum of whole 20 ms frames - the mixer's arithmetic, alone.
+
+    Pulled out so a test can check the *rule* rather than the thread: what six
+    people overlapping sounds like is arithmetic, and arithmetic that is only
+    reachable through a mixer is arithmetic nobody checks.
+    """
+    out = [0] * (FRAME_BYTES // 2)
+    for frame in frames:
+        clipped = frame[:FRAME_BYTES]
+        for index, value in enumerate(struct.unpack(f"<{len(clipped)//2}h", clipped)):
+            out[index] += value
+    return struct.pack(f"<{len(out)}h",
+                       *[max(-32768, min(32767, v)) for v in out])
+
+
+class MixInput:
+    """One participant's audio: what they say goes in, what the room says comes out.
+
+    Attached as a call's `sound` so the far end's decoded frames land in the
+    mixer rather than on the speaker - a conference hears everybody, and a
+    participant who is not in the room is a participant who hears nothing.
+    """
+
+    def __init__(self, speaker: object, mixer: "Mixer") -> None:
+        self.speaker, self.mixer = speaker, mixer
+        mixer.join(speaker)
+
+    def write(self, pcm: bytes) -> None:
+        self.mixer.add(self.speaker, pcm)
+
+    def read(self) -> bytes:
+        return self.mixer.read(self.speaker)
+
+    def close(self) -> None:
+        self.mixer.drop(self.speaker)
+
+
+class Mixer:
+    """Sums the calls in a conference into the one stream the conference sends.
+
+    **Each participant has their own queue, and a frame is delivered to every
+    queue but its author's.** A single shared buffer is the obvious shape and it
+    is wrong in a way a test caught: the first participant to call `read()` takes
+    the whole room, so with two people only one of them hears anything and the
+    other hears silence for the whole call. Per-queue delivery costs a copy per
+    participant per frame, which at five parties and twenty frames a second is
+    nothing, and it is the only shape where "everyone hears everyone" is true by
+    construction rather than by timing.
+
+    Excluding the author's own frames is the other half: the mix goes *out* over
+    that participant's stream, so a room that fed its own output back in would
+    amplify itself until it howled.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._queues: "dict[object, list]" = {}
+
+    def add(self, speaker: object, pcm: bytes) -> None:
+        """One participant's frame, into every queue but theirs."""
+        if not pcm:
+            return
+        with self._lock:
+            # The author is in the room from the moment they speak, even if
+            # nothing has called `join` for them yet - a frame delivered to a
+            # room with no queues in it is a frame nobody ever hears.
+            self._queues.setdefault(speaker, [])
+            for who, queue in self._queues.items():
+                if who is not speaker:
+                    queue.append(pcm)
+
+    def join(self, speaker: object) -> None:
+        """Add a participant to the room, so they hear what is said from now on."""
+        with self._lock:
+            self._queues.setdefault(speaker, [])
+
+    def read(self, speaker: object) -> bytes:
+        """One 20 ms frame of the room minus `speaker`, ready for the codec.
+
+        Whatever has arrived since the last read is summed; when nothing has, the
+        frame is silence, because a conference with one person talking is a
+        conference with a gap where the others are.
+        """
+        with self._lock:
+            queue = self._queues.setdefault(speaker, [])
+            # Copied first, then cleared in place: `frames, queue[:] = queue, []`
+            # binds both names to the *same* list and then empties it, so the
+            # frames are gone before `mix_sum` sees them and every participant
+            # hears silence for the whole call. Measured.
+            frames, queue[:] = queue[:], []
+        return mix_sum(frames)
+
+    def drop(self, speaker: object) -> None:
+        with self._lock:
+            self._queues.pop(speaker, None)
+
+    def close(self) -> None:
+        pass
+
+
+MAX_CALLS = 5     #: 3GPP MMTel conferencing is five, ours included.
+
+
 class PwCat:
     """The microphone and the speaker, through `pw-cat` (PipeWire's own tool)."""
 
@@ -586,6 +713,10 @@ class RtpSession:
         self.seq = random.randint(0, 0xFFFF)
         self.ts = random.randint(0, 0xFFFFFFFF)
         self.received = 0
+        #: Whether this stream is on hold. Gated inside the two loops rather
+        #: than by stopping them, because `stop()` ends the call and a resume
+        #: has to be a direction change and not a new session.
+        self.held = False
         self._stop = threading.Event()
         self._threads: List[threading.Thread] = []
         self._lock = threading.Lock()
@@ -637,6 +768,12 @@ class RtpSession:
         first = True
         next_at = time.monotonic()
         while not self._stop.is_set():
+            if self.held:
+                # A held call sends nothing at all - not silence. Comfort noise
+                # is a packet claiming a live microphone, and the far end has
+                # already been told by the SDP that there is not one.
+                self._stop.wait(0.05)
+                continue
             pcm = self.sound.read()
             if not pcm:
                 # A source that has nothing (a closed mic) still keeps time.
@@ -673,6 +810,13 @@ class RtpSession:
             if pt != self.pt or self.coder is None:
                 continue
             self.received += 1
+            # A held call's audio is not played. The receive thread keeps
+            # running - and keeps counting, because what the far end sent is a
+            # fact whether or not we listened - so a resume is a direction
+            # change and not a new session. Without this, a far end that has not
+            # honoured the hold yet is heard over the call that replaced it.
+            if self.held and self.sound is not None:
+                continue
             try:
                 self.sound.write(self.coder.decode(payload))
             except Exception:  # noqa: BLE001 - one bad frame must not end the call

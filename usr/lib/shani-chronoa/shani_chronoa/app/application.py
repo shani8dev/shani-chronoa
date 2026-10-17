@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 import sys
 import os
+import threading
 from typing import Optional, Union
 
 import gi
@@ -157,7 +158,8 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         # launch, before any tool can be dispatched. The window itself does not
         # exist yet (`do_activate` builds it), which is why the presenter takes a
         # getter rather than a window.
-        ask_bridge.set_presenter(self._spoken_presenter(make_question_presenter(lambda: self.window)))
+        ask_bridge.set_presenter(self._notifying_presenter(
+            self._spoken_presenter(make_question_presenter(lambda: self.window))))
 
         # Same hook, same getter, different presenter: the question one answers
         # "pick an option", this one answers "type a sentence" - the free-form
@@ -299,6 +301,16 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
             service = getattr(self, name, None)
             if service is not None:
                 service.stop()
+        try:
+            from shani_chronoa import landline
+            landline.stop()
+        except Exception:  # noqa: BLE001
+            pass
+        if getattr(self, "mascot", None) is not None:
+            try:
+                self.mascot.stop()
+            except Exception:  # noqa: BLE001
+                pass
         # Answer a prompt that is still on screen. The window is about to be
         # destroyed, so nobody is ever going to click it, and the tool loop is
         # blocked on that answer - `AsyncBridge.shutdown()` below joins its
@@ -1186,6 +1198,24 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
             ]
             self.window.connect("user-input", self._on_user_input)
             self.window.connect("rewind-history", self._rewind_history)
+            # Start the desktop companion now that a display exists. Off by
+            # default; `running` is the gate and each surface answers it from
+            # its own state - the window from `_win`, the notch from its bus
+            # proxy - so this line no longer names a private attribute of one
+            # of them.
+            if not getattr(self, "mascot", None) is None and not self.mascot.running:
+                try:
+                    if self.mascot.start():
+                        def _landline_to_mascot(kind, **info):
+                            if kind == "incoming":
+                                who = info.get("name") or info.get("number") or "someone"
+                                GLib.idle_add(lambda: (self.mascot.notice("call", f"Call from {who}"), False)[1])
+                        try:
+                            landline.listen(_landline_to_mascot)
+                        except Exception:  # noqa: BLE001
+                            pass
+                except Exception:  # noqa: BLE001
+                    logger.exception("mascot: could not start the companion")
             self.window.set_browser_available(browser_available())
             # A window raised by a global shortcut arrives with the caret
             # somewhere else, so the first thing a person types is lost.
@@ -1233,6 +1263,106 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
             self.hold()
             self._hidden_hold = True
 
+    #: The one notification id a question uses, so a newer one replaces it.
+    QUESTION_NOTIFICATION = "chronoa-question"
+
+    def _notifying_presenter(self, present):
+        """`present`, plus a notification with the answers when nobody is looking.
+
+        **An approval waited where nobody could see it.** "May I run pytest in
+        ~/shop?" appeared only in the window, so with the window behind another
+        one the turn sat blocked until someone happened to look - up to the
+        decision timeout. Now, when the window is not the active one, the same
+        question is a desktop notification whose buttons answer it (through
+        `app.answer-question`, the same path a spoken answer takes), and it is
+        withdrawn once the question is answered from either place.
+        """
+        def wrapped(question: str, options: list):
+            done = present(question, options)
+            window = self.window
+            try:
+                looking = bool(window is not None and window.is_active())
+            except Exception:  # noqa: BLE001
+                looking = False
+            if not looking and options:
+                GLib.idle_add(self._notify_question, question, list(options), done)
+            return done
+        return wrapped
+
+    def _notify_question(self, question: str, options: list, done) -> bool:
+        """Post the question through org.freedesktop.Notifications, with its answers.
+
+        **Not `Gio.Notification`.** GNOME shows a GApplication's notifications
+        only when a desktop file is named after the app id, and Chronoa's is
+        `shani-chronoa.desktop` - measured 2026-10-15 in the demo recorder: the
+        question was posted and nothing appeared on screen. The freedesktop API
+        is the one `incoming_call.py` already uses, and both GNOME and Plasma
+        show it. A button press arrives as `ActionInvoked` and is answered
+        through `app.answer-question`, the same path as a spoken answer.
+        """
+        bus = self.get_dbus_connection() or Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        first = (question or "").strip().split("\n\n", 1)[0]
+        actions = []
+        for i, option in enumerate(options[:3]):
+            actions += [str(i), str(option)]
+        hints = {"urgency": GLib.Variant("y", 2), "resident": GLib.Variant("b", True),
+                 "desktop-entry": GLib.Variant("s", "shani-chronoa")}
+        try:
+            reply = bus.call_sync(
+                "org.freedesktop.Notifications", "/org/freedesktop/Notifications",
+                "org.freedesktop.Notifications", "Notify",
+                GLib.Variant("(susssasa{sv}i)", ("Shani Chronoa", 0, "shani-chronoa",
+                                                  "Chronoa is asking", first[:300],
+                                                  actions, hints, 0)),
+                GLib.VariantType.new("(u)"), Gio.DBusCallFlags.NONE, 5000, None)
+            nid = int(reply.unpack()[0])
+        except Exception:  # noqa: BLE001 - no notification server: the window still asks
+            logger.warning("could not post the question as a notification", exc_info=True)
+            return GLib.SOURCE_REMOVE
+        self._question_note = nid
+
+        def on_action(_conn, _sender, _path, _iface, _signal, params):
+            got, key = params.unpack()
+            if got == nid and key.isdigit() and int(key) < len(options):
+                self.activate_action("answer-question", GLib.Variant("s", str(options[int(key)])))
+        watch = bus.signal_subscribe("org.freedesktop.Notifications",
+                                     "org.freedesktop.Notifications", "ActionInvoked",
+                                     "/org/freedesktop/Notifications", None,
+                                     Gio.DBusSignalFlags.NONE, on_action)
+
+        def close():
+            bus.signal_unsubscribe(watch)
+            self._close_question_note()
+            return False
+
+        def withdraw_when_answered():
+            if hasattr(done, "wait"):
+                done.wait()
+            GLib.idle_add(close)
+        threading.Thread(target=withdraw_when_answered, daemon=True).start()
+        return GLib.SOURCE_REMOVE
+
+    def _close_question_note(self) -> None:
+        nid = getattr(self, "_question_note", 0)
+        if not nid:
+            return
+        self._question_note = 0
+        bus = self.get_dbus_connection() or Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        try:
+            bus.call_sync("org.freedesktop.Notifications", "/org/freedesktop/Notifications",
+                          "org.freedesktop.Notifications", "CloseNotification",
+                          GLib.Variant("(u)", (nid,)), None, Gio.DBusCallFlags.NONE, 2000, None)
+        except Exception:  # noqa: BLE001 - already gone
+            pass
+
+    def _on_answer_question(self, _action, value) -> None:
+        """An answer from the notification: the same as one given in the window."""
+        answer = value.get_string() if value is not None else ""
+        window = self.window
+        if window is None or not window.answer_pending_question(answer):
+            logger.info("answer-question %r: no question is open any more", answer)
+        self._close_question_note()
+
     def do_command_line(self, command_line: Gio.ApplicationCommandLine) -> int:
         """Handle command line arguments."""
         args = command_line.get_arguments()
@@ -1255,6 +1385,11 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         self.activate()
         if self.window is not None and handed:
             self.window.add_attachments(handed)
+        # `--rules=build`: the answer rules to ask under (Circle to Search's
+        # "Fix this error" asks in Build mode). Set before the question goes.
+        rules = next((a.split("=", 1)[1] for a in args[1:] if a.startswith("--rules=")), "")
+        if rules and self.lookup_action("answer-rules") is not None:
+            self.lookup_action("answer-rules").change_state(GLib.Variant("s", rules))
         if self.window is not None and ask.strip():
             # Through the window's own send path, so the question shows in the
             # transcript with its attachments, as if it had been typed.
@@ -1263,6 +1398,13 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         # (sayri's `sayri toggle`): work on any session, portal or not.
         if "--listen" in args[1:] or "--toggle-listening" in args[1:]:
             GLib.idle_add(lambda: (self.activate_action("toggle-listening", None), False)[1])
+        # Dictate into the focused app, and stop whatever Chronoa is doing -
+        # the two verbs a dictation shortcut needs (Handy's --toggle-
+        # transcription and --cancel, for the same reason).
+        if "--dictate" in args[1:]:
+            GLib.idle_add(lambda: (self.activate_action("dictate", None), False)[1])
+        if "--stop" in args[1:]:
+            GLib.idle_add(lambda: (self.activate_action("stop-speaking", None), False)[1])
         if "--new-conversation" in args[1:]:
             GLib.idle_add(lambda: (self.activate_action("reset-conversation", None), False)[1])
         if "--setup" in args[1:]:
@@ -1339,6 +1481,20 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         from shani_chronoa.presence import detect
         from shani_chronoa import local_llm
         self._presence = detect(local_llm.is_up)
+        # A server started at login from an llm.env an older build wrote keeps
+        # that build's choices (its context size, above all) until something
+        # rewrites the file. Checked once, off the main loop: a restart reloads
+        # the model, which is seconds, and is done before the first question.
+        from shani_chronoa.gateway import off_the_main_loop
+
+        def refresh() -> None:
+            try:
+                if local_llm.refresh_env() and local_llm.is_up():
+                    logger.info("restarting the local model with its new settings")
+                    local_llm.restart_service()
+            except Exception:  # noqa: BLE001 - a stale setting is not a broken start
+                logger.debug("could not refresh llm.env", exc_info=True)
+        off_the_main_loop(refresh, "refresh-llm-env")
         if not self._can_answer:
             self._no_model_reason = (
                 "no language model is set up, so nothing can answer yet")
@@ -1678,6 +1834,71 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
 
         # `player.stop()` was previously only reachable via `_begin_listening`,
         # so stopping the assistant meant also opening the mic.
+        # The speaker toggle beside the microphone. Stateful, so the button
+        # draws the setting rather than its own idea of it; turning it off
+        # also stops a reply that is already being said.
+        # A question answered from its notification (`_notifying_presenter`).
+        answer_action = Gio.SimpleAction.new("answer-question", GLib.VariantType.new("s"))
+        answer_action.connect("activate", self._on_answer_question)
+        self.add_action(answer_action)
+
+        # Text in any script, committed through IBus (ibus_input.py); a no-op
+        # where IBus is not running.
+        from shani_chronoa import ibus_input
+        ibus_input.start()
+        # One summary on unlock of what Chronoa did while you were away (away.py).
+        from shani_chronoa import away
+        away.start()
+        # A meeting app opening the microphone: offer notes (mic_watch.py).
+        from shani_chronoa import mic_watch
+        mic_watch.start(self)
+        # The JioFiber landline, when set up and allowed: register with the
+        # router so the line can ring in and be dialled (landline/__init__.py).
+        from shani_chronoa import landline
+        landline.start(self)
+        # The desktop companion (mascot.py): an always-on overlay, off by
+        # default, that mirrors the assistant state and reacts to events.
+        # `mascot.create()` picks the surface this machine can show - the
+        # draggable window where a layer shell exists, the GNOME Shell notch
+        # where it does not - and both answer the same surface, so everything
+        # below holds one object and never asks which it got.
+        #
+        # **Constructed here, started in do_activate().** Both gates are honest
+        # and neither can be answered yet: `mascot.available()` asks the
+        # compositor and `mascot_notch.available()` asks the session bus, and
+        # both depend on a main loop that does not exist at `do_startup`. So the
+        # *choice* of surface can be made now (it is a property of the machine)
+        # and the *running* of it cannot.
+        #
+        # **There is deliberately no second build site in `do_activate`**, which
+        # looked like the obvious safety net for a partial startup. Measured
+        # rather than assumed, because the assumption was wrong in an
+        # interesting way: when `do_startup` raises, GLib logs
+        # `failed to chain up on ::startup` and **carries on into
+        # `do_activate` anyway** - so a fallback there *is* reachable. It would
+        # still change nothing for the better, and the reason is the one that
+        # matters: every reader of `self.mascot` (`do_shutdown`,
+        # `do_activate`, `voice._on_level`) already treats absence as "no
+        # companion" rather than as a fault, so the fallback's only observable
+        # effect would be to **show a mascot on an application that failed to
+        # start**.
+        from shani_chronoa import mascot
+        self.mascot = mascot.create(self)
+
+        # What the assistant is doing, for the top-bar indicator: idle,
+        # listening, thinking, speaking... Read-only - disabled, so a D-Bus
+        # caller can watch it but not set it; `ChronoaWindow.set_state` is the
+        # one writer.
+        status_action = Gio.SimpleAction.new_stateful(
+            "status", None, GLib.Variant("s", "idle"))
+        status_action.set_enabled(False)
+        self.add_action(status_action)
+
+        speak_action = Gio.SimpleAction.new_stateful(
+            "speak-replies", None, GLib.Variant("b", self.config.speak_replies))
+        speak_action.connect("change-state", self._on_speak_replies)
+        self.add_action(speak_action)
+
         stop_speaking_action = Gio.SimpleAction.new("stop-speaking", None)
         stop_speaking_action.connect("activate", self._stop_speaking)
         self.add_action(stop_speaking_action)

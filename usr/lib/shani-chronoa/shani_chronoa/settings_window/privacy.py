@@ -328,6 +328,14 @@ class PrivacyPage:
              "computer. Your phone stays the radio either way - this is about who can start a call. "
              "Chronoa asks you to confirm before it places one.",
              "placing, answering or ending a call is refused while this is off"),
+            ("Let Chronoa use your JioFiber landline", "landline-enabled",
+             "Off: Chronoa cannot connect to your JioFiber router or place and answer calls on your "
+             "broadband landline number. On: set it up once from the Phone page - the account owner "
+             "enters a one-time code Jio texts them, which tells the router to allow this computer on "
+             "the line, the same way the JioJoin app is added. Nothing is recorded, Chronoa confirms "
+             "before dialling, and your landline handset keeps working - the call goes through the "
+             "router, never directly to Jio's network.",
+             "using the landline is refused while this is off"),
             ("Let Chronoa read your Bluetooth devices", "bluetooth-gatt-enabled",
              "Off: Chronoa can still list your paired devices and connect to them, but cannot ask "
              "one what it says about itself - no watch battery, no heart-rate reading, no firmware "

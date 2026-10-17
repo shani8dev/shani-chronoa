@@ -21,7 +21,7 @@ import threading
 import time
 from typing import Callable, Dict, List, Optional
 
-from shani_chronoa.landline import media, sip
+from shani_chronoa.landline import media, sip, video
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,18 @@ ALLOW = "INVITE, ACK, CANCEL, BYE, OPTIONS, UPDATE, PRACK, NOTIFY, MESSAGE, INFO
 MMTEL = '+g.3gpp.icsi-ref="urn%3Aurn-7%3A3gpp-service.ims.icsi.mmtel"'
 FEATURES = (MMTEL + ';+g.3gpp.iari-ref="urn%3Aurn-7%3A3gpp-application.ims.iari.rcs.jio.eucr"'
             ';+g.gsma.rcs.telephony="none"')
+
+#: The Contact parameter that says this device can be a **video** caller.
+#:
+#: **This spelling is the one thing in the video path not measured against the
+#: router.** What actually makes a call a video call is the `m=video` section
+#: `video.with_video` writes, and that is unambiguous; this rides in the Contact
+#: beside the MMTel ICSI so the network sees the capability *before* the call
+#: rather than only once the SDP arrives. A tag the network does not recognise
+#: is a call it will not take as video, so it is one constant here rather than a
+#: string spelled out across four call sites - and the live probe is what
+#: settles it, not a confident guess.
+VIDEO_TAG = ";video"
 
 
 def dial_user(number: str) -> str:
@@ -60,13 +72,19 @@ class Call:
         self.remote_uri = ""
         self.invite: Optional[sip.Message] = None    # theirs (incoming) or ours (outgoing)
         self.rtp: Optional[media.RtpSession] = None
+        self.video: Optional[video.VideoRtpSession] = None
         self.started = 0.0
+        #: Whether this call is on hold. A held call is still a live dialog with
+        #: a live port - it is just not sending or playing - which is what lets
+        #: `swap()` resume it without a new session.
+        self.held = False
 
 
 class Line:
     def __init__(self, host: str, creds: Dict[str, str], instance: str,
                  on_event: Callable[..., None] = lambda kind, **info: None,
-                 port: int = 5068, sound_factory: Optional[Callable[[], object]] = None) -> None:
+                 port: int = 5068, sound_factory: Optional[Callable[[], object]] = None,
+                 video_factory: Optional[Callable[[], video.VideoRtpSession]] = None) -> None:
         self.host, self.port = host, port
         self.realm = creds["realm"]
         self.auth_user = creds["user"]
@@ -80,8 +98,16 @@ class Line:
         self.instance = f"<00000000-0000-1000-8000-0000{instance.upper()}>"
         self.on_event = on_event
         self.sound_factory = sound_factory
+        self.video_factory = video_factory
         self.registered = False
-        self.call: Optional[Call] = None
+        #: Every live call, oldest first. One call is what this line did before
+        #: hold landed; two is what makes hold worth having, because a hold with
+        #: nothing to swap *to* is a mute with extra packets.
+        self.calls: List[Call] = []
+        #: The room a conference mixes into, or None before `merge()`. Held by
+        #: the line rather than by the conference call because every participant
+        #: sends it, and the conference dialog is only the network's side of it.
+        self.mixer: Optional[media.Mixer] = None
         self.last_error = ""
         self._sock: Optional[ssl.SSLSocket] = None
         self._send_lock = threading.Lock()
@@ -94,6 +120,39 @@ class Line:
         self._thread: Optional[threading.Thread] = None
         self.local_ip = ""
         self.local_port = 0
+        #: Whether this machine can be a video caller. None means "not asked yet":
+        #: `video.available()` shells out to ffmpeg, and the Contact header is
+        #: built on every request in a call.
+        self._video_ok: Optional[bool] = None
+
+    @property
+    def call(self) -> Optional[Call]:
+        """The call the line is *on*: not held, and the oldest when all are.
+
+        With one call - everything here until hold landed - that is simply the
+        call, so every existing reader is unchanged. With two it is the live one,
+        which is what the strip, the events and the hangup button are about; the
+        held one is reachable through `calls`.
+        """
+        for call in self.calls:
+            if not call.held:
+                return call
+        return self.calls[0] if self.calls else None
+
+    def _video_capable(self) -> bool:
+        """Whether to offer video at all, asked of the machine that would send it.
+
+        Cached because `video.available()` is a subprocess and `_contact()` runs
+        on every REGISTER and every in-dialog request. A machine with no camera
+        or no ffmpeg answers False and gets the audio-only line it always did -
+        which is the whole point of asking rather than assuming.
+        """
+        if self._video_ok is None:
+            try:
+                self._video_ok, _why = video.available()
+            except Exception:  # noqa: BLE001 - an unprobeable camera is not a camera
+                self._video_ok = False
+        return bool(self._video_ok)
 
     # --- the connection --------------------------------------------------------------
     def start(self) -> None:
@@ -188,6 +247,11 @@ class Line:
                     logger.exception("landline: could not handle %r", message)
 
     def _send_raw(self, data: bytes) -> None:
+        # While stopping, a request still in the reader thread (a BYE 200, say)
+        # must not write to a closing socket - that raced to a BrokenPipe at
+        # shutdown. Silently drop it; the line is going away.
+        if self._stop.is_set():
+            return
         sock = self._sock
         if sock is None:
             raise OSError("not connected to the router")
@@ -202,10 +266,56 @@ class Line:
     def _via(self, branch: str) -> str:
         return f"SIP/2.0/TLS {self.local_ip}:{self.local_port};branch={branch};rport"
 
-    def _contact(self, expires: Optional[int] = None) -> str:
+    def _contact(self, expires: Optional[int] = None, focus: bool = False) -> str:
         c = (f"<sip:{self.number}@{self.local_ip}:{self.local_port};transport=tls;ob>"
              f';+sip.instance="{self.instance}";{FEATURES}')
+        if self._video_capable():
+            c += VIDEO_TAG
+        # `isfocus` (RFC 4579) says *this* endpoint is the conference's focus -
+        # the one that holds the room and tells everybody else to come to it.
+        # It is what makes a dialog a conference rather than a call.
+        if focus:
+            c += ";isfocus"
         return c + (";reg-id=1" if expires is not None else "")
+
+    def _body(self, call: Call, only: Optional[int] = None) -> str:
+        """Our SDP body, with the video m-line when this machine has a camera.
+
+        The audio offer is built exactly as it was and the section is appended
+        after it, because RFC 4566 puts session-level lines first and media
+        sections last - a body whose `m=video` precedes the `m=audio` it belongs
+        after is a different document, not a formatting choice.
+        """
+        body = media.offer(self.local_ip, call.rtp.port, only=only)   # type: ignore[union-attr]
+        if call.video is not None:
+            body = video.with_video(body, self.local_ip, call.video.port)
+        return body
+
+    def _start_video(self, call: Call, body: str) -> bool:
+        """Point our camera and our screen at the far end's video m-line.
+
+        `m=video 0` is a **decline, not a port**: the far end answered
+        audio-only, and taking 0 as a port would send every packet nowhere while
+        reporting success. A body with no `m=video` at all is a far end that does
+        not do video - the ordinary case for a phone on a voice call, and the
+        reason this is not an error.
+
+        A failure here never takes the call down: audio is already flowing, and
+        a call that ends because the picture would not start is a worse outcome
+        than a call that carries sound and nothing else.
+        """
+        if call.video is None:
+            return False
+        ip, port, codecs = video.parse_video(body)
+        if not ip or not port:
+            return False
+        pt = codecs[0][0] if codecs else video.H264_PT
+        try:
+            call.video.start((ip, port), pt)
+        except Exception as exc:  # noqa: BLE001 - a picture that will not start is not a reason to lose audio
+            logger.warning("landline: the picture would not start: %s", exc)
+            return False
+        return True
 
     def _request(self, message: sip.Message, timeout: float = 32.0,
                  final: bool = True) -> Optional[sip.Message]:
@@ -296,8 +406,17 @@ class Line:
         """Start a call; progress arrives as events. Raises when it cannot start."""
         if not self.registered:
             raise RuntimeError("the landline is not connected to the router")
-        if self.call is not None:
-            raise RuntimeError("a call is already in progress")
+        live = self.call
+        if live is not None:
+            if live.state != "active":
+                raise RuntimeError("a call is already in progress")
+            # A second number while a call is live: the first is held and the
+            # second rings. That is what a phone does, and it is what makes
+            # hold worth having - a hold with nothing to swap *to* is a mute
+            # with extra packets. Refusing the second number would leave the
+            # first call with no way to be put aside and picked back up.
+            if not self.hold():
+                return
         user = dial_user(number)
         if not user:
             raise ValueError("that is not a number")
@@ -305,16 +424,22 @@ class Line:
         call.local_uri, call.remote_uri = self.public, f"sip:{user}@{self.realm}"
         call.route = self._routes()
         call.rtp = media.RtpSession.bind(self.local_ip, self.sound_factory() if self.sound_factory else None)
-        self.call = call
+        if self.video_factory is not None and self._video_capable():
+            try:
+                call.video = self.video_factory()
+            except Exception as exc:  # noqa: BLE001 - no free port pair is no video, not no call
+                logger.warning("landline: no video session for this call: %s", exc)
+        self.calls.append(call)
         threading.Thread(target=self._outgoing, args=(call,), daemon=True, name="landline-dial").start()
 
-    def _invite(self, call: Call, auth: str = "") -> sip.Message:
+    def _invite(self, call: Call, auth: str = "", focus: bool = False) -> sip.Message:
         headers = [
             ("Via", self._via(sip.new_branch())), ("Max-Forwards", "70"),
             *[("Route", r) for r in call.route],
             ("From", f"<{call.local_uri}>;tag={call.local_tag}"), ("To", f"<{call.remote_uri}>"),
             ("Call-ID", call.call_id), ("CSeq", f"{call.cseq} INVITE"),
-            ("Contact", self._contact()), ("Allow", ALLOW), ("Supported", "100rel, timer"),
+            ("Contact", self._contact(focus=focus)), ("Allow", ALLOW),
+            ("Supported", "100rel, timer"),
             ("Accept-Contact", f"*;{MMTEL}"),
             ("P-Preferred-Service", "urn:urn-7:3gpp-service.ims.icsi.mmtel"),
             ("User-Agent", USER_AGENT), ("P-Access-Network-Info", "IEEE-802.11"),
@@ -323,14 +448,15 @@ class Line:
         if auth:
             headers.append(("Proxy-Authorization" if auth.startswith("P:") else "Authorization",
                             auth[2:] if auth.startswith("P:") else auth))
-        body = media.offer(self.local_ip, call.rtp.port)
+        body = self._body(call)
         return sip.Message(f"INVITE {call.remote_uri} SIP/2.0", headers, body)
 
     def _outgoing(self, call: Call) -> None:
         auth = ""
         try:
             for _attempt in range(2):
-                invite = self._invite(call, auth)
+                invite = self._invite(call, auth, focus=self.mixer is not None
+                                      and call.number == "Conference")
                 call.invite = invite
                 reply = self._request(invite, timeout=180)
                 if reply is None:
@@ -352,6 +478,146 @@ class Line:
         except Exception as exc:  # noqa: BLE001
             logger.exception("landline: the call failed")
             self._end(call, str(exc))
+
+    def hold(self) -> bool:
+        """Put the live call on hold: a re-INVITE that says we are only sending.
+
+        `a=sendonly` rather than `a=inactive` because the far end should still
+        hear *something* - hold tone or comfort noise - where `inactive` is a
+        stream it has to decide what to do with. Measured on the fake router's
+        own answer: a far end that answers a hold offer with `a=recvonly` has
+        taken it, and one that answers `a=inactive` has said it will stop too.
+
+        **The RTP is gated here and not only by the SDP.** A held call sends
+        nothing at all - not silence, which would be a packet claiming a live
+        microphone - and does not play what arrives, because a far end that has
+        not honoured the hold yet would otherwise be heard over the call that
+        replaced it.
+
+        Returns whether the hold took. A far end that refuses the re-INVITE has
+        said no, and reporting a hold that did not happen is the chip-reads-one-
+        thing-while-the-machine-does-another defect this line has already had.
+        """
+        call = self.call
+        if call is None or call.state != "active" or call.held:
+            return False
+        if not self._re_offer(call, "sendonly"):
+            return False
+        call.held = True
+        if call.rtp is not None:
+            call.rtp.held = True
+        return True
+
+    #: The conference factory, as the MMTel specification spells it: the `mmtel`
+    #: public service identity at `conf-factory.<home domain>`. **Unverified
+    #: against this router** - it is the form the standard names, and whether
+    #: Jio's IMS hosts one here is a live question, not a fact this line has.
+    CONF_FACTORY = "sip:mmtel@conf-factory.{realm}"
+
+    def merge(self) -> bool:
+        """Put every live call into one conference, mixing on this computer.
+
+        Two dialogs, and the difference between them is which way the audio
+        goes: the participants keep their own connection to their own far end,
+        and the conference dialog is the network's side of the room. Each
+        participant's `rtp.sound` becomes a room input, and the room is what
+        their own stream carries back out - so a person hears everybody and
+        nobody hears themselves.
+
+        **Unverified against the real network.** The SIP below is checked
+        against the fake router and the mixing is measured as arithmetic, but
+        whether Jio's IMS answers `mmtel@conf-factory` at all, and accepts an
+        `isfocus` Contact from a UE, is a live question this line has not asked.
+        So `merge()` starts the dialog rather than claiming a conference: the
+        events say `answered` when the factory takes it, and `ended` with the
+        reason when it does not.
+
+        Refuses rather than starting something nobody asked for: at least two
+        calls, no more than `media.MAX_CALLS` of them.
+        """
+        live = [c for c in self.calls if not c.held]
+        if len(live) < 2:
+            return False
+        if len(self.calls) + 1 > media.MAX_CALLS:
+            return False
+        room = media.Mixer()
+        for call in live:
+            # What this participant says goes into the room, and what the room
+            # says comes out over the same stream. The `RtpSession` re-points
+            # its two threads rather than starting another pair, so there is
+            # exactly one sender and one receiver per far end either way.
+            call.rtp.sound = media.MixInput(call, room)
+        self.mixer = room
+        conference = Call(sip.new_call_id(self.local_ip), sip.new_tag(), True, "Conference")
+        conference.name = f"{len(live)} people"
+        conference.local_uri, conference.remote_uri = self.public, self.CONF_FACTORY.format(
+            realm=self.realm)
+        conference.route = self._routes()
+        conference.rtp = media.RtpSession.bind(self.local_ip, room)
+        self.calls.append(conference)
+        threading.Thread(target=self._outgoing, args=(conference,), daemon=True,
+                         name="landline-conference").start()
+        return True
+
+    def swap(self) -> bool:
+        """Trade the live call for the held one - hold this, resume that.
+
+        Both halves of one action, because that is what Swap means on a phone:
+        with two calls, "which one am I on" toggles, and a press that only
+        held the current one would need a second press to do anything.
+        """
+        live = self.call
+        held = [c for c in self.calls if c.held]
+        if live is None or not held:
+            return False
+        # Swap trades two *answered* calls. A ringing call has no session whose
+        # direction could be changed, and resuming into one would report a
+        # call came back that was never there - so it is a refusal and not a
+        # half-action.
+        if any(c.state != "active" for c in [live, *held]):
+            return False
+        if not self._re_offer(live, "sendonly"):
+            return False
+        live.held = True
+        if live.rtp is not None:
+            live.rtp.held = True
+        for call in held:
+            if self._re_offer(call, "sendrecv"):
+                call.held = False
+                if call.rtp is not None:
+                    call.rtp.held = False
+        return True
+
+    def _re_offer(self, call: Call, direction: str) -> bool:
+        """A re-INVITE that changes only the direction the sound goes.
+
+        Same Call-ID, same tags, the same ports and the same codec - so the far
+        end sees a direction change on a live session rather than a new one. The
+        codec is the one already negotiated rather than a fresh offer: re-offering
+        every codec we can play mid-call invites the far end to renegotiate.
+        """
+        if call.rtp is None or not call.remote_target:
+            return False
+        try:
+            body = media.offer(self.local_ip, call.rtp.port, only=call.rtp.codec,
+                               direction=direction)
+            reply = self._in_dialog(call, "INVITE", body=body)
+        except Exception as exc:  # noqa: BLE001 - a re-offer we cannot send is a refusal
+            logger.warning("landline: the re-offer would not send: %s", exc)
+            return False
+        if reply is None:
+            logger.warning("landline: the router did not answer the re-offer")
+            return False
+        if reply.status != 200:
+            # A non-2xx final to an INVITE is ACKed on the CSeq it arrived with
+            # (RFC 3261 17.1.1.3) and leaves the dialog standing, so the CSeq
+            # does not go back - a CSeq that moved backwards would collide with
+            # a transaction the far end has already answered.
+            self._in_dialog(call, "ACK", cseq=call.cseq)
+            logger.warning("landline: the far end refused the re-offer (%s %s)",
+                           reply.status, reply.reason)
+            return False
+        return True
 
     def _provisional(self, reply: sip.Message) -> None:
         call = self.call
@@ -389,7 +655,7 @@ class Line:
         if reply.all("Record-Route"):
             call.route = list(reversed(reply.all("Record-Route")))
         self._in_dialog(call, "ACK", cseq=call.cseq)
-        if self.call is not call:  # hung up while it was being answered
+        if call not in self.calls:  # hung up while it was being answered
             self._in_dialog(call, "BYE")
             return
         # A renegotiated call answers the INVITE with no SDP of its own - the
@@ -411,6 +677,11 @@ class Line:
             self._end(call, "the line answered with no sound this computer can play")
             return
         call.state, call.started = "active", time.monotonic()
+        if call.video is not None and not self._start_video(call, reply.body):
+            # A far end that answers with no video m-line, or with `m=video 0`,
+            # is a voice call - which is the ordinary case, so the picture stops
+            # and the sound carries on.
+            call.video.stop()
         self.on_event("answered", number=call.number)
 
     # --- calls in ---------------------------------------------------------------------------
@@ -432,14 +703,21 @@ class Line:
         call.route = invite.all("Record-Route")
         call.local_uri, call.remote_uri = sip.uri_of(invite.get("To")), sip.uri_of(invite.get("From"))
         call.rtp = media.RtpSession.bind(self.local_ip, None)
+        if self.video_factory is not None and self._video_capable():
+            try:
+                call.video = self.video_factory()
+            except Exception as exc:  # noqa: BLE001 - an incoming call is still answerable without video
+                logger.warning("landline: no video session for this call: %s", exc)
         if media.pick(media.parse_sdp(invite.body)[2]) is None:
-            self.call = None
+            # Never added, so nothing to take back out.
             call.rtp.stop()
+            if call.video is not None:
+                call.video.stop()
             self._send(sip.response(invite, 488, to_tag=call.local_tag))
             self.on_event("ended", number=call.number,
                           reason="a call came in with no sound this computer can play (488)")
             return
-        self.call = call
+        self.calls.append(call)
         self._send(sip.response(invite, 100))
         self._send(sip.response(invite, 180, to_tag=call.local_tag,
                                 extra=[("Contact", self._contact())]))
@@ -457,11 +735,13 @@ class Line:
             self._send(sip.response(call.invite, 488, to_tag=call.local_tag))
             self._end(call, "this computer cannot play the sound this call offered (488)")
             return
-        body = media.offer(self.local_ip, call.rtp.port, only=chosen[1])
+        body = self._body(call, only=chosen[1])
         self._send(sip.response(call.invite, 200, to_tag=call.local_tag, body=body,
                                 extra=[("Contact", self._contact()), ("Allow", ALLOW)]))
         packing = media.packing_for(media.negotiated(codecs, chosen[0]))
         call.rtp.start((ip, port), chosen[0], chosen[1], dtmf, packing)
+        if call.video is not None and not self._start_video(call, call.invite.body):
+            call.video.stop()
         call.state, call.started = "active", time.monotonic()
         self.on_event("answered", number=call.number)
 
@@ -518,6 +798,9 @@ class Line:
         except Exception as exc:  # noqa: BLE001 - a re-offer we cannot take ends the call
             logger.warning("landline: the re-offered sound would not start: %s", exc)
             self._end(call, "this computer could not take the sound re-offered mid-call")
+            return
+        if call.video is not None and not self._start_video(call, update.body):
+            call.video.stop()
 
     def _on_cancel(self, cancel: sip.Message) -> None:
         call = self.call
@@ -552,21 +835,31 @@ class Line:
         call = self.call
         return bool(call and call.state == "active" and call.rtp and call.rtp.dtmf(digit))
 
-    def _in_dialog(self, call: Call, method: str, cseq: Optional[int] = None) -> None:
+    def _in_dialog(self, call: Call, method: str, cseq: Optional[int] = None,
+                   body: str = "") -> Optional[sip.Message]:
+        """A request inside a live dialog: same Call-ID, same tags, next CSeq.
+
+        Returns the far end's response - the reason `hold()` can tell a hold
+        that took from one that was refused - or None for the ACK, which is sent
+        on the reliable TLS connection and has nothing to wait for.
+        """
         if cseq is None:
             call.cseq += 1
         number = call.cseq if cseq is None else cseq
         local = f"<{call.local_uri}>;tag={call.local_tag}"
         remote = f"<{call.remote_uri}>;tag={call.remote_tag}"
-        message = sip.Message(f"{method} {call.remote_target or call.remote_uri} SIP/2.0", [
-            ("Via", self._via(sip.new_branch())), ("Max-Forwards", "70"),
-            *[("Route", r) for r in call.route],
-            ("From", local), ("To", remote), ("Call-ID", call.call_id),
-            ("CSeq", f"{number} {method}"), ("User-Agent", USER_AGENT)])
+        headers = [("Via", self._via(sip.new_branch())), ("Max-Forwards", "70"),
+                   *[("Route", r) for r in call.route],
+                   ("From", local), ("To", remote), ("Call-ID", call.call_id),
+                   ("CSeq", f"{number} {method}"), ("User-Agent", USER_AGENT)]
+        if body:
+            headers.append(("Content-Type", "application/sdp"))
+        message = sip.Message(f"{method} {call.remote_target or call.remote_uri} SIP/2.0",
+                              headers, body)
         if method == "ACK":
             self._send(message)
-        else:
-            self._request(message, timeout=10)
+            return None
+        return self._request(message, timeout=10)
 
     def _start_media(self, call: Call, body: str, answer: bool) -> bool:
         ip, port, codecs, dtmf = media.parse_sdp(body)
@@ -582,10 +875,11 @@ class Line:
         return True
 
     def _end(self, call: Call, reason: str, status: int = 0) -> None:
-        if self.call is call:
-            self.call = None
+        self.calls = [c for c in self.calls if c is not call]
         if call.rtp is not None:
             call.rtp.stop()
+        if call.video is not None:
+            call.video.stop()
         seconds = int(time.monotonic() - call.started) if call.started else 0
         call.state = "ended"
         self.on_event("ended", number=call.number, reason=reason, seconds=seconds, status=status)

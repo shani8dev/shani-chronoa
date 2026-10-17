@@ -650,6 +650,86 @@ def _short_arg(value) -> str:
     return text
 
 
+def _file(value) -> str:
+    """A path as the name a person knows it by: its last part."""
+    text = str(value or "").rstrip("/")
+    return text.rsplit("/", 1)[-1] or text
+
+
+def _quoted(value, limit: int = 40) -> str:
+    text = " ".join(str(value or "").split())
+    return "“" + (markdown_lite.clip(text, limit) if len(text) > limit else text) + "”"
+
+
+_TODO_STATUS = {"completed": "done", "in_progress": "started", "blocked": "blocked",
+                "pending": "to do", "complete": "done", "done": "done", "start": "started"}
+
+
+def call_phrase(name: str, arguments: dict) -> str:
+    """What this call is doing, in words, for the tool card's one line.
+
+    **The card read like a log.** Measured in the 2026-10-15 coding take: six
+    rows of `action=add, id=1, content=Fix pricing.py to treat the dis…` and
+    `action=list, id=1` - the arguments as the model sent them, which is the
+    one view of the agent's work a person is actually watching. The common
+    tools get a sentence; every other tool keeps the `key=value` line, and the
+    full arguments stay one click away in the card's details either way.
+    """
+    a = arguments or {}
+    try:
+        if name == "todo_list" and a:
+            action = str(a.get("action") or "list").lower()
+            step = f"step {a['id']}" if a.get("id") not in (None, "") else "a step"
+            if action == "add":
+                return "Planned: " + _quoted(a.get("content"))
+            if action == "list":
+                return "Checked the plan"
+            if action == "clear":
+                return "Cleared the plan"
+            if action == "remove":
+                return f"Removed {step}"
+            status = _TODO_STATUS.get(str(a.get("status") or action).lower())
+            return (f"Marked {step} {status}" if status else f"Updated {step}")
+        if name == "edit_file" and a.get("path"):
+            return "Changed " + _file(a.get("path"))
+        if name == "write_text_file" and a.get("path"):
+            return ("Added to " if a.get("append") else "Wrote ") + _file(a.get("path"))
+        if name in ("read_document", "read_text_file") and a.get("path"):
+            return "Read " + _file(a.get("path"))
+        if name == "list_directory":
+            return "Looked in " + (_file(a.get("path")) or "your home")
+        if name == "run_command" and a.get("command"):
+            where = str(a.get("where") or "sandbox")
+            place = {"container": " in a container", "machine": " on a machine"}.get(where, "")
+            return "Ran " + _quoted(a.get("command"), 44) + place
+        if name == "search_file_contents" and a.get("text"):
+            return "Searched for " + _quoted(a.get("text"))
+        if name == "find_files" and a.get("pattern"):
+            return "Looked for " + _quoted(a.get("pattern"))
+        if name == "web_search" and a.get("query"):
+            return "Searched the web for " + _quoted(a.get("query"))
+        if name == "get_weather":
+            return "Weather" + (" in " + str(a["place"]) if a.get("place") else "") \
+                + (", " + str(a["when"]) if a.get("when") else "")
+        if name == "set_timer" and a.get("seconds"):
+            secs = int(float(a["seconds"]))
+            span = f"{secs // 60} min" if secs >= 60 and secs % 60 == 0 else f"{secs} s"
+            return f"Timer for {span}" + (" - " + str(a["label"]) if a.get("label") else "")
+        if name == "open_application" and a.get("name"):
+            return "Opened " + str(a["name"])
+        if name == "set_volume" and a.get("percent") is not None:
+            return f"Volume to {a['percent']}%"
+        if name == "delegate" and a.get("task"):
+            return "Handed off: " + _quoted(a.get("task"))
+        if name == "git_commit" and a.get("message"):
+            return "Committed " + _quoted(a.get("message"))
+        if name == "disk_usage":
+            return "Disk space" + (" on " + _short_arg(a["path"]) if a.get("path") else "")
+    except (TypeError, ValueError, KeyError):
+        pass  # an odd argument is not a broken card: fall back to the raw line
+    return ", ".join(f"{key}={_short_arg(value)}" for key, value in a.items())
+
+
 class InlineDiff(Gtk.Box):
     """The changed lines of one file write, in the chat, under its tool card.
 
@@ -1122,7 +1202,7 @@ class ToolCallCard(Gtk.Box):
                 "Chronoa says this call did not succeed. Its answer below "
                 "explains why, if it did.")
             row.append(outcome)
-        summary = ", ".join(f"{key}={_short_arg(value)}" for key, value in self.arguments.items())
+        summary = call_phrase(name, self.arguments)
         if len(summary) > 60:
             # **`markdown_lite.clip`, not a hard slice.** The arguments are
             # model-supplied text, and `[:57]` cuts a grapheme cluster: an emoji

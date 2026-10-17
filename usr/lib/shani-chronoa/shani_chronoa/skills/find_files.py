@@ -111,6 +111,13 @@ def _run(arguments: dict) -> str:
             "No pattern was given. Use a wildcard such as '*.log' or "
             "'report*' - a bare word matches only a file with exactly that name."
         )
+    # **A name, not a path.** Names are what is matched, so a pattern with a
+    # folder in it never matched anything: measured 2026-10-15, a model looked
+    # for 'tests/test_pricing.py', was told nothing matched, and set out to
+    # write the tests that were already there as ./test_pricing.py.
+    asked = pattern
+    if "/" in pattern.rstrip("/"):
+        pattern = pattern.rstrip("/").rsplit("/", 1)[-1]
     raw_path = (arguments.get("path") or "").strip() or "~"
     try:
         root = files.resolve(raw_path)
@@ -160,6 +167,8 @@ def _run(arguments: dict) -> str:
         return base
 
     lines = [f"{len(matches)}{'+' if truncated else ''} match(es) for {pattern!r} under {root}:"]
+    if asked != pattern:
+        lines.insert(0, f"(Matched the name {pattern!r} from {asked!r} - names are matched, not paths.)")
     for m in matches:
         lines.append(f"  {m}")
     if truncated:

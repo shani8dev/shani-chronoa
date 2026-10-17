@@ -1,0 +1,10627 @@
+{
+ "about": "Chronoa task eval: what a person says, and the tool call a correct assistant makes. Checked, never executed. Each 'expect' entry is one acceptable call: 'tool' must match, and every key in 'args' must match its rule - a number equals (5 == 5.0), a string is compared case-insensitively and may be a list of acceptable values, a string starting with '~' must be contained, '*' only requires the key to be present. 'none': true means no tool should be called. 'ask': true also accepts ask_user. COVERAGE IS PARTIAL: fewer skills have at least one case than the tree registers, so a regression in tool selection is visible in most of the list and invisible in the rest. The exact counts live in `coverage` beside this text and are asserted by `test_the_recorded_coverage_is_still_the_coverage`, which is why the prose here does not repeat a number that a new skill would make stale. It was complete when it was last claimed; `tools/gen_eval_cases.py --check` reports what is missing, and this stops saying PARTIAL when that output is empty. `tools/gen_eval_cases.py --check` reports what is missing and `tests/test_task_eval.py` asserts the counts against this file. THIS FILE: a broad generated set (2026-10-15) - 915 everyday requests covering all 259 skills, written by a model from the tool list and checked by script (every tool and argument exists; repeated requests removed). Run it with `task_eval.py --file tools/eval_cases_1000.json`; tools/eval_cases.json stays the hand-checked set.",
+ "cases": [
+  {
+   "id": "unmute",
+   "say": "unmute the speakers",
+   "expect": [
+    {
+     "tool": "set_mute",
+     "args": {
+      "mute": false,
+      "device": "~speakers"
+     }
+    }
+   ]
+  },
+  {
+   "id": "space-type2",
+   "say": "what takes space by type under /tmp?",
+   "expect": [
+    {
+     "tool": "space_by_type",
+     "args": {
+      "path": "~"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-187",
+   "say": "delete junk.tmp",
+   "expect": [
+    {
+     "tool": "delete_file",
+     "args": {
+      "path": "~junk.tmp"
+     }
+    }
+   ]
+  },
+  {
+   "id": "arrange-left",
+   "say": "Snap the terminal to the left half",
+   "expect": [
+    {
+     "tool": "arrange_window",
+     "args": {
+      "action": "~tile",
+      "side": "~left",
+      "title_contains": "~terminal"
+     }
+    }
+   ]
+  },
+  {
+   "id": "locale2",
+   "say": "what locale am I using?",
+   "expect": [
+    {
+     "tool": "set_locale",
+     "args": {
+      "action": "~get"
+     }
+    }
+   ]
+  },
+  {
+   "id": "writefile",
+   "say": "write todo.txt with buy milk",
+   "expect": [
+    {
+     "tool": "write_text_file",
+     "args": {
+      "path": "~todo.txt",
+      "content": "~buy milk"
+     }
+    }
+   ]
+  },
+  {
+   "id": "power-perf",
+   "say": "switch to performance mode",
+   "expect": [
+    {
+     "tool": "set_power_profile",
+     "args": {
+      "profile": "~performance"
+     }
+    }
+   ]
+  },
+  {
+   "id": "nfc-scan",
+   "say": "scan an nfc tag",
+   "expect": [
+    {
+     "tool": "nfc",
+     "args": {
+      "action": "~scan",
+      "seconds": 5
+     }
+    }
+   ]
+  },
+  {
+   "id": "w7",
+   "say": "temperature in dubai",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~dubai"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-194",
+   "say": "set volume to 30",
+   "expect": [
+    {
+     "tool": "set_volume",
+     "args": {
+      "percent": 30
+     }
+    }
+   ]
+  },
+  {
+   "id": "rec-model2",
+   "say": "what models fit in 8gb",
+   "expect": [
+    {
+     "tool": "recommend_model",
+     "args": {
+      "limit": 5
+     }
+    }
+   ]
+  },
+  {
+   "id": "ask-23",
+   "say": "Do you want this reminder pinned or in the list?",
+   "expect": [
+    {
+     "tool": "reminders",
+     "args": {
+      "action": "~add"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "extra-139",
+   "say": "turn it up to 100",
+   "expect": [
+    {
+     "tool": "set_volume",
+     "args": {
+      "percent": 100
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-21",
+   "say": "any news",
+   "none": true
+  },
+  {
+   "id": "stale2",
+   "say": "files untouched for 90 days under ~",
+   "expect": [
+    {
+     "tool": "stale_files",
+     "args": {
+      "path": "~",
+      "older_than_days": 90,
+      "limit": 15
+     }
+    }
+   ]
+  },
+  {
+   "id": "net-debug",
+   "say": "Why won't the internet load?",
+   "expect": [
+    {
+     "tool": "check_internet"
+    }
+   ]
+  },
+  {
+   "id": "scan-list",
+   "say": "list available scanners",
+   "expect": [
+    {
+     "tool": "scan_document",
+     "args": {
+      "list_only": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "alarm-morning",
+   "say": "Set an alarm for 7:30am",
+   "expect": [
+    {
+     "tool": "alarm",
+     "args": {
+      "action": "~set",
+      "time": "~7:30"
+     }
+    }
+   ]
+  },
+  {
+   "id": "conv-search",
+   "say": "Find where I talked about terraform",
+   "expect": [
+    {
+     "tool": "conversations",
+     "args": {
+      "action": "~search",
+      "query": "~terraform"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-022",
+   "say": "empty trash",
+   "expect": [
+    {
+     "tool": "empty_trash",
+     "args": {
+      "action": "~empty"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-162",
+   "say": "clean up disk",
+   "expect": [
+    {
+     "tool": "cleanup_report"
+    }
+   ]
+  },
+  {
+   "id": "cleanup-disk",
+   "say": "Anything in trash or caches I can delete?",
+   "expect": [
+    {
+     "tool": "cleanup_report"
+    }
+   ]
+  },
+  {
+   "id": "extra-012",
+   "say": "weather in warsaw",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~warsaw"
+     }
+    }
+   ]
+  },
+  {
+   "id": "find-watch",
+   "say": "Ring my watch so I can find it",
+   "expect": [
+    {
+     "tool": "find_device",
+     "args": {
+      "device": "~watch"
+     }
+    }
+   ]
+  },
+  {
+   "id": "port-check",
+   "say": "Can I reach google.com:443?",
+   "expect": [
+    {
+     "tool": "check_port",
+     "args": {
+      "host": "~google.com",
+      "port": 443
+     }
+    }
+   ]
+  },
+  {
+   "id": "mute",
+   "say": "mute the sound",
+   "expect": [
+    {
+     "tool": "set_mute",
+     "args": {
+      "mute": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-208",
+   "say": "set volume 25",
+   "expect": [
+    {
+     "tool": "set_volume",
+     "args": {
+      "percent": 25
+     }
+    }
+   ]
+  },
+  {
+   "id": "delegate-test",
+   "say": "Have a subagent run the test suite",
+   "expect": [
+    {
+     "tool": "delegate",
+     "args": {
+      "task": "~run the test suite"
+     }
+    }
+   ]
+  },
+  {
+   "id": "wifi-leave",
+   "say": "Leave the current wifi",
+   "expect": [
+    {
+     "tool": "connect_wifi"
+    }
+   ]
+  },
+  {
+   "id": "extra-147",
+   "say": "weather in moscow",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~moscow"
+     }
+    }
+   ]
+  },
+  {
+   "id": "logs",
+   "say": "which log files are biggest?",
+   "expect": [
+    {
+     "tool": "log_files"
+    }
+   ]
+  },
+  {
+   "id": "none-58",
+   "say": "chit chat",
+   "none": true
+  },
+  {
+   "id": "none-14",
+   "say": "how's the weather",
+   "none": true
+  },
+  {
+   "id": "fprint-status",
+   "say": "Is fingerprint login set up?",
+   "expect": [
+    {
+     "tool": "fingerprint_status"
+    }
+   ]
+  },
+  {
+   "id": "extra-100",
+   "say": "timer 120 seconds",
+   "expect": [
+    {
+     "tool": "set_timer",
+     "args": {
+      "action": "~set",
+      "seconds": 120
+     }
+    }
+   ]
+  },
+  {
+   "id": "vcs2",
+   "say": "vcs status of ~/code",
+   "expect": [
+    {
+     "tool": "vcs_status",
+     "args": {
+      "path": "~code"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-259",
+   "say": "add meeting tomorrow",
+   "expect": [
+    {
+     "tool": "calendar_edit",
+     "args": {
+      "action": "~create",
+      "title": "~meeting"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-023",
+   "say": "tell me the time",
+   "expect": [
+    {
+     "tool": "get_datetime"
+    }
+   ]
+  },
+  {
+   "id": "extra-116",
+   "say": "what hour is it",
+   "expect": [
+    {
+     "tool": "get_datetime"
+    }
+   ]
+  },
+  {
+   "id": "dl-file",
+   "say": "Download https://example.com/a.zip to /tmp",
+   "expect": [
+    {
+     "tool": "download_file",
+     "args": {
+      "url": "~example.com/a.zip",
+      "destination": "~"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ask-25",
+   "say": "Which virtual machine should I start?",
+   "expect": [
+    {
+     "tool": "vm",
+     "args": {
+      "action": "~start"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "extra-186",
+   "say": "open steam",
+   "expect": [
+    {
+     "tool": "open_application",
+     "args": {
+      "name": "~steam"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-005",
+   "say": "empty folders under /tmp",
+   "expect": [
+    {
+     "tool": "empty_directories",
+     "args": {
+      "path": "~"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-175",
+   "say": "move report.pdf to /tmp",
+   "expect": [
+    {
+     "tool": "move_or_copy_file",
+     "args": {
+      "source": "~report.pdf",
+      "destination": "~",
+      "mode": "~move"
+     }
+    }
+   ]
+  },
+  {
+   "id": "volume-get",
+   "say": "how loud is it right now?",
+   "expect": [
+    {
+     "tool": "get_volume"
+    }
+   ]
+  },
+  {
+   "id": "none-04",
+   "say": "good morning",
+   "none": true
+  },
+  {
+   "id": "apply-strip",
+   "say": "Apply the fix.patch here, stripping the top path component",
+   "expect": [
+    {
+     "tool": "apply_patch",
+     "args": {
+      "patch": "~fix.patch",
+      "strip": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-06",
+   "say": "how are you doing today",
+   "none": true
+  },
+  {
+   "id": "vol2",
+   "say": "volume up",
+   "expect": [
+    {
+     "tool": "set_volume",
+     "args": {
+      "percent": 80
+     }
+    }
+   ]
+  },
+  {
+   "id": "disk-hidden",
+   "say": "Show partitions including hidden ones",
+   "expect": [
+    {
+     "tool": "disk_layout",
+     "args": {
+      "show_hidden": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-085",
+   "say": "delete that reminder",
+   "expect": [
+    {
+     "tool": "reminders",
+     "args": {
+      "action": "~delete",
+      "text": "~"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-238",
+   "say": "snap firefox to left",
+   "expect": [
+    {
+     "tool": "arrange_window",
+     "args": {
+      "action": "~tile",
+      "side": "~left",
+      "title_contains": "~firefox"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ptr-move",
+   "say": "move the cursor to 400 300",
+   "expect": [
+    {
+     "tool": "move_pointer",
+     "args": {
+      "x": 400,
+      "y": 300
+     }
+    }
+   ]
+  },
+  {
+   "id": "cleanup-report",
+   "say": "What could I clean up to free space?",
+   "expect": [
+    {
+     "tool": "cleanup_report"
+    }
+   ]
+  },
+  {
+   "id": "extra-257",
+   "say": "open the logs folder",
+   "expect": [
+    {
+     "tool": "open_file",
+     "args": {
+      "path": "~logs"
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-42",
+   "say": "okay",
+   "none": true
+  },
+  {
+   "id": "ask-22",
+   "say": "Which note should I update?",
+   "expect": [
+    {
+     "tool": "notes",
+     "args": {
+      "action": "~add"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "extra-176",
+   "say": "louder please",
+   "expect": [
+    {
+     "tool": "set_volume",
+     "args": {
+      "percent": 70
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-207",
+   "say": "close all windows",
+   "expect": [
+    {
+     "tool": "close_window",
+     "args": {
+      "title_contains": "*"
+     }
+    }
+   ]
+  },
+  {
+   "id": "lab-destroy",
+   "say": "tear down the labnet network",
+   "expect": [
+    {
+     "tool": "lab_network_destroy",
+     "args": {
+      "name": "~labnet",
+      "apply": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "print2",
+   "say": "print doc.txt on the office printer",
+   "expect": [
+    {
+     "tool": "print_file",
+     "args": {
+      "path": "~doc.txt",
+      "printer": "~office"
+     }
+    }
+   ]
+  },
+  {
+   "id": "autostart-list",
+   "say": "What starts up automatically when I log in?",
+   "expect": [
+    {
+     "tool": "autostart_entries"
+    }
+   ]
+  },
+  {
+   "id": "ask-28",
+   "say": "What name should I give the new branch?",
+   "expect": [
+    {
+     "tool": "git_branch",
+     "args": {
+      "name": "~feature"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "wifi4",
+   "say": "disable wifi",
+   "expect": [
+    {
+     "tool": "toggle_wifi",
+     "args": {
+      "action": "~off"
+     }
+    }
+   ]
+  },
+  {
+   "id": "usb",
+   "say": "what's plugged into usb?",
+   "expect": [
+    {
+     "tool": "usb_devices"
+    }
+   ]
+  },
+  {
+   "id": "date-now",
+   "say": "today's date",
+   "expect": [
+    {
+     "tool": "get_datetime"
+    }
+   ]
+  },
+  {
+   "id": "f4",
+   "say": "read todo.txt",
+   "expect": [
+    {
+     "tool": "read_text_file",
+     "args": {
+      "path": "~todo.txt"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-017",
+   "say": "capital of australia",
+   "expect": [
+    {
+     "tool": "web_search",
+     "args": {
+      "query": "~australia capital"
+     }
+    },
+    {
+     "tool": "lookup_wikipedia",
+     "args": {
+      "topic": "~australia"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-247",
+   "say": "who is ada lovelace",
+   "expect": [
+    {
+     "tool": "lookup_wikipedia",
+     "args": {
+      "topic": "~ada lovelace"
+     }
+    },
+    {
+     "tool": "web_search",
+     "args": {
+      "query": "~ada lovelace"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-122",
+   "say": "pair the headphones",
+   "expect": [
+    {
+     "tool": "bluetooth_devices",
+     "args": {
+      "action": "~connect",
+      "name": "~headphones"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-260",
+   "say": "next month's calendar",
+   "expect": [
+    {
+     "tool": "calendar_month",
+     "args": {
+      "month": 11
+     }
+    }
+   ]
+  },
+  {
+   "id": "screenshot",
+   "say": "take a screenshot",
+   "expect": [
+    {
+     "tool": "screenshot"
+    }
+   ]
+  },
+  {
+   "id": "ir-recv",
+   "say": "Record ir timings for 3 seconds",
+   "expect": [
+    {
+     "tool": "ir_remote",
+     "args": {
+      "action": "~record",
+      "seconds": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-121",
+   "say": "whats the date today",
+   "expect": [
+    {
+     "tool": "get_datetime"
+    }
+   ]
+  },
+  {
+   "id": "wifi5",
+   "say": "enable wifi radio",
+   "expect": [
+    {
+     "tool": "toggle_wifi",
+     "args": {
+      "action": "~on"
+     }
+    }
+   ]
+  },
+  {
+   "id": "doc-read",
+   "say": "read the text of report.docx",
+   "expect": [
+    {
+     "tool": "office_document",
+     "args": {
+      "action": "~read",
+      "path": "~report.docx"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-151",
+   "say": "add a reminder walk dog",
+   "expect": [
+    {
+     "tool": "reminders",
+     "args": {
+      "action": "~add",
+      "text": "~walk dog"
+     }
+    }
+   ]
+  },
+  {
+   "id": "notify",
+   "say": "remind me to stand up",
+   "expect": [
+    {
+     "tool": "notify",
+     "args": {
+      "summary": "~stand up",
+      "body": "~it's been an hour"
+     }
+    }
+   ]
+  },
+  {
+   "id": "cu-mile",
+   "say": "100 km in miles",
+   "expect": [
+    {
+     "tool": "convert_units",
+     "args": {
+      "value": 100,
+      "from_unit": "~km",
+      "to_unit": "~miles"
+     }
+    }
+   ]
+  },
+  {
+   "id": "sync-folder",
+   "say": "sync /tmp/src to /tmp/dst, show plan first",
+   "expect": [
+    {
+     "tool": "sync_folder",
+     "args": {
+      "source": "~src",
+      "destination": "~dst",
+      "apply": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-105",
+   "say": "battery percent",
+   "expect": [
+    {
+     "tool": "get_battery_status"
+    }
+   ]
+  },
+  {
+   "id": "extra-080",
+   "say": "file size of big.bin",
+   "expect": [
+    {
+     "tool": "get_file_info",
+     "args": {
+      "path": "~big.bin"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-019",
+   "say": "start keepass",
+   "expect": [
+    {
+     "tool": "open_application",
+     "args": {
+      "name": "~keepass"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ask-confirm",
+   "say": "Delete everything in /tmp/old?",
+   "expect": [
+    {
+     "tool": "ask_user",
+     "args": {
+      "question": "~delete"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-098",
+   "say": "weather dublin",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~dublin"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-235",
+   "say": "weather in amsterdam",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~amsterdam"
+     }
+    }
+   ]
+  },
+  {
+   "id": "search-web",
+   "say": "who won the world series 2024",
+   "expect": [
+    {
+     "tool": "web_search",
+     "args": {
+      "query": "~world series 2024"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-125",
+   "say": "is it muted",
+   "expect": [
+    {
+     "tool": "get_volume"
+    }
+   ]
+  },
+  {
+   "id": "media-play",
+   "say": "play",
+   "expect": [
+    {
+     "tool": "media_control",
+     "args": {
+      "action": "~play"
+     }
+    }
+   ]
+  },
+  {
+   "id": "wallpaper-set",
+   "say": "set the wallpaper to mountain.jpg",
+   "expect": [
+    {
+     "tool": "set_wallpaper",
+     "args": {
+      "action": "~set",
+      "image": "~mountain.jpg"
+     }
+    }
+   ]
+  },
+  {
+   "id": "airplane-on",
+   "say": "Enable airplane mode",
+   "expect": [
+    {
+     "tool": "airplane_mode",
+     "args": {
+      "action": "*"
+     }
+    }
+   ]
+  },
+  {
+   "id": "myfiles",
+   "say": "search my home for receipts",
+   "expect": [
+    {
+     "tool": "search_my_files",
+     "args": {
+      "action": "~search",
+      "query": "~receipts",
+      "path": "~"
+     }
+    }
+   ]
+  },
+  {
+   "id": "meeting-start",
+   "say": "start a meeting recording for 25 minutes",
+   "expect": [
+    {
+     "tool": "meeting",
+     "args": {
+      "action": "~start",
+      "minutes": 25
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-137",
+   "say": "nearest chinese restaurant",
+   "expect": [
+    {
+     "tool": "web_search",
+     "args": {
+      "query": "~chinese restaurant"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-026",
+   "say": "scan wifi networks",
+   "expect": [
+    {
+     "tool": "list_wifi_networks"
+    }
+   ]
+  },
+  {
+   "id": "conflict-resolve",
+   "say": "resolve the conflicts in src/",
+   "expect": [
+    {
+     "tool": "resolve_conflict",
+     "args": {
+      "action": "~resolve",
+      "paths": "*"
+     }
+    }
+   ]
+  },
+  {
+   "id": "trash-empty",
+   "say": "Empty the trash",
+   "expect": [
+    {
+     "tool": "empty_trash",
+     "args": {
+      "action": "~empty"
+     }
+    }
+   ]
+  },
+  {
+   "id": "mkdir-b",
+   "say": "Create ~/projects/newsite folders",
+   "expect": [
+    {
+     "tool": "create_directory",
+     "args": {
+      "path": "~newsite"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-184",
+   "say": "current disk activity",
+   "expect": [
+    {
+     "tool": "disk_activity"
+    }
+   ]
+  },
+  {
+   "id": "extra-190",
+   "say": "join the office network",
+   "expect": [
+    {
+     "tool": "connect_wifi",
+     "args": {
+      "ssid": "~office"
+     }
+    }
+   ]
+  },
+  {
+   "id": "date-today",
+   "say": "what's today's date",
+   "expect": [
+    {
+     "tool": "get_datetime"
+    }
+   ]
+  },
+  {
+   "id": "find-recent",
+   "say": "Find report*.pdf in ~/Documents",
+   "expect": [
+    {
+     "tool": "find_files",
+     "args": {
+      "pattern": "~report*",
+      "path": "~Documents"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-084",
+   "say": "15 minute timer",
+   "expect": [
+    {
+     "tool": "set_timer",
+     "args": {
+      "action": "~set",
+      "seconds": 900
+     }
+    }
+   ]
+  },
+  {
+   "id": "wiki2",
+   "say": "what is the great wall of china",
+   "expect": [
+    {
+     "tool": "lookup_wikipedia",
+     "args": {
+      "topic": "~great wall of china"
+     }
+    }
+   ]
+  },
+  {
+   "id": "containers2",
+   "say": "show me distroboxes and pods",
+   "expect": [
+    {
+     "tool": "list_containers"
+    }
+   ]
+  },
+  {
+   "id": "temps",
+   "say": "what are the cpu and gpu temps?",
+   "expect": [
+    {
+     "tool": "temperatures"
+    }
+   ]
+  },
+  {
+   "id": "time",
+   "say": "What time is it?",
+   "expect": [
+    {
+     "tool": "get_datetime"
+    }
+   ]
+  },
+  {
+   "id": "extra-256",
+   "say": "find duplicate photos",
+   "expect": [
+    {
+     "tool": "duplicate_files",
+     "args": {
+      "path": "~"
+     }
+    }
+   ]
+  },
+  {
+   "id": "bw-nas",
+   "say": "Push data to nas.local port 5201 for 8 seconds",
+   "expect": [
+    {
+     "tool": "bandwidth_to_host",
+     "args": {
+      "host": "~nas.local",
+      "port": 5201,
+      "seconds": 8
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-063",
+   "say": "volume to 40 percent",
+   "expect": [
+    {
+     "tool": "set_volume",
+     "args": {
+      "percent": 40
+     }
+    }
+   ]
+  },
+  {
+   "id": "updates-check",
+   "say": "Are there package updates?",
+   "expect": [
+    {
+     "tool": "check_updates"
+    }
+   ]
+  },
+  {
+   "id": "img-prompt1",
+   "say": "A photorealistic apple on a wooden table, 1024x1024",
+   "expect": [
+    {
+     "tool": "generate_image",
+     "args": {
+      "prompt": "~apple"
+     }
+    }
+   ]
+  },
+  {
+   "id": "audio-trim",
+   "say": "Trim song.mp3 to the first 15 seconds",
+   "expect": [
+    {
+     "tool": "edit_audio",
+     "args": {
+      "path": "~song.mp3",
+      "start": 0,
+      "end": 15
+     }
+    }
+   ]
+  },
+  {
+   "id": "cal-now",
+   "say": "What month is this?",
+   "expect": [
+    {
+     "tool": "calendar_month"
+    }
+   ]
+  },
+  {
+   "id": "vid-mute",
+   "say": "Mute the audio of lecture.mp4",
+   "expect": [
+    {
+     "tool": "edit_video",
+     "args": {
+      "path": "~lecture.mp4",
+      "mute": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-087",
+   "say": "find *.log files",
+   "expect": [
+    {
+     "tool": "find_files",
+     "args": {
+      "pattern": "~*.log"
+     }
+    }
+   ]
+  },
+  {
+   "id": "traceroute2",
+   "say": "traceroute example.com with 5 probes",
+   "expect": [
+    {
+     "tool": "trace_route",
+     "args": {
+      "host": "~example.com",
+      "probes": 5
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-245",
+   "say": "how full is the drive",
+   "expect": [
+    {
+     "tool": "disk_usage"
+    }
+   ]
+  },
+  {
+   "id": "git4",
+   "say": "git log",
+   "expect": [
+    {
+     "tool": "git_inspect",
+     "args": {
+      "subcommand": "~log"
+     }
+    }
+   ]
+  },
+  {
+   "id": "w5",
+   "say": "weather boston today",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~boston"
+     }
+    }
+   ]
+  },
+  {
+   "id": "timer-90s",
+   "say": "90 second timer for the eggs",
+   "expect": [
+    {
+     "tool": "set_timer",
+     "args": {
+      "action": "~set",
+      "seconds": 90,
+      "label": "~egg"
+     }
+    }
+   ]
+  },
+  {
+   "id": "scaling",
+   "say": "set text scaling to 1.5",
+   "expect": [
+    {
+     "tool": "set_scaling",
+     "args": {
+      "action": "~set",
+      "factor": 1.5
+     }
+    }
+   ]
+  },
+  {
+   "id": "bt5",
+   "say": "turn bluetooth off",
+   "expect": [
+    {
+     "tool": "toggle_bluetooth",
+     "args": {
+      "action": "~off"
+     }
+    }
+   ]
+  },
+  {
+   "id": "doc5",
+   "say": "new text file hello.txt",
+   "expect": [
+    {
+     "tool": "write_text_file",
+     "args": {
+      "path": "~hello.txt",
+      "content": "~hi"
+     }
+    }
+   ]
+  },
+  {
+   "id": "speedtest",
+   "say": "test my internet speed",
+   "expect": [
+    {
+     "tool": "speed_test"
+    }
+   ]
+  },
+  {
+   "id": "extra-154",
+   "say": "is it charging",
+   "expect": [
+    {
+     "tool": "get_battery_status"
+    }
+   ]
+  },
+  {
+   "id": "wifi6",
+   "say": "rescan wifi networks",
+   "expect": [
+    {
+     "tool": "list_wifi_networks",
+     "args": {
+      "rescan": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "wifi-rescan",
+   "say": "rescan for wifi networks",
+   "expect": [
+    {
+     "tool": "list_wifi_networks",
+     "args": {
+      "rescan": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "install-model",
+   "say": "Download the llama3 model",
+   "expect": [
+    {
+     "tool": "install_model",
+     "args": {
+      "name": "~llama3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ping2",
+   "say": "is 1.1.1.1 alive?",
+   "expect": [
+    {
+     "tool": "ping_host",
+     "args": {
+      "host": "~1.1.1.1",
+      "count": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "cal4",
+   "say": "schedule a call",
+   "expect": [
+    {
+     "tool": "calendar_edit",
+     "args": {
+      "action": "~create",
+      "title": "~meeting"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ask-32",
+   "say": "Which device should I pair?",
+   "expect": [
+    {
+     "tool": "bluetooth_devices",
+     "args": {
+      "action": "~connect"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "ask-30",
+   "say": "Do you want the full transcript or a summary?",
+   "expect": [
+    {
+     "tool": "recording",
+     "args": {
+      "action": "~transcribe"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "extra-173",
+   "say": "what type is mystery.dat",
+   "expect": [
+    {
+     "tool": "identify_file",
+     "args": {
+      "path": "~mystery.dat"
+     }
+    }
+   ]
+  },
+  {
+   "id": "cpu-cores",
+   "say": "Which cores are busy?",
+   "expect": [
+    {
+     "tool": "cpu_per_core"
+    }
+   ]
+  },
+  {
+   "id": "empty-dirs",
+   "say": "Find empty folders under /tmp/proj",
+   "expect": [
+    {
+     "tool": "empty_directories",
+     "args": {
+      "path": "~proj"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ui-hello",
+   "say": "what apps and controls are reachable?",
+   "expect": [
+    {
+     "tool": "ui_elements",
+     "args": {
+      "action": "~apps"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-070",
+   "say": "weather in stockholm",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~stockholm"
+     }
+    }
+   ]
+  },
+  {
+   "id": "doc-md",
+   "say": "Turn readme.docx into markdown",
+   "expect": [
+    {
+     "tool": "convert_document",
+     "args": {
+      "path": "~readme.docx",
+      "to": "~md"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-211",
+   "say": "connect my watch",
+   "expect": [
+    {
+     "tool": "bluetooth_devices",
+     "args": {
+      "action": "~connect",
+      "name": "~watch"
+     }
+    }
+   ]
+  },
+  {
+   "id": "vol4",
+   "say": "turn sound up to 80",
+   "expect": [
+    {
+     "tool": "set_volume",
+     "args": {
+      "percent": 80
+     }
+    }
+   ]
+  },
+  {
+   "id": "ask-20",
+   "say": "Where should I save the downloaded file?",
+   "expect": [
+    {
+     "tool": "download_file",
+     "args": {
+      "url": "~"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "procs2",
+   "say": "show firefox processes",
+   "expect": [
+    {
+     "tool": "list_processes",
+     "args": {
+      "name_filter": "~firefox",
+      "sort_by": "~cpu",
+      "limit": 10
+     }
+    }
+   ]
+  },
+  {
+   "id": "whois2",
+   "say": "whois 1.2.3.4",
+   "expect": [
+    {
+     "tool": "whois_lookup",
+     "args": {
+      "domain": "~1.2.3.4"
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-26",
+   "say": "your name",
+   "none": true
+  },
+  {
+   "id": "none-03",
+   "say": "hey how are you",
+   "none": true
+  },
+  {
+   "id": "tree-deep",
+   "say": "Nested tree of ~/docs to depth 2",
+   "expect": [
+    {
+     "tool": "directory_tree",
+     "args": {
+      "path": "~docs",
+      "max_depth": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "bat2",
+   "say": "how charged is my laptop",
+   "expect": [
+    {
+     "tool": "get_battery_status"
+    }
+   ]
+  },
+  {
+   "id": "lanphone-find",
+   "say": "find phones on the same wifi to ring",
+   "expect": [
+    {
+     "tool": "lan_phone",
+     "args": {
+      "action": "~find",
+      "seconds": 10
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-34",
+   "say": "cool",
+   "none": true
+  },
+  {
+   "id": "cal-month",
+   "say": "Show October 2026",
+   "expect": [
+    {
+     "tool": "calendar_month",
+     "args": {
+      "month": 10,
+      "year": 2026
+     }
+    }
+   ]
+  },
+  {
+   "id": "translate2",
+   "say": "english to french: good morning",
+   "expect": [
+    {
+     "tool": "translate_text",
+     "args": {
+      "text": "~good morning",
+      "from_language": "~en",
+      "to_language": "~fr"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-171",
+   "say": "find notes with todo",
+   "expect": [
+    {
+     "tool": "notes",
+     "args": {
+      "action": "~search",
+      "query": "~todo"
+     }
+    }
+   ]
+  },
+  {
+   "id": "explain-grep",
+   "say": "Explain grep -rn",
+   "expect": [
+    {
+     "tool": "explain_command",
+     "args": {
+      "command": "~grep -rn"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-255",
+   "say": "volume 50",
+   "expect": [
+    {
+     "tool": "set_volume",
+     "args": {
+      "percent": 50
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-200",
+   "say": "open firefox",
+   "expect": [
+    {
+     "tool": "open_application",
+     "args": {
+      "name": "~firefox"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-224",
+   "say": "search flathub for vscode",
+   "expect": [
+    {
+     "tool": "install_app",
+     "args": {
+      "query": "~vscode"
+     }
+    }
+   ]
+  },
+  {
+   "id": "a5",
+   "say": "open the calculator",
+   "expect": [
+    {
+     "tool": "open_application",
+     "args": {
+      "name": "~calculator"
+     }
+    }
+   ]
+  },
+  {
+   "id": "audio-switch",
+   "say": "Switch output to my Bluetooth headphones",
+   "expect": [
+    {
+     "tool": "audio_output",
+     "args": {
+      "action": "~switch",
+      "device": "~headphones"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-046",
+   "say": "maximize the window",
+   "expect": [
+    {
+     "tool": "arrange_window",
+     "args": {
+      "action": "~maximize"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-077",
+   "say": "latest iphone price",
+   "expect": [
+    {
+     "tool": "web_search",
+     "args": {
+      "query": "~iphone price"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-153",
+   "say": "leave this wifi",
+   "expect": [
+    {
+     "tool": "connect_wifi"
+    }
+   ]
+  },
+  {
+   "id": "extra-152",
+   "say": "unmute microphone",
+   "expect": [
+    {
+     "tool": "set_mic_mute",
+     "args": {
+      "action": "~unmute"
+     }
+    }
+   ]
+  },
+  {
+   "id": "time-syd",
+   "say": "time in sydney",
+   "expect": [
+    {
+     "tool": "get_world_time",
+     "args": {
+      "place": "~sydney"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ask-14",
+   "say": "Should the timer count down or be an alarm?",
+   "expect": [
+    {
+     "tool": "set_timer",
+     "args": {
+      "action": "~set"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "boot-report",
+   "say": "How did the last boot go?",
+   "expect": [
+    {
+     "tool": "boot_report"
+    }
+   ]
+  },
+  {
+   "id": "extra-096",
+   "say": "what's the weather in berlin?",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~berlin"
+     }
+    },
+    {
+     "tool": "web_search",
+     "args": {
+      "query": "~berlin weather"
+     }
+    }
+   ]
+  },
+  {
+   "id": "stopwatch-lap",
+   "say": "lap the stopwatch",
+   "expect": [
+    {
+     "tool": "stopwatch",
+     "args": {
+      "action": "~lap"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-095",
+   "say": "what time is it",
+   "expect": [
+    {
+     "tool": "get_datetime"
+    }
+   ]
+  },
+  {
+   "id": "port-owner",
+   "say": "what's using port 8080?",
+   "expect": [
+    {
+     "tool": "port_owner",
+     "args": {
+      "port": 8080
+     }
+    }
+   ]
+  },
+  {
+   "id": "readtxt",
+   "say": "show me lines 10-30 of app.py",
+   "expect": [
+    {
+     "tool": "read_text_file",
+     "args": {
+      "path": "~app.py",
+      "start_line": 10,
+      "max_lines": 20
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-15",
+   "say": "tell me a joke",
+   "none": true
+  },
+  {
+   "id": "dnd-on",
+   "say": "Quiet please, turn on do not disturb",
+   "expect": [
+    {
+     "tool": "do_not_disturb",
+     "args": {
+      "enabled": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "port-closed",
+   "say": "Is anything listening on localhost:8080?",
+   "expect": [
+    {
+     "tool": "check_port",
+     "args": {
+      "host": "~localhost",
+      "port": 8080
+     }
+    }
+   ]
+  },
+  {
+   "id": "port-listen",
+   "say": "list listening ports",
+   "expect": [
+    {
+     "tool": "port_owner",
+     "args": {
+      "listening": true,
+      "limit": 20
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-048",
+   "say": "snow denver tonight",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~denver"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-110",
+   "say": "connect to campus wifi",
+   "expect": [
+    {
+     "tool": "connect_wifi",
+     "args": {
+      "ssid": "~campus"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-113",
+   "say": "how much charge",
+   "expect": [
+    {
+     "tool": "get_battery_status"
+    }
+   ]
+  },
+  {
+   "id": "reminder-list",
+   "say": "what reminders are due?",
+   "expect": [
+    {
+     "tool": "reminders",
+     "args": {
+      "action": "~list"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-170",
+   "say": "search for TODO in code",
+   "expect": [
+    {
+     "tool": "search_file_contents",
+     "args": {
+      "text": "~TODO"
+     }
+    }
+   ]
+  },
+  {
+   "id": "readdoc2",
+   "say": "summarise paper.pdf",
+   "expect": [
+    {
+     "tool": "read_document",
+     "args": {
+      "path": "~paper.pdf"
+     }
+    }
+   ]
+  },
+  {
+   "id": "battery-perc",
+   "say": "How much battery is left?",
+   "expect": [
+    {
+     "tool": "get_battery_status"
+    }
+   ]
+  },
+  {
+   "id": "wifi-nearby",
+   "say": "what wifi networks are in range?",
+   "expect": [
+    {
+     "tool": "list_wifi_networks"
+    }
+   ]
+  },
+  {
+   "id": "inspect-bin2",
+   "say": "check the architecture of app.bin",
+   "expect": [
+    {
+     "tool": "inspect_binary",
+     "args": {
+      "path": "~app.bin"
+     }
+    }
+   ]
+  },
+  {
+   "id": "integral",
+   "say": "integrate x^2 from 0 to 3",
+   "expect": [
+    {
+     "tool": "solve_math",
+     "args": {
+      "operation": "~integral",
+      "expression": "~x^2",
+      "variable": "~x",
+      "lower": 0,
+      "upper": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-53",
+   "say": "did you know",
+   "none": true
+  },
+  {
+   "id": "lock",
+   "say": "lock my screen",
+   "expect": [
+    {
+     "tool": "lock_screen"
+    }
+   ]
+  },
+  {
+   "id": "extra-104",
+   "say": "show partition table",
+   "expect": [
+    {
+     "tool": "disk_layout"
+    }
+   ]
+  },
+  {
+   "id": "f3",
+   "say": "show me home directory",
+   "expect": [
+    {
+     "tool": "list_directory"
+    }
+   ]
+  },
+  {
+   "id": "pw-password",
+   "say": "Give me a 16 char password with symbols",
+   "expect": [
+    {
+     "tool": "generate_password",
+     "args": {
+      "kind": "~password",
+      "length": 16,
+      "symbols": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "doc3",
+   "say": "convert to pdf",
+   "expect": [
+    {
+     "tool": "convert_document",
+     "args": {
+      "path": "~doc.docx",
+      "to": "~pdf"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-156",
+   "say": "open the mail app",
+   "expect": [
+    {
+     "tool": "open_application",
+     "args": {
+      "name": "~mail"
+     }
+    }
+   ]
+  },
+  {
+   "id": "img1",
+   "say": "resize banner.png",
+   "expect": [
+    {
+     "tool": "edit_image",
+     "args": {
+      "path": "~banner.png"
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-18",
+   "say": "i'm bored",
+   "none": true
+  },
+  {
+   "id": "img-resize",
+   "say": "Resize photo.png to 800 wide",
+   "expect": [
+    {
+     "tool": "edit_image",
+     "args": {
+      "path": "~photo.png",
+      "width": "~800"
+     }
+    }
+   ]
+  },
+  {
+   "id": "wallpaper-get",
+   "say": "what's my current wallpaper?",
+   "expect": [
+    {
+     "tool": "set_wallpaper",
+     "args": {
+      "action": "~get"
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-37",
+   "say": "same",
+   "none": true
+  },
+  {
+   "id": "extra-195",
+   "say": "what's my calendar for friday",
+   "expect": [
+    {
+     "tool": "calendar_events",
+     "args": {
+      "range": "~friday"
+     }
+    }
+   ]
+  },
+  {
+   "id": "i2c-read",
+   "say": "Read register 0x10 on bus 1 address 0x42",
+   "expect": [
+    {
+     "tool": "device_i2c",
+     "args": {
+      "action": "~read",
+      "bus": 1,
+      "address": "~0x42",
+      "register": "~0x10"
+     }
+    }
+   ]
+  },
+  {
+   "id": "w9",
+   "say": "windy in chicago?",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~chicago"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-192",
+   "say": "search notes for recipe",
+   "expect": [
+    {
+     "tool": "notes",
+     "args": {
+      "action": "~search",
+      "query": "~recipe"
+     }
+    }
+   ]
+  },
+  {
+   "id": "vidinfo2",
+   "say": "read video at /tmp/lecture.mov",
+   "expect": [
+    {
+     "tool": "read_video",
+     "args": {
+      "path": "~lecture.mov"
+     }
+    }
+   ]
+  },
+  {
+   "id": "a1",
+   "say": "open slack",
+   "expect": [
+    {
+     "tool": "open_application",
+     "args": {
+      "name": "~slack"
+     }
+    }
+   ]
+  },
+  {
+   "id": "fm-hardware",
+   "say": "Can this machine receive FM radio?",
+   "expect": [
+    {
+     "tool": "fm_radio",
+     "args": {
+      "action": "~hardware"
+     }
+    }
+   ]
+  },
+  {
+   "id": "pdf-info",
+   "say": "how many pages in doc.pdf?",
+   "expect": [
+    {
+     "tool": "pdf_pages",
+     "args": {
+      "action": "~info",
+      "path": "~doc.pdf"
+     }
+    }
+   ]
+  },
+  {
+   "id": "qr-write",
+   "say": "make a qr code for hello world",
+   "expect": [
+    {
+     "tool": "qr_code",
+     "args": {
+      "action": "~write",
+      "text": "~hello world"
+     }
+    }
+   ]
+  },
+  {
+   "id": "theme-light",
+   "say": "switch to light theme",
+   "expect": [
+    {
+     "tool": "set_theme",
+     "args": {
+      "action": "~light"
+     }
+    }
+   ]
+  },
+  {
+   "id": "outline2",
+   "say": "show classes in server.py",
+   "expect": [
+    {
+     "tool": "project_outline",
+     "args": {
+      "path": "~server.py"
+     }
+    }
+   ]
+  },
+  {
+   "id": "fwu-efi",
+   "say": "Check for BIOS updates",
+   "expect": [
+    {
+     "tool": "firmware_updates"
+    }
+   ]
+  },
+  {
+   "id": "define-verbose",
+   "say": "Define verbose",
+   "expect": [
+    {
+     "tool": "define_word",
+     "args": {
+      "word": "~verbose"
+     }
+    }
+   ]
+  },
+  {
+   "id": "vm-list",
+   "say": "list my libvirt VMs",
+   "expect": [
+    {
+     "tool": "vm",
+     "args": {
+      "action": "~list"
+     }
+    }
+   ]
+  },
+  {
+   "id": "rc3",
+   "say": "python -m pytest",
+   "expect": [
+    {
+     "tool": "run_command",
+     "args": {
+      "command": "~python -m pytest"
+     }
+    }
+   ]
+  },
+  {
+   "id": "click-right",
+   "say": "Right-click twice",
+   "expect": [
+    {
+     "tool": "click_pointer",
+     "args": {
+      "button": "~right",
+      "count": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "trash-list",
+   "say": "What's in the trash?",
+   "expect": [
+    {
+     "tool": "empty_trash",
+     "args": {
+      "action": "~list"
+     }
+    }
+   ]
+  },
+  {
+   "id": "wifi1",
+   "say": "connect to coffee-shop wifi",
+   "expect": [
+    {
+     "tool": "connect_wifi",
+     "args": {
+      "ssid": "~coffee-shop"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-097",
+   "say": "turn wifi on",
+   "expect": [
+    {
+     "tool": "toggle_wifi",
+     "args": {
+      "action": "~on"
+     }
+    }
+   ]
+  },
+  {
+   "id": "snapshot2",
+   "say": "what's the OS version and slot?",
+   "expect": [
+    {
+     "tool": "snapshot_status"
+    }
+   ]
+  },
+  {
+   "id": "audinfo2",
+   "say": "tell me the bitrate of song.wav",
+   "expect": [
+    {
+     "tool": "read_audio",
+     "args": {
+      "path": "~song.wav"
+     }
+    }
+   ]
+  },
+  {
+   "id": "color-name",
+   "say": "What color is tomato?",
+   "expect": [
+    {
+     "tool": "convert_color",
+     "args": {
+      "color": "~tomato"
+     }
+    }
+   ]
+  },
+  {
+   "id": "archive-zip",
+   "say": "Zip up /tmp/proj into proj.zip",
+   "expect": [
+    {
+     "tool": "create_archive",
+     "args": {
+      "action": "~create",
+      "source": "~proj",
+      "destination": "~proj.zip",
+      "format": "~zip"
+     }
+    }
+   ]
+  },
+  {
+   "id": "cloud-proj",
+   "say": "Show the backups folder on the s3 remote",
+   "expect": [
+    {
+     "tool": "cloud_files",
+     "args": {
+      "remote": "~s3",
+      "path": "~backups"
+     }
+    }
+   ]
+  },
+  {
+   "id": "lab-list",
+   "say": "what lab networks exist?",
+   "expect": [
+    {
+     "tool": "lab_network_list"
+    }
+   ]
+  },
+  {
+   "id": "crash-show",
+   "say": "Show me recent crashes",
+   "expect": [
+    {
+     "tool": "crash_report"
+    }
+   ]
+  },
+  {
+   "id": "vpn-connect",
+   "say": "connect to the office vpn",
+   "expect": [
+    {
+     "tool": "vpn_control",
+     "args": {
+      "action": "~connect",
+      "name": "~office"
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-12",
+   "say": "goodnight",
+   "none": true
+  },
+  {
+   "id": "git-commit",
+   "say": "commit the changes with message 'fix bug'",
+   "expect": [
+    {
+     "tool": "git_commit",
+     "args": {
+      "files": "*",
+      "message": "~fix bug"
+     }
+    }
+   ]
+  },
+  {
+   "id": "routine-list",
+   "say": "what routines do I have?",
+   "expect": [
+    {
+     "tool": "routines",
+     "args": {
+      "action": "~list"
+     }
+    }
+   ]
+  },
+  {
+   "id": "w1",
+   "say": "weather in mumbai",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~mumbai"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-150",
+   "say": "grep foo in js files",
+   "expect": [
+    {
+     "tool": "search_file_contents",
+     "args": {
+      "text": "~foo",
+      "file_pattern": "~*.js"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ask-39",
+   "say": "Where to extract the archive?",
+   "expect": [
+    {
+     "tool": "extract_archive",
+     "args": {
+      "archive": "~"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "drv-check",
+   "say": "Do we have a compiler and kernel tree?",
+   "expect": [
+    {
+     "tool": "driver_status"
+    }
+   ]
+  },
+  {
+   "id": "myfiles2",
+   "say": "find notebooks in ~/docs",
+   "expect": [
+    {
+     "tool": "search_my_files",
+     "args": {
+      "action": "~search",
+      "query": "~notebook",
+      "path": "~docs"
+     }
+    }
+   ]
+  },
+  {
+   "id": "locks-dir",
+   "say": "What's locking /var/lib/foo?",
+   "expect": [
+    {
+     "tool": "file_locks",
+     "args": {
+      "path": "~foo"
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-51",
+   "say": "random thought",
+   "none": true
+  },
+  {
+   "id": "vm-start",
+   "say": "start the win10 vm with 4096 memory",
+   "expect": [
+    {
+     "tool": "vm",
+     "args": {
+      "action": "~start",
+      "name": "~win10",
+      "memory_mb": 4096
+     }
+    }
+   ]
+  },
+  {
+   "id": "time-par",
+   "say": "time in paris",
+   "expect": [
+    {
+     "tool": "get_world_time",
+     "args": {
+      "place": "~paris"
+     }
+    }
+   ]
+  },
+  {
+   "id": "weather",
+   "say": "What's the weather like in Pune?",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~pune"
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-50",
+   "say": "help me decide",
+   "none": true
+  },
+  {
+   "id": "extra-261",
+   "say": "connect my airpods",
+   "expect": [
+    {
+     "tool": "bluetooth_devices",
+     "args": {
+      "action": "~connect",
+      "name": "~airpods"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-055",
+   "say": "connect speakers",
+   "expect": [
+    {
+     "tool": "bluetooth_devices",
+     "args": {
+      "action": "~connect",
+      "name": "~speakers"
+     }
+    }
+   ]
+  },
+  {
+   "id": "svc-restart",
+   "say": "Restart the docker service",
+   "expect": [
+    {
+     "tool": "control_service",
+     "args": {
+      "unit": "~docker.service",
+      "action": "~restart"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-145",
+   "say": "how tall is mount everest",
+   "expect": [
+    {
+     "tool": "web_search",
+     "args": {
+      "query": "~mount everest"
+     }
+    }
+   ]
+  },
+  {
+   "id": "night-off",
+   "say": "turn off the blue light filter",
+   "expect": [
+    {
+     "tool": "toggle_night_light",
+     "args": {
+      "action": "~off"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-183",
+   "say": "read config.py",
+   "expect": [
+    {
+     "tool": "read_text_file",
+     "args": {
+      "path": "~config.py"
+     }
+    }
+   ]
+  },
+  {
+   "id": "json-keys",
+   "say": "what keys does config.json have",
+   "expect": [
+    {
+     "tool": "json_query",
+     "args": {
+      "path": "~config.json",
+      "operation": "~keys"
+     }
+    }
+   ]
+  },
+  {
+   "id": "archive-list-2",
+   "say": "what's inside backup.zip?",
+   "expect": [
+    {
+     "tool": "list_archive",
+     "args": {
+      "path": "~backup.zip"
+     }
+    }
+   ]
+  },
+  {
+   "id": "data-usage",
+   "say": "How much data did I use today?",
+   "expect": [
+    {
+     "tool": "data_usage"
+    }
+   ]
+  },
+  {
+   "id": "ws1",
+   "say": "what is quantum computing",
+   "expect": [
+    {
+     "tool": "web_search",
+     "args": {
+      "query": "~quantum computing"
+     }
+    }
+   ]
+  },
+  {
+   "id": "todo1",
+   "say": "add todo pay bills",
+   "expect": [
+    {
+     "tool": "todo_list",
+     "args": {
+      "action": "~add",
+      "content": "~pay bills"
+     }
+    }
+   ]
+  },
+  {
+   "id": "disk6",
+   "say": "compress old files",
+   "expect": [
+    {
+     "tool": "cleanup_apply",
+     "args": {
+      "target": "~cache"
+     }
+    }
+   ]
+  },
+  {
+   "id": "time-nyt",
+   "say": "time in new york",
+   "expect": [
+    {
+     "tool": "get_world_time",
+     "args": {
+      "place": "~new york"
+     }
+    }
+   ]
+  },
+  {
+   "id": "f5",
+   "say": "open /tmp/notes.md",
+   "expect": [
+    {
+     "tool": "open_file",
+     "args": {
+      "path": "~notes.md"
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-24",
+   "say": "lets chat",
+   "none": true
+  },
+  {
+   "id": "extra-142",
+   "say": "open document.pdf",
+   "expect": [
+    {
+     "tool": "open_file",
+     "args": {
+      "path": "~document.pdf"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-174",
+   "say": "open discord",
+   "expect": [
+    {
+     "tool": "open_application",
+     "args": {
+      "name": "~discord"
+     }
+    }
+   ]
+  },
+  {
+   "id": "pdetail2",
+   "say": "what's process 5678 doing?",
+   "expect": [
+    {
+     "tool": "process_detail",
+     "args": {
+      "pid": 5678
+     }
+    }
+   ]
+  },
+  {
+   "id": "apply-patch",
+   "say": "Apply this bugfix.diff to the project",
+   "expect": [
+    {
+     "tool": "apply_patch",
+     "args": {
+      "patch": "~bugfix.diff",
+      "path": "~project"
+     }
+    }
+   ]
+  },
+  {
+   "id": "phone-ring",
+   "say": "ring my phone to find it",
+   "expect": [
+    {
+     "tool": "phone",
+     "args": {
+      "action": "~ring",
+      "target": "~phone"
+     }
+    }
+   ]
+  },
+  {
+   "id": "sdoc",
+   "say": "find pdfs about kubernetes",
+   "expect": [
+    {
+     "tool": "search_documents",
+     "args": {
+      "query": "~kubernetes",
+      "kind": "~pdf"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-206",
+   "say": "create new folder ~/notes",
+   "expect": [
+    {
+     "tool": "create_directory",
+     "args": {
+      "path": "~notes"
+     }
+    }
+   ]
+  },
+  {
+   "id": "img4",
+   "say": "screenshot please",
+   "expect": [
+    {
+     "tool": "screenshot"
+    }
+   ]
+  },
+  {
+   "id": "extra-006",
+   "say": "focus the terminal",
+   "expect": [
+    {
+     "tool": "focus_window",
+     "args": {
+      "title_contains": "~terminal"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-119",
+   "say": "copy readme to docs",
+   "expect": [
+    {
+     "tool": "move_or_copy_file",
+     "args": {
+      "source": "~README.md",
+      "destination": "~docs",
+      "mode": "~copy"
+     }
+    }
+   ]
+  },
+  {
+   "id": "tmpfiles2",
+   "say": "show up to 20 swap files under ~",
+   "expect": [
+    {
+     "tool": "temp_files",
+     "args": {
+      "path": "~",
+      "limit": 20
+     }
+    }
+   ]
+  },
+  {
+   "id": "notify2",
+   "say": "send a notification hello world",
+   "expect": [
+    {
+     "tool": "notify",
+     "args": {
+      "summary": "~hello",
+      "body": "~world"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-103",
+   "say": "disk health",
+   "expect": [
+    {
+     "tool": "disk_health"
+    }
+   ]
+  },
+  {
+   "id": "extra-124",
+   "say": "timer 2 hours",
+   "expect": [
+    {
+     "tool": "set_timer",
+     "args": {
+      "action": "~set",
+      "seconds": 7200
+     }
+    }
+   ]
+  },
+  {
+   "id": "ask-29",
+   "say": "Which calendar event should I move?",
+   "expect": [
+    {
+     "tool": "calendar_edit",
+     "args": {
+      "action": "~update"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "rec-model",
+   "say": "suggest a local model that fits my ram",
+   "expect": [
+    {
+     "tool": "recommend_model"
+    }
+   ]
+  },
+  {
+   "id": "cal-today",
+   "say": "What's on my calendar today?",
+   "expect": [
+    {
+     "tool": "calendar_events"
+    }
+   ]
+  },
+  {
+   "id": "news2",
+   "say": "bbc news about climate",
+   "expect": [
+    {
+     "tool": "news",
+     "args": {
+      "source": "~bbc",
+      "topic": "~climate",
+      "limit": 10
+     }
+    }
+   ]
+  },
+  {
+   "id": "click-left",
+   "say": "Click once",
+   "expect": [
+    {
+     "tool": "click_pointer",
+     "args": {
+      "button": "~left",
+      "count": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-029",
+   "say": "3min timer for coffee",
+   "expect": [
+    {
+     "tool": "set_timer",
+     "args": {
+      "action": "~set",
+      "seconds": 180,
+      "label": "~coffee"
+     }
+    }
+   ]
+  },
+  {
+   "id": "sing2",
+   "say": "sing happy birthday in arch style",
+   "expect": [
+    {
+     "tool": "sing",
+     "args": {
+      "text": "~happy birthday",
+      "shape": "~arch",
+      "voice_style": "~cheerful"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-112",
+   "say": "my schedule tomorrow",
+   "expect": [
+    {
+     "tool": "calendar_events",
+     "args": {
+      "range": "~tomorrow"
+     }
+    }
+   ]
+  },
+  {
+   "id": "media-next",
+   "say": "skip to next track",
+   "expect": [
+    {
+     "tool": "media_control",
+     "args": {
+      "action": "~next"
+     }
+    }
+   ]
+  },
+  {
+   "id": "type",
+   "say": "type 'git commit -m done'",
+   "expect": [
+    {
+     "tool": "type_text",
+     "args": {
+      "text": "~git commit -m done"
+     }
+    }
+   ]
+  },
+  {
+   "id": "cloud-list",
+   "say": "What's in my google-drive remote?",
+   "expect": [
+    {
+     "tool": "cloud_files",
+     "args": {
+      "remote": "~drive"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ask-38",
+   "say": "Should I include hidden files?",
+   "expect": [
+    {
+     "tool": "list_directory",
+     "args": {
+      "path": "~"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "drv-nvidia",
+   "say": "What's the nvidia kernel module info?",
+   "expect": [
+    {
+     "tool": "driver_info",
+     "args": {
+      "module": "~nvidia"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ask-01",
+   "say": "Should I install or uninstall this app?",
+   "expect": [
+    {
+     "tool": "install_app",
+     "args": {
+      "action": "~install"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "fprint-user",
+   "say": "Which fingers are enrolled for me?",
+   "expect": [
+    {
+     "tool": "fingerprint_status",
+     "args": {
+      "user": "~me"
+     }
+    }
+   ]
+  },
+  {
+   "id": "location",
+   "say": "Where am I right now?",
+   "expect": [
+    {
+     "tool": "get_location"
+    }
+   ]
+  },
+  {
+   "id": "whois",
+   "say": "who owns example.com?",
+   "expect": [
+    {
+     "tool": "whois_lookup",
+     "args": {
+      "domain": "~example.com"
+     }
+    }
+   ]
+  },
+  {
+   "id": "openfiles",
+   "say": "who has report.pdf open?",
+   "expect": [
+    {
+     "tool": "open_files",
+     "args": {
+      "path": "~report.pdf"
+     }
+    }
+   ]
+  },
+  {
+   "id": "oom",
+   "say": "which process would get killed first?",
+   "expect": [
+    {
+     "tool": "oom_score"
+    }
+   ]
+  },
+  {
+   "id": "ls-hidden",
+   "say": "show hidden files in ~",
+   "expect": [
+    {
+     "tool": "list_directory",
+     "args": {
+      "path": "~",
+      "include_hidden": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "rec-denoise",
+   "say": "denoise podcast.wav, english",
+   "expect": [
+    {
+     "tool": "recording",
+     "args": {
+      "action": "~denoise",
+      "path": "~podcast.wav",
+      "language": "~en"
+     }
+    }
+   ]
+  },
+  {
+   "id": "delegate-build",
+   "say": "Hand off building the project to a subagent",
+   "expect": [
+    {
+     "tool": "delegate",
+     "args": {
+      "task": "~build the project"
+     }
+    }
+   ]
+  },
+  {
+   "id": "find-keys",
+   "say": "Make my Tile tracker buzz",
+   "expect": [
+    {
+     "tool": "find_device",
+     "args": {
+      "device": "~tile"
+     }
+    }
+   ]
+  },
+  {
+   "id": "du-home",
+   "say": "How full is /var?",
+   "expect": [
+    {
+     "tool": "disk_usage",
+     "args": {
+      "path": "~var"
+     }
+    }
+   ]
+  },
+  {
+   "id": "audio-list",
+   "say": "What output speakers do I have?",
+   "expect": [
+    {
+     "tool": "audio_output",
+     "args": {
+      "action": "~list"
+     }
+    }
+   ]
+  },
+  {
+   "id": "bw-10s",
+   "say": "Measure upload to 10.0.0.5:9000 over 10 seconds",
+   "expect": [
+    {
+     "tool": "bandwidth_to_host",
+     "args": {
+      "host": "~10.0.0.5",
+      "port": 9000,
+      "seconds": 10
+     }
+    }
+   ]
+  },
+  {
+   "id": "analyze-rows",
+   "say": "How many rows where status=active in orders.csv?",
+   "expect": [
+    {
+     "tool": "analyze_table",
+     "args": {
+      "action": "~query",
+      "path": "~orders.csv"
+     }
+    }
+   ]
+  },
+  {
+   "id": "dl-pdf",
+   "say": "Save the report pdf from the link to Downloads",
+   "expect": [
+    {
+     "tool": "download_file",
+     "args": {
+      "url": "~report.pdf",
+      "destination": "~Downloads"
+     }
+    }
+   ]
+  },
+  {
+   "id": "btgatt-batt",
+   "say": "Read the battery of my BLE watch",
+   "expect": [
+    {
+     "tool": "bluetooth_gatt",
+     "args": {
+      "action": "~read",
+      "device": "~watch"
+     }
+    }
+   ]
+  },
+  {
+   "id": "graphics",
+   "say": "Is opengl hardware accelerated?",
+   "expect": [
+    {
+     "tool": "graphics_stack"
+    }
+   ]
+  },
+  {
+   "id": "ask-02",
+   "say": "Which account should I use to log in?",
+   "expect": [
+    {
+     "tool": "open_application",
+     "args": {
+      "name": "~"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "extra-057",
+   "say": "how many bones in a human body",
+   "expect": [
+    {
+     "tool": "web_search",
+     "args": {
+      "query": "~human body bones"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ws5",
+   "say": "recipe for lasagna",
+   "expect": [
+    {
+     "tool": "web_search",
+     "args": {
+      "query": "~lasagna"
+     }
+    }
+   ]
+  },
+  {
+   "id": "emoji-heart",
+   "say": "Copy the heart emoji",
+   "expect": [
+    {
+     "tool": "find_emoji",
+     "args": {
+      "name": "~heart"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-091",
+   "say": "show disk usage of /var",
+   "expect": [
+    {
+     "tool": "disk_usage",
+     "args": {
+      "path": "~var"
+     }
+    }
+   ]
+  },
+  {
+   "id": "unit-check",
+   "say": "Validate my nginx.service file",
+   "expect": [
+    {
+     "tool": "check_units",
+     "args": {
+      "unit": "~nginx.service"
+     }
+    }
+   ]
+  },
+  {
+   "id": "vms",
+   "say": "what VMs are defined?",
+   "expect": [
+    {
+     "tool": "list_vms"
+    }
+   ]
+  },
+  {
+   "id": "btrfs-savings",
+   "say": "How much is btrfs compression saving?",
+   "expect": [
+    {
+     "tool": "compression_savings"
+    }
+   ]
+  },
+  {
+   "id": "dnd-status",
+   "say": "Turn do not disturb off",
+   "expect": [
+    {
+     "tool": "do_not_disturb",
+     "args": {
+      "enabled": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "pcap-wlan",
+   "say": "Capture 10 packets on wlan0 for 5s",
+   "expect": [
+    {
+     "tool": "capture_packets",
+     "args": {
+      "interface": "~wlan0",
+      "packets": 10,
+      "seconds": 5
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-189",
+   "say": "list windows",
+   "expect": [
+    {
+     "tool": "list_windows"
+    }
+   ]
+  },
+  {
+   "id": "extra-081",
+   "say": "turn bluetooth on",
+   "expect": [
+    {
+     "tool": "toggle_bluetooth",
+     "args": {
+      "action": "~on"
+     }
+    }
+   ]
+  },
+  {
+   "id": "dns-mx",
+   "say": "What are the MX records for gmail.com?",
+   "expect": [
+    {
+     "tool": "dns_lookup",
+     "args": {
+      "name": "~gmail.com",
+      "type": "~mx"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-228",
+   "say": "calendar this week",
+   "expect": [
+    {
+     "tool": "calendar_events",
+     "args": {
+      "range": "~week"
+     }
+    }
+   ]
+  },
+  {
+   "id": "vpn-list",
+   "say": "what vpn connections are saved?",
+   "expect": [
+    {
+     "tool": "vpn_control",
+     "args": {
+      "action": "~list"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-089",
+   "say": "open libreoffice writer",
+   "expect": [
+    {
+     "tool": "open_application",
+     "args": {
+      "name": "~libreoffice"
+     }
+    }
+   ]
+  },
+  {
+   "id": "readdoc",
+   "say": "read me pages 1-3 of book.pdf",
+   "expect": [
+    {
+     "tool": "read_document",
+     "args": {
+      "path": "~book.pdf",
+      "first_page": 1,
+      "last_page": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-099",
+   "say": "turn wifi off",
+   "expect": [
+    {
+     "tool": "toggle_wifi",
+     "args": {
+      "action": "~off"
+     }
+    }
+   ]
+  },
+  {
+   "id": "open-file",
+   "say": "open /tmp/report.pdf",
+   "expect": [
+    {
+     "tool": "open_file",
+     "args": {
+      "path": "~report.pdf"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-066",
+   "say": "time in amsterdam",
+   "expect": [
+    {
+     "tool": "get_world_time",
+     "args": {
+      "place": "~amsterdam"
+     }
+    }
+   ]
+  },
+  {
+   "id": "date-add",
+   "say": "What's the date 3 weeks from now?",
+   "expect": [
+    {
+     "tool": "date_math",
+     "args": {
+      "operation": "~add",
+      "amount": 3,
+      "unit": "~weeks"
+     }
+    }
+   ]
+  },
+  {
+   "id": "w3",
+   "say": "weather tokyo tomorrow",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~tokyo",
+      "when": "~tomorrow"
+     }
+    }
+   ]
+  },
+  {
+   "id": "volume-level",
+   "say": "current volume on speakers?",
+   "expect": [
+    {
+     "tool": "get_volume"
+    }
+   ]
+  },
+  {
+   "id": "ask-17",
+   "say": "What language should I translate to?",
+   "expect": [
+    {
+     "tool": "translate_text",
+     "args": {
+      "to_language": "~es"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "ask-36",
+   "say": "Which folder do you want me to search?",
+   "expect": [
+    {
+     "tool": "search_file_contents",
+     "args": {
+      "text": "~"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "trigger-add",
+   "say": "arm a rule for new mail",
+   "expect": [
+    {
+     "tool": "manage_triggers",
+     "args": {
+      "action": "~arm",
+      "name": "~new mail"
+     }
+    }
+   ]
+  },
+  {
+   "id": "kb-layout",
+   "say": "switch keyboard to colemak",
+   "expect": [
+    {
+     "tool": "set_keyboard_layout",
+     "args": {
+      "action": "~set",
+      "layout": "~colemak"
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-45",
+   "say": "nah",
+   "none": true
+  },
+  {
+   "id": "none-49",
+   "say": "what should i do",
+   "none": true
+  },
+  {
+   "id": "ask-07",
+   "say": "Which format should I convert it to?",
+   "expect": [
+    {
+     "tool": "convert_media",
+     "args": {
+      "to": "~mp3"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "extra-155",
+   "say": "time in sao paulo",
+   "expect": [
+    {
+     "tool": "get_world_time",
+     "args": {
+      "place": "~sao paulo"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-033",
+   "say": "best mechanical keyboard",
+   "expect": [
+    {
+     "tool": "web_search",
+     "args": {
+      "query": "~mechanical keyboard"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-076",
+   "say": "search flathub for blender",
+   "expect": [
+    {
+     "tool": "install_app",
+     "args": {
+      "query": "~blender"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-035",
+   "say": "weather in rome",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~rome"
+     }
+    }
+   ]
+  },
+  {
+   "id": "cpu-freq",
+   "say": "What speed is my CPU running at?",
+   "expect": [
+    {
+     "tool": "cpu_frequency"
+    }
+   ]
+  },
+  {
+   "id": "extra-031",
+   "say": "uninstall discord",
+   "expect": [
+    {
+     "tool": "install_app",
+     "args": {
+      "query": "~discord"
+     }
+    }
+   ]
+  },
+  {
+   "id": "cpu-gov",
+   "say": "Is the governor performance or powersave?",
+   "expect": [
+    {
+     "tool": "cpu_frequency"
+    }
+   ]
+  },
+  {
+   "id": "extra-016",
+   "say": "10 minute timer",
+   "expect": [
+    {
+     "tool": "set_timer",
+     "args": {
+      "action": "~set",
+      "seconds": 600
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-101",
+   "say": "mark first todo done",
+   "expect": [
+    {
+     "tool": "todo_list",
+     "args": {
+      "action": "~done"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-079",
+   "say": "rescan for networks",
+   "expect": [
+    {
+     "tool": "list_wifi_networks",
+     "args": {
+      "rescan": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "delete-trash",
+   "say": "Move /tmp/old.log to trash",
+   "expect": [
+    {
+     "tool": "delete_file",
+     "args": {
+      "path": "~old.log"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ui-click",
+   "say": "click the Submit button in app",
+   "expect": [
+    {
+     "tool": "ui_elements",
+     "args": {
+      "action": "~click",
+      "app": "~app",
+      "text": "~Submit",
+      "how": "~click"
+     }
+    }
+   ]
+  },
+  {
+   "id": "drv-new",
+   "say": "Create a skeleton driver project mydrv",
+   "expect": [
+    {
+     "tool": "driver_scaffold",
+     "args": {
+      "name": "~mydrv",
+      "path": "~mydrv"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-010",
+   "say": "weather prague",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~prague"
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-02",
+   "say": "hello!",
+   "none": true
+  },
+  {
+   "id": "speedtest2",
+   "say": "speed test downloading 50mb uploading 20mb",
+   "expect": [
+    {
+     "tool": "speed_test",
+     "args": {
+      "download_mb": 50,
+      "upload_mb": 20
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-049",
+   "say": "remind me at noon",
+   "expect": [
+    {
+     "tool": "reminders",
+     "args": {
+      "action": "~add",
+      "text": "~noon"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-138",
+   "say": "disk usage",
+   "expect": [
+    {
+     "tool": "disk_usage"
+    }
+   ]
+  },
+  {
+   "id": "extra-106",
+   "say": "weather in buenos aires",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~buenos aires"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-165",
+   "say": "set timer 20 minutes",
+   "expect": [
+    {
+     "tool": "set_timer",
+     "args": {
+      "action": "~set",
+      "seconds": 1200
+     }
+    }
+   ]
+  },
+  {
+   "id": "cron2",
+   "say": "show scheduled tasks",
+   "expect": [
+    {
+     "tool": "scheduled_tasks"
+    }
+   ]
+  },
+  {
+   "id": "dns-a",
+   "say": "Where does example.com resolve?",
+   "expect": [
+    {
+     "tool": "dns_lookup",
+     "args": {
+      "name": "~example.com"
+     }
+    }
+   ]
+  },
+  {
+   "id": "keypress",
+   "say": "press ctrl+t",
+   "expect": [
+    {
+     "tool": "press_key",
+     "args": {
+      "key": "~ctrl+t"
+     }
+    }
+   ]
+  },
+  {
+   "id": "bridge-br0",
+   "say": "Show what's enslaved to br0",
+   "expect": [
+    {
+     "tool": "bridge_topology",
+     "args": {
+      "bridge": "~br0"
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-10",
+   "say": "thank you so much",
+   "none": true
+  },
+  {
+   "id": "doc4",
+   "say": "read the contract",
+   "expect": [
+    {
+     "tool": "read_document",
+     "args": {
+      "path": "~contract.pdf"
+     }
+    }
+   ]
+  },
+  {
+   "id": "meeting-stop",
+   "say": "end the meeting recording",
+   "expect": [
+    {
+     "tool": "meeting",
+     "args": {
+      "action": "~stop"
+     }
+    }
+   ]
+  },
+  {
+   "id": "defapp-list",
+   "say": "What opens pdfs by default?",
+   "expect": [
+    {
+     "tool": "default_apps",
+     "args": {
+      "target": "~pdf"
+     }
+    }
+   ]
+  },
+  {
+   "id": "wifi-join",
+   "say": "Connect to the couch network",
+   "expect": [
+    {
+     "tool": "connect_wifi",
+     "args": {
+      "ssid": "~couch"
+     }
+    }
+   ]
+  },
+  {
+   "id": "dev-probe",
+   "say": "What i2c and video devices exist?",
+   "expect": [
+    {
+     "tool": "device_probe"
+    }
+   ]
+  },
+  {
+   "id": "color-hex",
+   "say": "Convert #ff8800 to rgb",
+   "expect": [
+    {
+     "tool": "convert_color",
+     "args": {
+      "color": "~#ff8800"
+     }
+    }
+   ]
+  },
+  {
+   "id": "btcall-status",
+   "say": "Is my phone linked as a Bluetooth speaker?",
+   "expect": [
+    {
+     "tool": "bluetooth_call",
+     "args": {
+      "action": "~status",
+      "to": "~phone"
+     }
+    }
+   ]
+  },
+  {
+   "id": "takepic",
+   "say": "take a selfie",
+   "expect": [
+    {
+     "tool": "take_photo"
+    }
+   ]
+  },
+  {
+   "id": "sync-run",
+   "say": "actually sync src into dst deleting extras",
+   "expect": [
+    {
+     "tool": "sync_folder",
+     "args": {
+      "source": "~src",
+      "destination": "~dst",
+      "apply": true,
+      "delete": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "clipboard-content",
+   "say": "Read the clipboard contents",
+   "expect": [
+    {
+     "tool": "get_clipboard"
+    }
+   ]
+  },
+  {
+   "id": "timer5",
+   "say": "countdown 3 minutes",
+   "expect": [
+    {
+     "tool": "set_timer",
+     "args": {
+      "action": "~set",
+      "seconds": 180
+     }
+    }
+   ]
+  },
+  {
+   "id": "ws3",
+   "say": "how to tie a tie",
+   "expect": [
+    {
+     "tool": "web_search",
+     "args": {
+      "query": "~tie"
+     }
+    }
+   ]
+  },
+  {
+   "id": "stale",
+   "say": "find large old files in /tmp",
+   "expect": [
+    {
+     "tool": "stale_files",
+     "args": {
+      "path": "~"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-226",
+   "say": "latest nobel prize winners",
+   "expect": [
+    {
+     "tool": "web_search",
+     "args": {
+      "query": "~nobel prize"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-036",
+   "say": "tile the editor left",
+   "expect": [
+    {
+     "tool": "arrange_window",
+     "args": {
+      "action": "~tile",
+      "side": "~left"
+     }
+    }
+   ]
+  },
+  {
+   "id": "bt2",
+   "say": "is bluetooth on",
+   "expect": [
+    {
+     "tool": "toggle_bluetooth",
+     "args": {
+      "action": "~status"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-045",
+   "say": "rename old.txt to new.txt",
+   "expect": [
+    {
+     "tool": "move_or_copy_file",
+     "args": {
+      "source": "~old.txt",
+      "destination": "~new.txt",
+      "mode": "~move"
+     }
+    }
+   ]
+  },
+  {
+   "id": "a3",
+   "say": "open settings",
+   "expect": [
+    {
+     "tool": "open_application",
+     "args": {
+      "name": "~settings"
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-36",
+   "say": "me too",
+   "none": true
+  },
+  {
+   "id": "f2",
+   "say": "what's in the downloads folder",
+   "expect": [
+    {
+     "tool": "list_directory"
+    }
+   ]
+  },
+  {
+   "id": "extra-241",
+   "say": "weather madrid tomorrow",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~madrid",
+      "when": "~tomorrow"
+     }
+    }
+   ]
+  },
+  {
+   "id": "bt1",
+   "say": "pair my headphones",
+   "expect": [
+    {
+     "tool": "bluetooth_devices",
+     "args": {
+      "action": "~connect",
+      "name": "~headphones"
+     }
+    }
+   ]
+  },
+  {
+   "id": "todo-add",
+   "say": "add a todo: write the report",
+   "expect": [
+    {
+     "tool": "todo_list",
+     "args": {
+      "action": "~add",
+      "content": "~write the report"
+     }
+    }
+   ]
+  },
+  {
+   "id": "lab-create2",
+   "say": "make an isolated labnet 10.5.0.0/16 without internet",
+   "expect": [
+    {
+     "tool": "lab_network_create",
+     "args": {
+      "name": "~labnet2",
+      "cidr": "~10.5.0.0/16",
+      "internet": false,
+      "apply": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "conflict-show",
+   "say": "show git conflicts in /tmp/repo",
+   "expect": [
+    {
+     "tool": "resolve_conflict",
+     "args": {
+      "action": "~show",
+      "path": "~repo"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-075",
+   "say": "install krita",
+   "expect": [
+    {
+     "tool": "install_app",
+     "args": {
+      "query": "~krita"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-123",
+   "say": "set timer 45 seconds",
+   "expect": [
+    {
+     "tool": "set_timer",
+     "args": {
+      "action": "~set",
+      "seconds": 45
+     }
+    }
+   ]
+  },
+  {
+   "id": "cleanup-cache",
+   "say": "Free the disk space cleanup_report found in cache",
+   "expect": [
+    {
+     "tool": "cleanup_apply",
+     "args": {
+      "target": "~cache"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-159",
+   "say": "how to fix a leaky tap",
+   "expect": [
+    {
+     "tool": "web_search",
+     "args": {
+      "query": "~leaky tap"
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-08",
+   "say": "lol that's funny",
+   "none": true
+  },
+  {
+   "id": "cc-2",
+   "say": "How much is 10000 yen in dollars?",
+   "expect": [
+    {
+     "tool": "convert_currency",
+     "args": {
+      "amount": 10000,
+      "from_currency": "~jpy",
+      "to_currency": "~usd"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-088",
+   "say": "drive health",
+   "expect": [
+    {
+     "tool": "disk_health"
+    }
+   ]
+  },
+  {
+   "id": "timer-5min",
+   "say": "Set a timer for 5 minutes.",
+   "expect": [
+    {
+     "tool": "set_timer",
+     "args": {
+      "action": "~set",
+      "seconds": 300
+     }
+    }
+   ]
+  },
+  {
+   "id": "open-app2",
+   "say": "launch the file manager",
+   "expect": [
+    {
+     "tool": "open_application",
+     "args": {
+      "name": "~files"
+     }
+    }
+   ]
+  },
+  {
+   "id": "w6",
+   "say": "rain forecast seattle",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~seattle"
+     }
+    }
+   ]
+  },
+  {
+   "id": "dissect-wlan",
+   "say": "Dissect 20 packets on eth0 for 4s",
+   "expect": [
+    {
+     "tool": "dissect_traffic",
+     "args": {
+      "interface": "~eth0",
+      "packets": 20,
+      "seconds": 4
+     }
+    }
+   ]
+  },
+  {
+   "id": "logs-kernel",
+   "say": "kernel logs from today",
+   "expect": [
+    {
+     "tool": "read_logs",
+     "args": {
+      "unit": "~kernel",
+      "since": "~today",
+      "lines": 50
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-069",
+   "say": "disk space report",
+   "expect": [
+    {
+     "tool": "disk_usage"
+    }
+   ]
+  },
+  {
+   "id": "extra-120",
+   "say": "copy data.csv into backup",
+   "expect": [
+    {
+     "tool": "move_or_copy_file",
+     "args": {
+      "source": "~data.csv",
+      "destination": "~backup",
+      "mode": "~copy"
+     }
+    }
+   ]
+  },
+  {
+   "id": "writefile2",
+   "say": "append a line to log.txt",
+   "expect": [
+    {
+     "tool": "write_text_file",
+     "args": {
+      "path": "~log.txt",
+      "content": "~new entry",
+      "append": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "print",
+   "say": "print letter.pdf",
+   "expect": [
+    {
+     "tool": "print_file",
+     "args": {
+      "path": "~letter.pdf"
+     }
+    }
+   ]
+  },
+  {
+   "id": "dset-set",
+   "say": "Turn animations off",
+   "expect": [
+    {
+     "tool": "desktop_setting",
+     "args": {
+      "setting": "~animations",
+      "value": "~off"
+     }
+    }
+   ]
+  },
+  {
+   "id": "tls2",
+   "say": "letsencrypt cert for my site",
+   "expect": [
+    {
+     "tool": "tls_certificate",
+     "args": {
+      "host": "~mysite.com",
+      "port": 443
+     }
+    }
+   ]
+  },
+  {
+   "id": "bt3",
+   "say": "connect airpods",
+   "expect": [
+    {
+     "tool": "bluetooth_devices",
+     "args": {
+      "action": "~connect",
+      "name": "~airpods"
+     }
+    }
+   ]
+  },
+  {
+   "id": "screen-share",
+   "say": "share this screen to my phone",
+   "expect": [
+    {
+     "tool": "screen_to_phone",
+     "args": {
+      "action": "~start"
+     }
+    }
+   ]
+  },
+  {
+   "id": "install-app",
+   "say": "install VLC from flathub",
+   "expect": [
+    {
+     "tool": "install_app",
+     "args": {
+      "action": "~install",
+      "query": "~vlc"
+     }
+    }
+   ]
+  },
+  {
+   "id": "security2",
+   "say": "tpm and linux security module status?",
+   "expect": [
+    {
+     "tool": "security_status"
+    }
+   ]
+  },
+  {
+   "id": "extra-219",
+   "say": "where can i find my phone",
+   "expect": [
+    {
+     "tool": "phone",
+     "args": {
+      "action": "~ring"
+     }
+    },
+    {
+     "tool": "find_device",
+     "args": {
+      "device": "~phone"
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-32",
+   "say": "good job",
+   "none": true
+  },
+  {
+   "id": "settings",
+   "say": "open wifi settings",
+   "expect": [
+    {
+     "tool": "open_settings",
+     "args": {
+      "page": "~wifi"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-164",
+   "say": "when was draft.md modified",
+   "expect": [
+    {
+     "tool": "get_file_info",
+     "args": {
+      "path": "~draft.md"
+     }
+    }
+   ]
+  },
+  {
+   "id": "spell2",
+   "say": "spell accommodate",
+   "expect": [
+    {
+     "tool": "spell_word",
+     "args": {
+      "word": "~accommodate"
+     }
+    }
+   ]
+  },
+  {
+   "id": "install-model2",
+   "say": "Install phi3 in ollama",
+   "expect": [
+    {
+     "tool": "install_model",
+     "args": {
+      "name": "~phi3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "logs-unit",
+   "say": "recent ssh service logs",
+   "expect": [
+    {
+     "tool": "read_logs",
+     "args": {
+      "unit": "~ssh.service"
+     }
+    }
+   ]
+  },
+  {
+   "id": "audinfo",
+   "say": "how long is podcast.mp3?",
+   "expect": [
+    {
+     "tool": "read_audio",
+     "args": {
+      "path": "~podcast.mp3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "doc-txt",
+   "say": "Export notes.odt to plain text",
+   "expect": [
+    {
+     "tool": "convert_document",
+     "args": {
+      "path": "~notes.odt",
+      "to": "~txt"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-126",
+   "say": "set timer 2 min for noodles",
+   "expect": [
+    {
+     "tool": "set_timer",
+     "args": {
+      "action": "~set",
+      "seconds": 120,
+      "label": "~noodles"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-196",
+   "say": "find recent files in ~",
+   "expect": [
+    {
+     "tool": "find_recently_modified",
+     "args": {
+      "path": "~"
+     }
+    }
+   ]
+  },
+  {
+   "id": "w10",
+   "say": "weather report for berlin",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~berlin"
+     }
+    }
+   ]
+  },
+  {
+   "id": "kill-proc2",
+   "say": "send SIGTERM to 6789",
+   "expect": [
+    {
+     "tool": "kill_process",
+     "args": {
+      "pid": 6789,
+      "signal_name": "~SIGTERM"
+     }
+    }
+   ]
+  },
+  {
+   "id": "scan-doc",
+   "say": "scan a page to text",
+   "expect": [
+    {
+     "tool": "scan_document",
+     "args": {
+      "source": "~scanner"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-129",
+   "say": "plugged in?",
+   "expect": [
+    {
+     "tool": "get_battery_status"
+    }
+   ]
+  },
+  {
+   "id": "none-40",
+   "say": "oh ok",
+   "none": true
+  },
+  {
+   "id": "ask-35",
+   "say": "Choose a power profile",
+   "expect": [
+    {
+     "tool": "set_power_profile",
+     "args": {
+      "profile": "~balanced"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "delete-dup",
+   "say": "Trash the duplicate file /tmp/dup.txt",
+   "expect": [
+    {
+     "tool": "delete_file",
+     "args": {
+      "path": "~dup.txt"
+     }
+    }
+   ]
+  },
+  {
+   "id": "doc-title",
+   "say": "Write a markdown doc titled README",
+   "expect": [
+    {
+     "tool": "create_document",
+     "args": {
+      "title": "~README",
+      "format": "~md"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ask-pick",
+   "say": "Red or blue for the new logo?",
+   "expect": [
+    {
+     "tool": "ask_user",
+     "args": {
+      "question": "~red",
+      "options": "*"
+     }
+    }
+   ]
+  },
+  {
+   "id": "emoji-thumbs",
+   "say": "Find the thumbs up emoji",
+   "expect": [
+    {
+     "tool": "find_emoji",
+     "args": {
+      "name": "~thumbs up"
+     }
+    }
+   ]
+  },
+  {
+   "id": "w2",
+   "say": "is it raining in london",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~london"
+     }
+    }
+   ]
+  },
+  {
+   "id": "qr-read",
+   "say": "decode qr codes on the screen",
+   "expect": [
+    {
+     "tool": "qr_code",
+     "args": {
+      "action": "~read",
+      "screen": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-127",
+   "say": "connect to home wifi",
+   "expect": [
+    {
+     "tool": "connect_wifi",
+     "args": {
+      "ssid": "~home"
+     }
+    }
+   ]
+  },
+  {
+   "id": "dissect-http",
+   "say": "Break down HTTP traffic on wlan0",
+   "expect": [
+    {
+     "tool": "dissect_traffic",
+     "args": {
+      "interface": "~wlan0",
+      "filter": "~http",
+      "seconds": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-27",
+   "say": "what is your name",
+   "none": true
+  },
+  {
+   "id": "none-47",
+   "say": "hmm",
+   "none": true
+  },
+  {
+   "id": "ask-08",
+   "say": "When should the alarm go off?",
+   "expect": [
+    {
+     "tool": "alarm",
+     "args": {
+      "action": "~set",
+      "time": "~7:00"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "pdf-merge",
+   "say": "merge a.pdf and b.pdf into out.pdf",
+   "expect": [
+    {
+     "tool": "pdf_pages",
+     "args": {
+      "action": "~merge",
+      "paths": "*",
+      "output": "~out.pdf"
+     }
+    }
+   ]
+  },
+  {
+   "id": "net-interfaces2",
+   "say": "bytes on wlan0 over 2 seconds",
+   "expect": [
+    {
+     "tool": "interface_counters",
+     "args": {
+      "interface": "~wlan0",
+      "sample_seconds": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "cu-temp",
+   "say": "25 C to F",
+   "expect": [
+    {
+     "tool": "convert_units",
+     "args": {
+      "value": 25,
+      "from_unit": "~c",
+      "to_unit": "~f"
+     }
+    }
+   ]
+  },
+  {
+   "id": "hash-file",
+   "say": "SHA-256 of /tmp/installer.bin",
+   "expect": [
+    {
+     "tool": "compute_hash",
+     "args": {
+      "path": "~installer.bin",
+      "algorithm": "~sha256"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-242",
+   "say": "free up space",
+   "expect": [
+    {
+     "tool": "cleanup_report"
+    }
+   ]
+  },
+  {
+   "id": "extra-172",
+   "say": "disconnect headphones",
+   "expect": [
+    {
+     "tool": "bluetooth_devices",
+     "args": {
+      "action": "~disconnect",
+      "name": "~headphones"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-185",
+   "say": "connect to starbucks wifi",
+   "expect": [
+    {
+     "tool": "connect_wifi",
+     "args": {
+      "ssid": "~starbucks"
+     }
+    }
+   ]
+  },
+  {
+   "id": "fonts",
+   "say": "what fonts are installed?",
+   "expect": [
+    {
+     "tool": "list_fonts"
+    }
+   ]
+  },
+  {
+   "id": "none-22",
+   "say": "tell me something",
+   "none": true
+  },
+  {
+   "id": "encode-b64",
+   "say": "Base64 encode hello world",
+   "expect": [
+    {
+     "tool": "encode_text",
+     "args": {
+      "text": "~hello world",
+      "scheme": "~base64",
+      "direction": "~encode"
+     }
+    }
+   ]
+  },
+  {
+   "id": "vms2",
+   "say": "show me virtual machines",
+   "expect": [
+    {
+     "tool": "list_vms"
+    }
+   ]
+  },
+  {
+   "id": "git2",
+   "say": "git add and commit",
+   "expect": [
+    {
+     "tool": "git_commit",
+     "args": {
+      "files": "*",
+      "message": "~wip"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ask-05",
+   "say": "Which printer should I use?",
+   "expect": [
+    {
+     "tool": "print_file",
+     "args": {
+      "path": "~"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "ir-send",
+   "say": "Send a power toggle via NEC to address 4",
+   "expect": [
+    {
+     "tool": "ir_remote",
+     "args": {
+      "action": "~send",
+      "protocol": "~nec",
+      "address": "~4",
+      "command": "~power"
+     }
+    }
+   ]
+  },
+  {
+   "id": "fresh-files",
+   "say": "Files modified in the last 2 days in ~",
+   "expect": [
+    {
+     "tool": "find_recently_modified",
+     "args": {
+      "path": "~",
+      "within_days": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "bt-off",
+   "say": "turn off bluetooth",
+   "expect": [
+    {
+     "tool": "toggle_bluetooth",
+     "args": {
+      "action": "~off"
+     }
+    }
+   ]
+  },
+  {
+   "id": "unzip",
+   "say": "Extract stuff.zip into /tmp/out",
+   "expect": [
+    {
+     "tool": "extract_archive",
+     "args": {
+      "archive": "~stuff.zip",
+      "destination": "~out"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-160",
+   "say": "mute speakers",
+   "expect": [
+    {
+     "tool": "set_mute",
+     "args": {
+      "mute": true,
+      "device": "~speakers"
+     }
+    }
+   ]
+  },
+  {
+   "id": "rc1",
+   "say": "run the tests",
+   "expect": [
+    {
+     "tool": "run_command",
+     "args": {
+      "command": "~pytest"
+     }
+    }
+   ]
+  },
+  {
+   "id": "a4",
+   "say": "start vscode",
+   "expect": [
+    {
+     "tool": "open_application",
+     "args": {
+      "name": "~vscode"
+     }
+    }
+   ]
+  },
+  {
+   "id": "rem2",
+   "say": "remind me at 9am",
+   "expect": [
+    {
+     "tool": "reminders",
+     "args": {
+      "action": "~add",
+      "text": "~9am"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-027",
+   "say": "add a note call bob",
+   "expect": [
+    {
+     "tool": "notes",
+     "args": {
+      "action": "~add",
+      "text": "~call bob"
+     }
+    }
+   ]
+  },
+  {
+   "id": "calc-split",
+   "say": "72 / 9 plus 4",
+   "expect": [
+    {
+     "tool": "calculate",
+     "args": {
+      "expression": "*"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-128",
+   "say": "is it raining in nyc",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~nyc"
+     }
+    }
+   ]
+  },
+  {
+   "id": "discover-wlan",
+   "say": "Who's on the wlan0 network?",
+   "expect": [
+    {
+     "tool": "discover_hosts",
+     "args": {
+      "interface": "~wlan0"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-090",
+   "say": "pending todos",
+   "expect": [
+    {
+     "tool": "todo_list",
+     "args": {
+      "action": "~list",
+      "status": "~pending"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-058",
+   "say": "close vs code",
+   "expect": [
+    {
+     "tool": "close_window",
+     "args": {
+      "title_contains": "~code"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-169",
+   "say": "wipe the trash",
+   "expect": [
+    {
+     "tool": "empty_trash",
+     "args": {
+      "action": "~empty"
+     }
+    }
+   ]
+  },
+  {
+   "id": "pv-blur",
+   "say": "blur faces in selfie.jpg",
+   "expect": [
+    {
+     "tool": "photo_video",
+     "args": {
+      "action": "~blur",
+      "path": "~selfie.jpg",
+      "subject": "~faces"
+     }
+    }
+   ]
+  },
+  {
+   "id": "note1",
+   "say": "add note buy milk",
+   "expect": [
+    {
+     "tool": "notes",
+     "args": {
+      "action": "~add",
+      "text": "~buy milk"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-216",
+   "say": "rain london today",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~london"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-051",
+   "say": "disable bluetooth",
+   "expect": [
+    {
+     "tool": "toggle_bluetooth",
+     "args": {
+      "action": "~off"
+     }
+    }
+   ]
+  },
+  {
+   "id": "cc-1",
+   "say": "Convert 500 USD to EUR",
+   "expect": [
+    {
+     "tool": "convert_currency",
+     "args": {
+      "amount": 500,
+      "from_currency": "~usd",
+      "to_currency": "~eur"
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-09",
+   "say": "thanks!",
+   "none": true
+  },
+  {
+   "id": "rem1",
+   "say": "remind me to walk the dog",
+   "expect": [
+    {
+     "tool": "reminders",
+     "args": {
+      "action": "~add",
+      "text": "~walk dog"
+     }
+    }
+   ]
+  },
+  {
+   "id": "map-dir",
+   "say": "how do I drive from paris to lyon?",
+   "expect": [
+    {
+     "tool": "maps",
+     "args": {
+      "action": "~directions",
+      "origin": "~paris",
+      "destination": "~lyon",
+      "mode": "~car"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ask-03",
+   "say": "Do you mean today or yesterday?",
+   "expect": [
+    {
+     "tool": "calendar_events",
+     "args": {
+      "range": "~today"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "world-time2",
+   "say": "current time in London",
+   "expect": [
+    {
+     "tool": "get_world_time",
+     "args": {
+      "place": "~london"
+     }
+    }
+   ]
+  },
+  {
+   "id": "data-month",
+   "say": "Monthly data use per interface?",
+   "expect": [
+    {
+     "tool": "data_usage"
+    }
+   ]
+  },
+  {
+   "id": "cal-create",
+   "say": "Add a meeting with Alex tomorrow at 3pm for an hour",
+   "expect": [
+    {
+     "tool": "calendar_edit",
+     "args": {
+      "action": "~create",
+      "title": "~meeting",
+      "start": "~tomorrow"
+     }
+    }
+   ]
+  },
+  {
+   "id": "reminder",
+   "say": "Remind me to call mom tomorrow at 6pm",
+   "expect": [
+    {
+     "tool": "reminders",
+     "args": {
+      "action": "~add",
+      "text": "~call mom"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-086",
+   "say": "define serendipity for me",
+   "expect": [
+    {
+     "tool": "define_word",
+     "args": {
+      "word": "~serendipity"
+     }
+    },
+    {
+     "tool": "lookup_wikipedia",
+     "args": {
+      "topic": "~serendipity"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ph1",
+   "say": "where is my phone",
+   "expect": [
+    {
+     "tool": "phone",
+     "args": {
+      "action": "~ring",
+      "target": "~phone"
+     }
+    }
+   ]
+  },
+  {
+   "id": "lab-status2",
+   "say": "status of the labnet2 network",
+   "expect": [
+    {
+     "tool": "lab_network_status",
+     "args": {
+      "name": "~labnet2"
+     }
+    }
+   ]
+  },
+  {
+   "id": "git-inspect",
+   "say": "git status of /tmp/repo",
+   "expect": [
+    {
+     "tool": "git_inspect",
+     "args": {
+      "path": "~repo",
+      "subcommand": "~status"
+     }
+    }
+   ]
+  },
+  {
+   "id": "lab-destroy2",
+   "say": "remove labnet2",
+   "expect": [
+    {
+     "tool": "lab_network_destroy",
+     "args": {
+      "name": "~labnet2",
+      "apply": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-149",
+   "say": "show october calendar",
+   "expect": [
+    {
+     "tool": "calendar_month",
+     "args": {
+      "month": 10
+     }
+    }
+   ]
+  },
+  {
+   "id": "ask-04",
+   "say": "What kind of document do you want created?",
+   "expect": [
+    {
+     "tool": "create_document"
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "hist-mem",
+   "say": "memory usage earlier today",
+   "expect": [
+    {
+     "tool": "system_history",
+     "args": {
+      "topic": "~memory"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-050",
+   "say": "show notes about work",
+   "expect": [
+    {
+     "tool": "notes",
+     "args": {
+      "action": "~search",
+      "query": "~work"
+     }
+    }
+   ]
+  },
+  {
+   "id": "hist-cpu",
+   "say": "cpu usage from an hour ago",
+   "expect": [
+    {
+     "tool": "system_history",
+     "args": {
+      "topic": "~cpu"
+     }
+    }
+   ]
+  },
+  {
+   "id": "explain-tar",
+   "say": "What does 'tar -xzf' do?",
+   "expect": [
+    {
+     "tool": "explain_command",
+     "args": {
+      "command": "~tar -xzf"
+     }
+    }
+   ]
+  },
+  {
+   "id": "cpu-perc",
+   "say": "Per-core usage right now",
+   "expect": [
+    {
+     "tool": "cpu_per_core"
+    }
+   ]
+  },
+  {
+   "id": "win2",
+   "say": "close the browser window",
+   "expect": [
+    {
+     "tool": "close_window",
+     "args": {
+      "title_contains": "~browser"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-249",
+   "say": "temperature in bangkok",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~bangkok"
+     }
+    }
+   ]
+  },
+  {
+   "id": "translate",
+   "say": "translate 'hello' to spanish",
+   "expect": [
+    {
+     "tool": "translate_text",
+     "args": {
+      "text": "~hello",
+      "to_language": "~es"
+     }
+    }
+   ]
+  },
+  {
+   "id": "time-lon",
+   "say": "time in tokyo",
+   "expect": [
+    {
+     "tool": "get_world_time",
+     "args": {
+      "place": "~tokyo"
+     }
+    }
+   ]
+  },
+  {
+   "id": "broken-home",
+   "say": "Find broken symlinks under ~",
+   "expect": [
+    {
+     "tool": "broken_symlinks",
+     "args": {
+      "path": "~"
+     }
+    }
+   ]
+  },
+  {
+   "id": "fresh-py",
+   "say": "Recently changed .py files under /tmp/proj",
+   "expect": [
+    {
+     "tool": "find_recently_modified",
+     "args": {
+      "path": "~proj",
+      "pattern": "~*.py",
+      "within_days": 3,
+      "limit": 15
+     }
+    }
+   ]
+  },
+  {
+   "id": "backup-repo",
+   "say": "Check the restic repo on backup-nas",
+   "expect": [
+    {
+     "tool": "backup_status",
+     "args": {
+      "repository": "~backup-nas"
+     }
+    }
+   ]
+  },
+  {
+   "id": "disk1",
+   "say": "how full is the disk",
+   "expect": [
+    {
+     "tool": "disk_usage"
+    }
+   ]
+  },
+  {
+   "id": "identify2",
+   "say": "tell me the real type of download.dat",
+   "expect": [
+    {
+     "tool": "identify_file",
+     "args": {
+      "path": "~download.dat"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-136",
+   "say": "list hidden in ~",
+   "expect": [
+    {
+     "tool": "list_directory",
+     "args": {
+      "path": "~",
+      "include_hidden": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "cp-file",
+   "say": "copy draft.txt into ~/backup overwriting",
+   "expect": [
+    {
+     "tool": "move_or_copy_file",
+     "args": {
+      "source": "~draft.txt",
+      "destination": "~backup",
+      "mode": "~copy",
+      "overwrite": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-230",
+   "say": "weather vancouver",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~vancouver"
+     }
+    }
+   ]
+  },
+  {
+   "id": "git-commit2",
+   "say": "commit file.py saying 'wip'",
+   "expect": [
+    {
+     "tool": "git_commit",
+     "args": {
+      "files": "~file.py",
+      "message": "~wip"
+     }
+    }
+   ]
+  },
+  {
+   "id": "sdoc2",
+   "say": "search my files for budget",
+   "expect": [
+    {
+     "tool": "search_documents",
+     "args": {
+      "query": "~budget",
+      "limit": 10
+     }
+    }
+   ]
+  },
+  {
+   "id": "ask-15",
+   "say": "Which wifi network do you mean?",
+   "expect": [
+    {
+     "tool": "connect_wifi",
+     "args": {
+      "ssid": "~"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "disk5",
+   "say": "remove empty folders",
+   "expect": [
+    {
+     "tool": "empty_directories",
+     "args": {
+      "path": "~"
+     }
+    }
+   ]
+  },
+  {
+   "id": "net-ok",
+   "say": "Is the internet working?",
+   "expect": [
+    {
+     "tool": "check_internet"
+    }
+   ]
+  },
+  {
+   "id": "ping",
+   "say": "ping google.com 3 times",
+   "expect": [
+    {
+     "tool": "ping_host",
+     "args": {
+      "host": "~google.com",
+      "count": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-004",
+   "say": "set a 7 minute timer",
+   "expect": [
+    {
+     "tool": "set_timer",
+     "args": {
+      "action": "~set",
+      "seconds": 420
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-209",
+   "say": "mute",
+   "expect": [
+    {
+     "tool": "set_mute",
+     "args": {
+      "mute": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "watch-batt",
+   "say": "battery level of the fitness band",
+   "expect": [
+    {
+     "tool": "watch",
+     "args": {
+      "action": "~summary",
+      "device": "~band"
+     }
+    }
+   ]
+  },
+  {
+   "id": "trigger-list",
+   "say": "list my automation triggers",
+   "expect": [
+    {
+     "tool": "manage_triggers",
+     "args": {
+      "action": "~list"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ls-home",
+   "say": "list_files in /tmp/projects",
+   "expect": [
+    {
+     "tool": "list_directory",
+     "args": {
+      "path": "~projects"
+     }
+    }
+   ]
+  },
+  {
+   "id": "world-time",
+   "say": "what time is it in Tokyo",
+   "expect": [
+    {
+     "tool": "get_world_time",
+     "args": {
+      "place": "~tokyo"
+     }
+    }
+   ]
+  },
+  {
+   "id": "machine-cap2",
+   "say": "does this box have ffmpeg and git?",
+   "expect": [
+    {
+     "tool": "machine_capabilities"
+    }
+   ]
+  },
+  {
+   "id": "settings2",
+   "say": "open the bluetooth settings page",
+   "expect": [
+    {
+     "tool": "open_settings",
+     "args": {
+      "page": "~bluetooth"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-210",
+   "say": "enable bluetooth",
+   "expect": [
+    {
+     "tool": "toggle_bluetooth",
+     "args": {
+      "action": "~on"
+     }
+    }
+   ]
+  },
+  {
+   "id": "f10",
+   "say": "copy notes.txt backup",
+   "expect": [
+    {
+     "tool": "move_or_copy_file",
+     "args": {
+      "source": "~notes.txt",
+      "destination": "~backup",
+      "mode": "~copy"
+     }
+    }
+   ]
+  },
+  {
+   "id": "browse-form",
+   "say": "Fill the search box on example.com and submit",
+   "expect": [
+    {
+     "tool": "browse",
+     "args": {
+      "url": "~example.com",
+      "selector": "~search",
+      "text": "hello"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-053",
+   "say": "tree of ~/src",
+   "expect": [
+    {
+     "tool": "directory_tree",
+     "args": {
+      "path": "~src"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ask-11",
+   "say": "What timezone is that in?",
+   "expect": [
+    {
+     "tool": "get_world_time",
+     "args": {
+      "place": "~"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "extra-093",
+   "say": "todo list for today",
+   "expect": [
+    {
+     "tool": "todo_list",
+     "args": {
+      "action": "~list"
+     }
+    }
+   ]
+  },
+  {
+   "id": "dice",
+   "say": "roll 2d6",
+   "expect": [
+    {
+     "tool": "random_pick",
+     "args": {
+      "kind": "~dice",
+      "dice": "~2d6"
+     }
+    }
+   ]
+  },
+  {
+   "id": "logins",
+   "say": "who logged in recently?",
+   "expect": [
+    {
+     "tool": "login_history"
+    }
+   ]
+  },
+  {
+   "id": "defapp-set",
+   "say": "Set VLC as the default for .mp4",
+   "expect": [
+    {
+     "tool": "default_apps",
+     "args": {
+      "target": "~.mp4",
+      "app": "~vlc",
+      "action": "~set"
+     }
+    }
+   ]
+  },
+  {
+   "id": "power-sleep",
+   "say": "put the computer to sleep",
+   "expect": [
+    {
+     "tool": "power_action",
+     "args": {
+      "action": "~sleep"
+     }
+    }
+   ]
+  },
+  {
+   "id": "search-web2",
+   "say": "latest price of bitcoin",
+   "expect": [
+    {
+     "tool": "web_search",
+     "args": {
+      "query": "~bitcoin price"
+     }
+    }
+   ]
+  },
+  {
+   "id": "caps",
+   "say": "what can you do?",
+   "expect": [
+    {
+     "tool": "list_capabilities"
+    }
+   ]
+  },
+  {
+   "id": "extra-134",
+   "say": "ls the project folder",
+   "expect": [
+    {
+     "tool": "list_directory",
+     "args": {
+      "path": "~project"
+     }
+    }
+   ]
+  },
+  {
+   "id": "run-build",
+   "say": "run npm test in /tmp/app",
+   "expect": [
+    {
+     "tool": "run_command",
+     "args": {
+      "command": "~npm test",
+      "cwd": "~app"
+     }
+    }
+   ]
+  },
+  {
+   "id": "charger-info",
+   "say": "What's powering this laptop?",
+   "expect": [
+    {
+     "tool": "charger_info"
+    }
+   ]
+  },
+  {
+   "id": "extra-204",
+   "say": "turn it down to 15",
+   "expect": [
+    {
+     "tool": "set_volume",
+     "args": {
+      "percent": 15
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-144",
+   "say": "weather in seattle",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~seattle"
+     }
+    }
+   ]
+  },
+  {
+   "id": "shortcuts",
+   "say": "what's the shortcut for screenshot?",
+   "expect": [
+    {
+     "tool": "list_shortcuts",
+     "args": {
+      "keys": "~screenshot"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ask-33",
+   "say": "How many rows should I fetch from the table?",
+   "expect": [
+    {
+     "tool": "analyze_table",
+     "args": {
+      "action": "~query",
+      "path": "~"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "printq",
+   "say": "show the print queue",
+   "expect": [
+    {
+     "tool": "print_queue",
+     "args": {
+      "action": "~list"
+     }
+    }
+   ]
+  },
+  {
+   "id": "caps2",
+   "say": "list my available skills",
+   "expect": [
+    {
+     "tool": "list_capabilities"
+    }
+   ]
+  },
+  {
+   "id": "extra-132",
+   "say": "what's on today",
+   "expect": [
+    {
+     "tool": "calendar_events"
+    }
+   ]
+  },
+  {
+   "id": "extra-078",
+   "say": "set_volume 70",
+   "expect": [
+    {
+     "tool": "set_volume",
+     "args": {
+      "percent": 70
+     }
+    }
+   ]
+  },
+  {
+   "id": "todo3",
+   "say": "mark todo done",
+   "expect": [
+    {
+     "tool": "todo_list",
+     "args": {
+      "action": "~done"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-232",
+   "say": "move window to workspace 3",
+   "expect": [
+    {
+     "tool": "arrange_window",
+     "args": {
+      "action": "~move",
+      "workspace": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-16",
+   "say": "joke",
+   "none": true
+  },
+  {
+   "id": "boot-top",
+   "say": "Show the slowest parts of the last boot",
+   "expect": [
+    {
+     "tool": "boot_report",
+     "args": {
+      "top": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "autostart-check",
+   "say": "Show me my startup applications",
+   "expect": [
+    {
+     "tool": "autostart_entries"
+    }
+   ]
+  },
+  {
+   "id": "untar",
+   "say": "Unpack backup.tar.gz",
+   "expect": [
+    {
+     "tool": "extract_archive",
+     "args": {
+      "archive": "~backup.tar.gz"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-237",
+   "say": "show me the home directory",
+   "expect": [
+    {
+     "tool": "list_directory",
+     "args": {
+      "path": "~"
+     }
+    }
+   ]
+  },
+  {
+   "id": "timer2",
+   "say": "timer for 10 minutes",
+   "expect": [
+    {
+     "tool": "set_timer",
+     "args": {
+      "action": "~set",
+      "seconds": 600
+     }
+    }
+   ]
+  },
+  {
+   "id": "privacy-cam",
+   "say": "disable the camera",
+   "expect": [
+    {
+     "tool": "set_privacy",
+     "args": {
+      "action": "~disable_camera",
+      "device": "~camera"
+     }
+    }
+   ]
+  },
+  {
+   "id": "readtxt2",
+   "say": "first 20 lines of todo.txt",
+   "expect": [
+    {
+     "tool": "read_text_file",
+     "args": {
+      "path": "~todo.txt",
+      "max_lines": 20
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-067",
+   "say": "set_timer 8 min",
+   "expect": [
+    {
+     "tool": "set_timer",
+     "args": {
+      "action": "~set",
+      "seconds": 480
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-177",
+   "say": "open signal",
+   "expect": [
+    {
+     "tool": "open_application",
+     "args": {
+      "name": "~signal"
+     }
+    }
+   ]
+  },
+  {
+   "id": "cron",
+   "say": "what's in my crontab?",
+   "expect": [
+    {
+     "tool": "scheduled_tasks"
+    }
+   ]
+  },
+  {
+   "id": "cal2",
+   "say": "what's on tomorrow",
+   "expect": [
+    {
+     "tool": "calendar_events",
+     "args": {
+      "range": "~tomorrow"
+     }
+    }
+   ]
+  },
+  {
+   "id": "unit-check2",
+   "say": "Is sshd.service unit valid?",
+   "expect": [
+    {
+     "tool": "check_units",
+     "args": {
+      "unit": "~sshd.service"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-102",
+   "say": "find largest old files",
+   "expect": [
+    {
+     "tool": "stale_files",
+     "args": {
+      "path": "~"
+     }
+    }
+   ]
+  },
+  {
+   "id": "dev-list",
+   "say": "Probe user-space drivers",
+   "expect": [
+    {
+     "tool": "device_probe"
+    }
+   ]
+  },
+  {
+   "id": "git-diff",
+   "say": "show me the diff from last week",
+   "expect": [
+    {
+     "tool": "git_inspect",
+     "args": {
+      "path": "~repo",
+      "subcommand": "~diff",
+      "since": "~week ago"
+     }
+    }
+   ]
+  },
+  {
+   "id": "charger-plugged",
+   "say": "Is it on battery or AC?",
+   "expect": [
+    {
+     "tool": "charger_info"
+    }
+   ]
+  },
+  {
+   "id": "none-33",
+   "say": "nice",
+   "none": true
+  },
+  {
+   "id": "netact",
+   "say": "what's using the network right now?",
+   "expect": [
+    {
+     "tool": "network_activity"
+    }
+   ]
+  },
+  {
+   "id": "none-48",
+   "say": "i don't know",
+   "none": true
+  },
+  {
+   "id": "btgatt-hr",
+   "say": "Get heart-rate from the chest strap for 5s",
+   "expect": [
+    {
+     "tool": "bluetooth_gatt",
+     "args": {
+      "action": "~read",
+      "device": "~chest strap",
+      "seconds": 5
+     }
+    }
+   ]
+  },
+  {
+   "id": "map-find",
+   "say": "where is the eiffel tower?",
+   "expect": [
+    {
+     "tool": "maps",
+     "args": {
+      "action": "~find",
+      "place": "~eiffel tower"
+     }
+    }
+   ]
+  },
+  {
+   "id": "f8",
+   "say": "what type of file is a.bin",
+   "expect": [
+    {
+     "tool": "identify_file",
+     "args": {
+      "path": "~a.bin"
+     }
+    }
+   ]
+  },
+  {
+   "id": "fwu-list",
+   "say": "Any firmware updates for my laptop?",
+   "expect": [
+    {
+     "tool": "firmware_updates"
+    }
+   ]
+  },
+  {
+   "id": "none-39",
+   "say": "really?",
+   "none": true
+  },
+  {
+   "id": "vol3",
+   "say": "quiet please",
+   "expect": [
+    {
+     "tool": "set_volume",
+     "args": {
+      "percent": "~low"
+     }
+    }
+   ]
+  },
+  {
+   "id": "timer3",
+   "say": "set_timer 2 min for noodles",
+   "expect": [
+    {
+     "tool": "set_timer",
+     "args": {
+      "action": "~set",
+      "seconds": 120
+     }
+    }
+   ]
+  },
+  {
+   "id": "type2",
+   "say": "type out the address 123 main st",
+   "expect": [
+    {
+     "tool": "type_text",
+     "args": {
+      "text": "~123 main st"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-114",
+   "say": "launch chromium",
+   "expect": [
+    {
+     "tool": "open_application",
+     "args": {
+      "name": "~chromium"
+     }
+    }
+   ]
+  },
+  {
+   "id": "video-ir",
+   "say": "Record 3 seconds of infrared from the camera",
+   "expect": [
+    {
+     "tool": "capture_video",
+     "args": {
+      "device": "~video0",
+      "seconds": 3,
+      "infrared": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "rec-sub",
+   "say": "transcribe interview.mp4",
+   "expect": [
+    {
+     "tool": "recording",
+     "args": {
+      "action": "~transcribe",
+      "path": "~interview.mp4"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-201",
+   "say": "python list comprehension",
+   "expect": [
+    {
+     "tool": "web_search",
+     "args": {
+      "query": "~list comprehension"
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-54",
+   "say": "trivia",
+   "none": true
+  },
+  {
+   "id": "photos-list",
+   "say": "my photos from today",
+   "expect": [
+    {
+     "tool": "photos",
+     "args": {
+      "action": "~list"
+     }
+    }
+   ]
+  },
+  {
+   "id": "arrange-ws",
+   "say": "Move Firefox to workspace 2",
+   "expect": [
+    {
+     "tool": "arrange_window",
+     "args": {
+      "action": "~move",
+      "workspace": 2,
+      "title_contains": "~firefox"
+     }
+    }
+   ]
+  },
+  {
+   "id": "hostname2",
+   "say": "what's my hostname?",
+   "expect": [
+    {
+     "tool": "set_hostname",
+     "args": {
+      "action": "~get"
+     }
+    }
+   ]
+  },
+  {
+   "id": "screensaver",
+   "say": "blank the screen after 5 minutes and lock",
+   "expect": [
+    {
+     "tool": "set_screensaver",
+     "args": {
+      "action": "~set",
+      "blank_after_minutes": 5,
+      "lock": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "space-type",
+   "say": "break down disk use by file kind in ~",
+   "expect": [
+    {
+     "tool": "space_by_type",
+     "args": {
+      "path": "~"
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-13",
+   "say": "good night",
+   "none": true
+  },
+  {
+   "id": "ask-26",
+   "say": "The search query was ambiguous, can you clarify?",
+   "expect": [
+    {
+     "tool": "web_search",
+     "args": {
+      "query": "~"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "traceroute",
+   "say": "trace route to 8.8.8.8",
+   "expect": [
+    {
+     "tool": "trace_route",
+     "args": {
+      "host": "~8.8.8.8"
+     }
+    }
+   ]
+  },
+  {
+   "id": "theme-dark",
+   "say": "use dark mode",
+   "expect": [
+    {
+     "tool": "set_theme",
+     "args": {
+      "action": "~dark"
+     }
+    }
+   ]
+  },
+  {
+   "id": "w8",
+   "say": "weather miami this weekend",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~miami"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-199",
+   "say": "is wifi enabled",
+   "expect": [
+    {
+     "tool": "toggle_wifi",
+     "args": {
+      "action": "~status"
+     }
+    }
+   ]
+  },
+  {
+   "id": "undo-list",
+   "say": "list the changes I can undo",
+   "expect": [
+    {
+     "tool": "undo_last_change",
+     "args": {
+      "list": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "analyze-columns",
+   "say": "What columns are in /tmp/data.csv?",
+   "expect": [
+    {
+     "tool": "analyze_table",
+     "args": {
+      "action": "~describe",
+      "path": "~data.csv"
+     }
+    }
+   ]
+  },
+  {
+   "id": "threads2",
+   "say": "all threads on the machine",
+   "expect": [
+    {
+     "tool": "thread_activity"
+    }
+   ]
+  },
+  {
+   "id": "backup-home",
+   "say": "Is my home folder backed up?",
+   "expect": [
+    {
+     "tool": "backup_status"
+    }
+   ]
+  },
+  {
+   "id": "none-25",
+   "say": "how old are you",
+   "none": true
+  },
+  {
+   "id": "w4",
+   "say": "will it snow in denver",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~denver"
+     }
+    }
+   ]
+  },
+  {
+   "id": "bt-connect",
+   "say": "Connect to the Jaybird headphones",
+   "expect": [
+    {
+     "tool": "bluetooth_devices",
+     "args": {
+      "action": "~connect",
+      "name": "~jaybird"
+     }
+    }
+   ]
+  },
+  {
+   "id": "open-file2",
+   "say": "show me the folder /tmp/work",
+   "expect": [
+    {
+     "tool": "open_file",
+     "args": {
+      "path": "~work"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-003",
+   "say": "time in cape town",
+   "expect": [
+    {
+     "tool": "get_world_time",
+     "args": {
+      "place": "~cape town"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-191",
+   "say": "enable wifi",
+   "expect": [
+    {
+     "tool": "toggle_wifi",
+     "args": {
+      "action": "~on"
+     }
+    }
+   ]
+  },
+  {
+   "id": "net-scan",
+   "say": "which devices are on 192.168.1.0/24?",
+   "expect": [
+    {
+     "tool": "scan_network",
+     "args": {
+      "range": "~192.168.1.0/24"
+     }
+    }
+   ]
+  },
+  {
+   "id": "du-root",
+   "say": "Which folders eat the most space?",
+   "expect": [
+    {
+     "tool": "disk_usage",
+     "args": {
+      "path": "~"
+     }
+    }
+   ]
+  },
+  {
+   "id": "photos-search",
+   "say": "find photos of a dog",
+   "expect": [
+    {
+     "tool": "photos",
+     "args": {
+      "action": "~search",
+      "query": "~dog"
+     }
+    }
+   ]
+  },
+  {
+   "id": "pdetail",
+   "say": "tell me about pid 1234",
+   "expect": [
+    {
+     "tool": "process_detail",
+     "args": {
+      "pid": 1234
+     }
+    }
+   ]
+  },
+  {
+   "id": "mount",
+   "say": "mount the second disk /dev/sdb1",
+   "expect": [
+    {
+     "tool": "manage_mount",
+     "args": {
+      "action": "~mount",
+      "device": "~sdb1"
+     }
+    }
+   ]
+  },
+  {
+   "id": "stay-awake",
+   "say": "keep it awake for 20 minutes while downloading",
+   "expect": [
+    {
+     "tool": "set_sleep_inhibit",
+     "args": {
+      "action": "~inhibit",
+      "seconds": 1200
+     }
+    }
+   ]
+  },
+  {
+   "id": "location2",
+   "say": "My current coordinates?",
+   "expect": [
+    {
+     "tool": "get_location"
+    }
+   ]
+  },
+  {
+   "id": "drv-status",
+   "say": "Can this machine build a kernel driver?",
+   "expect": [
+    {
+     "tool": "driver_status"
+    }
+   ]
+  },
+  {
+   "id": "git-push2",
+   "say": "push feature-x upstream and set upstream",
+   "expect": [
+    {
+     "tool": "git_push",
+     "args": {
+      "remote": "~upstream",
+      "branch": "~feature-x",
+      "set_upstream": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-065",
+   "say": "add todo finish report",
+   "expect": [
+    {
+     "tool": "todo_list",
+     "args": {
+      "action": "~add",
+      "content": "~finish report"
+     }
+    }
+   ]
+  },
+  {
+   "id": "a6",
+   "say": "install gimp",
+   "expect": [
+    {
+     "tool": "install_app",
+     "args": {
+      "action": "~search",
+      "query": "~gimp"
+     }
+    }
+   ]
+  },
+  {
+   "id": "dset-list",
+   "say": "Is animations on?",
+   "expect": [
+    {
+     "tool": "desktop_setting",
+     "args": {
+      "setting": "~animations"
+     }
+    }
+   ]
+  },
+  {
+   "id": "clipboard-write2",
+   "say": "put 'meeting notes' on the clipboard",
+   "expect": [
+    {
+     "tool": "set_clipboard",
+     "args": {
+      "text": "~meeting notes"
+     }
+    }
+   ]
+  },
+  {
+   "id": "updates-list",
+   "say": "What upgrades are pending?",
+   "expect": [
+    {
+     "tool": "check_updates"
+    }
+   ]
+  },
+  {
+   "id": "disk-health",
+   "say": "Are my drives healthy?",
+   "expect": [
+    {
+     "tool": "disk_health"
+    }
+   ]
+  },
+  {
+   "id": "ask-10",
+   "say": "Which branch should I push to?",
+   "expect": [
+    {
+     "tool": "git_push",
+     "args": {
+      "remote": "~origin"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "pcap-filter",
+   "say": "Watch DNS traffic on eth0",
+   "expect": [
+    {
+     "tool": "capture_packets",
+     "args": {
+      "interface": "~eth0",
+      "filter": "~dns",
+      "seconds": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "temps2",
+   "say": "check fans and temperatures",
+   "expect": [
+    {
+     "tool": "temperatures"
+    }
+   ]
+  },
+  {
+   "id": "net-scan2",
+   "say": "scan the lan for hostnames",
+   "expect": [
+    {
+     "tool": "scan_network",
+     "args": {
+      "range": "~192.168.1.0/24",
+      "resolve_names": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "btcall-dial",
+   "say": "Dial 9876543210 through the phone's bluetooth",
+   "expect": [
+    {
+     "tool": "bluetooth_call",
+     "args": {
+      "action": "~call",
+      "number": "~9876543210"
+     }
+    }
+   ]
+  },
+  {
+   "id": "drv-scaffold",
+   "say": "Scaffold a new module called scull",
+   "expect": [
+    {
+     "tool": "driver_scaffold",
+     "args": {
+      "name": "~scull",
+      "path": "~scull"
+     }
+    }
+   ]
+  },
+  {
+   "id": "proposals2",
+   "say": "review 5 proposals",
+   "expect": [
+    {
+     "tool": "review_proposals",
+     "args": {
+      "action": "~list",
+      "number": 5
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-31",
+   "say": "la la la",
+   "none": true
+  },
+  {
+   "id": "extra-082",
+   "say": "current time please",
+   "expect": [
+    {
+     "tool": "get_datetime"
+    }
+   ]
+  },
+  {
+   "id": "edit-replace",
+   "say": "Replace the old title in README.md with a new one",
+   "expect": [
+    {
+     "tool": "edit_file",
+     "args": {
+      "path": "~README.md",
+      "old_string": "~old title",
+      "new_string": "~new title"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-188",
+   "say": "time in berlin",
+   "expect": [
+    {
+     "tool": "get_world_time",
+     "args": {
+      "place": "~berlin"
+     }
+    }
+   ]
+  },
+  {
+   "id": "sysinfo2",
+   "say": "system summary please",
+   "expect": [
+    {
+     "tool": "system_info"
+    }
+   ]
+  },
+  {
+   "id": "disk-layout",
+   "say": "How is my disk partitioned?",
+   "expect": [
+    {
+     "tool": "disk_layout"
+    }
+   ]
+  },
+  {
+   "id": "lock2",
+   "say": "I'm stepping away, lock it",
+   "expect": [
+    {
+     "tool": "lock_screen"
+    }
+   ]
+  },
+  {
+   "id": "rem3",
+   "say": "what are my reminders",
+   "expect": [
+    {
+     "tool": "reminders",
+     "args": {
+      "action": "~list"
+     }
+    }
+   ]
+  },
+  {
+   "id": "spell",
+   "say": "how do you spell necessary",
+   "expect": [
+    {
+     "tool": "spell_word",
+     "args": {
+      "word": "~necessary"
+     }
+    }
+   ]
+  },
+  {
+   "id": "empty-home",
+   "say": "List up to 10 empty dirs in ~",
+   "expect": [
+    {
+     "tool": "empty_directories",
+     "args": {
+      "path": "~",
+      "limit": 10
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-161",
+   "say": "bluetooth status",
+   "expect": [
+    {
+     "tool": "toggle_bluetooth",
+     "args": {
+      "action": "~status"
+     }
+    }
+   ]
+  },
+  {
+   "id": "find-logs",
+   "say": "Find all .log files under /var",
+   "expect": [
+    {
+     "tool": "find_files",
+     "args": {
+      "pattern": "~*.log",
+      "path": "~var"
+     }
+    }
+   ]
+  },
+  {
+   "id": "net-interfaces",
+   "say": "show interface counters for eth0",
+   "expect": [
+    {
+     "tool": "interface_counters",
+     "args": {
+      "interface": "~eth0"
+     }
+    }
+   ]
+  },
+  {
+   "id": "windows2",
+   "say": "list terminal windows",
+   "expect": [
+    {
+     "tool": "list_windows",
+     "args": {
+      "title_contains": "~term"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-052",
+   "say": "join coffee-shop network",
+   "expect": [
+    {
+     "tool": "connect_wifi",
+     "args": {
+      "ssid": "~coffee-shop"
+     }
+    }
+   ]
+  },
+  {
+   "id": "git-branch2",
+   "say": "Switch to the dev branch",
+   "expect": [
+    {
+     "tool": "git_branch",
+     "args": {
+      "name": "~dev"
+     }
+    }
+   ]
+  },
+  {
+   "id": "brightness",
+   "say": "make the screen brightness 70",
+   "expect": [
+    {
+     "tool": "set_brightness",
+     "args": {
+      "level": 70
+     }
+    }
+   ]
+  },
+  {
+   "id": "bt6",
+   "say": "find my bluetooth speaker",
+   "expect": [
+    {
+     "tool": "bluetooth_devices",
+     "args": {
+      "action": "~connect",
+      "name": "~headphones"
+     }
+    }
+   ]
+  },
+  {
+   "id": "usb2",
+   "say": "list usb devices",
+   "expect": [
+    {
+     "tool": "usb_devices"
+    }
+   ]
+  },
+  {
+   "id": "mic-unmute",
+   "say": "unmute the mic",
+   "expect": [
+    {
+     "tool": "set_mic_mute",
+     "args": {
+      "action": "~unmute"
+     }
+    }
+   ]
+  },
+  {
+   "id": "tmpfiles",
+   "say": "find junk/temp files in /tmp/src",
+   "expect": [
+    {
+     "tool": "temp_files",
+     "args": {
+      "path": "~src"
+     }
+    }
+   ]
+  },
+  {
+   "id": "hash-check",
+   "say": "Verify md5sum matches abc123 for archive.zip",
+   "expect": [
+    {
+     "tool": "compute_hash",
+     "args": {
+      "path": "~archive.zip",
+      "algorithm": "~md5",
+      "expected": "~abc123"
+     }
+    }
+   ]
+  },
+  {
+   "id": "route",
+   "say": "show the ipv4 routing table",
+   "expect": [
+    {
+     "tool": "routing_table",
+     "args": {
+      "family": "~ipv4"
+     }
+    }
+   ]
+  },
+  {
+   "id": "win1",
+   "say": "list open windows",
+   "expect": [
+    {
+     "tool": "list_windows"
+    }
+   ]
+  },
+  {
+   "id": "none-07",
+   "say": "what's up",
+   "none": true
+  },
+  {
+   "id": "undo",
+   "say": "undo chronoa's last edit to README.md",
+   "expect": [
+    {
+     "tool": "undo_last_change",
+     "args": {
+      "path": "~README.md"
+     }
+    }
+   ]
+  },
+  {
+   "id": "stopwatch-start",
+   "say": "start the stopwatch",
+   "expect": [
+    {
+     "tool": "stopwatch",
+     "args": {
+      "action": "~start"
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-46",
+   "say": "maybe",
+   "none": true
+  },
+  {
+   "id": "cleanup-flatpak",
+   "say": "Remove unused flatpak runtimes",
+   "expect": [
+    {
+     "tool": "cleanup_apply",
+     "args": {
+      "target": "~flatpak"
+     }
+    }
+   ]
+  },
+  {
+   "id": "lanphone-ring",
+   "say": "ring a phone on the local network for 5s",
+   "expect": [
+    {
+     "tool": "lan_phone",
+     "args": {
+      "action": "~ring",
+      "seconds": 5
+     }
+    }
+   ]
+  },
+  {
+   "id": "screen-status",
+   "say": "can I share my screen now?",
+   "expect": [
+    {
+     "tool": "screen_to_phone",
+     "args": {
+      "action": "~status"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ask-16",
+   "say": "Mute which device - speakers or mic?",
+   "expect": [
+    {
+     "tool": "set_mute",
+     "args": {
+      "mute": true
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "f6",
+   "say": "delete old.log",
+   "expect": [
+    {
+     "tool": "delete_file",
+     "args": {
+      "path": "~old.log"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-117",
+   "say": "delete the lunch event",
+   "expect": [
+    {
+     "tool": "calendar_edit",
+     "args": {
+      "action": "~delete",
+      "title": "~lunch"
+     }
+    }
+   ]
+  },
+  {
+   "id": "perms2",
+   "say": "check permissions under /srv",
+   "expect": [
+    {
+     "tool": "permission_audit",
+     "args": {
+      "path": "~srv"
+     }
+    }
+   ]
+  },
+  {
+   "id": "bt4",
+   "say": "list bluetooth devices",
+   "expect": [
+    {
+     "tool": "bluetooth_devices",
+     "args": {
+      "action": "~list"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-135",
+   "say": "list files in /tmp/work",
+   "expect": [
+    {
+     "tool": "list_directory",
+     "args": {
+      "path": "~work"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ask-31",
+   "say": "Pick a color theme for the presentation",
+   "expect": [
+    {
+     "tool": "set_theme",
+     "args": {
+      "action": "~dark"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "todo4",
+   "say": "todo list pending",
+   "expect": [
+    {
+     "tool": "todo_list",
+     "args": {
+      "action": "~list"
+     }
+    }
+   ]
+  },
+  {
+   "id": "time-chi",
+   "say": "time in chicago",
+   "expect": [
+    {
+     "tool": "get_world_time",
+     "args": {
+      "place": "~chicago"
+     }
+    }
+   ]
+  },
+  {
+   "id": "percepts",
+   "say": "what do you currently perceive?",
+   "expect": [
+    {
+     "tool": "list_percepts"
+    }
+   ]
+  },
+  {
+   "id": "fonts2",
+   "say": "find sans-serif fonts",
+   "expect": [
+    {
+     "tool": "list_fonts",
+     "args": {
+      "query": "~sans"
+     }
+    }
+   ]
+  },
+  {
+   "id": "speak2",
+   "say": "read this aloud: good morning",
+   "expect": [
+    {
+     "tool": "speak",
+     "args": {
+      "text": "~good morning"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-014",
+   "say": "clean caches",
+   "expect": [
+    {
+     "tool": "cleanup_apply",
+     "args": {
+      "target": "~cache"
+     }
+    }
+   ]
+  },
+  {
+   "id": "tls",
+   "say": "when does example.com's cert expire?",
+   "expect": [
+    {
+     "tool": "tls_certificate",
+     "args": {
+      "host": "~example.com",
+      "port": 443
+     }
+    }
+   ]
+  },
+  {
+   "id": "svc-start",
+   "say": "Start cups please",
+   "expect": [
+    {
+     "tool": "control_service",
+     "args": {
+      "unit": "~cups.service",
+      "action": "~start"
+     }
+    }
+   ]
+  },
+  {
+   "id": "vol5",
+   "say": "mute system",
+   "expect": [
+    {
+     "tool": "set_mute",
+     "args": {
+      "mute": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "f1",
+   "say": "list the files in /tmp/work",
+   "expect": [
+    {
+     "tool": "list_directory"
+    }
+   ]
+  },
+  {
+   "id": "container-run",
+   "say": "Run nginx in a container named web",
+   "expect": [
+    {
+     "tool": "container",
+     "args": {
+      "action": "~run",
+      "image": "~nginx",
+      "name": "~web"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ptr-move2",
+   "say": "point at coordinates 100,200",
+   "expect": [
+    {
+     "tool": "move_pointer",
+     "args": {
+      "x": 100,
+      "y": 200
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-130",
+   "say": "set_volume 85",
+   "expect": [
+    {
+     "tool": "set_volume",
+     "args": {
+      "percent": 85
+     }
+    }
+   ]
+  },
+  {
+   "id": "img2",
+   "say": "rotate photo 90",
+   "expect": [
+    {
+     "tool": "edit_image",
+     "args": {
+      "path": "~photo.png",
+      "rotate": 90
+     }
+    }
+   ]
+  },
+  {
+   "id": "cal-week",
+   "say": "Show me this week's events",
+   "expect": [
+    {
+     "tool": "calendar_events",
+     "args": {
+      "range": "~week"
+     }
+    }
+   ]
+  },
+  {
+   "id": "phoneck",
+   "say": "press the camera shutter",
+   "expect": [
+    {
+     "tool": "phone_remote",
+     "args": {
+      "action": "~press",
+      "key": "~camera"
+     }
+    }
+   ]
+  },
+  {
+   "id": "brightness2",
+   "say": "set brightness to 30 percent",
+   "expect": [
+    {
+     "tool": "set_brightness",
+     "args": {
+      "level": 30
+     }
+    }
+   ]
+  },
+  {
+   "id": "pv-bg",
+   "say": "remove background from portrait.png",
+   "expect": [
+    {
+     "tool": "photo_video",
+     "args": {
+      "action": "~remove_background",
+      "path": "~portrait.png"
+     }
+    }
+   ]
+  },
+  {
+   "id": "inspect-bin",
+   "say": "Can /usr/bin/vim run here, 64-bit?",
+   "expect": [
+    {
+     "tool": "inspect_binary",
+     "args": {
+      "path": "~vim"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ph2",
+   "say": "phone battery",
+   "expect": [
+    {
+     "tool": "phone",
+     "args": {
+      "action": "~status"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-083",
+   "say": "add a todo buy gifts",
+   "expect": [
+    {
+     "tool": "todo_list",
+     "args": {
+      "action": "~add",
+      "content": "~buy gifts"
+     }
+    }
+   ]
+  },
+  {
+   "id": "goal-save",
+   "say": "save a goal to learn rust",
+   "expect": [
+    {
+     "tool": "manage_goals",
+     "args": {
+      "action": "~save",
+      "goal": "~learn rust"
+     }
+    }
+   ]
+  },
+  {
+   "id": "containers",
+   "say": "what containers are running?",
+   "expect": [
+    {
+     "tool": "list_containers"
+    }
+   ]
+  },
+  {
+   "id": "win4",
+   "say": "snap terminal left",
+   "expect": [
+    {
+     "tool": "arrange_window",
+     "args": {
+      "action": "~tile",
+      "side": "~left"
+     }
+    }
+   ]
+  },
+  {
+   "id": "git-push",
+   "say": "push main to origin",
+   "expect": [
+    {
+     "tool": "git_push",
+     "args": {
+      "remote": "~origin",
+      "branch": "~main"
+     }
+    }
+   ]
+  },
+  {
+   "id": "pw-passphrase",
+   "say": "A random 5 word passphrase",
+   "expect": [
+    {
+     "tool": "generate_password",
+     "args": {
+      "kind": "~passphrase",
+      "length": 5
+     }
+    }
+   ]
+  },
+  {
+   "id": "run-tests",
+   "say": "run pytest",
+   "expect": [
+    {
+     "tool": "run_command",
+     "args": {
+      "command": "~pytest"
+     }
+    }
+   ]
+  },
+  {
+   "id": "tz2",
+   "say": "what timezone am I in?",
+   "expect": [
+    {
+     "tool": "set_timezone",
+     "args": {
+      "action": "~get"
+     }
+    }
+   ]
+  },
+  {
+   "id": "lab-list2",
+   "say": "show me the lab networks",
+   "expect": [
+    {
+     "tool": "lab_network_list"
+    }
+   ]
+  },
+  {
+   "id": "encode-rot13",
+   "say": "rot13 encode my secret message",
+   "expect": [
+    {
+     "tool": "encode_text",
+     "args": {
+      "text": "~secret",
+      "scheme": "~rot13",
+      "direction": "~encode"
+     }
+    }
+   ]
+  },
+  {
+   "id": "acc-list",
+   "say": "What accessibility features are currently turned on?",
+   "expect": [
+    {
+     "tool": "accessibility"
+    }
+   ]
+  },
+  {
+   "id": "disk2",
+   "say": "free disk space",
+   "expect": [
+    {
+     "tool": "disk_usage"
+    }
+   ]
+  },
+  {
+   "id": "conv-list",
+   "say": "Show my recent conversations",
+   "expect": [
+    {
+     "tool": "conversations",
+     "args": {
+      "action": "~list"
+     }
+    }
+   ]
+  },
+  {
+   "id": "mic-mute",
+   "say": "mute the microphone",
+   "expect": [
+    {
+     "tool": "set_mic_mute",
+     "args": {
+      "action": "~mute"
+     }
+    }
+   ]
+  },
+  {
+   "id": "proposals",
+   "say": "show me facts to save from last session",
+   "expect": [
+    {
+     "tool": "review_proposals",
+     "args": {
+      "action": "~list"
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-23",
+   "say": "can you chat",
+   "none": true
+  },
+  {
+   "id": "fbname-readme",
+   "say": "Find all README files under the project",
+   "expect": [
+    {
+     "tool": "files_by_name",
+     "args": {
+      "name": "~README",
+      "path": "~project"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ask-37",
+   "say": "What's the exact message you want sent?",
+   "expect": [
+    {
+     "tool": "notify",
+     "args": {
+      "summary": "~"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "extra-056",
+   "say": "focus the browser",
+   "expect": [
+    {
+     "tool": "focus_window",
+     "args": {
+      "title_contains": "~browser"
+     }
+    }
+   ]
+  },
+  {
+   "id": "note-add",
+   "say": "add a note: buy milk tomorrow",
+   "expect": [
+    {
+     "tool": "notes",
+     "args": {
+      "action": "~add",
+      "text": "~buy milk"
+     }
+    }
+   ]
+  },
+  {
+   "id": "media-gif",
+   "say": "Convert pic.png to a gif",
+   "expect": [
+    {
+     "tool": "convert_media",
+     "args": {
+      "path": "~pic.png",
+      "to": "~gif"
+     }
+    }
+   ]
+  },
+  {
+   "id": "bat1",
+   "say": "battery level",
+   "expect": [
+    {
+     "tool": "get_battery_status"
+    }
+   ]
+  },
+  {
+   "id": "night-on",
+   "say": "enable night light",
+   "expect": [
+    {
+     "tool": "toggle_night_light",
+     "args": {
+      "action": "~on"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ask-40",
+   "say": "Confirm deletion of the folder?",
+   "expect": [
+    {
+     "tool": "delete_file",
+     "args": {
+      "path": "~"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "perms",
+   "say": "who can read /tmp/secrets?",
+   "expect": [
+    {
+     "tool": "permission_audit",
+     "args": {
+      "path": "~secrets"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-108",
+   "say": "install inkscape",
+   "expect": [
+    {
+     "tool": "install_app",
+     "args": {
+      "query": "~inkscape"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ask-34",
+   "say": "What sort order do you want?",
+   "expect": [
+    {
+     "tool": "list_processes",
+     "args": {
+      "sort_by": "~cpu"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "locks-file",
+   "say": "Who has log.txt open?",
+   "expect": [
+    {
+     "tool": "file_locks",
+     "args": {
+      "path": "~log.txt"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-158",
+   "say": "time in mumbai",
+   "expect": [
+    {
+     "tool": "get_world_time",
+     "args": {
+      "place": "~mumbai"
+     }
+    }
+   ]
+  },
+  {
+   "id": "mv-file",
+   "say": "move photo.jpg to /tmp/archive",
+   "expect": [
+    {
+     "tool": "move_or_copy_file",
+     "args": {
+      "source": "~photo.jpg",
+      "destination": "~archive",
+      "mode": "~move"
+     }
+    }
+   ]
+  },
+  {
+   "id": "hostname",
+   "say": "rename this computer to devbox",
+   "expect": [
+    {
+     "tool": "set_hostname",
+     "args": {
+      "action": "~rename",
+      "name": "~devbox"
+     }
+    }
+   ]
+  },
+  {
+   "id": "security",
+   "say": "is secure boot on?",
+   "expect": [
+    {
+     "tool": "security_status"
+    }
+   ]
+  },
+  {
+   "id": "imginfo",
+   "say": "what size is photo.png?",
+   "expect": [
+    {
+     "tool": "read_image",
+     "args": {
+      "path": "~photo.png"
+     }
+    }
+   ]
+  },
+  {
+   "id": "json-query",
+   "say": "how many entries are in users list in data.json?",
+   "expect": [
+    {
+     "tool": "json_query",
+     "args": {
+      "path": "~data.json",
+      "field": "~users",
+      "operation": "~count"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-054",
+   "say": "add note take meds",
+   "expect": [
+    {
+     "tool": "notes",
+     "args": {
+      "action": "~add",
+      "text": "~take meds"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ask-18",
+   "say": "Do you want to empty the trash now?",
+   "expect": [
+    {
+     "tool": "empty_trash",
+     "args": {
+      "action": "~empty"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "extra-179",
+   "say": "timer list running",
+   "expect": [
+    {
+     "tool": "set_timer",
+     "args": {
+      "action": "~list"
+     }
+    }
+   ]
+  },
+  {
+   "id": "arp",
+   "say": "neighbour table for wlan0",
+   "expect": [
+    {
+     "tool": "neighbour_table",
+     "args": {
+      "device": "~wlan0"
+     }
+    }
+   ]
+  },
+  {
+   "id": "git1",
+   "say": "git status",
+   "expect": [
+    {
+     "tool": "git_inspect",
+     "args": {
+      "subcommand": "~status"
+     }
+    }
+   ]
+  },
+  {
+   "id": "alarm-weekdays",
+   "say": "Wake me up at 6:45 on weekdays",
+   "expect": [
+    {
+     "tool": "alarm",
+     "args": {
+      "action": "~set",
+      "time": "~6:45",
+      "repeat": "~weekday"
+     }
+    }
+   ]
+  },
+  {
+   "id": "watch-steps",
+   "say": "how many steps did I take yesterday?",
+   "expect": [
+    {
+     "tool": "watch",
+     "args": {
+      "action": "~summary"
+     }
+    }
+   ]
+  },
+  {
+   "id": "screensaver2",
+   "say": "turn off the screensaver lock",
+   "expect": [
+    {
+     "tool": "set_screensaver",
+     "args": {
+      "action": "~set",
+      "lock": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "wifi2",
+   "say": "list wifi networks",
+   "expect": [
+    {
+     "tool": "list_wifi_networks"
+    }
+   ]
+  },
+  {
+   "id": "threads",
+   "say": "show threads of pid 4321",
+   "expect": [
+    {
+     "tool": "thread_activity",
+     "args": {
+      "pid": 4321
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-072",
+   "say": "snap terminal right",
+   "expect": [
+    {
+     "tool": "arrange_window",
+     "args": {
+      "action": "~tile",
+      "side": "~right",
+      "title_contains": "~terminal"
+     }
+    }
+   ]
+  },
+  {
+   "id": "i2c-write",
+   "say": "Write 0x01 to bus 2 addr 0x50 reg 0x00",
+   "expect": [
+    {
+     "tool": "device_i2c",
+     "args": {
+      "action": "~write",
+      "bus": 2,
+      "address": "~0x50",
+      "register": "~0x00",
+      "value": "~0x01"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-061",
+   "say": "weather in austin",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~austin"
+     }
+    }
+   ]
+  },
+  {
+   "id": "drv-build",
+   "say": "Build the hello module out of tree",
+   "expect": [
+    {
+     "tool": "driver_build",
+     "args": {
+      "name": "~hello",
+      "path": "~hello"
+     }
+    }
+   ]
+  },
+  {
+   "id": "acc-high-contrast",
+   "say": "Turn on high contrast mode, please",
+   "expect": [
+    {
+     "tool": "accessibility",
+     "args": {
+      "feature": "~high contrast",
+      "enabled": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "ws2",
+   "say": "latest iphone release",
+   "expect": [
+    {
+     "tool": "web_search",
+     "args": {
+      "query": "~iphone"
+     }
+    }
+   ]
+  },
+  {
+   "id": "route2",
+   "say": "routing for eth0",
+   "expect": [
+    {
+     "tool": "routing_table",
+     "args": {
+      "interface": "~eth0"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-163",
+   "say": "what reminders are due",
+   "expect": [
+    {
+     "tool": "reminders",
+     "args": {
+      "action": "~list"
+     }
+    }
+   ]
+  },
+  {
+   "id": "netact2",
+   "say": "show per-process network usage",
+   "expect": [
+    {
+     "tool": "network_activity"
+    }
+   ]
+  },
+  {
+   "id": "extra-107",
+   "say": "add todo call alice",
+   "expect": [
+    {
+     "tool": "todo_list",
+     "args": {
+      "action": "~add",
+      "content": "~call alice"
+     }
+    }
+   ]
+  },
+  {
+   "id": "disk3",
+   "say": "clean up trash",
+   "expect": [
+    {
+     "tool": "cleanup_report"
+    }
+   ]
+  },
+  {
+   "id": "mount2",
+   "say": "unmount /dev/sdc2",
+   "expect": [
+    {
+     "tool": "manage_mount",
+     "args": {
+      "action": "~unmount",
+      "device": "~sdc2"
+     }
+    }
+   ]
+  },
+  {
+   "id": "focus-term",
+   "say": "Focus the terminal window",
+   "expect": [
+    {
+     "tool": "focus_window",
+     "args": {
+      "title_contains": "~term"
+     }
+    }
+   ]
+  },
+  {
+   "id": "battery-level",
+   "say": "Is it charging?",
+   "expect": [
+    {
+     "tool": "get_battery_status"
+    }
+   ]
+  },
+  {
+   "id": "none-41",
+   "say": "ok",
+   "none": true
+  },
+  {
+   "id": "extra-109",
+   "say": "weather lisbon",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~lisbon"
+     }
+    }
+   ]
+  },
+  {
+   "id": "openfiles2",
+   "say": "what's pid 42 using?",
+   "expect": [
+    {
+     "tool": "open_files",
+     "args": {
+      "pid": 42,
+      "limit": 10
+     }
+    }
+   ]
+  },
+  {
+   "id": "img3",
+   "say": "make a cat meme",
+   "expect": [
+    {
+     "tool": "generate_image",
+     "args": {
+      "prompt": "~cat"
+     }
+    }
+   ]
+  },
+  {
+   "id": "fm-tune",
+   "say": "Tune to 99.5 FM for 8 seconds",
+   "expect": [
+    {
+     "tool": "fm_radio",
+     "args": {
+      "action": "~tune",
+      "frequency": 99.5
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-28",
+   "say": "who are you",
+   "none": true
+  },
+  {
+   "id": "sysinfo",
+   "say": "tell me about this machine",
+   "expect": [
+    {
+     "tool": "system_info"
+    }
+   ]
+  },
+  {
+   "id": "timer9",
+   "say": "set alarm for 5 min",
+   "expect": [
+    {
+     "tool": "set_timer",
+     "args": {
+      "action": "~set",
+      "seconds": 300
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-092",
+   "say": "volume 60 percent",
+   "expect": [
+    {
+     "tool": "set_volume",
+     "args": {
+      "percent": 60
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-094",
+   "say": "mute the mic",
+   "expect": [
+    {
+     "tool": "set_mic_mute",
+     "args": {
+      "action": "~mute"
+     }
+    }
+   ]
+  },
+  {
+   "id": "note-list",
+   "say": "list my notes",
+   "expect": [
+    {
+     "tool": "notes",
+     "args": {
+      "action": "~list"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-214",
+   "say": "time where I am",
+   "expect": [
+    {
+     "tool": "get_datetime"
+    }
+   ]
+  },
+  {
+   "id": "privacy-mic",
+   "say": "mute my microphone for privacy",
+   "expect": [
+    {
+     "tool": "set_privacy",
+     "args": {
+      "action": "~mute_mic",
+      "device": "~mic"
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-38",
+   "say": "no way",
+   "none": true
+  },
+  {
+   "id": "extra-198",
+   "say": "list all reminders",
+   "expect": [
+    {
+     "tool": "reminders",
+     "args": {
+      "action": "~list"
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-20",
+   "say": "what's new",
+   "none": true
+  },
+  {
+   "id": "img-prompt2",
+   "say": "Draw a cyberpunk city at night in 4k",
+   "expect": [
+    {
+     "tool": "generate_image",
+     "args": {
+      "prompt": "~cyberpunk",
+      "size": "~4k"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-181",
+   "say": "launch gimp",
+   "expect": [
+    {
+     "tool": "open_application",
+     "args": {
+      "name": "~gimp"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ws4",
+   "say": "best laptop 2024",
+   "expect": [
+    {
+     "tool": "web_search",
+     "args": {
+      "query": "~laptop"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-118",
+   "say": "what is rust lang",
+   "expect": [
+    {
+     "tool": "web_search",
+     "args": {
+      "query": "~rust language"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-168",
+   "say": "make dir /tmp/test/x",
+   "expect": [
+    {
+     "tool": "create_directory",
+     "args": {
+      "path": "~test/x"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-157",
+   "say": "find report*.pdf",
+   "expect": [
+    {
+     "tool": "find_files",
+     "args": {
+      "pattern": "~report*",
+      "path": "~Documents"
+     }
+    }
+   ]
+  },
+  {
+   "id": "todo-list",
+   "say": "show me my todo list",
+   "expect": [
+    {
+     "tool": "todo_list",
+     "args": {
+      "action": "~list"
+     }
+    }
+   ]
+  },
+  {
+   "id": "doc2",
+   "say": "write a readme",
+   "expect": [
+    {
+     "tool": "create_document",
+     "args": {
+      "title": "~report",
+      "format": "~md"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-148",
+   "say": "remind me call mom at 6pm",
+   "expect": [
+    {
+     "tool": "reminders",
+     "args": {
+      "action": "~add",
+      "text": "~call mom"
+     }
+    }
+   ]
+  },
+  {
+   "id": "outline",
+   "say": "outline the /tmp/myapp project",
+   "expect": [
+    {
+     "tool": "project_outline",
+     "args": {
+      "path": "~myapp"
+     }
+    }
+   ]
+  },
+  {
+   "id": "video-color",
+   "say": "A 3 second solid blue clip at 720p",
+   "expect": [
+    {
+     "tool": "create_video",
+     "args": {
+      "color": "~blue",
+      "duration": 3,
+      "width": "~720"
+     }
+    }
+   ]
+  },
+  {
+   "id": "logins2",
+   "say": "last 10 logins",
+   "expect": [
+    {
+     "tool": "login_history",
+     "args": {
+      "limit": 10
+     }
+    }
+   ]
+  },
+  {
+   "id": "kill-proc",
+   "say": "kill pid 12345",
+   "expect": [
+    {
+     "tool": "kill_process",
+     "args": {
+      "pid": 12345
+     }
+    }
+   ]
+  },
+  {
+   "id": "snapshot",
+   "say": "is this a snapshot machine that can roll back?",
+   "expect": [
+    {
+     "tool": "snapshot_status"
+    }
+   ]
+  },
+  {
+   "id": "news",
+   "say": "latest tech headlines",
+   "expect": [
+    {
+     "tool": "news",
+     "args": {
+      "topic": "~tech",
+      "limit": 5
+     }
+    }
+   ]
+  },
+  {
+   "id": "timer1",
+   "say": "set a 5 minute timer",
+   "expect": [
+    {
+     "tool": "set_timer",
+     "args": {
+      "action": "~set",
+      "seconds": 300
+     }
+    }
+   ]
+  },
+  {
+   "id": "stay-list",
+   "say": "what's keeping the machine awake?",
+   "expect": [
+    {
+     "tool": "set_sleep_inhibit",
+     "args": {
+      "action": "~list"
+     }
+    }
+   ]
+  },
+  {
+   "id": "bt-list",
+   "say": "List my paired bluetooth devices",
+   "expect": [
+    {
+     "tool": "bluetooth_devices",
+     "args": {
+      "action": "~list"
+     }
+    }
+   ]
+  },
+  {
+   "id": "tree-proj",
+   "say": "Show the structure of /tmp/myapp",
+   "expect": [
+    {
+     "tool": "directory_tree",
+     "args": {
+      "path": "~myapp"
+     }
+    }
+   ]
+  },
+  {
+   "id": "phone-status",
+   "say": "is my phone connected and charged?",
+   "expect": [
+    {
+     "tool": "phone",
+     "args": {
+      "action": "~status"
+     }
+    }
+   ]
+  },
+  {
+   "id": "bridge-show",
+   "say": "What bridges are on this machine?",
+   "expect": [
+    {
+     "tool": "bridge_topology"
+    }
+   ]
+  },
+  {
+   "id": "clipboard-read",
+   "say": "What's on my clipboard?",
+   "expect": [
+    {
+     "tool": "get_clipboard"
+    }
+   ]
+  },
+  {
+   "id": "coin",
+   "say": "flip a coin",
+   "expect": [
+    {
+     "tool": "random_pick",
+     "args": {
+      "kind": "~coin"
+     }
+    }
+   ]
+  },
+  {
+   "id": "focus-code",
+   "say": "Bring VS Code to the front",
+   "expect": [
+    {
+     "tool": "focus_window",
+     "args": {
+      "title_contains": "~code"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-193",
+   "say": "time in dublin",
+   "expect": [
+    {
+     "tool": "get_world_time",
+     "args": {
+      "place": "~dublin"
+     }
+    }
+   ]
+  },
+  {
+   "id": "shortcuts2",
+   "say": "list all keyboard shortcuts",
+   "expect": [
+    {
+     "tool": "list_shortcuts"
+    }
+   ]
+  },
+  {
+   "id": "ask-13",
+   "say": "Do you want me to read or write the document?",
+   "expect": [
+    {
+     "tool": "read_document",
+     "args": {
+      "path": "~"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "extra-146",
+   "say": "current time tokyo",
+   "expect": [
+    {
+     "tool": "get_world_time",
+     "args": {
+      "place": "~tokyo"
+     }
+    }
+   ]
+  },
+  {
+   "id": "f9",
+   "say": "move pic.png to /tmp/archive",
+   "expect": [
+    {
+     "tool": "move_or_copy_file",
+     "args": {
+      "source": "~pic.png",
+      "destination": "~archive",
+      "mode": "~move"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ask-24",
+   "say": "How long should the recording be?",
+   "expect": [
+    {
+     "tool": "recording",
+     "args": {
+      "action": "~transcribe"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "extra-060",
+   "say": "show me app.py lines 1-50",
+   "expect": [
+    {
+     "tool": "read_text_file",
+     "args": {
+      "path": "~app.py",
+      "start_line": 1,
+      "max_lines": 50
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-202",
+   "say": "close the chrome window",
+   "expect": [
+    {
+     "tool": "close_window",
+     "args": {
+      "title_contains": "~chrome"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ph3",
+   "say": "ring my phone",
+   "expect": [
+    {
+     "tool": "phone",
+     "args": {
+      "action": "~ring",
+      "target": "~phone"
+     }
+    }
+   ]
+  },
+  {
+   "id": "clipboard-write",
+   "say": "copy hello world to clipboard",
+   "expect": [
+    {
+     "tool": "set_clipboard",
+     "args": {
+      "text": "~hello world"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-133",
+   "say": "show my tasks",
+   "expect": [
+    {
+     "tool": "todo_list",
+     "args": {
+      "action": "~list"
+     }
+    }
+   ]
+  },
+  {
+   "id": "phoneck2",
+   "say": "type hello on the phone",
+   "expect": [
+    {
+     "tool": "phone_remote",
+     "args": {
+      "action": "~type",
+      "text": "~hello"
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-19",
+   "say": "bored",
+   "none": true
+  },
+  {
+   "id": "locale",
+   "say": "set my language to en_US",
+   "expect": [
+    {
+     "tool": "set_locale",
+     "args": {
+      "action": "~set",
+      "locale": "~en_US"
+     }
+    }
+   ]
+  },
+  {
+   "id": "far-dry",
+   "say": "Find TODO and replace with FIXME in /tmp/code dry run",
+   "expect": [
+    {
+     "tool": "find_and_replace",
+     "args": {
+      "find": "~TODO",
+      "replace": "~FIXME",
+      "path": "~code",
+      "dry_run": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "speak",
+   "say": "say hello world out loud",
+   "expect": [
+    {
+     "tool": "speak",
+     "args": {
+      "text": "~hello world"
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-44",
+   "say": "yep",
+   "none": true
+  },
+  {
+   "id": "cost",
+   "say": "what's costing me cpu right now?",
+   "expect": [
+    {
+     "tool": "process_cost"
+    }
+   ]
+  },
+  {
+   "id": "extra-225",
+   "say": "show my timers",
+   "expect": [
+    {
+     "tool": "set_timer",
+     "args": {
+      "action": "~list"
+     }
+    }
+   ]
+  },
+  {
+   "id": "dup-files",
+   "say": "Find duplicate files in ~/Documents",
+   "expect": [
+    {
+     "tool": "duplicate_files",
+     "args": {
+      "path": "~Documents"
+     }
+    }
+   ]
+  },
+  {
+   "id": "img5",
+   "say": "photo info",
+   "expect": [
+    {
+     "tool": "photo_metadata",
+     "args": {
+      "path": "~photo.jpg"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ask-09",
+   "say": "How many minutes long should the reminder be?",
+   "expect": [
+    {
+     "tool": "reminders",
+     "args": {
+      "action": "~add"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "date-until",
+   "say": "How many days until 25 December?",
+   "expect": [
+    {
+     "tool": "date_math",
+     "args": {
+      "operation": "~diff",
+      "date": "~25 December",
+      "unit": "~days"
+     }
+    }
+   ]
+  },
+  {
+   "id": "graphics2",
+   "say": "software or hardware rendering?",
+   "expect": [
+    {
+     "tool": "graphics_stack"
+    }
+   ]
+  },
+  {
+   "id": "far-real",
+   "say": "Replace foo with bar across all .js files in src",
+   "expect": [
+    {
+     "tool": "find_and_replace",
+     "args": {
+      "find": "~foo",
+      "replace": "~bar",
+      "path": "~src",
+      "file_pattern": "~*.js"
+     }
+    }
+   ]
+  },
+  {
+   "id": "vid-trim",
+   "say": "Cut the clip to 10-25 seconds",
+   "expect": [
+    {
+     "tool": "edit_video",
+     "args": {
+      "path": "~clip.mp4",
+      "start": 10,
+      "end": 25
+     }
+    }
+   ]
+  },
+  {
+   "id": "tz",
+   "say": "set timezone to America/New_York",
+   "expect": [
+    {
+     "tool": "set_timezone",
+     "args": {
+      "action": "~set",
+      "timezone": "~America/New_York"
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-35",
+   "say": "wow",
+   "none": true
+  },
+  {
+   "id": "takepic2",
+   "say": "take a photo after a 3 second countdown",
+   "expect": [
+    {
+     "tool": "take_photo",
+     "args": {
+      "countdown": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "apps-list",
+   "say": "list the apps I have installed",
+   "expect": [
+    {
+     "tool": "list_apps"
+    }
+   ]
+  },
+  {
+   "id": "identify",
+   "say": "What type of file is mystery.bin?",
+   "expect": [
+    {
+     "tool": "identify_file",
+     "args": {
+      "path": "~mystery.bin"
+     }
+    }
+   ]
+  },
+  {
+   "id": "git3",
+   "say": "git push",
+   "expect": [
+    {
+     "tool": "git_push",
+     "args": {
+      "remote": "~origin",
+      "branch": "~main"
+     }
+    }
+   ]
+  },
+  {
+   "id": "sing",
+   "say": "sing 'twinkle twinkle' rising",
+   "expect": [
+    {
+     "tool": "sing",
+     "args": {
+      "text": "~twinkle twinkle",
+      "shape": "~rising"
+     }
+    }
+   ]
+  },
+  {
+   "id": "edit-word",
+   "say": "In app.py change TODO to FIXME everywhere",
+   "expect": [
+    {
+     "tool": "edit_file",
+     "args": {
+      "path": "~app.py",
+      "old_string": "~TODO",
+      "new_string": "~FIXME",
+      "replace_all": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-182",
+   "say": "start slack",
+   "expect": [
+    {
+     "tool": "open_application",
+     "args": {
+      "name": "~slack"
+     }
+    }
+   ]
+  },
+  {
+   "id": "a2",
+   "say": "launch libreoffice",
+   "expect": [
+    {
+     "tool": "open_application",
+     "args": {
+      "name": "~libreoffice"
+     }
+    }
+   ]
+  },
+  {
+   "id": "imginfo2",
+   "say": "dimensions of banner.jpg",
+   "expect": [
+    {
+     "tool": "read_image",
+     "args": {
+      "path": "~banner.jpg"
+     }
+    }
+   ]
+  },
+  {
+   "id": "fbname-makefile",
+   "say": "Locate Makefiles in /tmp/src",
+   "expect": [
+    {
+     "tool": "files_by_name",
+     "args": {
+      "name": "~Makefile",
+      "path": "~src"
+     }
+    }
+   ]
+  },
+  {
+   "id": "browse-wiki",
+   "say": "Open en.wikipedia.org and read the first paragraph",
+   "expect": [
+    {
+     "tool": "browse",
+     "args": {
+      "url": "~wikipedia.org",
+      "action": "~read"
+     }
+    }
+   ]
+  },
+  {
+   "id": "archive-list",
+   "say": "List what's in backup.tar.gz",
+   "expect": [
+    {
+     "tool": "create_archive",
+     "args": {
+      "action": "~list",
+      "source": "~backup.tar.gz"
+     }
+    }
+   ]
+  },
+  {
+   "id": "harden-curl",
+   "say": "Check /usr/bin/curl for stack canary",
+   "expect": [
+    {
+     "tool": "binary_hardening",
+     "args": {
+      "path": "~curl"
+     }
+    }
+   ]
+  },
+  {
+   "id": "video-slideshow",
+   "say": "Make a 6s slideshow from a few pictures",
+   "expect": [
+    {
+     "tool": "create_video",
+     "args": {
+      "images": "*",
+      "seconds": 6,
+      "duration": 6
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-034",
+   "say": "weather in seoul",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~seoul"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-205",
+   "say": "open the terminal",
+   "expect": [
+    {
+     "tool": "open_application",
+     "args": {
+      "name": "~terminal"
+     }
+    }
+   ]
+  },
+  {
+   "id": "drv-info",
+   "say": "Which driver does my ethernet use?",
+   "expect": [
+    {
+     "tool": "driver_info",
+     "args": {
+      "module": "~ethernet"
+     }
+    }
+   ]
+  },
+  {
+   "id": "vol6",
+   "say": "unmute audio",
+   "expect": [
+    {
+     "tool": "set_mute",
+     "args": {
+      "mute": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "exif",
+   "say": "when was img_001.jpg taken?",
+   "expect": [
+    {
+     "tool": "photo_metadata",
+     "args": {
+      "path": "~img_001.jpg"
+     }
+    }
+   ]
+  },
+  {
+   "id": "drv-kbuild",
+   "say": "Compile the out-of-tree driver in /tmp/x",
+   "expect": [
+    {
+     "tool": "driver_build",
+     "args": {
+      "name": "~x",
+      "path": "~x"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ask-12",
+   "say": "The file path wasn't clear, which one?",
+   "expect": [
+    {
+     "tool": "read_text_file",
+     "args": {
+      "path": "~"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "none-11",
+   "say": "i love you",
+   "none": true
+  },
+  {
+   "id": "keypress2",
+   "say": "hit enter 3 times",
+   "expect": [
+    {
+     "tool": "press_key",
+     "args": {
+      "key": "~Return",
+      "repeat": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "apps-find",
+   "say": "find a browser in my apps",
+   "expect": [
+    {
+     "tool": "list_apps",
+     "args": {
+      "search": "~browser"
+     }
+    }
+   ]
+  },
+  {
+   "id": "install-app2",
+   "say": "Search flathub for a video editor",
+   "expect": [
+    {
+     "tool": "install_app",
+     "args": {
+      "action": "~search",
+      "query": "~video editor"
+     }
+    }
+   ]
+  },
+  {
+   "id": "sgrep2",
+   "say": "find foo in *.js case sensitive",
+   "expect": [
+    {
+     "tool": "search_file_contents",
+     "args": {
+      "text": "~foo",
+      "file_pattern": "~*.js",
+      "case_sensitive": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "sgrep",
+   "say": "grep TODO under /tmp/src",
+   "expect": [
+    {
+     "tool": "search_file_contents",
+     "args": {
+      "text": "~TODO",
+      "path": "~src"
+     }
+    }
+   ]
+  },
+  {
+   "id": "vol1",
+   "say": "set volume 50",
+   "expect": [
+    {
+     "tool": "set_volume",
+     "args": {
+      "percent": 50
+     }
+    }
+   ]
+  },
+  {
+   "id": "harden-firefox",
+   "say": "Is the firefox binary hardened (PIE/RELRO)?",
+   "expect": [
+    {
+     "tool": "binary_hardening",
+     "args": {
+      "path": "~firefox"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-068",
+   "say": "forecast miami",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~miami"
+     }
+    }
+   ]
+  },
+  {
+   "id": "kb-list",
+   "say": "what keyboard layouts do I have?",
+   "expect": [
+    {
+     "tool": "set_keyboard_layout",
+     "args": {
+      "action": "~list"
+     }
+    }
+   ]
+  },
+  {
+   "id": "close-firefox",
+   "say": "Close Firefox",
+   "expect": [
+    {
+     "tool": "close_window",
+     "args": {
+      "title_contains": "~firefox"
+     }
+    }
+   ]
+  },
+  {
+   "id": "btrfs-info",
+   "say": "btrfs compressed size?",
+   "expect": [
+    {
+     "tool": "compression_savings"
+    }
+   ]
+  },
+  {
+   "id": "extra-141",
+   "say": "show me a file tree",
+   "expect": [
+    {
+     "tool": "directory_tree",
+     "args": {
+      "path": "~"
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-29",
+   "say": "are you human",
+   "none": true
+  },
+  {
+   "id": "none-05",
+   "say": "good evening",
+   "none": true
+  },
+  {
+   "id": "cost2",
+   "say": "show process costs",
+   "expect": [
+    {
+     "tool": "process_cost"
+    }
+   ]
+  },
+  {
+   "id": "routine-save",
+   "say": "save a good morning routine",
+   "expect": [
+    {
+     "tool": "routines",
+     "args": {
+      "action": "~save",
+      "name": "~good morning"
+     }
+    }
+   ]
+  },
+  {
+   "id": "broken-proj",
+   "say": "Any dead shortcuts in /tmp/proj?",
+   "expect": [
+    {
+     "tool": "broken_symlinks",
+     "args": {
+      "path": "~proj"
+     }
+    }
+   ]
+  },
+  {
+   "id": "nfc-write",
+   "say": "write a url to an nfc tag",
+   "expect": [
+    {
+     "tool": "nfc",
+     "args": {
+      "action": "~write",
+      "url": "~https://example.com"
+     }
+    }
+   ]
+  },
+  {
+   "id": "calc-percent",
+   "say": "15% of 2400",
+   "expect": [
+    {
+     "tool": "calculate",
+     "args": {
+      "expression": "*"
+     }
+    }
+   ]
+  },
+  {
+   "id": "myip2",
+   "say": "give me my local and public ip",
+   "expect": [
+    {
+     "tool": "my_ip_address"
+    }
+   ]
+  },
+  {
+   "id": "screenshot2",
+   "say": "capture the screen",
+   "expect": [
+    {
+     "tool": "screenshot"
+    }
+   ]
+  },
+  {
+   "id": "services2",
+   "say": "show failed services",
+   "expect": [
+    {
+     "tool": "list_services",
+     "args": {
+      "failed_only": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "diff-b",
+   "say": "What's different between old.py and new.py?",
+   "expect": [
+    {
+     "tool": "compare_files",
+     "args": {
+      "path_a": "~old.py",
+      "path_b": "~new.py"
+     }
+    }
+   ]
+  },
+  {
+   "id": "vcs",
+   "say": "is /tmp/repo a git, svn or hg checkout?",
+   "expect": [
+    {
+     "tool": "vcs_status",
+     "args": {
+      "path": "~repo"
+     }
+    }
+   ]
+  },
+  {
+   "id": "time4",
+   "say": "current time",
+   "expect": [
+    {
+     "tool": "get_datetime"
+    }
+   ]
+  },
+  {
+   "id": "mkdir-a",
+   "say": "Make a dir /tmp/reports",
+   "expect": [
+    {
+     "tool": "create_directory",
+     "args": {
+      "path": "~reports"
+     }
+    }
+   ]
+  },
+  {
+   "id": "disk4",
+   "say": "disk health report",
+   "expect": [
+    {
+     "tool": "disk_health"
+    }
+   ]
+  },
+  {
+   "id": "extra-140",
+   "say": "unmute please",
+   "expect": [
+    {
+     "tool": "set_mute",
+     "args": {
+      "mute": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-43",
+   "say": "sure",
+   "none": true
+  },
+  {
+   "id": "disk-activity",
+   "say": "Is my disk busy right now?",
+   "expect": [
+    {
+     "tool": "disk_activity"
+    }
+   ]
+  },
+  {
+   "id": "derivative",
+   "say": "derivative of x^2",
+   "expect": [
+    {
+     "tool": "solve_math",
+     "args": {
+      "operation": "~derivative",
+      "expression": "~x^2",
+      "variable": "~x"
+     }
+    }
+   ]
+  },
+  {
+   "id": "media-mp3",
+   "say": "Make this video into an mp3",
+   "expect": [
+    {
+     "tool": "convert_media",
+     "args": {
+      "path": "~clip.mp4",
+      "to": "~mp3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "logs2",
+   "say": "top 5 largest logs",
+   "expect": [
+    {
+     "tool": "log_files",
+     "args": {
+      "limit": 5
+     }
+    }
+   ]
+  },
+  {
+   "id": "diff-a",
+   "say": "Diff config.dev.json against config.prod.json",
+   "expect": [
+    {
+     "tool": "compare_files",
+     "args": {
+      "path_a": "~dev",
+      "path_b": "~prod"
+     }
+    }
+   ]
+  },
+  {
+   "id": "img-gray",
+   "say": "Make selfie.jpg black and white",
+   "expect": [
+    {
+     "tool": "edit_image",
+     "args": {
+      "path": "~selfie.jpg",
+      "grayscale": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "tailscale",
+   "say": "is tailscale connected?",
+   "expect": [
+    {
+     "tool": "tailscale_status"
+    }
+   ]
+  },
+  {
+   "id": "lab-create",
+   "say": "build a labnet with 10.0.0.0/24 with internet",
+   "expect": [
+    {
+     "tool": "lab_network_create",
+     "args": {
+      "name": "~labnet",
+      "cidr": "~10.0.0.0/24",
+      "internet": true,
+      "apply": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-166",
+   "say": "bitcoin price today",
+   "expect": [
+    {
+     "tool": "web_search",
+     "args": {
+      "query": "~bitcoin price"
+     }
+    }
+   ]
+  },
+  {
+   "id": "audio-fade",
+   "say": "Normalize the podcast.wav file",
+   "expect": [
+    {
+     "tool": "edit_audio",
+     "args": {
+      "path": "~podcast.wav",
+      "normalize": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-30",
+   "say": "sing a song",
+   "none": true
+  },
+  {
+   "id": "myip",
+   "say": "what's my ip address?",
+   "expect": [
+    {
+     "tool": "my_ip_address"
+    }
+   ]
+  },
+  {
+   "id": "none-52",
+   "say": "fun fact",
+   "none": true
+  },
+  {
+   "id": "timer10",
+   "say": "timer list",
+   "expect": [
+    {
+     "tool": "set_timer",
+     "args": {
+      "action": "~list"
+     }
+    }
+   ]
+  },
+  {
+   "id": "weather-tomorrow",
+   "say": "Will it rain in Denver tomorrow?",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~denver",
+      "when": "~tomorrow"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-213",
+   "say": "list paired devices",
+   "expect": [
+    {
+     "tool": "bluetooth_devices",
+     "args": {
+      "action": "~list"
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-01",
+   "say": "hi there",
+   "none": true
+  },
+  {
+   "id": "percepts2",
+   "say": "show me network perceptions",
+   "expect": [
+    {
+     "tool": "list_percepts",
+     "args": {
+      "sense_filter": "~network"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-180",
+   "say": "who won the world series",
+   "expect": [
+    {
+     "tool": "web_search",
+     "args": {
+      "query": "~world series"
+     }
+    }
+   ]
+  },
+  {
+   "id": "windows",
+   "say": "what windows are open?",
+   "expect": [
+    {
+     "tool": "list_windows"
+    }
+   ]
+  },
+  {
+   "id": "exif2",
+   "say": "camera info of photo.jpg",
+   "expect": [
+    {
+     "tool": "photo_metadata",
+     "args": {
+      "path": "~photo.jpg"
+     }
+    }
+   ]
+  },
+  {
+   "id": "procs",
+   "say": "what's using the most cpu?",
+   "expect": [
+    {
+     "tool": "list_processes"
+    }
+   ]
+  },
+  {
+   "id": "ask-06",
+   "say": "Do you want to move or copy this file?",
+   "expect": [
+    {
+     "tool": "move_or_copy_file",
+     "args": {
+      "mode": "~copy"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "file-info",
+   "say": "Tell me about report.pdf",
+   "expect": [
+    {
+     "tool": "get_file_info",
+     "args": {
+      "path": "~report.pdf"
+     }
+    }
+   ]
+  },
+  {
+   "id": "goal-list",
+   "say": "list my saved goals",
+   "expect": [
+    {
+     "tool": "manage_goals",
+     "args": {
+      "action": "~list"
+     }
+    }
+   ]
+  },
+  {
+   "id": "doc-path",
+   "say": "Create notes.txt with some body text",
+   "expect": [
+    {
+     "tool": "create_document",
+     "args": {
+      "title": "~notes",
+      "format": "~txt",
+      "path": "~notes.txt"
+     }
+    }
+   ]
+  },
+  {
+   "id": "disk-smart",
+   "say": "SMART status of the disks?",
+   "expect": [
+    {
+     "tool": "disk_health"
+    }
+   ]
+  },
+  {
+   "id": "tailscale2",
+   "say": "my tailnet status",
+   "expect": [
+    {
+     "tool": "tailscale_status"
+    }
+   ]
+  },
+  {
+   "id": "printq2",
+   "say": "cancel print job 4",
+   "expect": [
+    {
+     "tool": "print_queue",
+     "args": {
+      "action": "~cancel",
+      "job": "~4"
+     }
+    }
+   ]
+  },
+  {
+   "id": "video-cam",
+   "say": "Record 4 seconds from /dev/video0",
+   "expect": [
+    {
+     "tool": "capture_video",
+     "args": {
+      "device": "~video0",
+      "seconds": 4
+     }
+    }
+   ]
+  },
+  {
+   "id": "wifi3",
+   "say": "turn off wifi",
+   "expect": [
+    {
+     "tool": "toggle_wifi",
+     "args": {
+      "action": "~off"
+     }
+    }
+   ]
+  },
+  {
+   "id": "doc1",
+   "say": "create a report.md",
+   "expect": [
+    {
+     "tool": "create_document",
+     "args": {
+      "title": "~report",
+      "format": "~md"
+     }
+    }
+   ]
+  },
+  {
+   "id": "lab-status",
+   "say": "what can labnet reach?",
+   "expect": [
+    {
+     "tool": "lab_network_status",
+     "args": {
+      "name": "~labnet"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-131",
+   "say": "weather in cape town",
+   "expect": [
+    {
+     "tool": "get_weather",
+     "args": {
+      "place": "~cape town"
+     }
+    }
+   ]
+  },
+  {
+   "id": "f7",
+   "say": "create a folder /tmp/x/y/z",
+   "expect": [
+    {
+     "tool": "create_directory",
+     "args": {
+      "path": "~x/y/z"
+     }
+    }
+   ]
+  },
+  {
+   "id": "android-list",
+   "say": "Which Android devices are connected?",
+   "expect": [
+    {
+     "tool": "android_device",
+     "args": {
+      "action": "~devices"
+     }
+    }
+   ]
+  },
+  {
+   "id": "disk-iops",
+   "say": "Current disk reads/writes?",
+   "expect": [
+    {
+     "tool": "disk_activity"
+    }
+   ]
+  },
+  {
+   "id": "machine-cap",
+   "say": "what can this machine actually do?",
+   "expect": [
+    {
+     "tool": "machine_capabilities"
+    }
+   ]
+  },
+  {
+   "id": "extra-264",
+   "say": "time in moscow",
+   "expect": [
+    {
+     "tool": "get_world_time",
+     "args": {
+      "place": "~moscow"
+     }
+    }
+   ]
+  },
+  {
+   "id": "discover-net",
+   "say": "Find hosts on 192.168.1.0/24",
+   "expect": [
+    {
+     "tool": "discover_hosts",
+     "args": {
+      "network": "~192.168.1.0/24"
+     }
+    }
+   ]
+  },
+  {
+   "id": "airplane-status",
+   "say": "Is airplane mode on right now?",
+   "expect": [
+    {
+     "tool": "airplane_mode",
+     "args": {
+      "action": "~status"
+     }
+    }
+   ]
+  },
+  {
+   "id": "file-details",
+   "say": "details of /tmp/big.bin",
+   "expect": [
+    {
+     "tool": "get_file_info",
+     "args": {
+      "path": "~big.bin"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ask-27",
+   "say": "Should I overwrite the existing file?",
+   "expect": [
+    {
+     "tool": "write_text_file",
+     "args": {
+      "path": "~"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "cal5",
+   "say": "this month's calendar",
+   "expect": [
+    {
+     "tool": "calendar_month"
+    }
+   ]
+  },
+  {
+   "id": "rc2",
+   "say": "run make",
+   "expect": [
+    {
+     "tool": "run_command",
+     "args": {
+      "command": "~make"
+     }
+    }
+   ]
+  },
+  {
+   "id": "cal1",
+   "say": "meetings today",
+   "expect": [
+    {
+     "tool": "calendar_events"
+    }
+   ]
+  },
+  {
+   "id": "define-serendipity",
+   "say": "What does serendipity mean?",
+   "expect": [
+    {
+     "tool": "define_word",
+     "args": {
+      "word": "~serendipity"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-167",
+   "say": "open obs",
+   "expect": [
+    {
+     "tool": "open_application",
+     "args": {
+      "name": "~obs"
+     }
+    }
+   ]
+  },
+  {
+   "id": "archive-list2",
+   "say": "show contents of data.tar.gz",
+   "expect": [
+    {
+     "tool": "list_archive",
+     "args": {
+      "path": "~data.tar.gz"
+     }
+    }
+   ]
+  },
+  {
+   "id": "android-info",
+   "say": "Tell me about the phone with serial R3H5T2X",
+   "expect": [
+    {
+     "tool": "android_device",
+     "args": {
+      "action": "~info",
+      "serial": "~R3H5T2X"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-059",
+   "say": "launch thunderbird",
+   "expect": [
+    {
+     "tool": "open_application",
+     "args": {
+      "name": "~thunderbird"
+     }
+    }
+   ]
+  },
+  {
+   "id": "none-17",
+   "say": "knock knock",
+   "none": true
+  },
+  {
+   "id": "arp2",
+   "say": "who's on the lan?",
+   "expect": [
+    {
+     "tool": "neighbour_table"
+    }
+   ]
+  },
+  {
+   "id": "extra-215",
+   "say": "remaining battery",
+   "expect": [
+    {
+     "tool": "get_battery_status"
+    }
+   ]
+  },
+  {
+   "id": "cal3",
+   "say": "add a meeting",
+   "expect": [
+    {
+     "tool": "calendar_edit",
+     "args": {
+      "action": "~create",
+      "title": "~meeting"
+     }
+    }
+   ]
+  },
+  {
+   "id": "extra-197",
+   "say": "remind me to pay rent",
+   "expect": [
+    {
+     "tool": "reminders",
+     "args": {
+      "action": "~add",
+      "text": "~pay rent"
+     }
+    }
+   ]
+  },
+  {
+   "id": "doc-cell",
+   "say": "set B2 to 42 in budget.xlsx sheet1",
+   "expect": [
+    {
+     "tool": "office_document",
+     "args": {
+      "action": "~write",
+      "path": "~budget.xlsx",
+      "sheet": "~sheet1",
+      "cell_range": "~B2",
+      "values": "*"
+     }
+    }
+   ]
+  },
+  {
+   "id": "dup-limit",
+   "say": "Show up to 5 duplicates under /tmp",
+   "expect": [
+    {
+     "tool": "duplicate_files",
+     "args": {
+      "path": "~",
+      "limit": 5
+     }
+    }
+   ]
+  },
+  {
+   "id": "win3",
+   "say": "focus the code window",
+   "expect": [
+    {
+     "tool": "focus_window",
+     "args": {
+      "title_contains": "~code"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ask-21",
+   "say": "What's the password for the wifi?",
+   "expect": [
+    {
+     "tool": "connect_wifi",
+     "args": {
+      "ssid": "~"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "close-term",
+   "say": "Close the terminal window",
+   "expect": [
+    {
+     "tool": "close_window",
+     "args": {
+      "title_contains": "~term"
+     }
+    }
+   ]
+  },
+  {
+   "id": "power-restart",
+   "say": "restart now",
+   "expect": [
+    {
+     "tool": "power_action",
+     "args": {
+      "action": "~restart"
+     }
+    }
+   ]
+  },
+  {
+   "id": "cal-cancel",
+   "say": "Delete my dentist appointment on Friday",
+   "expect": [
+    {
+     "tool": "calendar_edit",
+     "args": {
+      "action": "~delete",
+      "title": "~dentist"
+     }
+    }
+   ]
+  },
+  {
+   "id": "container-stop",
+   "say": "Stop the running web container",
+   "expect": [
+    {
+     "tool": "container",
+     "args": {
+      "action": "~stop",
+      "name": "~web"
+     }
+    }
+   ]
+  },
+  {
+   "id": "scaling2",
+   "say": "what's my scaling factor?",
+   "expect": [
+    {
+     "tool": "set_scaling",
+     "args": {
+      "action": "~get"
+     }
+    }
+   ]
+  },
+  {
+   "id": "git-branch",
+   "say": "create a branch called feature-x",
+   "expect": [
+    {
+     "tool": "git_branch",
+     "args": {
+      "name": "~feature-x"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ask-19",
+   "say": "Which image size do you prefer?",
+   "expect": [
+    {
+     "tool": "edit_image",
+     "args": {
+      "path": "~",
+      "width": "~1024"
+     }
+    }
+   ],
+   "ask": true
+  },
+  {
+   "id": "vidinfo",
+   "say": "how long is clip.mp4?",
+   "expect": [
+    {
+     "tool": "read_video",
+     "args": {
+      "path": "~clip.mp4"
+     }
+    }
+   ]
+  },
+  {
+   "id": "power-save",
+   "say": "set power-saver profile",
+   "expect": [
+    {
+     "tool": "set_power_profile",
+     "args": {
+      "profile": "~power-saver"
+     }
+    }
+   ]
+  },
+  {
+   "id": "services",
+   "say": "list systemd services",
+   "expect": [
+    {
+     "tool": "list_services"
+    }
+   ]
+  },
+  {
+   "id": "crash-list",
+   "say": "Did anything crash recently?",
+   "expect": [
+    {
+     "tool": "crash_report"
+    }
+   ]
+  },
+  {
+   "id": "extra-217",
+   "say": "bump volume to 90",
+   "expect": [
+    {
+     "tool": "set_volume",
+     "args": {
+      "percent": 90
+     }
+    }
+   ]
+  },
+  {
+   "id": "oom2",
+   "say": "show the oom scores",
+   "expect": [
+    {
+     "tool": "oom_score"
+    }
+   ]
+  }
+ ]
+}

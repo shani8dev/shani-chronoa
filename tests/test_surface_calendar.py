@@ -370,8 +370,14 @@ class TestHonestStates:
         widget = surface.build(_app())
         assert widget.state() == surface.STATE_NO_BACKEND
         text = _text(widget)
-        assert "Plasma has none" in text, text
-        assert "not the same as having nothing on" in text, text
+        # Reworded 2026-10-15 to say what to do (add an account in Online
+        # Accounts) instead of describing the bindings. What must still hold:
+        # it names the missing backend and Plasma, and says nothing that reads
+        # as "you have nothing on".
+        assert "No calendar backend" in text, text
+        assert "Online Accounts" in text, text
+        assert "Plasma" in text and "not supported" in text, text
+        assert "nothing on" not in text.lower() and "no events" not in text.lower(), text
         assert _rows(widget) == []
 
     def test_a_backend_that_is_present_but_unreadable_is_its_own_state(self, monkeypatch):

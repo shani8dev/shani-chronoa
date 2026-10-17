@@ -108,6 +108,27 @@ def _run(arguments: dict) -> str:
     except (TypeError, ValueError):
         count = 1
 
+    from shani_chronoa.skills.input_control import chronoa_has_focus
+    refusal = chronoa_has_focus()
+    if refusal:
+        return refusal.replace("Nothing was typed", f"{raw} was not pressed")
+
+    # Chronoa's GNOME Shell extension first: it presses keys from inside the
+    # shell, which no outside program can do on GNOME Wayland.
+    try:
+        from shani_chronoa.windows import gnome, WindowError
+        ext = gnome.input_backend()
+    except Exception:  # noqa: BLE001 - no extension is "try the next way"
+        ext = None
+    if ext is not None:
+        try:
+            ext.key_press(raw, count)
+        except WindowError as exc:
+            return f"Could not press {raw}: {exc}"
+        return (f"Pressed {raw}" + (f" {count} times" if count > 1 else "")
+                + " (through Chronoa's GNOME Shell extension). Nothing was verified - "
+                  "what that key did depends on what had focus.")
+
     if wayland:
         # xdotool cannot drive a Wayland session; the desktop portal can (GNOME and Plasma).
         from shani_chronoa import portal

@@ -108,11 +108,16 @@ def test_the_strip_shows_the_modes_it_carries_and_nothing_else():
     added; the two tests together cover both ends of the move, where before this
     one asserted a strip that no longer exists.
     """
+    # **3 since the 2026-10-14 redesign** (`83ab820`): one chip per question -
+    # Work (what it works on, and whether it plans first), Permissions (risky
+    # actions, and whether it acts on its own), Voice (mic button / wake word).
+    # Presence and "where answers come from" moved into the model button under
+    # the composer, beside the model they describe.
     strip = _strip()
     chips = [c for c in strip if isinstance(c, Gtk.MenuButton)]
-    assert len(chips) == 4, (
-        f"{len(chips)} chips on the strip: capability, auto, presence and "
-        f"egress. Expected 4. Plan mode moved beside Send in `5ef5c62`.")
+    assert chips == [strip._work_chip, strip._permissions_chip, strip._hands_chip], (
+        f"{len(chips)} chips on the strip; expected exactly Work, Permissions "
+        f"and Voice, in that order.")
     # **Built, not appended** - the move has to stay visible as a move, or the
     # next reader assumes a chip nobody appended is dead code.
     assert strip._plan_chip is not None, (

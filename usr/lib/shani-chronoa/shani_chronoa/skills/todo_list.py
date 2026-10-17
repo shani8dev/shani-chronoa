@@ -165,9 +165,29 @@ def _save(items: list) -> str:
     return ""
 
 
+def current_project() -> str:
+    """The Build-mode project folder this call runs in, or "" (the env the
+    dispatcher sets from `buildmode`)."""
+    return os.environ.get("CHRONOA_PROJECT", "").strip()
+
+
+def project_items(items: list, project: str) -> list:
+    """The items that belong to `project` ("" = the general list)."""
+    return [i for i in items if (i.get("project") or "") == project]
+
+
 def _render(items: list) -> str:
+    # In Build mode the list is the project's own: coding steps and the
+    # shopping list do not mix, and the model reads only what it is working on.
+    project = current_project()
+    others = 0
+    if project:
+        mine = project_items(items, project)
+        others = len(items) - len(mine)
+        items = mine
     if not items:
-        return "The task list is empty."
+        return "The task list is empty." + (
+            f" ({others} task(s) belong to other lists.)" if others else "")
     mark = {"pending": "[ ]", "in_progress": "[~]", "blocked": "[!]",
             "completed": "[x]"}
     outstanding = [i for i in items if i.get("status") != "completed"]
@@ -183,8 +203,20 @@ def _render(items: list) -> str:
     return "\n".join(lines)
 
 
+#: Actions that are really a status: "complete" id 3 means update id 3 to completed.
+_STATUS_ACTIONS = {"complete": "completed", "completed": "completed", "done": "completed",
+                   "finish": "completed", "start": "in_progress", "begin": "in_progress",
+                   "in_progress": "in_progress", "block": "blocked", "blocked": "blocked"}
+
+
 def _run(arguments: dict) -> str:
     action = (arguments.get("action") or "list").strip().lower()
+    # **The verb a small model reaches for.** Measured 2026-10-15: Qwen3-1.7B
+    # sent action "complete" with status "completed", was refused, and left the
+    # step open. A status-word action is an update to that status.
+    if action in _STATUS_ACTIONS and arguments.get("id") is not None:
+        arguments = {**arguments, "status": arguments.get("status") or _STATUS_ACTIONS[action]}
+        action = "update"
     if action not in _ACTIONS:
         return f"Action must be one of {', '.join(_ACTIONS)}, not {action!r}."
 
@@ -205,10 +237,13 @@ def _run(arguments: dict) -> str:
         return f"Refusing to change the task list: {reason}"
 
     if action == "clear":
-        if not items:
+        # In Build mode `clear` empties this project's list only.
+        project = current_project()
+        doomed = project_items(items, project) if project else items
+        if not doomed:
             return "The task list is already empty, so nothing was removed."
-        count = len(items)
-        failure = _save([])
+        count = len(doomed)
+        failure = _save([i for i in items if i not in doomed])
         if failure:
             return failure
         return f"Removed all {count} task(s) from the list. That is permanent."
@@ -243,6 +278,8 @@ def _run(arguments: dict) -> str:
             "blocked_by": [b for b in (blocked or [])],
             "created_at": time.time(),
         }
+        if current_project():
+            item["project"] = current_project()
         items.append(item)
         failure = _save(items)
         if failure:

@@ -48,7 +48,9 @@ Adw.init()
 from shani_chronoa import pages  # noqa: E402
 from shani_chronoa.gui.surfaces import phone  # noqa: E402
 
-ROUTE = "Open Privacy settings"
+#: The way out of an off switch: turned on here, by its Settings name (it was
+#: "Open Privacy settings", which sent the person to find the row).
+ROUTE = "Turn on"
 
 
 class _Config:
@@ -65,6 +67,9 @@ class _Config:
 
     def get_double(self, key, default=0.0):
         return float(default)
+
+    def set(self, key, value):
+        self.written = {**getattr(self, "written", {}), key: value}
 
 
 class _App:
@@ -132,13 +137,9 @@ def test_the_names_match_the_settings_page():
             "pointing at a page that cannot change the answer")
 
 
-def test_the_route_reaches_privacy_when_the_gate_is_off(monkeypatch):
-    reached = []
-    monkeypatch.setattr(pages, "show",
-                        lambda target, application=None, config=None:
-                        reached.append(target) or True)
-
-    panel = phone.PhonePanel(_App(on=False))
+def test_turn_on_writes_the_switch_when_the_gate_is_off(monkeypatch):
+    app = _App(on=False)
+    panel = phone.PhonePanel(app)
     row, button = panel._note_row()
 
     # The button is created once and shown only while a gate is off.
@@ -148,16 +149,16 @@ def test_the_route_reaches_privacy_when_the_gate_is_off(monkeypatch):
     panel._say_gate(_label := Gtk.Label(label=""), button, phone.SEND_KEY,
                     "Calling is")
 
-    assert "Calling is turned off." in _label.get_text(), _label.get_text()
+    assert "Calling is turned off" in _label.get_text(), _label.get_text()
     # **The sentence names the switch the way Settings does.**
     assert phone.GATE_NAMES[phone.SEND_KEY] in _label.get_text(), _label.get_text()
     assert phone.SEND_KEY not in _label.get_text(), (
         f"the panel is still printing the storage key: {_label.get_text()!r}")
 
+    assert button.get_visible() and button.get_label() == ROUTE
     button.emit("clicked")
-    assert reached == ["settings:privacy"], (
-        f"the press reached {reached!r}, not the page that writes "
-        f"{phone.SEND_KEY!r}")
+    assert getattr(app.config, "written", {}) == {phone.SEND_KEY: "true"}, (
+        "Turn on did not write the switch the note names")
 
 
 def test_a_granted_gate_hides_the_route(monkeypatch):

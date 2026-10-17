@@ -716,6 +716,26 @@ _RETRY_JITTER = 0.125
 _RETRY_MAX_ATTEMPTS = 2  # one original try plus two backoff retries
 
 
+def _note_prompt_speed(llm, body) -> None:
+    """Hand a local server's measured prompt speed to tool selection.
+
+    llama-server reports `timings.prompt_per_second` with every reply; how fast
+    *this* machine reads a prompt is what tool schemas cost, so the tool budget
+    follows it (`tool_select.note_prompt_speed`). Cloud replies carry no timings
+    and are skipped; a prompt of a few tokens says nothing about speed.
+    """
+    if not getattr(llm, "local", False) or not isinstance(body, dict):
+        return
+    timings = body.get("timings")
+    if not isinstance(timings, dict) or int(timings.get("prompt_n") or 0) < 200:
+        return
+    try:
+        from shani_chronoa import tool_select
+        tool_select.note_prompt_speed(float(timings.get("prompt_per_second") or 0))
+    except Exception:  # noqa: BLE001 - a measurement is never worth a failed reply
+        pass
+
+
 class CloudLLMError(Exception):
     """Raised when a single provider's request fails or returns an error body."""
 
@@ -769,6 +789,31 @@ def _valid_tools(tools: Optional[list]) -> list:
         else:
             logger.warning(f"Skipping malformed tool schema in cloud request: {tool!r}")
     return valid
+
+
+#: Context windows by model-id fragment, first match wins (lower-cased).
+#: Providers rarely report it on the chat path, so this is the table; an
+#: unknown model gets `DEFAULT_CLOUD_CONTEXT`, which is deliberately modest -
+#: overestimating means a request the provider rejects, underestimating only
+#: means older turns are summarised a little early.
+CLOUD_CONTEXT_WINDOWS = (
+    ("gemini-1.5-pro", 2_097_152), ("gemini", 1_048_576),
+    ("gpt-4.1", 1_047_576), ("gpt-5", 400_000), ("o4", 200_000), ("o3", 200_000),
+    ("gpt-4o", 128_000), ("claude", 200_000), ("llama-4", 1_048_576),
+    ("llama-3", 131_072), ("llama3", 131_072), ("mistral", 128_000), ("mixtral", 32_768),
+    ("deepseek", 128_000), ("qwen3", 131_072), ("qwen", 32_768), ("grok", 131_072),
+    ("kimi", 131_072), ("glm", 128_000),
+)
+DEFAULT_CLOUD_CONTEXT = 32_768
+
+
+def context_window(model: str) -> int:
+    """Tokens of context `model` accepts, from `CLOUD_CONTEXT_WINDOWS`."""
+    name = (model or "").lower()
+    for fragment, tokens in CLOUD_CONTEXT_WINDOWS:
+        if fragment in name:
+            return tokens
+    return DEFAULT_CLOUD_CONTEXT
 
 
 class OpenAICompatibleLLM:
@@ -968,6 +1013,7 @@ class OpenAICompatibleLLM:
         # Recorded beside the message, not inside it: a message is appended to
         # history and re-sent as context on later turns.
         self.last_usage = usage_mod.from_openai(data)
+        _note_prompt_speed(self, data)
         return self.postprocess(choices[0].get("message", {}), tools)
 
     #: Whether `chat_message_stream` may be used (the local llama-server: yes;
@@ -1018,6 +1064,7 @@ class OpenAICompatibleLLM:
                         continue
                     if chunk.get("usage"):
                         self.last_usage = usage_mod.from_openai(chunk)
+                    _note_prompt_speed(self, chunk)
                     for choice in chunk.get("choices") or []:
                         delta = choice.get("delta") or {}
                         for tc in delta.get("tool_calls") or []:
@@ -1353,6 +1400,13 @@ class CloudLLMChain:
         #: what a person said off the machine, and it has to be visible rather
         #: than inferable from a settings key.
         self.last_provider: str = ""
+
+    @property
+    def context_window(self) -> int:
+        """The smallest window in the chain: a fallback can land on any of
+        them, so a request must fit whichever answers."""
+        windows = [context_window(getattr(b, "model", "")) for b in self._backends]
+        return min(windows) if windows else DEFAULT_CLOUD_CONTEXT
 
     @property
     def thinking(self) -> str:

@@ -290,3 +290,16 @@ def test_the_diff_panel_reverts_a_file_and_the_revert_is_undoable(tmp_path, monk
     assert target.read_text() == "old\n"
     befores = [b for p, b, _a in ul.recent_changes() if str(p) == str(target)]
     assert "new\n" in befores, "the revert recorded no pre-image, so it cannot be undone"
+
+
+def test_a_bad_cwd_in_build_mode_runs_in_the_project(allowed, monkeypatch):
+    """Measured with Qwen3-1.7B: an invented cwd and `where: machine` with no
+    machine, refused three times, and the tests never ran. With a project set,
+    the project is the obvious folder and the sandbox the obvious place."""
+    from shani_chronoa import files
+    project = pathlib.Path.home() / "proj"
+    project.mkdir(exist_ok=True)
+    monkeypatch.setenv(files.PROJECT_ENV, str(project))
+    out = rc.run_command({"command": "true", "cwd": "/tmp/somewhere/else", "where": "machine"})
+    assert "succeeded" in out, out
+    assert "ran in the project folder" in out and "no machine was named" in out, out

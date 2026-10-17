@@ -169,7 +169,7 @@ class WatchDashboard(Gtk.Box):
         self.append(grid)
         self._grid_at = 0
 
-        activity, body = _card("Activity", "emblem-default-symbolic")
+        activity, body = _card("Activity", "starred-symbolic")
         self.ring = Ring()
         body.append(self.ring)
         self.activity_detail = _label("", "dim-label", xalign=0.5)
@@ -204,7 +204,7 @@ class WatchDashboard(Gtk.Box):
         body.append(self.spark)
         self._place(grid, stress)
 
-        vitals, body = _card("Measure now", "emblem-favorite-symbolic")
+        vitals, body = _card("Measure now", "emote-love-symbolic")
         body.append(_label("Wear the watch and keep still - each takes up to a minute.",
                            "dim-label", "caption"))
         tiles = Gtk.Box(spacing=8, homogeneous=True)

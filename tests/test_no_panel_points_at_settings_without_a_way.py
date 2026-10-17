@@ -69,7 +69,11 @@ NAMES_A_SWITCH = re.compile(
 #: `common.open_settings_button()` is given, so the check reads the screen rather
 #: than trusting a module constant - a panel that wires nothing still *builds* a
 #: button, which is exactly what "dead ends have buttons" is guarding against.
-ROUTE_LABELS = {"Open Privacy settings", "Open Senses settings"}
+#: "Turn on" is `common.consent_banner`'s button (2026-10-15): it writes the
+#: switch the sentence names, on the page, which is a way *to* it and a shorter
+#: one than opening Settings to find it. `test_dead_ends_have_buttons` checks
+#: that the press writes the right key.
+ROUTE_LABELS = {"Open Privacy settings", "Open Senses settings", "Turn on"}
 
 
 class _Config:

@@ -174,6 +174,18 @@ MODE_STRIP_CSS = """
 """
 
 
+def _tier_word(key: str) -> str:
+    """The short word a tier key is shown as - `qwen3-1.7b` -> `1.7B`.
+
+    **One function, because the second branch below wanted it too.** The chip's
+    installed row and its answering-model row are the same question, and when
+    the answering row carried the bare key while the installed row beside it
+    carried `1.7B`, the chip said two names for one model - the defect this file
+    records most often, introduced by that row rather than left by it.
+    """
+    return key.split("-")[-1].upper() if "-" in key else key
+
+
 class _ModeStrip(Gtk.Box):
     """What Chronoa *is* right now: three switches and one button.
 
@@ -922,7 +934,7 @@ class _ModeStrip(Gtk.Box):
         for key, spec in getattr(local_llm, "SPECS", {}).items():
             if key not in local_llm.installed():
                 continue
-            word = key.split("-")[-1].upper() if "-" in key else key
+            word = _tier_word(key)
             line = getattr(spec, "note", "") or word
             rows.append((key, word, f"{word}: {line}", "object-select-symbolic"))
         if not rows:
@@ -942,10 +954,19 @@ class _ModeStrip(Gtk.Box):
             # one. Naming the active key here is what makes the chip, the row
             # and the setting file agree, which is three sources that are one
             # fact.
-            active = local_llm.active() or ""
+            #
+            # **`answering_key()`, not `active()`, and the reason is a rendering.**
+            # `active()` reads a symlink in *this process's own data home*, which
+            # is empty in a throwaway profile pointed at a server another
+            # session started - so the disk said nothing while the server was
+            # answering every question, and the row said **"No model"** on a
+            # window that was visibly answering. The server is what receives the
+            # prompt, so it is what the row is about.
+            active = local_llm.answering_key() or ""
             if active:
-                rows.append((active, active, f"{active}: the model in use, "
-                              "which no installed tier describes",
+                rows.append((active, _tier_word(active),
+                              f"{active}: the model in use, which this data "
+                              "home does not hold",
                               "object-select-symbolic"))
             else:
                 rows.append(("", "No model",
@@ -954,8 +975,17 @@ class _ModeStrip(Gtk.Box):
         return rows
 
     def _read_model(self) -> str:
+        """The tier answering now, or "" - **the same reader `_model_word` and
+        `_model_rows` use.**
+
+        It was `local_llm.active()`, a symlink in this data home, while the
+        rows it is drawn against are themselves about what is answering: two
+        sources for one question, which is the shape this file records
+        repeatedly. `tests/test_model_picker.py` reads it directly, so it is a
+        named reader rather than an expression at the call site.
+        """
         try:
-            return local_llm.active() or ""
+            return local_llm.answering_key() or ""
         except Exception:                               # noqa: BLE001
             logger.warning("could not read the model in use", exc_info=True)
             return ""
@@ -1380,8 +1410,30 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._model_picker_lead = lead
         row.append(button)
         row.append(self._thinking_button())
+        row.append(self._speak_toggle())
         self._refresh_model_word()
         return row
+
+    def _speak_toggle(self) -> Gtk.ToggleButton:
+        """Speak replies aloud, or not - one press, in the window.
+
+        Bound to the stateful `app.speak-replies`, so it shows the setting and
+        cannot disagree with it. Before this the only way to silence replies
+        was Settings → Voice, on a switch that also silenced timers.
+        """
+        button = Gtk.ToggleButton(action_name="app.speak-replies")
+        button.add_css_class("flat")
+
+        def show(*_a) -> None:
+            on = button.get_active()
+            button.set_icon_name("audio-volume-high-symbolic" if on
+                                 else "audio-volume-muted-symbolic")
+            tip = "Replies are spoken - press to stop" if on else "Replies are not spoken - press to speak them"
+            button.set_tooltip_text(tip)
+            button.update_property([Gtk.AccessibleProperty.LABEL], [tip])
+        button.connect("notify::active", show)
+        show()
+        return button
 
     #: `_ModeStrip._PRESENCE` with words for a model menu. The strip's
     #: "Here / Drowsy / Asleep" describe Chronoa; inside "Model in memory"
@@ -1593,7 +1645,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
                 return "a cloud provider"
             strip = getattr(self, "_mode_strip", None)
             rows = strip._model_rows() if strip is not None else ()
-            active = local_llm.active() or ""
+            active = local_llm.answering_key() or ""
             for key, word, _line, _icon in rows:
                 if key == active:
                     return word
@@ -1848,7 +1900,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
                 row = Adw.ActionRow(title=GLib.markup_escape_text(session["title"]),
                                     subtitle=f"{session['messages']} messages",
                                     activatable=True)
-                row.add_prefix(Gtk.Image(icon_name="chat-bubbles-text-symbolic"))
+                row.add_prefix(Gtk.Image(icon_name="chat-message-new-symbolic"))
                 row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
                 row.connect("activated", activate("switch-conversation",
                                                   GLib.Variant("s", session["id"])))
@@ -2956,6 +3008,11 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         """Set the assistant state. The single entry point for it."""
         self._state = state
         self._sync_from_state()
+        # Mirrored to `app.status`, which the top-bar indicator watches.
+        app = self.get_application()
+        status = app.lookup_action("status") if app is not None else None
+        if status is not None:
+            status.set_state(GLib.Variant("s", state.value))
         # A turn-stop is only meaningful while a turn exists, and `set_state` is
         # the one place that knows. Driven here rather than in `_setup_ui` so it
         # cannot end up built-but-never-shown, which is what happened to the

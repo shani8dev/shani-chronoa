@@ -75,6 +75,8 @@ SETTINGS_TARGETS = {
     "goals": "privacy",
     "machine": "senses",
     "activity": "tool-activity",
+    # The seccomp switch is a Privacy row; it is also on the page itself.
+    "sandbox": "privacy",
 }
 
 
@@ -210,6 +212,8 @@ SURFACE_IDS = (
     "android",
     "desktop",
     "diagnostics",
+    # Where commands run, and a probe that shows what the sandbox holds.
+    "sandbox",
     "export",
 )
 

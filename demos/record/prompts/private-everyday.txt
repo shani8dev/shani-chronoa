@@ -1,0 +1,1 @@
+How much battery do I have left? Then tell me how much free space is on my disk.

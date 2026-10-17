@@ -41,7 +41,7 @@ class TestCancelIsRecordedAndReadable:
         permissions.clear()
         monkeypatch.setattr(ask_bridge, "has_presenter", lambda: True)
         monkeypatch.setattr(ask_bridge, "ask",
-                            lambda q, o, timeout=0.0: _answer(permissions, choice))
+                            lambda q, o, timeout=0.0, **_kw: _answer(permissions, choice))
         try:
             permissions.decide("delete_file", "/tmp/x", "delete-file", "d",
                                offer_cancel=True)
@@ -59,7 +59,7 @@ class TestCancelIsRecordedAndReadable:
         monkey = pytest.MonkeyPatch()
         monkey.setattr(ask_bridge, "has_presenter", lambda: True)
         monkey.setattr(ask_bridge, "ask",
-                       lambda q, o, timeout=0.0: _answer(permissions, "cancel"))
+                       lambda q, o, timeout=0.0, **_kw: _answer(permissions, "cancel"))
         try:
             permissions.decide("a", "r", "k", "d", offer_cancel=True)
             assert permissions.turn_cancelled() is True
@@ -77,7 +77,7 @@ class TestCancelIsRecordedAndReadable:
         monkey = pytest.MonkeyPatch()
         monkey.setattr(ask_bridge, "has_presenter", lambda: True)
         monkey.setattr(ask_bridge, "ask",
-                       lambda q, o, timeout=0.0: _answer(permissions, "cancel"))
+                       lambda q, o, timeout=0.0, **_kw: _answer(permissions, "cancel"))
         try:
             permissions.decide("delete_file", "/tmp/a", "delete-file", "d",
                                offer_cancel=True)
@@ -124,7 +124,7 @@ class TestTheLoopHonoursIt:
         llm = _LLM()
         monkeypatch.setattr(ask_bridge, "has_presenter", lambda: True)
         monkeypatch.setattr(ask_bridge, "ask",
-                            lambda q, o, timeout=0.0: _answer(permissions, "cancel"))
+                            lambda q, o, timeout=0.0, **_kw: _answer(permissions, "cancel"))
         # The gated tool refuses, having recorded the Cancel - which is exactly
         # what `tools.dispatch` now does when the user picks that option.
         # `origin=` is part of `execute_tool`'s signature (per-origin round

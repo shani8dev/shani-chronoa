@@ -36,6 +36,76 @@ DEFAULT_LIMIT = 8
 WINDOW_TOKENS = 2048
 SELECTION_SHARE = 0.75
 
+#: **Scaled to the window the model is actually served with, within bounds.**
+#: `WINDOW_TOKENS` above is the fallback; once the local server's real
+#: context is known (`local_llm._N_CTX`, read from /props) the tool schemas may
+#: take a quarter of it. Measured 2026-10-15: the server ran at 8192 while this
+#: budgeted for 2048, and a two-part request lost its second-best tool to the
+#: cap. Capped at 4096 because every schema is prompt a CPU model prefills
+#: before its first word (see the cache note in `assistant.py`).
+LIVE_SHARE = 0.25
+MIN_BUDGET_TOKENS = int(WINDOW_TOKENS * SELECTION_SHARE)
+MAX_BUDGET_TOKENS = 4096
+
+
+#: The window of the brain answering this turn, set by the assistant
+#: (`set_window`): the local server's served context, or the cloud model's.
+_WINDOW = {"tokens": 0, "local": True, "gpu": False}
+#: Cloud has no CPU prefill to pay for, so it may carry far more tools; a
+#: local GPU prefills an order of magnitude faster than a CPU, so in between.
+MAX_CLOUD_BUDGET_TOKENS = 16384
+MAX_GPU_BUDGET_TOKENS = 8192
+
+
+def set_window(tokens: int, local: bool, gpu: bool = False) -> None:
+    _WINDOW.update(tokens=int(tokens or 0), local=bool(local), gpu=bool(gpu))
+
+
+def _live_window() -> int:
+    """The answering brain's window if known, else the cached local one, else 0."""
+    if _WINDOW["tokens"]:
+        return _WINDOW["tokens"]
+    try:
+        from shani_chronoa import local_llm
+        return int(local_llm._N_CTX.get("n") or 0)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+#: Seconds of prompt reading the tool schemas may cost on a local model. The
+#: fixed caps below guessed at speed per class (CPU 4096, GPU 8192); measured
+#: 2026-10-15 this laptop's CPU reads ~130 tokens/s, so 4096 tokens of tools
+#: was ~31 s before the first word, while a GPU at thousands of tokens/s was
+#: held to 8192 on a 128k window. With a measurement, the cap is that speed
+#: times this many seconds; until one exists, the class caps stand.
+TOOL_SECONDS = 30.0
+
+_PROMPT_SPEED = {"tps": 0.0}
+
+
+def note_prompt_speed(tokens_per_second: float) -> None:
+    """Record a measured prompt speed (local server timings), smoothed."""
+    if not 1.0 < tokens_per_second < 1e6:
+        return  # llama.cpp reports 1e6 for a one-millisecond prompt; not a speed
+    old = _PROMPT_SPEED["tps"]
+    _PROMPT_SPEED["tps"] = tokens_per_second if old <= 0 else 0.7 * old + 0.3 * tokens_per_second
+
+
+def selection_budget() -> int:
+    """Tokens the tool schemas may take for this request."""
+    window = _live_window()
+    if not window:
+        return MIN_BUDGET_TOKENS
+    if not _WINDOW["local"]:
+        cap = MAX_CLOUD_BUDGET_TOKENS
+    elif _PROMPT_SPEED["tps"] > 0:
+        cap = int(_PROMPT_SPEED["tps"] * TOOL_SECONDS)
+    elif _WINDOW["gpu"]:
+        cap = MAX_GPU_BUDGET_TOKENS
+    else:
+        cap = MAX_BUDGET_TOKENS
+    return max(MIN_BUDGET_TOKENS, min(cap, int(window * LIVE_SHARE)))
+
 #: Chars per token used **for the size cap**, deliberately the pessimistic 4
 #: rather than `local_llm.CHARS_PER_TOKEN`'s measured 3. The cap has to hold on
 #: the machine that tokenises most favourably, or the guarantee it makes is one
@@ -858,7 +928,8 @@ def protected_for(request: str, keep: Set[str],
     # `ask_user`/`get_datetime` in `scored`.
     if wants_to_drive_an_app(request):
         protected |= {n for n in ("ui_elements",) if n in keep}
-    if "browse" in keep and not _FILE_OR_APP.search(request or ""):
+    if "browse" in keep and (not _FILE_OR_APP.search(request or "")
+                             or _BROWSER_NAMED.search(request or "")):
         # The site rule fired and the request is not about a file: what the
         # person asked for cannot be done without a browser, so the cap must not
         # take it. Measured on "Open blaze demo dot com and find the cheapest
@@ -877,6 +948,15 @@ REASON_IN_USE = "already in use this turn"
 REASON_CORE = "always offered"
 REASON_CONVERSATION = "nothing to call"
 REASON_CUE = "the request carries its cue"
+REASON_CALL = "the request is placing a call"
+#: "call/phone/dial/ring" tied to a number or a person - a phone call, not a
+#: function call. No `re.I`: a name is a Capitalised word, and `[A-Z]` under
+#: `re.I` matched any letter, so "what does this function call do" fired. The
+#: unambiguous verbs match either case explicitly.
+_WANTS_A_CALL = re.compile(
+    r"\b([Dd]ial|[Rr]ing\s+up|[Gg]ive\s+\w+\s+a\s+call)\b"
+    r"|\b[Cc]all\s+(?:up\s+)?(\+?\d|[Mm]y\b|mom|mum|dad|[Aa]mma|appa|[A-Z][a-z])"
+    r"|\b[Pp]hone\s+(\+?\d|[Mm]y\b|the\b|mom|mum|dad|[Aa]mma|appa)")
 REASON_DRIVE = "driving an app\'s controls"
 REASON_SCORE = "matched the request"
 REASON_DISTILLED = "a learned router chose it"
@@ -890,6 +970,7 @@ REASON_SMALL_TALK = "this is conversation"
 REASON_FILES_APP = "the file manager is an app, not a file"
 REASON_NO_SITE = "a website request displaced it"
 REASON_BUDGET = "did not fit the tool budget"
+REASON_CLAUSE = "best match for one part of the request"
 
 
 def _clip_words(text: str, width: int) -> str:
@@ -1051,6 +1132,35 @@ def _record(request: str, sent: List[str], scored_total: int,
                      protected=tuple(sorted(protected)))
 
 
+#: Where a request turns into another job: "?", ".", ";", ",", "and", "then",
+#: "also". Commas and "and" also join lists ("files and folders"), so a part
+#: only counts with at least `_CLAUSE_MIN_WORDS` words - and a part only ever
+#: *adds* its best tool, never removes one, so an over-split costs a schema,
+#: not a missed job. Measured 2026-10-15: "turn on do not disturb, switch to
+#: dark mode, open the text editor and put it on the left half" lost
+#: `arrange_window` when only "then"/"?" split.
+_CLAUSE_SPLIT = re.compile(r"[?;!,]|\.(?=\s|$)|\b(?:and then|then|also|after that|and)\b", re.I)
+_CLAUSE_MIN_WORDS = 3
+
+
+def clause_leaders(request: str, tools: List[dict], learned=None) -> Set[str]:
+    """The best-scoring tool for each clause of a several-part request.
+
+    One clause (the common case) returns nothing - the whole-request ranking
+    already put its best tool first. A clause with no real match adds nothing.
+    """
+    parts = [p.strip() for p in _CLAUSE_SPLIT.split(request or "")
+             if p and len(p.split()) >= _CLAUSE_MIN_WORDS]
+    if len(parts) < 2:
+        return set()
+    out: Set[str] = set()
+    for part in parts:
+        ranked_part = ranked(part, tools, learned=learned)
+        if ranked_part and ranked_part[0][0] > 0 and ranked_part[0][2] > 0:
+            out.add(ranked_part[0][1])
+    return out
+
+
 def _select(request: str, tools: List[dict], limit: int,
             in_use: Optional[Iterable[str]]) -> Tuple[Set[str], Selection]:
     """The schemas to send for `request`, and the record of how it decided.
@@ -1102,7 +1212,7 @@ def _select(request: str, tools: List[dict], limit: int,
 
     say(held, REASON_IN_USE)
     say((n for n in CORE if n in known), REASON_CORE)
-    budget = int(WINDOW_TOKENS * SELECTION_SHARE)
+    budget = selection_budget()
     # A turn that is conversation gets the smallest honest set: there is nothing
     # to call, and sending eight tools to "thanks!" is what produced two of the
     # five eval misses (2026-10-09). `in_use` still wins, so a turn mid-task is
@@ -1144,7 +1254,20 @@ def _select(request: str, tools: List[dict], limit: int,
     # the container itself, so a second tool here would be tokens spent on
     # nothing this turn uses.
     if wants_to_drive_an_app(request):
-        say((n for n in ("ui_elements",) if n in known), REASON_DRIVE)
+        # **Kept, not only named.** This line used to `say` the reason and add
+        # nothing, so the inspector read "driving an app's controls" for a tool
+        # that was never sent (measured 2026-10-15 on the desktop-agent demo).
+        driving = {n for n in ("ui_elements",) if n in known}
+        keep |= driving
+        say(driving, REASON_DRIVE)
+    # Placing a call: "call Amma", "phone the bank", "dial 9527916219". The word
+    # "call" alone is ambiguous (a function call, a phone call), so it is paired
+    # with a person, a number, or a calling verb - then both call tools are
+    # offered, since either line may be the one that is up.
+    if _WANTS_A_CALL.search(request or ""):
+        calling = {n for n in ("landline_call", "bluetooth_call") if n in known}
+        keep |= calling
+        say(calling, REASON_CALL)
     keep |= {name for score, name, _hits in scored[:limit] if score >= floor}
     say((name for score, name, _hits in scored[:limit] if score >= floor),
         REASON_SCORE)
@@ -1169,6 +1292,7 @@ def _select(request: str, tools: List[dict], limit: int,
     # opened an invented path with `open_file` every time (2026-10-08).
     if _FILES_APP.search(lowered):
         unsay({"open_file"} - held, REASON_FILES_APP)
+    displaced: frozenset = frozenset()
     if wants_a_browser(request):
         keep.add("browse")
         say(("browse",), REASON_BROWSER)
@@ -1187,7 +1311,23 @@ def _select(request: str, tools: List[dict], limit: int,
         # to say which of them wins.
         if not _FILE_OR_APP.search(request or ""):
             unsay(_DISPLACED_BY_A_SITE - held, REASON_NO_SITE)
+            displaced = _DISPLACED_BY_A_SITE - held
     protected = protected_for(request, keep, in_use)
+    # **Each part of a several-part request keeps its best tool.** Measured
+    # 2026-10-15 on "How much battery do I have left? Then set a 25 minute
+    # timer called focus.": scored as one sentence, `get_battery_status` came
+    # 16.5 against `desktop_setting`'s 16.8 and was cut by the budget, so
+    # Qwen3-1.7B toggled the top bar's battery percentage and never read the
+    # battery. Asked alone, the first clause selects it. So every clause's top
+    # match is protected from the cap - the "and then" requests are the ones
+    # that show what an agent can do, and each half must be answerable.
+    # A clause's leader is not one a named site displaced: "Open blaze demo
+    # dot com" leads with `open_application`, which the site rule took out.
+    leaders = clause_leaders(request, tools, learned) - set(protected) - displaced
+    if leaders:
+        keep |= leaders
+        say(leaders, REASON_CLAUSE)
+        protected = tuple(protected) + tuple(sorted(leaders))
     before = set(keep)
     keep = _cap_to_window(keep, tools, scored, budget, protected)
     for name in before - keep:
@@ -1236,7 +1376,7 @@ def explain(request: str, tools: Iterable[dict], limit: int = DEFAULT_LIMIT,
         return _record(request, [forced] if forced in {t["function"]["name"]
                                                         for t in tools} else [],
                        0, {}, {}, reasons,
-                       int(WINDOW_TOKENS * SELECTION_SHARE), (), forced=forced)
+                       selection_budget(), (), forced=forced)
     _, record = _select(request, tools, limit, in_use)
     return record
 
@@ -1245,7 +1385,12 @@ _TLDS = r"(?:com|org|net|io|dev|in|co|ai|app|uk|de|edu|gov)"
 #: A website, written or SAID: "blazedemo.com", and "blaze demo dot com" (what a
 #: transcript of speech gives), or a plain "website" / "web page" / "online".
 _SITE = re.compile(r"https?://|\bwww\.|\b[a-z0-9-]+\." + _TLDS + r"\b|\bdot " + _TLDS + r"\b"
-                   r"|\bweb ?sites?\b|\bweb ?pages?\b|\bonline\b", re.I)
+                   r"|\bweb ?sites?\b|\bweb ?pages?\b|\bonline\b"
+                   # "open the Wikipedia page about Pune in the browser" named
+                   # no URL and offered lookup_wikipedia, never `browse` - and
+                   # the model went looking for a browser app (2026-10-15).
+                   r"|\bin (?:the|a|my) (?:web )?browser\b|\bwikipedia\b|\byoutube\b"
+                   r"|\bgithub\b|\breddit\b", re.I)
 #: Tools that a website request drew in only through a generic verb ("open the
 #: site", "find the cheapest flight") - each a wrong first move a small model
 #: can make. Measured 2026-10-08: offered all of these and not `browse`,
@@ -1389,6 +1534,12 @@ def wants_a_browser(request: str) -> bool:
     return bool(_SITE.search(text) or _ACT_ON_A_PAGE.search(text))
 
 
+#: The browser itself, or a site, named outright: "open the Wikipedia page in
+#: the browser" also says "Calculator app", and `_FILE_OR_APP` alone then let
+#: the budget take `browse` from a request that cannot be done without it.
+_BROWSER_NAMED = re.compile(r"\bin (?:the|a|my) (?:web )?browser\b|\bwikipedia\b|\byoutube\b"
+                            r"|\bgithub\b|\breddit\b|https?://|\bwww\.", re.I)
+
 _ACT_IN_A_WINDOW = re.compile(
     r"\b(click|clicks|clicking|type into|type in|typing into|drive|"
     r"automate|ui test|test the app|test my app|"
@@ -1397,8 +1548,10 @@ _ACT_IN_A_WINDOW = re.compile(
 #: A control is named, so the request is about *using* one rather than about a
 #: window in the abstract.
 _CONTROL_NAMED = re.compile(
-    r"\b(button|menu|field|checkbox|tab|dialog|popover|list item|"
-    r"dropdown|save|cancel|export|settings|toolbar|sidebar)\b",
+    # Plurals too: "using the Calculator app and its own buttons" did not
+    # count as driving, so ui_elements was never offered (2026-10-15).
+    r"\b(buttons?|menus?|fields?|checkbox(?:es)?|tabs?|dialogs?|popovers?|list items?|"
+    r"dropdowns?|save|cancel|export|settings|toolbars?|sidebars?|keys?)\b",
     re.IGNORECASE)
 
 

@@ -125,6 +125,8 @@ def _apply_profile_ceiling() -> None:
     command does not run, which is the correct answer to a ceiling that cannot
     be applied.
     """
+    if _PENDING_CEILING.get("low_priority"):
+        _lower_priority()
     limits = _PENDING_CEILING.get("limits")
     if not limits:
         return
@@ -139,6 +141,33 @@ def _apply_profile_ceiling() -> None:
                 f"could not be given: {exc}. The command was not run, because a "
                 f"profile whose ceiling cannot be applied is not a profile."
             ) from exc
+
+
+#: ioprio_set(2): who = one process, class = idle (3), shifted into place.
+_SYS_IOPRIO_SET = {"x86_64": 251, "aarch64": 30}
+_IOPRIO_WHO_PROCESS = 1
+_IOPRIO_IDLE = 3 << 13
+
+
+def _lower_priority() -> None:
+    """nice 10 and idle-class I/O for this child - best-effort, never a refusal.
+
+    Unlike a memory or CPU ceiling this is a courtesy, not a promise: a kernel
+    that refuses it leaves the command running at normal priority, which is
+    what it did before the setting existed.
+    """
+    try:
+        os.nice(10)
+    except OSError:
+        pass
+    try:
+        import ctypes
+        import platform
+        number = _SYS_IOPRIO_SET.get(platform.machine())
+        if number is not None:
+            ctypes.CDLL(None, use_errno=True).syscall(number, _IOPRIO_WHO_PROCESS, 0, _IOPRIO_IDLE)
+    except Exception:  # noqa: BLE001 - priority is best-effort
+        pass
 
 
 def _limit_name(what: int) -> str:

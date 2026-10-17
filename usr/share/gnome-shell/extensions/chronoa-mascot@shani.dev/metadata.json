@@ -1,6 +1,7 @@
 {
   "uuid": "chronoa-mascot@shani.dev",
-  "name": "Chronoa mascot",
-  "description": "The Chronoa companion as a GNOME Shell actor, with the gaze following the pointer. This is the route that works on Mutter, which has never implemented zwlr_layer_shell_v1 and therefore refuses mascot.available().",
-  "shell-version": ["48", "49", "50"]
+  "name": "Chronoa notch",
+  "description": "The Chronoa companion as a GNOME Shell actor, in a top-centre notch carrying the mascot, what it is doing and the tool step it is on. This is the route that works on Mutter, which has never implemented zwlr_layer_shell_v1 and therefore refuses mascot.available().",
+  "shell-version": ["48", "49", "50"],
+  "settings-schema": "org.shani.chronoa"
 }

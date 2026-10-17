@@ -650,7 +650,10 @@ class ChronoaConfig:
             except (TypeError, ValueError):
                 logger.error("Setting %s needs a number", key)
                 return
-            low, high = {"speech-rate": (0.5, 2.0), "end-of-speech-pause": (0.5, 3.0)}.get(key, (-1e9, 1e9))
+            low, high = {"speech-rate": (0.5, 2.0), "end-of-speech-pause": (0.5, 3.0),
+                         "sandbox-command-memory-mb": (512, 65536),
+                         "sandbox-command-timeout": (60, 7200),
+                         "sandbox-command-cores": (1, 256)}.get(key, (-1e9, 1e9))
             self._settings.set_double(key, min(high, max(low, number)))
         else:
             self._settings.set_string(key, value)
@@ -939,6 +942,11 @@ class ChronoaConfig:
         """
         got = (self.get("answer-mode", "local") or "local").strip().lower()
         return got if got in ("local", "local-cloud", "cloud") else "local"
+
+    @property
+    def speak_replies(self) -> bool:
+        """The main window's speaker toggle: whether replies are said aloud."""
+        return self.get_bool("speak-replies", True)
 
     @property
     def notification_enabled(self) -> bool:
