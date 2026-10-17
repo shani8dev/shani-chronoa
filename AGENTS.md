@@ -27408,3 +27408,13 @@ fail). Faces for a turn's ending are emitted **before** `_turn_finished()`, so
 the ending this turn caused is what shows, not the next turn's start; the
 queue-reentry `_turn_finished()` in `_submit` is deliberately not a producer
 site - nothing ended there.
+
+### pytest refuses to run while a mutation run is live
+
+`tests/conftest.py` exits with "a mutation run (pid N) is rewriting the source
+tree right now" whenever `CHRONOA_MUTATION_RUN` is set - a suite run against
+half-mutated code reports failures on code that is correct, so the guard is
+right to be rude. The trap is what to do with the waiting: **the runner is
+never safe to SIGKILL** - it kills its children with `killpg`, but killing the
+runner itself skips its `finally` restore and can leave a mutated source file
+in the tree. Wait for it and run the suites after; that is the whole move.
