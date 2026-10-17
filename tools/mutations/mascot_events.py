@@ -79,6 +79,20 @@ MUTATIONS = [
             "test_uninstall_clears_only_when_it_is_the_same_listener",
         ],
     },
+    {
+        "file": _BUS,
+        "old": """    global _listener
+    _listener = listener
+""",
+        "new": """    global _listener
+""",
+        "label": "install() keeps nothing - the mascot looks like it is "
+                 "listening, producers no-op forever, and the only visible "
+                 "symptom is a companion that never reacts to anything",
+        "expect": [
+            "test_emit_reaches_the_installed_listener",
+        ],
+    },
 
     # -- the tables: swaps that keep every membership invariant true ----------
     {
