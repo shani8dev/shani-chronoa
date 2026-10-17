@@ -95,12 +95,28 @@ def emit(kind: str, text: str = "") -> None:
 # name->kind choice stays in the table above. 
 
 def question(text: str = "") -> None:
-    """A tool is asking the person something (`ask_user`, a plan, the phone)."""
+    """A tool is asking the person something (an ask_user, a plan, the phone).
+
+    **No direct caller today (measured: 0 call sites).** `ask_bridge.ask` is
+    the one chokepoint every question passes and it emits the face its own
+    `kind` argument carries straight to `emit` - by name this wrapper would
+    be a second route to the same face on the same line it happens. It is the
+    named form of `BY_NAME["question"]`, kept so a producer that holds the
+    whole decision can say what happened without naming a face; the table
+    row is wired through the chokepoint even where this wrap is not.
+    """
     emit(BY_NAME["question"], text)
 
 
 def approval(text: str = "") -> None:
-    """A gated call is waiting on a decision (`permissions.decide`)."""
+    """A gated call is waiting on a decision (`permissions.decide`).
+
+    **No direct caller today (measured: 0 call sites).** The gate reaches the
+    face through `ask(kind="meeting")`, which carries the approval kind to the
+    same chokepoint the question does; this wrapper is the named form of
+    `BY_NAME["approval"]` for a body that decides without asking through
+    `ask_bridge`.
+    """
     emit(BY_NAME["approval"], text)
 
 
