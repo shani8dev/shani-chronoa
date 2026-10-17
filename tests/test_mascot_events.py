@@ -99,6 +99,31 @@ def test_uninstall_clears_only_when_it_is_the_same_listener():
 
 # --- the table: kinds the bus names must be faces the mascot can draw ----------
 
+def test_each_named_producer_emits_its_exact_kind_and_text():
+    """The kind each producer carries is **hardcoded here**, not read from
+    `BY_NAME` - reading it back would make the test a mirror that agrees with
+    whatever the table says, which is the one failure it exists to stop."""
+    table = [
+        (lambda: mascot_events.question("the words"), "greet"),
+        (lambda: mascot_events.approval("the words"), "meeting"),
+        (lambda: mascot_events.settled(True, "the words"), "build-ok"),
+        (lambda: mascot_events.settled(False, "the words"), "build-fail"),
+        (lambda: mascot_events.finished("the words"), "build-ok"),
+        (lambda: mascot_events.error("the words"), "build-fail"),
+        (lambda: mascot_events.step("the words"), "step"),
+    ]
+    for produce, kind in table:
+        rec = _Recorder()
+        mascot_events.install(rec)
+        try:
+            produce()
+            assert rec.seen == [(kind, "the words")], (
+                f"the producer carried {rec.seen!r}, expected the "
+                f"{kind!r} face")
+        finally:
+            mascot_events.uninstall(rec)
+
+
 def test_every_bus_kind_except_step_is_a_face_mascot_can_draw():
     """`BY_NAME` and `mascot._EVENT_FACE` must not drift apart in silence."""
     for name, kind in mascot_events.BY_NAME.items():
