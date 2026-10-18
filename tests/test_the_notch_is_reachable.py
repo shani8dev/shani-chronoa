@@ -41,8 +41,12 @@ cannot measure these five.
 """
 
 import json
+import os
 import re
+import shutil
+import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
@@ -228,6 +232,25 @@ class TestTheStripFitsTheMascot:
 # The manifest
 # --------------------------------------------------------------------------
 
+def _schema_path() -> Path:
+    """Where the schema `metadata.json` names actually lives in this tree.
+
+    A **function, not a constant**, so a control can point a check at a scratch
+    copy - and it reads `metadata.json` rather than restating the id, because
+    the manifest is the authority (`test_the_schema_it_names_is_the_one_this_
+    repository_ships` pins that) and a second copy of the id is one more list
+    to drift. The path a test redirects is not also the record of where the
+    schema really is; `_SHIPPED_SCHEMA_XML` is that.
+    """
+    schema = json.loads(METADATA.read_text())["settings-schema"]
+    return REPO / f"usr/share/glib-2.0/schemas/{schema}.gschema.xml"
+
+
+#: The real file, under a name the controls do not touch. See `_SHIPPED_JS`.
+_SHIPPED_SCHEMA_XML = (REPO
+                       / "usr/share/glib-2.0/schemas/org.shani.chronoa.gschema.xml")
+
+
 class TestTheManifest:
     def test_it_names_a_settings_schema(self):
         """Without this, `extension.getSettings()` throws on `enable()`.
@@ -259,6 +282,147 @@ class TestTheManifest:
             f"shell-version is {versions}. The measurements in "
             "HARVEST-COUCOU.md PART 9/10 were taken on the versions listed "
             "here; widening it without measuring claims a surface nobody saw.")
+
+    def test_the_schema_compiles_into_a_store_that_still_holds_the_keys(
+            self, tmp_path):
+        """`glib-compile-schemas` **discards the entire file** for one bad
+        declaration, **prints a warning and exits 0**, and the machine then has no
+        `org.shani.chronoa` at all.
+
+        Measured on this very file: a `mascot-corner` default naming a string
+        that is not in its own `<choices>` produced
+
+            <default> contains a string not in <choices>.  This entire file
+            has been ignored.
+            COMPILED (exit 0)
+            No such schema "org.shani.chronoa"
+
+        so **every one of the schema's ~200 keys silently takes its Python
+        default** - consent gates closed, a switch nothing reads, no error
+        anywhere a person would look. This is the recorded `calendar-write-enabled`
+        failure applied to the whole table at once, and it is asserted against the
+        **store** rather than the exit code for that reason: a compile that
+        succeeded and compiled nothing is the failure.
+
+        It guards more than the notch. The schema is a mixed file with another
+        session's keys in it, so a red here can be theirs - which is the correct
+        reading, because the failure takes the whole application with it.
+
+        **And the exit code is weaker still**, which is why the two assertions
+        below are not redundant. Measured across five distinct malformations -
+        not a `<schemalist>`, unparseable XML, a key name with an underscore, a
+        default outside its own `<choices>`, an empty `<schemalist>` - **every
+        one exits 0 and every one writes a `gschemas.compiled`**. The compiler
+        reports success on a schema store holding nothing at all.
+
+        It exits non-zero in exactly three cases: it cannot write its output, the
+        directory does not exist, the argument is not a directory. **None of the
+        three is reachable through this check**, which stages its own writable
+        directory - so `assert done.returncode == 0` has **no witness in this
+        file**, and that is recorded rather than dressed up. It is the documented
+        contract and it is worth keeping, because it is the one assertion that
+        would name *"the compiler could not write its output"*: without it a
+        permission failure falls through to `"has been ignored" not in said`,
+        which **passes** - the message is *"Permission denied"* - and then to the
+        `gschemas.compiled` check, whose failure would name a missing file rather
+        than the disk that would not take it. Keeping it is right; a test
+        claiming it was covered would not be.
+        """
+        schema = json.loads(METADATA.read_text())["settings-schema"]
+        src = _schema_path()
+        assert src.is_file(), f"{src} does not exist"
+        compile_schema = shutil.which("glib-compile-schemas")
+        gsettings = shutil.which("gsettings")
+        assert compile_schema and gsettings, (
+            "glib-compile-schemas and gsettings are both required to tell a "
+            "schema that compiled from one that compiled nothing")
+
+        # **A directory of its own, holding only this file** - the layout is the
+        # point: compiling a flattened copy gives a different answer, and reading
+        # a real install's store would mean reading whatever that install put
+        # there rather than what this tree declares.
+        stage = tmp_path / "schemas"
+        stage.mkdir()
+        shutil.copy(src, stage / src.name)
+
+        done = subprocess.run([compile_schema, str(stage)], capture_output=True,
+                              text=True, timeout=60)
+        said = done.stdout + done.stderr
+        assert done.returncode == 0, f"glib-compile-schemas failed:\n{said}"
+        assert "has been ignored" not in said, (
+            "glib-compile-schemas exited 0 and discarded the whole schema:\n"
+            f"{said.strip()}\nEvery setting in the application now takes its "
+            "Python default, silently.")
+
+        assert (stage / "gschemas.compiled").is_file(), (
+            "no gschemas.compiled was written")
+
+        env = dict(os.environ, GSETTINGS_SCHEMA_DIR=str(stage),
+                   GSETTINGS_BACKEND="memory")
+        ask = subprocess.run(
+            [gsettings, "get", schema, "mascot-corner"],
+            capture_output=True, text=True, timeout=60, env=env)
+        assert ask.returncode == 0 and "No such schema" not in ask.stderr, (
+            "the schema compiled to a file and the store cannot read a key out "
+            f"of it: {ask.stdout.strip()} {ask.stderr.strip()}")
+
+    def test_the_corner_the_schema_picks_is_a_corner_the_code_handles(self):
+        """The default is the **only** thing that decides where the notch goes.
+
+        Measured: nothing in this repository writes `mascot-corner` - no skill, no
+        Settings row, no wizard, no CLI. So on any machine where the extension
+        comes up, `_corner()` returns the **schema's default**, and that one
+        literal is the whole of the placement decision.
+
+        Which is worth writing down because it was carried here as an open
+        product question - *"`_place()` stays bottom-right while the schema's
+        default is `top-center`"* - and that reading is wrong. It is the
+        **no-schema fallback** that says `bottom-right`, in both readers
+        (`extension.js:163`'s `value || 'bottom-right'` and `mascot.py:568`), not
+        the default: with the schema installed `gsettings get` answers
+        `'top-center'` and the strip is drawn at `monitor.y + bar`, which is the
+        whole reason the notch exists. The decision has been made and is
+        `top-centre`; what is *not* shipped is the key, which lives in two files
+        mixed with another session's work.
+
+        The second half guards the other direction of the same hand-kept list: a
+        `<choice>` the code has no branch for does not fail, it **falls into the
+        `else`** and lands at bottom-right with nothing saying so. Measured by
+        adding `top-left` to the choices - it compiles, the default is unaffected,
+        and `_place()` has no `top-left` anywhere.
+        """
+        schema = json.loads(METADATA.read_text())["settings-schema"]
+        root = ET.parse(_schema_path()).getroot()
+        key = next((k for k in root.iter("key")
+                    if k.get("name") == "mascot-corner"), None)
+        assert key is not None, (
+            f"{schema} declares no mascot-corner key. It is the key the "
+            "extension reads to place the strip, and nothing writes it, so its "
+            "absence leaves _corner() on its own fallback.")
+
+        default = (key.findtext("default") or "").strip().strip('"')
+        choices = [c.get("value") for c in key.iter("choice")]
+        assert default in choices, (
+            f"mascot-corner's default is {default!r}, which is not one of its "
+            f"own choices {choices}. glib-compile-schemas discards the ENTIRE "
+            "schema for that, exits 0, and every setting in the application "
+            "silently takes its Python default.")
+
+        assert default == "top-center", (
+            f"mascot-corner defaults to {default!r}. Nothing in the tree "
+            "writes this key, so the default is the only thing that decides "
+            "placement - and the notch is the top-centre strip, not the "
+            "bottom-right corner it was ported away from.")
+
+        js = EXTENSION_JS.read_text()
+        unhandled = [c for c in choices
+                     if c != "bottom-right" and f"'{c}'" not in js]
+        assert not unhandled, (
+            f"the schema offers mascot-corner={unhandled}, and extension.js "
+            "compares against no such string - _place() would fall into its "
+            "else and draw the strip at the bottom-right corner instead, with "
+            "nothing saying the choice was not honoured. Either the branch or "
+            "the choice is missing.")
 
 
 # --------------------------------------------------------------------------
@@ -688,3 +852,217 @@ class TestEachDroppedMutationWouldHaveBeenCaught:
         said = str(caught.value)
         assert said == "the check is broken against the real file", said
         assert "passed with the fact planted" not in said, said
+
+
+# --------------------------------------------------------------------------
+# The two manifest checks can bite, measured rather than argued
+# --------------------------------------------------------------------------
+
+def _point_schema_at(tmp_path, monkeypatch, plant: tuple = None):
+    """Copy the shipped schema into a scratch dir and read *that*.
+
+    The parallel of `_point_at`, for the file `metadata.json` names rather than
+    for `extension.js`. `plant` asserts it matched **exactly once**, for the
+    reason the sibling does - the needles here are single lines of a file another
+    session also edits, so a reworded anchor stops matching silently.
+
+    **Each half gets its own directory**, which `_point_at` does not need: the
+    five checks above only *read* the copy, while
+    `test_the_schema_compiles_into_a_store_that_still_holds_the_keys` **stages
+    one** (`stage.mkdir()`) and then compiles it. Pointed at one path twice it
+    raises `FileExistsError` on the second half, which is a harness error
+    arriving as a rejection - the worst shape there is, because the case would
+    read as a captured fact when nothing was decided. That is not hypothetical:
+    the probe that established these controls reported it that way first, and
+    `FileExistsError` is not an `AssertionError`.
+    """
+    scratch = tmp_path / "schema"
+    scratch.mkdir(parents=True, exist_ok=True)
+    text = _SHIPPED_SCHEMA_XML.read_text()
+    if plant is not None:
+        old, new = plant
+        assert text.count(old) == 1, (
+            f"the planted fact {old!r} occurs {text.count(old)} times in "
+            "the schema, not once - so this control would read the unmutated "
+            "file and pass for the wrong reason")
+        text = text.replace(old, new)
+    target = scratch / _SHIPPED_SCHEMA_XML.name
+    target.write_text(text)
+    monkeypatch.setattr(_MOD, "_schema_path", lambda: target)
+    return target
+
+
+def _schema_bites(check, tmp_path, monkeypatch, plant) -> str:
+    """`_bites` for the schema, with the two refusals it needs.
+
+    **The check takes the half's directory**, which is why the corner check is
+    reached through a closure rather than as the method itself: that check reads
+    the schema through `_schema_path()` and declares no `tmp_path`, while the
+    compile check *stages* one. Giving the helper a fixed contract keeps both
+    shapes expressible without it inspecting a signature - and a helper that
+    guesses what a callable wants is a helper whose failure depends on the
+    callable.
+
+    **`ET.parse` on the planted copy before the check reads it.** A malformed
+    plant would make the check raise `ParseError` - not an `AssertionError`, so
+    the "did it reject the fact" question would be answered by a syntax error,
+    and the case would report a captured fact when the only thing that happened
+    is that the file no longer parses.
+    """
+    for half, seed in (("clean", None), ("planted", plant)):
+        target = _point_schema_at(tmp_path / half, monkeypatch, seed)
+        ET.parse(target)
+        if half == "clean":
+            check(tmp_path / half)  # green, or "goes red" means nothing
+            continue
+        try:
+            check(tmp_path / half)
+        except AssertionError as exc:
+            return str(exc)
+    raise AssertionError(
+        f"{check.__qualname__} passed with the fact planted that this file "
+        "records as the reason it exists, so it is not a witness for it")
+
+
+def _the_corner_check(half_dir):
+    """`TestTheManifest`'s corner check, in the shape `_schema_bites` calls.
+
+    It takes no `tmp_path` - everything it reads comes through `_schema_path()` -
+    so it is wrapped rather than handed a directory it has no use for.
+    """
+    TestTheManifest().test_the_corner_the_schema_picks_is_a_corner_the_code_handles()
+
+
+class TestTheManifestChecksCanBite:
+    """The two `TestTheManifest` checks this port added, shown able to go red.
+
+    The notch set exercises them through **one** mutation - *"the manifest names
+    a schema this repository does not ship"* - and it drives both of them down
+    the **missing-file** branch, because `_schema_path()` then points at
+    something that is not there. That is a real capture and it is not the whole
+    claim: four assertions in these two tests are about a schema that exists,
+    and a mutation that renamed a schema would have exercised none of them.
+
+    So each is planted by hand here, the way
+    `TestEachDroppedMutationWouldHaveBeenCaught` plants the five the runner
+    cannot measure. **The distinction is why both classes exist.** Those five are
+    unmeasurable to the runner *because* they cannot be applied to a JavaScript
+    file; these four are ordinary measurable behaviour and the reason nothing has
+    exercised them is narrower and worse - the only mutation aimed at
+    `metadata.json` happens to fail earlier in the same check.
+
+    The measurements these assert, in the order they are asked:
+
+    | planted fact | the assertion that has to reject it |
+    |---|---|
+    | default is a valid choice but not `top-center` | the top-centre claim |
+    | default is not one of its own `<choices>` | the compile-discards-everything claim, at parse time |
+    | a `<choice>` `extension.js` has no branch for | the honest-placement claim |
+    | default names a string outside its `<choices>` | the compile-discards-everything claim, for real |
+
+    The last one is the reason this class exists rather than being tidiness. A
+    `mascot-corner` default outside its own choices is **exactly** the defect
+    `TestTheManifest`'s docstring records having measured - `glib-compile-schemas`
+    prints *"This entire file has been ignored"*, **exits 0**, and the machine
+    has no `org.shani.chronoa` at all - and it takes the whole application with
+    it. It is the most consequential thing either test guards, and nothing in
+    the mutation set touched it.
+    """
+
+    _TOP_CENTRE = '<default>"top-center"</default>'
+
+    def test_a_default_that_is_not_top_centre_goes_red(self, tmp_path,
+                                                       monkeypatch):
+        """The top-centre claim, planted with a default that is a legal choice.
+
+        `bottom-right` is deliberately the *valid* one: it isolates the assertion
+        under test from the choices assertion below, which would otherwise fire
+        first and make this look like coverage of the same fact twice.
+        """
+        said = _schema_bites(
+            _the_corner_check, tmp_path, monkeypatch,
+            (self._TOP_CENTRE, '<default>"bottom-right"</default>'))
+        assert "defaults to 'bottom-right'" in said, said
+        # And the choices assertion is *not* what fired: `bottom-right` is one of
+        # them, so a case that let it fire would be passing for the wrong reason.
+        assert "not one of its own choices" not in said, said
+
+    def test_a_default_outside_its_own_choices_goes_red(self, tmp_path,
+                                                       monkeypatch):
+        """The choices assertion, on its own."""
+        said = _schema_bites(
+            _the_corner_check, tmp_path, monkeypatch,
+            (self._TOP_CENTRE, '<default>"no-such-corner"</default>'))
+        assert "not one of its own choices" in said, said
+
+    def test_a_choice_extension_js_cannot_handle_goes_red(self, tmp_path,
+                                                          monkeypatch):
+        """The honest-placement claim: a `<choice>` with no branch behind it.
+
+        This is the failure that does **not** announce itself. The schema
+        compiles, the default is untouched, and `_place()` has no branch for
+        `top-left` - so the value falls into its `else` and the strip is drawn at
+        the bottom-right corner with nothing saying the choice was not honoured.
+        A one-line addition to the `<choices>` is the whole plant.
+        """
+        plant = ('        <choice value="top-center"/>\n',
+                 '        <choice value="top-center"/>\n'
+                 '        <choice value="top-left"/>\n')
+        said = _schema_bites(
+            _the_corner_check, tmp_path, monkeypatch, plant)
+        assert "top-left" in said, said
+
+    def test_the_schema_being_discarded_goes_red(self, tmp_path, monkeypatch):
+        """The failure the store check exists for, which nothing else reaches.
+
+        This is the measured one, and it is asserted against **the store**
+        rather than the exit code because that is the shape of the defect:
+        `glib-compile-schemas` **exits 0** having discarded the entire file, so a
+        check that watched the exit code would report success for a schema that
+        no longer exists. The check's own message says so.
+        """
+        said = _schema_bites(
+            TestTheManifest().test_the_schema_compiles_into_a_store_that_still_holds_the_keys,
+            tmp_path, monkeypatch,
+            (self._TOP_CENTRE, '<default>"no-such-corner"</default>'))
+        assert "discarded the whole schema" in said, said
+
+    def test_the_helper_reports_a_check_that_does_not_bite(self, tmp_path,
+                                                           monkeypatch):
+        """`_schema_bites`' own `raise`, which nothing above makes it reach.
+
+        Four cases are green because a real check rejected a planted fact. If
+        that `raise` were unreachable the class would read as coverage of four
+        claims it had measured nothing about.
+
+        So it is driven with a **real check and a plant it cannot see**: the
+        only assertion of `test_the_corner_...` that a `bottom-right` default
+        satisfies is *"the default is one of its own choices"*, so a check
+        carrying that one assertion alone stays green under a plant that a real
+        defect would trip. It is written out rather than reached for, because
+        pointing at a method that asserts four things and expecting it to pass is
+        a claim about the *other three* staying satisfied - true today, and the
+        kind of coupling that quietly stops holding.
+        """
+        def only_the_choices_assertion(tmp_dir):
+            root = ET.parse(_MOD._schema_path()).getroot()
+            key = next(k for k in root.iter("key")
+                       if k.get("name") == "mascot-corner")
+            default = (key.findtext("default") or "").strip().strip('"')
+            choices = [c.get("value") for c in key.iter("choice")]
+            assert default in choices, (
+                f"mascot-corner's default is {default!r}, which is not one of "
+                f"its own choices {choices}")
+
+        # The positive half first, and it is asserted on the **returned
+        # message**: `_schema_bites` catches a rejection and hands it back rather
+        # than re-raising, which is what lets a case above assert *why* it went
+        # red. So only the "did not bite" direction raises.
+        said = _schema_bites(only_the_choices_assertion, tmp_path, monkeypatch,
+                             (self._TOP_CENTRE,
+                              '<default>"no-such-corner"</default>'))
+        assert "not one of its own choices" in said, said
+
+        with pytest.raises(AssertionError, match="passed with the fact planted"):
+            _schema_bites(only_the_choices_assertion, tmp_path, monkeypatch,
+                          (self._TOP_CENTRE, '<default>"bottom-right"</default>'))
