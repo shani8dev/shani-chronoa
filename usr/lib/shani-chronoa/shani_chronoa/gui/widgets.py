@@ -901,11 +901,6 @@ class TranscriptView(Gtk.ScrolledWindow):
                 stack.append(child)
                 child = child.get_next_sibling()
 
-    def set_suggestion_handler(self, handler) -> None:
-        self._on_suggestion = handler
-        if self._is_placeholder():
-            self.show_placeholder()
-
     def set_turn_footer_handler(self, handler) -> None:
         """Attach (or detach) the per-turn cost footer.
 

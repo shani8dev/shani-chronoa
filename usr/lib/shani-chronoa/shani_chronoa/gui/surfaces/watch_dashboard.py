@@ -112,18 +112,22 @@ class StageBar(charts.StackedBar):
 
 
 class Spark(charts.Line):
-    """The day's stress over the watch's own bands (30 / 60 / 80)."""
+    """The day's stress over the watch's own bands (30 / 60 / 80).
+
+    **Feed it with `set_times`, not `set`** - `Line.set` takes `(x, y)` points
+    and the readings carry `(datetime, value)`. It carried its own `set`
+    override that did that conversion inline, because routing through
+    `charts.Line.set_times` recursed: `set_times` calls `self.set`, which *was*
+    this override, and the dashboard died on its first stress reading (found by
+    the README render, 2026-10-15). Dropping the override is what makes
+    `set_times` usable here, and it leaves one copy of the conversion rather
+    than the two it had.
+    """
 
     def __init__(self) -> None:
         super().__init__(height=70, colour=STRESS_COLOUR, y_range=(0, 100),
                          x_range=(0, 24), bands=(30, 60, 80))
         self.fill = False
-
-    def set(self, readings) -> None:  # type: ignore[override]
-        # `Line.set`, not `self.set`: `set_times` calls `self.set`, so routing
-        # through it recursed into this override and crashed the dashboard on
-        # its first stress reading (found by the README render, 2026-10-15).
-        charts.Line.set(self, [(w.hour + w.minute / 60, v) for w, v in readings])
 
 
 class WatchDashboard(Gtk.Box):
@@ -324,7 +328,7 @@ class WatchDashboard(Gtk.Box):
         else:
             self.stress_now.set_text("-")
             self.stress_word.set_text("No readings yet today")
-        self.spark.set(stress)
+        self.spark.set_times(stress)
 
         child = self.workouts.get_first_child()
         while child is not None:

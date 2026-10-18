@@ -246,6 +246,58 @@ def unreachable_methods(pkg: pathlib.Path = PKG, tests: pathlib.Path = TESTS):
     return found
 
 
+def gui_modules(pkg: pathlib.Path = PKG):
+    """`gui/` proper - the modules beside `surfaces/`, not inside it.
+
+    **`glob("gui/*.py")` is non-recursive on purpose**, so `surfaces/` is not
+    double-scanned by two gates that could then disagree. The two populations
+    are disjoint by construction rather than by a filter somebody remembers.
+    """
+    gui = pkg / "gui"
+    if not gui.is_dir():
+        return []
+    return sorted(gui.glob("*.py"))
+
+
+@functools.lru_cache(maxsize=None)
+def gui_names(pkg: pathlib.Path = PKG):
+    """(module, line, name) for every class method and module-level public
+    function defined in `gui/` outside `surfaces/`."""
+    for path in gui_modules(pkg):
+        tree = ast.parse(path.read_text())
+        for cls in [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]:
+            for fn in [n for n in cls.body
+                       if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
+                if not fn.name.startswith("__"):
+                    yield path, fn.lineno, fn.name
+        for fn in [n for n in tree.body
+                   if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
+            if not fn.name.startswith("_"):
+                yield path, fn.lineno, fn.name
+
+
+def unreachable_gui_names(pkg: pathlib.Path = PKG, tests: pathlib.Path = TESTS):
+    """The same scan, over `gui/` outside `surfaces/`.
+
+    **This population had no gate at all**, which is why the vestigial pair in
+    `window.py` survived: a `_regenerate` field written by a live setter and read
+    by a method nothing called, plus the setter-shaped method beside it. Neither
+    is a surface, and a gate that stopped at `gui/surfaces/` could not see either.
+
+    **It is not extended to the whole shipped tree, and the measurement is why.**
+    Run over every module outside `gui/`, the same scan reports 27 orphans, and
+    most are a documented false-positive class: `triggers/rules.py`'s `fire_all`
+    is called by exactly one caller, a `usr/bin/` launcher, which this index does
+    not walk; `ibus_input.py`'s `do_*` are GObject vfuncs the framework
+    dispatches by name. A gate over a population that cries wolf gets deleted,
+    and this one was written because its predecessors were not.
+    """
+    index = _index(pkg, tests)
+    return [f"{path.name}:{lineno} {name}()"
+            for path, lineno, name in gui_names(pkg)
+            if not _is_used(name, path, index)]
+
+
 class TestNoSurfaceMethodIsUnreachable:
 
     def test_the_scan_actually_looked_at_something(self):
@@ -277,18 +329,93 @@ class TestNoSurfaceMethodIsUnreachable:
             "something its docstring says and no one calls:\n  "
             + "\n  ".join(orphans))
 
+    def test_the_gui_scan_actually_looked_at_something(self):
+        """The same non-vacuity control for the wider population.
+
+        A `gui/` that moved, or a `glob` that stopped matching, examines zero
+        modules, reports zero orphans and passes forever - which is how
+        `common.rows_of` stayed hidden for as long as it did. The number is a
+        floor well under the measured 517, so ordinary growth cannot trip it and
+        a broken glob cannot reach it.
+        """
+        modules = gui_modules()
+        assert len(modules) > 15, (
+            f"only {len(modules)} gui/ modules found outside surfaces/ - a "
+            f"green result below would mean nothing")
+        names = list(gui_names())
+        assert len(names) > 400, (
+            f"only {len(names)} names examined in gui/ outside surfaces/; the "
+            f"scan is not looking at the population the vestigial pair hid in")
+
+    def test_no_gui_name_outside_surfaces_is_reachable_by_nothing(self):
+        orphans = unreachable_gui_names()
+        assert not orphans, (
+            "names in gui/ outside surfaces/ that nothing reaches:\n  "
+            + "\n  ".join(orphans))
+
+    def test_a_prose_only_name_in_gui_would_be_reported(self, tmp_path):
+        """**The live control for the wider gate.** Without it this is a second
+        assertion that cannot fail, and a gate nobody can prove bites is a gate
+        that gets deleted.
+
+        The planted orphan is in `gui/` and **not** in `surfaces/`, so it can
+        only be found by the scan this test is claiming to exercise.
+        """
+        body = (
+            "class _Probe:\n"
+            "    def _never_scheduled(self):\n"
+            "        \"\"\"Documented, and reached by nothing.\"\"\"\n"
+            "        return 1\n"
+            "    def caller(self):\n"
+            "        return self._live()\n"
+            "    def _live(self):\n"
+            "        return 1\n")
+        pkg, tests = self._synthetic(tmp_path, body, sub="gui")
+        tests.mkdir()
+        (tests / "test_probe.py").write_text("# no reference to the dead method\n")
+        found = unreachable_gui_names(pkg, tests)
+        assert "probe.py:2 _never_scheduled()" in found, (
+            f"a method nothing reaches was not reported in gui/ - this gate "
+            f"cannot fail: {found}")
+        assert not any("_live()" in f for f in found), (
+            f"a method called in code was reported dead: {found}")
+
+    def test_the_string_seams_in_gui_are_not_orphans(self):
+        """The wider gate is only sound **because strings are kept**, and two of
+        the four live seams sit inside this population - so this is a claim the
+        gate depends on, not a detail.
+
+        Both are called only from inside a subprocess harness held as a string in
+        a test file. An AST scan cannot see either, and `tools/deadcode.py` -
+        which deliberately does not read string constants - reports both dead.
+        Asserted here because the failure mode if it ever changes is the gate
+        going red on two *live* names, which reads like a product defect.
+        """
+        index = _index()
+        for name in ("activity_text", "webkit_version"):
+            total = sum(u.get(name, 0) - d.get(name, 0)
+                        for _f, u, _defined, d in index)
+            assert total > 0, (
+                f"{name} is dispatched through a string and reads as dead - the "
+                f"extractor is dropping the strings this gate depends on")
+
     # -- the controls -------------------------------------------------------
 
-    def _synthetic(self, tmp_path, body: str):
+    def _synthetic(self, tmp_path, body: str, sub: str = "gui/surfaces"):
         """A tiny package-shaped tree, so a mutation never touches the real one.
 
         Editing a real surface file to prove this catches orphans, then reverting
         it, is a path operation in a tree another session is working in - and the
         exact thing that destroyed uncommitted work on 2026-10-11. So the control
         runs the same scan against a module written outside the repo.
+
+        `sub` picks which directory the probe lands in, because the two gates
+        scan different populations: `gui/surfaces/` for the surface gate, and
+        `gui/` proper for the wider one. The default is the original, so the
+        existing controls are untouched by the widening.
         """
         pkg = tmp_path / "shani_chronoa"
-        surfaces = pkg / "gui" / "surfaces"
+        surfaces = pkg / sub
         surfaces.mkdir(parents=True)
         (surfaces / "probe.py").write_text(body)
         return pkg, tmp_path / "tests"
@@ -388,41 +515,59 @@ class TestNoSurfaceMethodIsUnreachable:
         """Stated separately so a failure names which half broke."""
         assert unreachable_methods() == []
 
-    def test_a_name_named_only_in_a_docstring_is_not_a_use(self):
-        """**The control for the prose false positive.**
+    def test_a_name_named_only_in_a_docstring_is_not_a_use(self, tmp_path):
+        """**The control for the prose false positive, and the reason this file
+        can also gate `gui/`.**
 
-        `TranscriptView.set_suggestion_handler` is dead - `tools/deadcode.py`
-        reports it, and it has no caller of any kind, not even a test - and it is
-        named exactly once outside its own definition, in a `window.py` docstring
-        explaining the pattern `None` follows. A raw-text scan counts that word
-        and calls the method live.
+        A dead `TranscriptView.set_suggestion_handler` was the original subject
+        of this control: `tools/deadcode.py` reported it, it had no caller of any
+        kind, and it was named exactly once outside its own definition - in a
+        `window.py` docstring explaining the pattern `None` follows. A raw-text
+        scan counts that word and calls the method live, which is the
+        mirror-image of the `show_devices` mistake this file exists to avoid.
 
-        So the extractor drops docstrings, and this asserts it does, against a
-        real dead method rather than a fixture. If the tokenising ever stops
-        excluding prose, this goes red while
-        `test_no_surface_method_is_reachable_by_nothing` stays green, which is
-        what makes it worth having.
+        **The subject is a fixture now, and that is a consequence rather than a
+        preference.** Extending the gate from `gui/surfaces/` to the rest of
+        `gui/` demands that no prose-only orphan *exist* there, so a control that
+        required one to exist could not coexist with the gate - the gate would
+        have to allowlist its own witness, and an allowlisting gate cannot notice
+        the day its entry rots. A fixture is also better on its own terms: a real
+        subject makes this control go **red when somebody wires the method up**,
+        which is the one thing a control must never punish.
 
-        **The name is spelled plainly, and that is only safe because
-        `_index` excludes this file.** It was composed at runtime in an earlier
-        version, on the grounds that naming it here would manufacture the caller
-        it asserts is absent. That was true and it was the wrong fix: it made the
-        docstrings unreadable to defend against one name, when the exclusion
-        handles every future name at once. The guard below is what proves the
-        exclusion is actually in effect rather than merely claimed.
+        **Both directions, because either alone is satisfiable by an extractor
+        that is simply broken.** One that keeps every file reports both methods
+        live and fails for the wrong reason; one that drops every file reports
+        both dead and passes.
         """
-        name = "set_suggestion_handler"
-        index = _index()
-        # The exclusion is load-bearing: without it this file's own prose is a
-        # caller, and the assertion below passes for the wrong reason.
-        assert all(f.name != pathlib.Path(__file__).name for f, _u, _d, _x in index), (
+        # The exclusion is load-bearing for the *real* tree scan, and it is
+        # asserted rather than claimed - naming a finding in this file's own
+        # prose puts it in the source, which is what happened three times while
+        # this file was written.
+        assert all(f.name != pathlib.Path(__file__).name
+                   for f, _u, _d, _x in _index()), (
             "this test file is in its own index, so its docstrings count as "
-            "callers and the assertion below cannot fail")
-        total = sum(u.get(name, 0) - d.get(name, 0)
-                    for _f, u, _defined, d in index)
-        assert total == 0, (
-            f"{name} is counted {total} times outside its def, but its only "
-            f"mention is a window.py docstring - prose is being read as a caller")
+            "callers and the real-tree gate cannot fail")
+        body = (
+            "class _Probe:\n"
+            "    def prose_only_method(self):\n"
+            "        return 1\n"
+            "    def code_only_method(self):\n"
+            "        return 1\n"
+            "    def caller(self):\n"
+            "        \"\"\"prose_only_method is discussed here, and nowhere that "
+            "counts.\"\"\"\n"
+            "        return self.code_only_method()\n")
+        pkg, tests = self._synthetic(tmp_path, body)
+        tests.mkdir()
+        (tests / "test_probe.py").write_text("# no reference to either method\n")
+        found = unreachable_methods(pkg, tests)
+        assert "probe.py:2 prose_only_method()" in found, (
+            f"a name mentioned only in a docstring was not reported dead - "
+            f"prose is being read as a caller: {found}")
+        assert not any("code_only_method" in f for f in found), (
+            f"a name called in code was reported dead, so dropping prose is not "
+            f"what this scan does - it is dropping callers: {found}")
 
     def test_a_string_dispatched_name_is_still_a_use(self):
         """**The other side, and the reason strings are kept at all.**

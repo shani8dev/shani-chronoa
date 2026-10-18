@@ -1683,9 +1683,6 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._config = config if config is not None else self._default_config()
         self._caps = self._load_capabilities()
         self._help_window: HelpWindow | None = None
-        #: Set by the application through `set_regenerate_handler`; None means
-        #: the transcript shows no "Ask that again" control at all.
-        self._regenerate = None
         #: Built panels, kept so opening one twice does not re-run everything it
         #: measures. Empty until a panel is opened.
         self._surface_pages: dict = {}
@@ -4026,16 +4023,18 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
 
         The window is constructed before the application knows whether there is
         an assistant to re-ask, so the handler arrives after construction - the
-        same pattern `set_suggestion_handler` uses. Passing None removes the
+        same late binding `set_rewind_handler` uses. Passing None removes the
         control, which is what happens when there is no model to answer with;
         a button that cannot work is worse than no button.
-        """
-        self._regenerate = handler
-        self._transcript.set_regenerate_handler(handler)
 
-    def _on_regenerate_clicked(self) -> None:
-        if self._regenerate is not None:
-            self._regenerate()
+        **The transcript owns the handler, and this window keeps no copy.** It
+        used to: the window stored `_regenerate` and had its own
+        `_on_regenerate_clicked`, which nothing called - the button is connected
+        to `TranscriptView._on_regenerate_clicked`, a different object holding
+        its own handler. So the field was written by this live setter and read
+        by nothing. The forward below is the whole of what this method does.
+        """
+        self._transcript.set_regenerate_handler(handler)
 
     def _build_palette(self) -> None:
         """Ctrl+K, and the one list of everywhere you can go.
