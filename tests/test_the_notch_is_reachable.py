@@ -250,6 +250,78 @@ def _schema_path() -> Path:
 _SHIPPED_SCHEMA_XML = (REPO
                        / "usr/share/glib-2.0/schemas/org.shani.chronoa.gschema.xml")
 
+#: Where `_place()`'s corner chain begins, and what each of its two shapes says.
+_CHAIN_START = "let nx, ny;"
+_GUARD = re.compile(r"if \(corner === '([^']+)'\) \{")
+_ELSE = re.compile(r"\s*else \{")
+#: The key the chain's unconditional branch is filed under. It is `bottom-right`
+#: by being the only branch with no condition of its own - which is the point:
+#: `_corner()`'s no-schema fallback *is* `'bottom-right'`, so a value that
+#: reaches the chain unrecognised has to land somewhere on purpose.
+_ELSE_KEY = "<else>"
+
+
+def _place_branches(js: str) -> dict:
+    """Map each corner to the body of the branch in `_place()` that places it.
+
+    **The check this replaced could not see a branch nobody reaches.** It
+    asserted `f"'{c}'" in js`, and that is satisfied by the string appearing
+    anywhere - in a comment, in `_corner()`'s no-schema fallback, or in the
+    `corner === 'top-center' || corner === 'top-right'` guard a hundred lines
+    down that positions the *mascot inside the strip* rather than the strip.
+    Measured on a copy with the condition renamed to `corner === 'top-never'`:
+    the branch can then never be taken, the mascot falls into the `else` and is
+    drawn at the bottom-right corner, and **all 34 tests in this file still
+    passed.** That is the "a check that cannot distinguish the two behaviours"
+    trap, in the one file whose subject is whether the strip is where the schema
+    says it is.
+
+    So the needle is a **condition**, not a literal: the chain is walked out of
+    `_place()` by brace matching from `let nx, ny;` and **stopped at its first
+    plain `else`**, so a later `if (corner === ...)` somewhere else in the file
+    cannot be mistaken for a branch of this chain. `else if` is not a stop,
+    because the guard regex picks the next condition up on the next turn.
+
+    Brace matching rather than a line regex, because a branch body is a block
+    and the claim is about the block.
+    """
+    if _CHAIN_START not in js:
+        raise AssertionError(
+            f"extension.js has no {_CHAIN_START!r}, so the corner chain could "
+            "not be found and nothing below was measured. This is a refactor, "
+            "not a defect - the check follows the chain rather than searching "
+            "for corner names, so it has to be pointed at the new one.")
+
+    def block(at: int):
+        """The `(open, close)` span of the `{...}` starting at or after `at`."""
+        start = js.index("{", at)
+        depth = 0
+        for k in range(start, len(js)):
+            if js[k] == "{":
+                depth += 1
+            elif js[k] == "}":
+                depth -= 1
+                if depth == 0:
+                    return start, k
+        raise AssertionError(
+            "the corner chain's braces do not balance, so no branch body could "
+            "be read out of it")
+
+    out: dict = {}
+    i = js.index(_CHAIN_START)
+    while True:
+        guard = _GUARD.search(js, i)
+        if not guard:
+            return out
+        opening, closing = block(guard.end() - 1)
+        out[guard.group(1)] = js[opening + 1:closing]
+        i = closing + 1
+        plain = _ELSE.match(js, i)
+        if plain:
+            opening, closing = block(plain.end() - 1)
+            out[_ELSE_KEY] = js[opening + 1:closing]
+            return out
+
 
 class TestTheManifest:
     def test_it_names_a_settings_schema(self):
@@ -390,6 +462,17 @@ class TestTheManifest:
         `else`** and lands at bottom-right with nothing saying so. Measured by
         adding `top-left` to the choices - it compiles, the default is unaffected,
         and `_place()` has no `top-left` anywhere.
+
+        **And it guards the branch itself, which is the half that was missing.**
+        This half used to ask `f"'{c}'" in js` - the string, anywhere - and that
+        cannot see a branch nobody can reach. Measured: renaming the condition
+        to `corner === 'top-never'` leaves the string in the file, so the
+        mascot falls into the `else` and is drawn at the bottom-right corner,
+        and **34 of 34 tests passed**. `_place_branches` reads the branch out
+        of the chain instead, and each of the four assertions it feeds needs a
+        different plant - renaming the condition, copying a body, dropping an
+        assignment, removing the `else` - so all four are planted in
+        `TestTheManifestChecksCanBite`.
         """
         schema = json.loads(METADATA.read_text())["settings-schema"]
         root = ET.parse(_schema_path()).getroot()
@@ -415,14 +498,39 @@ class TestTheManifest:
             "bottom-right corner it was ported away from.")
 
         js = EXTENSION_JS.read_text()
+        branches = _place_branches(js)
+
         unhandled = [c for c in choices
-                     if c != "bottom-right" and f"'{c}'" not in js]
+                     if c != "bottom-right" and c not in branches]
         assert not unhandled, (
-            f"the schema offers mascot-corner={unhandled}, and extension.js "
-            "compares against no such string - _place() would fall into its "
-            "else and draw the strip at the bottom-right corner instead, with "
-            "nothing saying the choice was not honoured. Either the branch or "
-            "the choice is missing.")
+            f"the schema offers mascot-corner={unhandled}, and _place() has no "
+            "branch for it - so the value falls into its `else` and the strip "
+            "is drawn at the bottom-right corner instead, with nothing saying "
+            "the choice was not honoured. Either the branch or the choice is "
+            "missing.")
+
+        assert _ELSE_KEY in branches, (
+            "the corner chain has no `else`, so the value `_corner()` falls back "
+            "to when there is no schema - 'bottom-right' - and any corner the "
+            "chain does not name has nowhere to land. `let nx, ny;` is handed "
+            "straight to set_position, so it would be `undefined`.")
+
+        half = sorted("the `else`" if name == _ELSE_KEY
+                      else f"mascot-corner={name!r}"
+                      for name, body in branches.items()
+                      if "nx =" not in body or "ny =" not in body)
+        assert not half, (
+            f"{half} positions only one axis. `let nx, ny;` is declared outside "
+            "the chain, so the axis the branch does not assign is `undefined` "
+            "and reaches `set_position` as such - the strip does not land at a "
+            "wrong corner, it lands nowhere.")
+
+        assert branches["top-center"].strip() != branches["top-right"].strip(), (
+            "top-center and top-right have the same body, so they place the "
+            "strip in the same place and the choice between them means "
+            "nothing. Centred is a claim about the arithmetic: top-center "
+            "carries the `/ 2` and top-right the right margin, and one of them "
+            "stopped being that.")
 
 
 # --------------------------------------------------------------------------
@@ -933,6 +1041,19 @@ def _the_corner_check(half_dir):
     TestTheManifest().test_the_corner_the_schema_picks_is_a_corner_the_code_handles()
 
 
+def _the_corner_check_against_the_js():
+    """The same check, in the shape `_bites` calls.
+
+    `_bites` redirects `EXTENSION_JS` and reads **no** `tmp_path`, so the
+    check has to be callable with no arguments. It reaches the schema through
+    `_schema_path()`, which this helper leaves pointing at the shipped file -
+    which is the point: these three plants differ from the five above in
+    **which file** is doctored, so the schema half of the check is real on
+    every one of them rather than planted twice.
+    """
+    TestTheManifest().test_the_corner_the_schema_picks_is_a_corner_the_code_handles()
+
+
 class TestTheManifestChecksCanBite:
     """The two `TestTheManifest` checks this port added, shown able to go red.
 
@@ -959,6 +1080,10 @@ class TestTheManifestChecksCanBite:
     | default is not one of its own `<choices>` | the compile-discards-everything claim, at parse time |
     | a `<choice>` `extension.js` has no branch for | the honest-placement claim |
     | default names a string outside its `<choices>` | the compile-discards-everything claim, for real |
+    | **the `top-center` branch renamed to something no value can equal** | the honest-placement claim, **by branch** |
+    | **`top-center`'s body replaced by `top-right`'s** | the claim that the two corners differ |
+    | **`ny` dropped from the `top-center` branch** | the claim that every branch positions both axes |
+    | **the chain's `else` turned into a bare block** | the claim that there is a fall-through at all |
 
     The last one is the reason this class exists rather than being tidiness. A
     `mascot-corner` default outside its own choices is **exactly** the defect
@@ -967,6 +1092,17 @@ class TestTheManifestChecksCanBite:
     has no `org.shani.chronoa` at all - and it takes the whole application with
     it. It is the most consequential thing either test guards, and nothing in
     the mutation set touched it.
+
+    **The last three rows are controls for an assertion that had no control and
+    could not have failed.** The honest-placement half used to ask whether the
+    corner's name appeared *anywhere* in `extension.js`, which is why the row
+    above it could be planted by adding a `<choice>` - the string was absent,
+    genuinely. Renaming an existing branch keeps the string and removes the
+    branch, and the whole file stayed green (measured, 34 of 34). So the check
+    now reads the chain structurally, and each of the three ways that can be
+    wrong needs a plant of its own: they overlap in the source and differ only
+    in **which assertion** they trip, which is the reason there are three and
+    not one.
     """
 
     _TOP_CENTRE = '<default>"top-center"</default>'
@@ -1011,6 +1147,89 @@ class TestTheManifestChecksCanBite:
         said = _schema_bites(
             _the_corner_check, tmp_path, monkeypatch, plant)
         assert "top-left" in said, said
+
+    #: The `top-center` branch's two assignments, which are the two needles the
+    #: next three plants share. `Math.round((monitor.width - nw) / 2)` is the
+    #: centring and appears once, which is what keeps `old` unique - the other
+    #: two branches carry the right-margin line instead.
+    _TC_BODY = ("            nx = monitor.x + Math.round((monitor.width - nw) / 2);\n"
+                "            ny = monitor.y + bar;\n")
+    #: What `top-right`'s branch says, copied over `top-center`'s in the second.
+    _TR_BODY = ("            nx = monitor.x + monitor.width - nw - "
+                "Math.round(MARGIN * f);\n"
+                "            ny = monitor.y + bar;\n")
+
+    def test_a_branch_nothing_can_reach_goes_red(self, tmp_path, monkeypatch):
+        """The dead branch, which the string-presence check could not see.
+
+        **This is the plant the old assertion had no answer for.** Renaming the
+        condition leaves `'top-center'` in the file - in `_corner()`'s fallback
+        text, in the `||` guard that places the mascot inside the strip, and in
+        this check's own needles - so `f"'{c}'" in js` is still true, the branch
+        can never be taken, and the strip is drawn at the bottom-right corner
+        instead. Measured before the change: **34 passed, 0 failed.**
+
+        The new assertion names it, and the two below cover the other ways the
+        same branch can be wrong while still *being* a branch.
+        """
+        said = _bites(
+            _the_corner_check_against_the_js, tmp_path, monkeypatch,
+            ("if (corner === 'top-center') {", "if (corner === 'top-never') {"))
+        assert "no branch for it" in said, said
+        # And it is this assertion, not the axes or the differ claim: both of
+        # those read `branches[...]`, which is empty for a branch that is gone.
+        assert "only one axis" not in said, said
+        assert "same body" not in said, said
+
+    def test_two_corners_placing_the_strip_the_same_way_goes_red(self,
+                                                                  tmp_path,
+                                                                  monkeypatch):
+        """The branch is present, both axes are set, and it is the wrong corner.
+
+        Two claims that are separately satisfiable and jointly wrong: the string
+        is there, the arithmetic is there, and choosing `top-center` over
+        `top-right` puts the strip in the same place either way. **Centred is a
+        claim about the `/ 2`**, and this is the plant that makes the claim mean
+        something other than presence.
+        """
+        said = _bites(
+            _the_corner_check_against_the_js, tmp_path, monkeypatch,
+            (self._TC_BODY, self._TR_BODY))
+        assert "same body" in said, said
+
+    def test_a_branch_that_positions_one_axis_goes_red(self, tmp_path,
+                                                       monkeypatch):
+        """`let nx, ny;` is declared outside the chain, so a branch that assigns
+        only `nx` hands `set_position` an `undefined` y.
+
+        Distinct from the two above on the source as well as the verdict: the
+        branch is named, reachable, and sets both of *its own* lines except the
+        one this plant removes.
+        """
+        said = _bites(
+            _the_corner_check_against_the_js, tmp_path, monkeypatch,
+            (self._TC_BODY,
+             "            nx = monitor.x + Math.round((monitor.width - nw) / 2);\n"))
+        assert "only one axis" in said, said
+        assert "mascot-corner='top-center'" in said, said
+
+    def test_a_chain_with_no_fall_through_goes_red(self, tmp_path,
+                                                   monkeypatch):
+        """The `else` is where the bottom-right corner lives, and it is load-bearing.
+
+        `_corner()` answers `'bottom-right'` whenever there is no schema, so the
+        value that reaches the chain without a matching branch is one the schema
+        does not have to offer - and with no `else` to catch it, both axes are
+        `undefined`. A chain that handles every `<choice>` and still has no
+        fall-through is therefore not a chain that handles everything.
+        """
+        said = _bites(
+            _the_corner_check_against_the_js, tmp_path, monkeypatch,
+            ("        } else {\n            // The historical home, and the only "
+             "corner where the strip is not\n",
+             "        }\n            // The historical home, and the only "
+             "corner where the strip is not\n"))
+        assert "no `else`" in said, said
 
     def test_the_schema_being_discarded_goes_red(self, tmp_path, monkeypatch):
         """The failure the store check exists for, which nothing else reaches.
