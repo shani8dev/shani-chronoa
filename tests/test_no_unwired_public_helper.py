@@ -119,6 +119,28 @@ _SKIP_DECORATORS = ("property", "cached_property", "abstractmethod", "override")
 #: `BaseHTTPRequestHandler`.
 _FRAMEWORK_DISPATCH = ("do_GET", "do_POST", "log_message")
 
+#: Names a **GObject vfunc** dispatches by name, so no code in this tree can
+#: refer to them and no scanner can see that they are called.
+#:
+#: `ibus_input.py`'s engine is an `IBus.Engine` subclass, and GTK calls
+#: `do_enable`, `do_focus_in`, `do_focus_out` and `do_process_key_event` on it
+#: by name - the same shape as `http.server`'s `do_GET`, and the same blind
+#: spot. **`tests/test_no_surface_method_is_unreachable.py` records the same
+#: class** in its own docstring, which is why that scan is not extended to the
+#: whole tree.
+#:
+#: **And the engine is live**, so these are not a dead feature's leftovers:
+#: `app/application.py` calls `ibus_input.start()` at startup, and
+#: `skills/input_control.py` commits text through it - which is the whole
+#: point of the module (a dictation tool has to reach a Devanagari word that
+#: no keyboard layout can produce).
+#:
+#: The same property as the http.server exemption: every name here must be a
+#: `do_*` method of a class that inherits `IBus.Engine`, so a genuine orphan
+#: cannot join by being spelled the same way.
+_GOBJECT_VFUNCS = ("do_enable", "do_focus_in", "do_focus_out",
+                   "do_process_key_event")
+
 #: Unreferenced public callables, each with why it is allowed to stay.
 #:
 #: **Every entry carries a reason, and a reason of "" is a failure.** An allowlist
@@ -497,6 +519,8 @@ def _defined_public(used):
             if node.name.startswith("_"):
                 continue
             if node.name in _FRAMEWORK_DISPATCH:
+                continue
+            if node.name in _GOBJECT_VFUNCS:
                 continue
             if any((getattr(d, "id", None)
                     or getattr(getattr(d, "func", None), "id", None))
@@ -1337,6 +1361,52 @@ def test_every_property_allowlist_entry_carries_a_reason():
                      if not why.strip())
 
     assert not without, f"PROPERTY_ALLOWED entries with no reason: {without}"
+
+def test_the_gobject_vfunc_exemption_names_only_real_vfuncs():
+    """**The GObject exemption cannot absorb a genuine orphan.**
+
+    `_GOBJECT_VFUNCS` says "the framework calls these by name", which is a
+    claim that can rot: a name could be added that no `IBus.Engine` subclass
+    implements, and then the exemption would silence a real orphan.
+
+    So every name in it must be a `do_*` method of a class that inherits
+    `IBus.Engine` - the class whose vfuncs GObject dispatches by name, which
+    is what makes the exemption true at all.
+    """
+    vfuncs = {}
+    for path in sorted(PKG.rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        try:
+            tree = ast.parse(path.read_text(errors="replace"))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        for cls in ast.walk(tree):
+            if not isinstance(cls, ast.ClassDef):
+                continue
+            bases = set()
+            for b in cls.bases:
+                if isinstance(b, ast.Name):
+                    bases.add(b.id)
+                elif isinstance(b, ast.Attribute):
+                    bases.add(f"{getattr(b.value, 'id', '')}.{b.attr}")
+            if not any(base.endswith(".Engine") or base == "Engine"
+                       for base in bases):
+                continue
+            for member in cls.body:
+                if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    vfuncs.setdefault(member.name, []).append(
+                        f"{path.relative_to(ROOT)}:{member.lineno}")
+
+    for name in _GOBJECT_VFUNCS:
+        assert name in vfuncs, (
+            f"{name!r} is exempted as a GObject vfunc, but no class "
+            f"inheriting an *Engine implements it; the exemption would "
+            f"silence a real orphan")
+        assert name.startswith("do_"), (
+            f"{name!r} is exempted as a GObject vfunc but is not named "
+            f"like one, so it is a plain orphan with a free pass")
+
 
 def test_the_framework_dispatch_exemption_names_only_real_handlers():
     """**The exemption cannot absorb a genuine orphan.**

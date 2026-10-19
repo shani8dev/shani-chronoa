@@ -292,21 +292,3 @@ def pending_bytes(name: str) -> int:
     return int(spec.size_bytes) if spec else 0
 
 
-def missing_reason(name: str, config=None) -> str:
-    """Why `name` is not available, or '' when it is. Never a guess about a program we could fetch.
-
-    **Deliberately not called, and recorded here so the next sweep stops
-    here.** `ensure()` answers the same question at the moment of the
-    attempt, and it has to: its answer carries the *consent* refusal, which
-    is the reason the program is not there right now, and a panel that
-    printed the sentence above instead would hide that. This is the
-    panel-shaped wording - it names the size of a download setup could
-    fetch - and it is kept for a panel that has to answer without asking
-    for the thing.
-    """
-    if has(name):
-        return ""
-    if name in DEFAULT_FOR_PROGRAM:
-        return (f"{name} is not installed. Setup can download it "
-                f"({DEFAULT_FOR_PROGRAM[name].size_bytes // (1 << 20)} MB) when 'Model download' is on.")
-    return f"{name} is not installed, and it comes with your system packages."

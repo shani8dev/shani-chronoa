@@ -363,16 +363,6 @@ class Notch:
             return ()
         return reply.unpack()
 
-    def _call_i(self, method: str) -> int:
-        """One integer-returning call, or 0."""
-        out = self._call(method)
-        if not out:
-            return 0
-        try:
-            return int(out[0])
-        except (TypeError, ValueError):
-            return 0
-
     def _call_rect(self, method: str) -> tuple[int, int, int, int]:
         out = self._call(method)
         if not out or len(out) < 4:

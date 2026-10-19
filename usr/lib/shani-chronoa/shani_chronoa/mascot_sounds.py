@@ -185,7 +185,7 @@ def _play_file(path: Path, volume: float) -> None:
     _stop_previous()
     try:
         _current = subprocess.Popen(  # noqa: S603 - argv list, no shell
-            [player, str(path)],
+            [player, str(path)] + _volume_args(),
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             start_new_session=True)
     except Exception:  # noqa: BLE001 - a note must never fail a notice

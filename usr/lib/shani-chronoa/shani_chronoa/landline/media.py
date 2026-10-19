@@ -548,26 +548,6 @@ def negotiated(codecs: List[Tuple[int, str]], pt: int) -> str:
     return ""
 
 
-def local_ip_towards(host: str) -> str:
-    """This machine's address on the way to `host`, found without sending.
-
-    **Deliberately not called, and recorded here so the next sweep stops
-    here.** The SIP client does not need it: it reads the address off the
-    socket it connected with (`ua.py` takes `getsockname()` from the TLS
-    socket), and that is the address the traffic actually leaves by - which
-    is the one the Contact header has to name. This asks the kernel to
-    route towards `host` and report the source address, which is a *second*
-    answer to a question the socket has already answered, and the two can
-    disagree on a machine with more than one interface.
-    """
-    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        probe.connect((host, 9))
-        return probe.getsockname()[0]
-    finally:
-        probe.close()
-
-
 # --- sound ---------------------------------------------------------------------
 
 # --- conferencing -----------------------------------------------------------------

@@ -167,21 +167,6 @@ class Prompt:
         else:
             invocation.return_value(None)
 
-    @property
-    def needs_answer(self) -> bool:
-        """Whether BlueZ is still waiting for an answer to this question.
-
-        **Deliberately not called, and recorded here so the next sweep
-        stops here.** The window asks the same question by kind: a
-        `show-pin` or `show-passkey` prompt is BlueZ *telling* the person
-        a code, with nothing to answer, so the page shows it and offers no
-        field. That distinction is the one this property encodes, and it is
-        made from the kind rather than from the presence of an invocation -
-        which is the same answer asked in the place where the decision is
-        made.
-        """
-        return self._invocation is not None
-
 
 def _unpack(props) -> dict:
     return {k: (v.unpack() if hasattr(v, "unpack") else v) for k, v in dict(props).items()}

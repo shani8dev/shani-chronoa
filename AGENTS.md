@@ -27852,3 +27852,68 @@ a file - a verdict that can be deleted mid-run is not a verdict.
 
 **The same shape as the `wpctl`-three-copies failure, one level up**: two
 components that both had a name for a thing, and the collision was silent.
+
+## A committed test was red, and the runner's cap had been hiding it (2026-10-20)
+
+The full-suite sweep with the **fixed** runner found one file it could not
+measure: `test_no_unwired_public_helper.py` returned `NO SUMMARY (rc=124)` -
+`rc=124` is `timeout`'s code, so the file takes longer than the 300 s cap.
+Run alone with a bigger cap, it is **3 failed, 25 passed** in 428 s.
+
+**And the file is a stricter instrument than `tools/deadcode.py`.** It checks
+every public *and* private callable and every property member, and its
+allowlists (`ALLOWED`, `PRIVATE_ALLOWED`, `CLASS_ALLOWED`, `PROPERTY_ALLOWED`)
+are **empty on purpose**: "there is no allowlist to add it to any more - that
+is the point of this file now". A public orphan must be **wired or deleted**,
+and a *documented* reason is not an option.
+
+### Three of the nine names were mine, from this session
+
+`local_ip_towards` (landline), `missing_reason` (engines) and `needs_answer`
+(bt_pair) are the three I had documented earlier this pass as "deliberately
+not called, and recorded here so the next sweep stops here". **The recording
+is not the same thing as being wired**, and this file says so in its own
+message: *"Either wire it, or delete it."* A docstring is a reason, and a
+reason belongs in the allowlist - which is empty.
+
+So they are deleted. `local_ip_towards` was a *second* answer to a question
+the SIP socket had already answered; `needs_answer` was the same distinction
+the window makes by kind; `missing_reason` was a panel-shaped wording with no
+panel.
+
+### And three of the other six were a real hole, not an orphan
+
+`mascot_sounds._volume_args()` is the *measured* answer to "how does the
+chosen player carry a volume" - `pw-play`'s `--help` lists no volume flag on
+this machine and `paplay` is not installed - and the fallback path was
+building the player's argv **without asking it**. The answer is now asked
+where it applies, so a player that does carry a volume is picked up from one
+place.
+
+### The four IBus callbacks are a framework dispatch, and the engine is live
+
+`ibus_input.py`'s `do_enable`, `do_focus_in`, `do_focus_out` and
+`do_process_key_event` are **GObject vfuncs** that GTK dispatches by name -
+the same shape as `http.server`'s `do_GET`, which the file already exempts.
+`tests/test_no_surface_method_is_unreachable.py` records the same class in
+its own docstring, which is why that scan is not extended to the whole tree.
+
+**And the engine is live**, so these are not a dead feature's leftovers:
+`app/application.py` calls `ibus_input.start()` at startup and
+`skills/input_control.py` commits text through it - which is the module's
+whole point, since a dictation tool has to reach a Devanagari word no
+keyboard layout can produce.
+
+The exemption is a **declared** one with the same property as the http.server
+one: every name in it must be a `do_*` method of a class that inherits
+`IBus.Engine`, so a genuine orphan cannot join by being spelled the same
+way.
+
+### And the runner could not see any of it
+
+**A file that exceeds the cap is a file whose result nobody has.** The old
+runner's `tail -1` read a warning line; the new one says `NO SUMMARY
+(rc=124)`, which is a verdict - and it is what pointed at the file. The
+three failures were in the tree the whole time, and the previous sweep's
+"0 failed" had not seen them, because the file never produced a readable
+verdict at all.
