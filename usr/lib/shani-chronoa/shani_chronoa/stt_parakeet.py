@@ -44,12 +44,11 @@ real transcript line.
 import logging
 import os
 import re
-import shutil
 import subprocess
 import tempfile
 from typing import Optional
 
-from shani_chronoa import files
+from shani_chronoa import engines, files
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +138,10 @@ class ParakeetSTT:
         # The literal fallback is not redundant the way a PATH lookup alone
         # would be: `senses/ocr.py` and `screengrab.py` both record that a
         # stripped PATH (a systemd unit, a sandbox) is a real environment here.
-        self.whisper_path = whisper_path or shutil.which("parakeet-cli") \
+        # `engines.resolve` asks PATH first and then the copy setup downloaded -
+        # and `parakeet-cli` ships inside whisper.cpp's own archive, so this
+        # backend's program costs no second download.
+        self.whisper_path = whisper_path or engines.resolve("parakeet-cli") \
             or "/usr/bin/parakeet-cli"
         self.model_path = self._get_model_path(model)
         # Recorded, never sent: `parakeet-cli` has no `-l` flag, and the model

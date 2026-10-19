@@ -465,7 +465,7 @@ def test_the_reads_are_on_a_thread_and_the_page_is_built_first(monkeypatch):
         return out
 
     READERS = ("_paired", "_attributes", "_services", "_read_value",
-               "_notifications", "_moyoung_watches", "_find_device")
+               "_notifications", "_moyoung_watches")
 
     build_fn = build_tree.body[0]
     assert isinstance(build_fn, ast.FunctionDef)
@@ -630,7 +630,16 @@ class TestTheMoYoungHalf:
 
     def test_the_watch_controls_go_through_the_app_dispatcher(self, monkeypatch):
         """The same `tools.execute_tool` the assistant goes through, so the panel
-        and the assistant get the same refusal for the same question."""
+        and the assistant get the same refusal for the same question.
+
+        **Driven through `_watch_call`, which is the route the panel's own
+        "Sync time" and "Settings" buttons take.** It used to drive a
+        single-characteristic GATT reader that no product code called - so the
+        invariant was real and its subject was dead, which is a test that reads
+        as coverage of nothing. `_watch_call` dispatches through `_tool` off the
+        same thread, so the property being checked is unchanged and now has a
+        caller.
+        """
         asked = []
 
         def execute(name, arguments):
@@ -645,9 +654,9 @@ class TestTheMoYoungHalf:
         monkeypatch.setattr(tools, "execute_tool", execute)
 
         note = w._label("")
-        w._gatt_read("FB", "battery level", note)
+        w._watch_call("FB", {"action": "sync_time"}, note)
 
-        # `_gatt_read` dispatches off-thread, so give the worker a moment. The
+        # `_watch_call` dispatches off-thread, so give the worker a moment. The
         # `for` loop that follows iterates `asked`, which is empty until the
         # thread runs - so it passed vacuously on a dispatcher that was never
         # asked. The assertion below is what stops that reading as a pass.
@@ -658,8 +667,8 @@ class TestTheMoYoungHalf:
         assert asked, (
             "the dispatcher was never asked, so nothing below was checked")
         for name, arguments in asked:
-            assert name == "bluetooth_gatt"
-            assert arguments["action"] == "read"
+            assert name == "watch"
+            assert arguments["action"] == "sync_time"
             assert arguments["device"] == "FB"
 
 

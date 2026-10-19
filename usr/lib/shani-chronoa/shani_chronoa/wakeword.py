@@ -42,7 +42,7 @@ from typing import Callable, List, Optional
 # recorder read the same microphone, and a second copy of the argv drifted from
 # this one silently (its rate was a literal). Asserted by
 # tests/test_capture_argv_agreement.py.
-from shani_chronoa import hardware_profile
+from shani_chronoa import engines, hardware_profile
 from shani_chronoa.audio import _stream_capture_cmd
 from shani_chronoa.vad import calibrate_noise_floor, rms
 
@@ -150,7 +150,7 @@ class WakeWordListener:
     ) -> None:
         self._phrase = (phrase or DEFAULT_PHRASE).strip()
         self._preferred_model = model
-        self._whisper = whisper_path or shutil.which("whisper-cli")
+        self._whisper = whisper_path or engines.resolve("whisper-cli")
         self._backend = self._detect_backend()
         # Same device the recorder uses. A wake word that triggers on one
         # microphone while the turn records from another is a bug that would

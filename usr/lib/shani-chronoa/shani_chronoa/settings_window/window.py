@@ -11,7 +11,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk
 
-from shani_chronoa import local_llm, model_choice
+from shani_chronoa import engines, local_llm, model_choice
 
 from .senses import SensesPage
 from .privacy import PrivacyPage
@@ -50,7 +50,17 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
     def _build_ui(self) -> None:
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
 
-        header = Adw.HeaderBar(show_end_title_buttons=False, show_start_title_buttons=True)
+        # **Both sides, and an explicit Close.** `show_start_title_buttons`
+        # alone puts the close glyph on the left, which on several desktops is
+        # the side a person does not look at first - and a settings window with
+        # no visible way out reads as a dialog that has to be killed. The end
+        # side carries the conventional close button, and the Escape key below
+        # closes it for anyone who never finds either.
+        header = Adw.HeaderBar(show_end_title_buttons=True, show_start_title_buttons=True)
+        close = Gtk.Button(label="Close")
+        close.add_css_class("flat")
+        close.connect("clicked", lambda *_: self.close())
+        header.pack_end(close)
         self._search = Gtk.SearchEntry(hexpand=True)
         self._search.set_placeholder_text("Search settings")
         # The placeholder is what a person sees; the label is what a screen
@@ -71,6 +81,17 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
         # GTK rejects that with "gtk_widget_get_parent (child) == NULL" - a
         # window can only ever have one.
         self.set_titlebar(header)
+
+        # Escape closes the window, the one shortcut every other dialog in
+        # this app honours and this one did not.
+        key = Gtk.EventControllerKey()
+        def _on_key(_c, keyval, _code, _state):
+            if keyval == getattr(Gtk, "KEY_Escape", 0):
+                self.close()
+                return True
+            return False
+        key.connect("key-pressed", _on_key)
+        self.add_controller(key)
 
         page = Adw.PreferencesPage()
         # `register()` happens at *import* time (bottom of this module), not
@@ -659,7 +680,7 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
         output would simply be worse than the input while claiming to be an
         improvement.
         """
-        if local_llm.shutil.which("llama-imatrix") is None:
+        if not engines.has("llama-imatrix"):
             report("llama-imatrix is not installed")
             return
         sources = [p for p in sorted(local_llm.model_dir().glob("*.gguf"))

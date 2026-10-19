@@ -34,7 +34,7 @@ except ImportError:  # pragma: no cover - exercised only on a stripped install
     httpx = None  # type: ignore[assignment]
 
 from shani_chronoa import hardware_profile
-from shani_chronoa import ctxfit, files
+from shani_chronoa import ctxfit, engines, files
 from shani_chronoa.stt_provision import ModelSpec, _install
 
 logger = logging.getLogger(__name__)
@@ -395,7 +395,14 @@ def answering_key() -> str:
 
 
 def server_binary() -> str:
-    return shutil.which("llama-server") or ""
+    """`llama-server`: the system's copy first, then one Chronoa downloaded.
+
+    Read through `engines.resolve` rather than `shutil.which`, so a machine
+    with no `llama-cpp` package can still run the server from the copy setup
+    fetched. The system's copy still wins when there is one, so nothing about a
+    machine that already has the package changes.
+    """
+    return engines.resolve("llama-server")
 
 
 def verify(key: str) -> bool:
@@ -473,7 +480,7 @@ def perplexity(path: "Path", timeout: float = 180.0) -> "float | None":
     "unknown" rather than "fine"; `None` is that answer, and callers must not
     treat it as a pass without saying so.
     """
-    binary = shutil.which("llama-perplexity")
+    binary = engines.resolve("llama-perplexity")
     if not binary:
         logger.info("llama-perplexity is not installed, so quality is unmeasured")
         return None
@@ -604,7 +611,7 @@ def build_imatrix(source: "Path", corpus: str, out: "Path",
     than producing a quant that is quietly uncalibrated, which would look exactly
     like the naive one.
     """
-    binary = shutil.which("llama-imatrix")
+    binary = engines.resolve("llama-imatrix")
     if not binary:
         logger.warning("llama-imatrix is not installed, so no calibrated quant "
                        "can be produced")
@@ -627,7 +634,7 @@ def build_imatrix(source: "Path", corpus: str, out: "Path",
 def quantize(source: "Path", target: str, out: "Path",
              imatrix: "Path | None" = None, timeout: float = 900.0) -> "bool":
     """Quantize with `llama-quantize`, optionally guided by an importance matrix."""
-    binary = shutil.which("llama-quantize")
+    binary = engines.resolve("llama-quantize")
     if not binary:
         logger.warning("llama-quantize is not installed")
         return False

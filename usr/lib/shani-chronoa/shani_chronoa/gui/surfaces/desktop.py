@@ -461,18 +461,6 @@ def _gate(config: Any, key: str) -> Tuple[Optional[bool], str]:
         return None, f"reading it raised {type(exc).__name__}: {exc}"
 
 
-def _privacy_button(app: Any) -> Gtk.Widget:
-    """The route to the one page that grants both of these keys.
-
-    `global-shortcut-enabled` and `document-search-enabled` are written in
-    `settings_window/privacy.py` and nowhere else, so this is the only button on
-    this panel that reaches something that can change the answer.
-    """
-    return common.wire_page_button(
-        common.open_settings_button("Open Privacy settings", "settings:privacy"),
-        app, "settings:privacy")
-
-
 def _turn_on_button(app: Any, key: str) -> Gtk.Widget:
     """"Turn on", for exactly this row's switch, then the panel rebuilds.
 

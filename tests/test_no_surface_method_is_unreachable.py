@@ -174,11 +174,28 @@ def _code_words(text: str, tree: ast.AST):
     return words
 
 
-_DEF_LINE = re.compile(r"^\s*(?:async\s+)?def\s+(\w+)\s*\(", re.MULTILINE)
+_DEF_LINE = re.compile(
+    r"^\s*(?:async\s+)?(?:def\s+(\w+)\s*\(|class\s+(\w+))", re.MULTILINE)
 
 
 def _definition_lines(text: str) -> collections.Counter:
-    return collections.Counter(m.group(1) for m in _DEF_LINE.finditer(text))
+    """Names whose **own declaration line** carries them - `def` and `class` alike.
+
+    The `class` half is load-bearing, and its absence made a whole gate
+    unreachable. `_is_used` subtracts a name's own definition lines from its
+    total, so a `class Foo:` line that was not counted here read as a *use* of
+    `Foo` - the declaration was its own evidence of being live. Measured: a class
+    named by nothing anywhere reported clean, so the class half of
+    `unreachable_gui_classes_and_vfuncs` could not fail at all; it was 121
+    vacuous passes.
+
+    Adding it leaves the method gates alone. A class and a method sharing a
+    name is the case to check: `defs` counts both declaration lines and `uses`
+    counts both of them too, so the subtraction removes exactly the declarations
+    and any real reference still counts.
+    """
+    return collections.Counter(m.group(1) or m.group(2)
+                               for m in _DEF_LINE.finditer(text))
 
 
 def _is_used(name: str, own: pathlib.Path, index) -> bool:
@@ -296,6 +313,187 @@ def unreachable_gui_names(pkg: pathlib.Path = PKG, tests: pathlib.Path = TESTS):
     return [f"{path.name}:{lineno} {name}()"
             for path, lineno, name in gui_names(pkg)
             if not _is_used(name, path, index)]
+
+
+# ---------------------------------------------------------------------------
+# The three populations the gates above skip by construction.
+# ---------------------------------------------------------------------------
+
+@functools.lru_cache(maxsize=None)
+def _imported_names(pkg: pathlib.Path = PKG, tests: pathlib.Path = TESTS):
+    """Per file, the names it imports **by name** (`from x import _y`).
+
+    A fourth question neither existing index answers. Parsed with `ast` and
+    nothing else: re-running `_code_words` over the whole tree is the 97 seconds
+    this file spent on exactly that in its first version, and a question about
+    import statements does not need a tokeniser.
+    """
+    rows = []
+    for path in _all_files(pkg, tests):
+        imported = set()
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    imported.add(alias.asname or alias.name)
+        rows.append((path.resolve(), frozenset(imported)))
+    return rows
+
+
+def _private_is_used(name: str, own: pathlib.Path, index, imports) -> bool:
+    """**Per module**: called where it is defined, or imported by name elsewhere.
+
+    This is the rule `_is_used` cannot express, and it is why three orphans
+    survived a gate that reported the tree clean:
+
+    - `android._in_thread` was masked by **phone.py's identically-named twin**
+      plus a test's `panel._in_thread` monkeypatch;
+    - `wearables._gatt_read` was masked by a test calling `w._gatt_read(...)`,
+      an attribute access on an object that has nothing to do with it.
+
+    Both are the same mistake in a new costume: `_is_used` counts the bare word
+    wherever it appears, and a module-private name is private **to its own
+    module**, so a qualified reference through any other object is not a call of
+    it. Counting those is how a helper kept alive by nothing but its own test
+    reads as live - and one of the two above was exactly that.
+    """
+    for f, uses, _defined, defs in index:
+        if f == own and uses.get(name, 0) - defs.get(name, 0) > 0:
+            return True
+    for f, names in imports:
+        if f != own and name in names:
+            return True
+    return False
+
+
+@functools.lru_cache(maxsize=None)
+def gui_private_functions(pkg: pathlib.Path = PKG):
+    """(module, line, name) for every **module-private module-level function**
+    in `gui/` and `gui/surfaces/`.
+
+    Both existing gates filter these out: `gui_names` skips a module-level
+    function whose name starts with `_`, and `surface_helpers` does the same.
+    So the population was invisible in both directions - the 592 functions here
+    had never been scanned, and they hold a dead builder written the same way
+    `_tick` was.
+    """
+    gui = pkg / "gui"
+    if not gui.is_dir():
+        return []
+    paths = sorted(gui.glob("*.py")) + sorted((gui / "surfaces").glob("*.py"))
+    for path in paths:
+        tree = ast.parse(path.read_text())
+        for fn in tree.body:
+            if (isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and fn.name.startswith("_")
+                    and not fn.name.startswith("__")):
+                yield path, fn.lineno, fn.name
+
+
+@functools.lru_cache(maxsize=None)
+def gui_classes(pkg: pathlib.Path = PKG):
+    """(module, line, name) for every **class** in `gui/` and `gui/surfaces/`.
+
+    A population no gate covered: only a class's *methods* were ever scanned, so
+    a class nothing named read as clean. 121 classes over the two directories.
+    """
+    gui = pkg / "gui"
+    if not gui.is_dir():
+        return []
+    paths = sorted(gui.glob("*.py")) + sorted((gui / "surfaces").glob("*.py"))
+    for path in paths:
+        tree = ast.parse(path.read_text())
+        for cls in [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]:
+            yield path, cls.lineno, cls.name
+
+
+@functools.lru_cache(maxsize=None)
+def gui_vfuncs(pkg: pathlib.Path = PKG):
+    """(module, line, vfunc name, **owning class**) for every `do_*` in
+    `gui/` and `gui/surfaces/`.
+
+    The owning class is carried because it is the only thing a reachability rule
+    can soundly ask about. A `do_*` is dispatched by the framework *by name*, so
+    no source-level caller exists and none is expected - which is why this
+    population needs its own rule rather than `_is_used`. See
+    `unreachable_gui_vfuncs` for the four oracles measured and refused.
+
+    Eight vfuncs across the two directories, and `do_snapshot` alone is six of
+    them - all six in `charts.py`. That concentration is what makes a bare-name
+    rule look like it works.
+    """
+    gui = pkg / "gui"
+    if not gui.is_dir():
+        return []
+    paths = sorted(gui.glob("*.py")) + sorted((gui / "surfaces").glob("*.py"))
+    for path in paths:
+        tree = ast.parse(path.read_text())
+        for cls in [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]:
+            for fn in cls.body:
+                if (isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef))
+                        and fn.name.startswith("do_")):
+                    yield path, fn.lineno, fn.name, cls.name
+
+
+def unreachable_gui_private_functions(pkg: pathlib.Path = PKG,
+                                      tests: pathlib.Path = TESTS):
+    index = _index(pkg, tests)
+    imports = _imported_names(pkg, tests)
+    return [f"{path.name}:{lineno} {name}()"
+            for path, lineno, name in gui_private_functions(pkg)
+            if not _private_is_used(name, path, index, imports)]
+
+
+def unreachable_gui_classes(pkg: pathlib.Path = PKG,
+                           tests: pathlib.Path = TESTS):
+    index = _index(pkg, tests)
+    return [f"{path.name}:{lineno} {name}"
+            for path, lineno, name in gui_classes(pkg)
+            if not _is_used(name, path, index)]
+
+
+def unreachable_gui_vfuncs(pkg: pathlib.Path = PKG,
+                           tests: pathlib.Path = TESTS):
+    """A `do_*` is reachable **iff the class that owns it is**.
+
+    **Not** "iff something mentions its name", which is what this gate did
+    before, and the reason it could not fail correctly in either direction. Two
+    measured facts make the bare-name rule wrong rather than merely loose:
+
+    - **A vfunc has no source-level caller and is not supposed to.** GObject
+      dispatches `do_snapshot` by name out of the class struct, so the only
+      honest question is whether the framework *knows* that name - which is a
+      question about GTK, not about our tree.
+    - **On this tree the bare-name rule answered right by collision.** All six
+      `do_snapshot` in `charts.py` are live, and exactly **one** mention of the
+      name exists outside a `def` line: `automation_overlay.py` has a method of
+      its own with that name. That single mention carried all six. Delete it and
+      the gate reports six live vfuncs as dead.
+
+    **Four oracles for "does the framework dispatch this name" were measured and
+    all four are unsound**, so none of them is the rule:
+
+    | instrument | why it cannot be it |
+    |---|---|
+    | `hasattr` over base classes | `do_button_press_event` is real GTK and is absent from every base tried, including `Gtk.EventController` - it would cry wolf on a legitimate vfunc |
+    | the `.typelib` string blob | strings are deduped: `size-allocate` is a real vfunc and **absent** from the blob, so a missing string means nothing |
+    | `GIRepository` declared methods | non-introspectable vfuncs are not in it either - of the same probe list only `measure` was declared |
+    | PyGObject instance attributes | an unmatched `do_*` is kept as a plain Python method, so `hasattr` is True for a typo'd override exactly as for a real one |
+
+    What is left is **sound in the direction that matters**: a vfunc whose class
+    is never named can never be dispatched, so the class gate above is a strict
+    implication and this one can only under-report. It cannot cry wolf, and that
+    asymmetry is the point - a gate that cries wolf gets deleted.
+
+    The defect it *does* catch is a `do_` on a class nothing reaches, which is
+    the `_tick` shape in a widget. It does **not** catch a misspelled vfunc name
+    - a `do_snapshpot` is dead code that would read as live - and no instrument
+    available here can tell it apart from a real one. Recorded rather than
+    pretended at.
+    """
+    index = _index(pkg, tests)
+    return [f"{path.name}:{lineno} {name}"
+            for path, lineno, name, owner in gui_vfuncs(pkg)
+            if not _is_used(owner, path, index)]
 
 
 class TestNoSurfaceMethodIsUnreachable:

@@ -40,6 +40,7 @@ import hashlib
 import logging
 import os
 import shutil
+import tarfile
 import tempfile
 import time
 from dataclasses import dataclass
@@ -617,6 +618,20 @@ def install_verified(spec: ModelSpec, directory: Path, *, config=None, progress=
 def spec_url(spec: ModelSpec) -> str:
     """The canonical download URL for `spec`."""
     return f"{spec.base_url or _BASE_URL}/{spec.filename}"
+
+
+def unpack_tar(archive: Path, destination: Path) -> None:
+    """Unpack a verified `.tar[.bz2]` into `destination`.
+
+    Shared by every engine that ships its programs in an archive - sherpa-onnx
+    today, llama.cpp and whisper.cpp through `engines.py` - so the extraction
+    filter is written once. `filter="data"` is the load-bearing argument: it
+    refuses absolute member paths, `..` components, links escaping the
+    destination, and device/setuid bits, which a plain `extractall` does not.
+    """
+    destination.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(archive) as tar:
+        tar.extractall(destination, filter="data")
 
 
 class _RangeIgnored(Exception):

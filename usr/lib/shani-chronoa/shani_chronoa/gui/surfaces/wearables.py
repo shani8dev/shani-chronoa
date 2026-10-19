@@ -267,42 +267,6 @@ def _watch_call(name: str, arguments: dict, note: Gtk.Label) -> None:
                    str(r).split(" (unverified")[0]))
 
 
-def _gatt_read(name: str, what: str, note: Gtk.Label) -> None:
-    """One stored value over GATT, through the same dispatcher the panel above
-    reads through."""
-    note.set_text(f"Reading the watch's {what}...")
-    _in_thread(
-        lambda: _tool("bluetooth_gatt",
-                      {"action": "read", "device": name,
-                       "characteristic": what}),
-        lambda r: note.set_text(str(r)))
-
-
-def _gatt_info(name: str, note: Gtk.Label) -> None:
-    """The four Device Information values, one row's worth of reading.
-
-    Asked as one thread because each is a `gatttool` round trip and four of them
-    in a row on the main thread is four stalls.
-    """
-    note.set_text("Reading the watch's details...")
-
-    def work() -> str:
-        return "\n".join(
-            _tool("bluetooth_gatt",
-                  {"action": "read", "device": name, "characteristic": what})
-            for what in ("manufacturer name", "firmware revision",
-                         "software revision", "battery level"))
-
-    _in_thread(work, lambda r: note.set_text(str(r)))
-
-
-def _find_device(name: str, note: Gtk.Label) -> None:
-    """The find signal, through `find_device` and the same dispatcher."""
-    note.set_text(f"Sending {name} the find signal...")
-    _in_thread(lambda: _tool("find_device", {"device": name}),
-               lambda r: note.set_text(str(r).split(" (unverified")[0]))
-
-
 def _moyoung_watches() -> List[Tuple[str, str]]:
     """Paired BLE devices that are **not phones**.
 

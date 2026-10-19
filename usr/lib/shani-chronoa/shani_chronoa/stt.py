@@ -14,7 +14,7 @@ import shutil
 import tempfile
 from typing import TYPE_CHECKING, Optional, Union
 
-from shani_chronoa import files
+from shani_chronoa import engines, files
 
 logger = logging.getLogger(__name__)
 
@@ -255,8 +255,11 @@ class WhisperSTT:
     def __init__(self, model: str = "base", whisper_path: Optional[str] = None, language: str = "en") -> None:
         self.model = model
         # Arch's whisper-cpp installs whisper-cli; "whisper.cpp" was never a
-        # binary name there, so speech input could not work on Shanios
-        self.whisper_path = whisper_path or shutil.which("whisper-cli") or shutil.which("whisper.cpp") \
+        # binary name there, so speech input could not work on Shanios.
+        # `engines.resolve` asks PATH first and then the copy setup downloaded,
+        # so a machine with no whisper-cpp package can still listen, and a
+        # machine that has the package is not changed by any of this.
+        self.whisper_path = whisper_path or engines.resolve("whisper-cli") or shutil.which("whisper.cpp") \
             or "/usr/bin/whisper-cli"
         self.model_path = self._get_model_path(model)
         self.language = language

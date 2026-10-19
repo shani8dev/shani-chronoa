@@ -45,10 +45,13 @@ def _stt() -> bool:
     ~/.config/glib-2.0/settings: a page that only asks "is it installed?" wrote
     to the home directory (caught by the Voice page's writes-nothing test).
     """
-    import shutil
-    from shani_chronoa import stt_provision
+    from shani_chronoa import engines, stt_provision
     whisper = any(stt_provision.is_provisioned(key) for key in stt_provision.MODELS)
-    has_cli = bool(shutil.which("whisper-cli") or shutil.which("whisper-cpp"))
+    # `engines.has`, not `shutil.which`: the two spellings this used - one of
+    # which named `whisper-cpp`, a package rather than a program - could only
+    # see a system copy, so a machine that had just downloaded whisper.cpp into
+    # its own data directory was reported as having no speech program.
+    has_cli = engines.has("whisper-cli")
     return (whisper and has_cli) or bool(stt_provision.is_parakeet_provisioned())
 
 

@@ -33,9 +33,8 @@ here runs on a thread and hands its result back with `GLib.idle_add`.
 from __future__ import annotations
 
 import logging
-import threading
 from dataclasses import dataclass
-from typing import Any, Callable, List, Optional
+from typing import Any, List, Optional
 
 import gi
 
@@ -149,19 +148,6 @@ class State:
         if not self.why or self.why in generic:
             return generic or self.why or self.headline
         return f"{generic}\n\nThis time: {self.why}" if generic else self.why
-
-
-def _in_thread(work: "Callable[[], Any]", done: "Callable[[Any], None]") -> None:
-    """Run `work` off the main thread and hand its result, or the exception, to
-    `done`."""
-    def run() -> None:
-        try:
-            result = work()
-        except Exception as exc:  # noqa: BLE001 - shown on the row, not raised
-            logger.warning("android surface: %s", exc, exc_info=True)
-            result = exc
-        GLib.idle_add(lambda: (done(result), False)[1])
-    threading.Thread(target=run, daemon=True).start()
 
 
 def _tool(name: str, arguments: dict) -> str:

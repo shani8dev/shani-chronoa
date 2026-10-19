@@ -8,9 +8,11 @@ nothing fetched until the person presses the button - which is also how the
 (detect what is already there, offer the rest, download resumably), built on
 Chronoa's own verified downloads:
 
-- **Brain** - `local_llm`: llama.cpp's `llama-server` (a package dependency)
-  plus one pinned GGUF model chosen by RAM, and by GPU when `ggml-vulkan` sees
-  one. Ollama, if present, is used instead and nothing is downloaded.
+- **Brain** - `local_llm`: llama.cpp's `llama-server` - fetched by `engines` when
+  this machine has none, so it is a download here rather than a package
+  dependency - plus one pinned GGUF model chosen by RAM, and by GPU when
+  `ggml-vulkan` sees one. Ollama, if present, is used instead and nothing is
+  downloaded.
 - **Ears** - `stt_provision`: a pinned whisper.cpp model for `whisper-cli`.
 - **Voice** - `voices`: Piper's release build and a pinned female voice, with
   a "Listen" button so the choice is heard, not read; and, the same way, the
@@ -91,7 +93,7 @@ def _cloud_ready(config) -> dict:
 
 def state(config=None) -> dict:
     """What this computer has now, for each of the three - read fresh every time."""
-    from shani_chronoa import local_llm, stt_provision, voices
+    from shani_chronoa import engines, local_llm, stt_provision, voices
     from shani_chronoa.config import ChronoaConfig
     from shani_chronoa.ollama_llm import OllamaLLM
     config = config or ChronoaConfig()
@@ -100,7 +102,14 @@ def state(config=None) -> dict:
         ollama = OllamaLLM(host=config.ollama_host, model=config.model or "x").is_available()
     except Exception:  # noqa: BLE001 - "is it there" must never crash setup
         ollama = False
-    whisper = bool(shutil.which("whisper-cli") or shutil.which("whisper.cpp"))
+    # `whisper.cpp` was a program named two ways here, and neither spelling
+    # matched anything: `whisper.cpp` is not a program (`stt.py` names the
+    # package `whisper-cpp`, whose binary is `whisper-cli`, and
+    # `model_status.py` had a third spelling). `engines.has` is the one answer,
+    # and it also sees a copy downloaded into this user's own directory - which
+    # the `which()` pair could not, so setup reported no speech program on a
+    # machine that had just fetched one.
+    whisper = engines.has("whisper-cli")
     stt_model = any(stt_provision.is_provisioned(k) for k in stt_provision.MODELS)
     voice = config.piper_voice
     from shani_chronoa import imagegen, languages, local_embed, local_vision
@@ -211,13 +220,15 @@ def setup_brain(key: str, report=None, cancel: Optional[threading.Event] = None,
                 wait_seconds: float = 120.0, transport=None) -> str:
     """Download the model, start the service, wait until it answers. Returns a sentence for the window."""
     import time
-    from shani_chronoa import local_llm
+    from shani_chronoa import engines, local_llm
     from shani_chronoa.config import ChronoaConfig
     config = config or ChronoaConfig()
     cancel = cancel or threading.Event()
-    if not local_llm.server_binary():
-        return ("llama.cpp is not installed, so there is no local model to start. It comes with the next "
-                "ShaniOS update; until then you can use Ollama, or the free online models in Settings.")
+    try:
+        engines.ensure("llama-server", progress=_progress(report, cancel, "llama.cpp"),
+                       config=config, transport=transport, gpu=bool(local_llm.gpu_devices()))
+    except engines.EngineMissing as why:
+        return (f"{why} Until then you can use Ollama, or the free online models in Settings.")
     spec = local_llm.SPECS[key]
     local_llm.provision(key, progress=_progress(report, cancel, spec.filename), config=config, transport=transport)
     if report:
@@ -237,13 +248,15 @@ def setup_brain(key: str, report=None, cancel: Optional[threading.Event] = None,
 
 
 def setup_ears(key: str, report=None, cancel: Optional[threading.Event] = None, config=None, transport=None) -> str:
-    from shani_chronoa import stt_provision
+    from shani_chronoa import engines, stt_provision
     from shani_chronoa.config import ChronoaConfig
     config = config or ChronoaConfig()
     cancel = cancel or threading.Event()
-    if not (shutil.which("whisper-cli") or shutil.which("whisper.cpp")):
-        return ("Speech recognition (whisper.cpp) is not installed. It comes with the next ShaniOS update; "
-                "typing works in the meantime.")
+    try:
+        engines.ensure("whisper-cli", progress=_progress(report, cancel, "whisper.cpp"),
+                       config=config, transport=transport)
+    except engines.EngineMissing as why:
+        return f"{why} Typing works in the meantime."
     spec = stt_provision.MODELS[key]
     stt_provision.provision(key, config=config, progress=_progress(report, cancel, spec.filename), transport=transport)
     config.set("whisper-model", key.split("-")[0])
@@ -285,12 +298,15 @@ def _start_and_wait(instance: str, path: str, cancel: threading.Event, wait_seco
 
 def setup_eyes(key: str, report=None, cancel: Optional[threading.Event] = None, config=None,
                wait_seconds: float = 60.0, transport=None) -> str:
-    from shani_chronoa import local_llm, local_vision
+    from shani_chronoa import engines, local_llm, local_vision
     from shani_chronoa.config import ChronoaConfig
     config = config or ChronoaConfig()
     cancel = cancel or threading.Event()
-    if not local_llm.server_binary():
-        return "llama.cpp is not installed, so there is no vision model to run."
+    try:
+        engines.ensure("llama-server", progress=_progress(report, cancel, "llama.cpp"),
+                       config=config, transport=transport, gpu=bool(local_llm.gpu_devices()))
+    except engines.EngineMissing as why:
+        return f"{why} So there is no vision model to run."
     m = local_vision.MODELS[key]
     local_vision.provision(key, progress=_progress(report, cancel, m.model.filename), config=config,
                            transport=transport)
@@ -322,12 +338,15 @@ def setup_imagine(report=None, cancel: Optional[threading.Event] = None, config=
 
 def setup_memory(report=None, cancel: Optional[threading.Event] = None, config=None,
                  wait_seconds: float = 30.0, transport=None) -> str:
-    from shani_chronoa import local_embed, local_llm
+    from shani_chronoa import engines, local_embed, local_llm
     from shani_chronoa.config import ChronoaConfig
     config = config or ChronoaConfig()
     cancel = cancel or threading.Event()
-    if not local_llm.server_binary():
-        return "llama.cpp is not installed, so there is no memory model to run."
+    try:
+        engines.ensure("llama-server", progress=_progress(report, cancel, "llama.cpp"),
+                       config=config, transport=transport, gpu=bool(local_llm.gpu_devices()))
+    except engines.EngineMissing as why:
+        return f"{why} So there is no memory model to run."
     local_embed.provision(progress=_progress(report, cancel, local_embed.MODEL.filename), config=config,
                           transport=transport)
     problem = _start_and_wait(local_embed.INSTANCE, "/health", cancel, wait_seconds)
@@ -631,7 +650,7 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
     gi.require_version("Adw", "1")
     from gi.repository import Adw, GLib, Gtk
 
-    from shani_chronoa import local_llm, sherpa, stt_provision, voices
+    from shani_chronoa import engines, local_llm, sherpa, stt_provision, voices
     from shani_chronoa.config import ChronoaConfig
     config = config or ChronoaConfig()
 
@@ -1182,6 +1201,33 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
 
     def unchoose(item_id: str) -> None:
         plan.pop(item_id, None)
+
+    _engine_counted: Dict[str, float] = {}
+
+    def with_engine(program: str, size_bytes: float) -> float:
+        """`size_bytes` plus whatever this plan has not yet counted for `program`.
+
+        **One program, one charge, for the whole plan.** The Brain, Eyes and
+        Memory rows all run `llama-server`, and each of them would otherwise add
+        the same 18 MB release to a total the person is being asked to agree to -
+        three charges for one file, which is a question about bytes that is
+        simply wrong rather than merely pessimistic.
+
+        The tally is keyed by program rather than by row, which is also what
+        makes it correct when a choice is *changed* rather than added: switching
+        the brain's radio re-records that row, and the second call charges
+        nothing. Dropping the brain while keeping Eyes leaves the charge in
+        place, because that program is still going to be fetched for them.
+
+        A program this tree has no release for contributes **0** rather than a
+        guess at a size - `engines.ensure` will refuse it with a sentence naming
+        the package manager, so a number here would be pricing a download nobody
+        is ever offered.
+        """
+        already = _engine_counted.get(program, 0.0)
+        extra = max(0.0, float(engines.pending_bytes(program)) - already)
+        _engine_counted[program] = already + extra
+        return float(size_bytes) + extra
 
     def plan_total() -> float:
         return sum(float(i["size"]) for i in plan.values())
@@ -2136,7 +2182,7 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
             # moves.
             _spec = local_llm.SPECS[chosen()]
             choose("brain", f"Language model - {local_llm.SPECS[chosen()].key}",
-                   _spec.size_bytes,
+                   with_engine("llama-server", _spec.size_bytes),
                    lambda report: setup_brain(chosen(), report, win.cancel, config),
                    None)
             _download_buttons.clear()
@@ -2226,7 +2272,8 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
     else:
         box.append(group)
         _espec = stt_provision.MODELS[chosen_stt()]
-        choose("ears", f"Listening - whisper.cpp {chosen_stt()}", _espec.size_bytes,
+        choose("ears", f"Listening - whisper.cpp {chosen_stt()}",
+               with_engine("whisper-cli", _espec.size_bytes),
                lambda report: setup_ears(chosen_stt(), report, win.cancel, config),
                _espec.note)
         _download_buttons.clear()
@@ -2437,7 +2484,8 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
                "already downloaded")
     else:
         _record_when_shown(body_page, "eyes", f"Eyes - {chosen_eyes()}",
-                           local_vision.MODELS[chosen_eyes()].size_bytes,
+                           with_engine("llama-server",
+                                       local_vision.MODELS[chosen_eyes()].size_bytes),
                            lambda report: setup_eyes(chosen_eyes(), report,
                                                      win.cancel, config),
                            "describes the screen")
@@ -2465,7 +2513,7 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         f"({local_embed.MODEL.size_bytes / 1e6:.0f} MB).",
         "photos")
     _record_when_shown(body_page, "memory", "Memory - search by meaning",
-                       local_embed.MODEL.size_bytes,
+                       with_engine("llama-server", local_embed.MODEL.size_bytes),
                        lambda report: setup_memory(report, win.cancel, config),
                        "by meaning, not by words")
 

@@ -64,7 +64,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk  # noqa: E402
 
-from shani_chronoa import egress, markdown_lite  # noqa: E402
+from shani_chronoa import egress  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -338,26 +338,6 @@ def _tooltip(percept: Any, now: float, durable_path: str) -> str:
     return "\n".join(lines)
 
 
-def _as_title(text: str) -> str:
-    """A fact's text, made safe for the row it becomes.
-
-    `Adw.PreferencesRow.use-markup` defaults to **True** (measured on
-    libadwaita 1.5), so an `Adw.ActionRow` parses both its title and its
-    subtitle as Pango markup: unescaped, a fact reading `A & B < C` is markup,
-    not text. `common.row()` escapes both fields, so this is only for the call
-    sites that bypass it - **the sentence this docstring used to carry said
-    `common.row()` does not escape, and it was true when written.** It is the
-    reason the row call sites escaped twice and a fact rendered as
-    `teapot &amp;amp;`: five call sites kept reading a docstring that a change
-    to the helper had made false.
-
-    The plain-GTK answer in `common.row()` is a `Gtk.Label(label=...)`, which
-    takes no markup and would print the entities themselves, so the escaping
-    follows whichever branch built the row. Both render the same characters.
-    """
-    return markdown_lite.escape(text) if common.adw_ready() else text
-
-
 # ---------------------------------------------------------------------------
 # Rows
 # ---------------------------------------------------------------------------
@@ -406,8 +386,8 @@ def _forget_button(percept: Any, on_forget: Any) -> Gtk.Button:
 def _fact_row(percept: Any, now: float, durable_path: str, on_forget: Any) -> Gtk.Widget:
     """One fact: its text, how old it is, and a way to be rid of it."""
     content = str(getattr(percept, "content", "") or "")
-    # **Neither title nor subtitle is `_as_title()`ed.** `common.row()` escapes
-    # both fields now, and the surface's own hand-rolled escape on the same
+    # **Neither title nor subtitle is escaped here.** `common.row()` escapes
+    # both fields, and the surface's own hand-rolled escape on the same
     # condition was escaping a second time - measured, a fact reading
     # `teapot & <b>blue</b>` rendered as `teapot &amp;amp; &amp;lt;b&amp;gt;`,
     # the entity shown to the person.

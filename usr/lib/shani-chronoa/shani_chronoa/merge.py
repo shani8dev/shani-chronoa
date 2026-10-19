@@ -46,11 +46,12 @@ from __future__ import annotations
 import logging
 import os
 import re
-import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 from typing import Dict, Optional, Sequence, Tuple
+
+from shani_chronoa import engines
 
 logger = logging.getLogger(__name__)
 
@@ -564,7 +565,7 @@ def quantize(source: Path, target: Path, quant: str = "Q4_K_M") -> Optional[Path
     blended quant would be a second one, which is what
     `--allow-requantize` warns "can severely reduce quality".
     """
-    binary = shutil.which("llama-quantize")
+    binary = engines.resolve("llama-quantize")
     if not binary:
         logger.warning("merge: llama-quantize is not installed; leaving %s f16",
                        source.name)
@@ -627,7 +628,7 @@ def perplexity(path: Path, corpus: Optional[Path] = None) -> Optional[float]:
     if path is None or not Path(path).is_file():
         logger.warning("merge: no model file to measure (%s)", path)
         return None
-    binary = shutil.which("llama-perplexity")
+    binary = engines.resolve("llama-perplexity")
     if not binary:
         return None
     args = [binary, "-m", str(path)]

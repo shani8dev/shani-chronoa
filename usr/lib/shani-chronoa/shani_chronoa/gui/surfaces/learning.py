@@ -71,14 +71,6 @@ ROW_TITLES = (
 )
 
 
-def _app_config(app: Any):
-    config = getattr(app, "config", None)
-    if config is None:
-        from shani_chronoa.config import ChronoaConfig
-        config = ChronoaConfig()
-    return config
-
-
 def _add_row(group, title: str, subtitle: str, suffix=None) -> None:
     """Put a row into a group built by `common.group()`.
 

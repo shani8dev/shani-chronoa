@@ -12,11 +12,12 @@ from __future__ import annotations
 
 import atexit
 import logging
-import shutil
 import subprocess
 import threading
 import time
 from typing import Optional
+
+from shani_chronoa import engines
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ STARTUP_SECONDS = 30.0
 
 
 def binary() -> str:
-    return shutil.which("whisper-server") or ""
+    return engines.resolve("whisper-server")
 
 
 def _up(timeout: float = 1.0) -> bool:

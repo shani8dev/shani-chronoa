@@ -17,12 +17,11 @@ matches a download of it (2026-10-02).
 from __future__ import annotations
 
 import os
-import tarfile
 from pathlib import Path
 from typing import Callable, Optional
 
 from shani_chronoa import files
-from shani_chronoa.stt_provision import ModelSpec, _install
+from shani_chronoa.stt_provision import ModelSpec, _install, unpack_tar
 
 VERSION = "v1.13.8"
 RELEASE = ModelSpec("sherpa-onnx", f"sherpa-onnx-{VERSION}-linux-x64-shared.tar.bz2", 28_156_791,
@@ -42,12 +41,6 @@ def binary(name: str) -> str:
     return str(path) if os.access(path, os.X_OK) else ""
 
 
-def unpack(archive: Path, destination: Path) -> None:
-    with tarfile.open(archive) as tar:
-        # data filter: no absolute paths, no "..", no devices or setuid bits
-        tar.extractall(destination, filter="data")
-
-
 def install(progress: Optional[Callable[[int, int], None]] = None, config=None, transport=None,
             label: str = "sherpa-onnx") -> str:
     """Fetch, verify and unpack the release (once); returns the install directory."""
@@ -56,7 +49,7 @@ def install(progress: Optional[Callable[[int, int], None]] = None, config=None, 
     archive = _install(RELEASE, user_dir=install_dir(), system_dir=Path("/usr/share/sherpa-onnx"), existing=None,
                        config=config, progress=progress, transport=transport, label=label)
     try:
-        unpack(archive, install_dir())
+        unpack_tar(archive, install_dir())
     finally:
         archive.unlink(missing_ok=True)
     if not binary("sherpa-onnx-offline-tts"):
@@ -72,7 +65,7 @@ def install_archive(spec: ModelSpec, directory: Path, expect: Path, progress=Non
     archive = _install(spec, user_dir=directory, system_dir=Path("/usr/share/sherpa-onnx"), existing=None,
                        config=config, progress=progress, transport=transport, label=label)
     try:
-        unpack(archive, directory)
+        unpack_tar(archive, directory)
     finally:
         archive.unlink(missing_ok=True)
     if not expect.exists():
