@@ -27786,3 +27786,69 @@ compatibility promise nobody can rely on is worse than no promise.
 is checkable** - and checking it took one `git log`. The sentence is
 corrected, and the `__all__` it sat next to is fine: all 36 of its names
 are exported from the module and a star-import brings every one.
+
+## The reference recording had a hole, and the harness had two of its own (2026-10-20)
+
+### The recording that was too big
+
+`voice_clone.clip_problem(path)` measures whether a *reference clip* is usable -
+there, empty, far too big - and its own docstring says it "is what the voice
+surface and `speak`'s own refusal print". **Neither asked it**: both asked
+`clone_problem()`, which answers a different question - whether the *engine*
+can run on this machine at all.
+
+The case the engine's answer cannot cover was covered by nobody. **Too big.**
+A recording of an hour is a hundred megabytes, its digest still matches the
+registration, so `check()` allows it - and the gate opened on a file the
+synthesis would choke on, with a refusal that named the engine instead of the
+recording. An empty refusal is what the cascade reads as *nothing is in the
+way*.
+
+The other two cases - the recording is gone, or it has been replaced - were
+already covered, by `check()`'s digest, which refuses them first and says
+which of the two happened. **So this is not a duplicate refusal: it is the one
+refusal `check()` cannot make**, and the order is the point - the file is the
+one a person can do something about, and the runtime is the one they cannot,
+on this machine.
+
+`voice_clone.clip_of(voice)` is the new way to ask which recording a voice was
+built from, and it returns the **path**: handing `clip_problem` a name would
+be a file that is not there, which is the very failure the measurement exists
+to catch. The voice surface's row now says what is wrong with the file as
+well as naming it - a recording that had been deleted read like an agreement
+that was fine.
+
+`tests/test_the_voice_recording_is_checked.py` (4) and
+`tools/mutations/voice_clip.py` (**3 mutations, 3 caught, 0 survivors**).
+
+### And the mutation set for the organ tone
+
+`tools/mutations/organ_tone.py` (**5 mutations, 5 caught, 0 survivors**) - the
+first restores the shipped defect verbatim. **The witness for the call site is
+a source check**, because a method nothing calls is a method: the window can
+hold a perfect installer and still ship a switch that does nothing, and only
+the call site can tell that apart from the method being wrong.
+
+### Two defects in the per-file runner, both of which hide results
+
+`tools/run_tests_per_file.sh` reads each file's verdict with `tail -1`. **That
+is not the summary line.** pytest prints its garbage-collection warnings
+*after* the counts, so `tail -1` reads a warning - and a file whose verdict
+cannot be read is neither in the failure list nor in the pass list, which is
+the absence presented as a pass. The verdict is now read from the counts
+line, with the same selector `tools/mutate.py` reads its own with, and a run
+that produced **no** summary says `NO SUMMARY (rc=...)` rather than nothing.
+
+**And the runner's own state directory was being deleted by the suite while it
+was running.** `tests/conftest.py`'s session fixture removes every `/tmp`
+directory whose name begins with one of `_OWNED_TMP_PREFIXES` - and
+**`chronoa-` is the first of them**. The runner's state was
+`/tmp/chronoa-per-file-state.*`, so the suite removed it under the runner,
+which is the same incident the fixture's own comment records for the live
+compiled schema: *the reclaimer is allowed to remove what the suite made, and
+what the suite is still using is not that*. The name is now
+`/tmp/per-file-state.*`, and the output is captured in a variable rather than
+a file - a verdict that can be deleted mid-run is not a verdict.
+
+**The same shape as the `wpctl`-three-copies failure, one level up**: two
+components that both had a name for a thing, and the collision was silent.

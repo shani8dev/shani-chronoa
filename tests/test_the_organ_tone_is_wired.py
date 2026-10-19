@@ -23,11 +23,15 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 
 import pytest
 
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(_REPO, "usr", "lib", "shani-chronoa"))
+sys.path.insert(0, os.path.join(_REPO, "tests"))
+
+from _source import package_source  # noqa: E402
 
 gi = pytest.importorskip("gi")
 gi.require_version("Gtk", "4.0")
@@ -117,6 +121,72 @@ class TestTheBodyAsks:
         finally:
             body_mod.body.done(activity)
             body_mod.body.set_audible(None)
+
+
+class TestTheWindowGivesTheBodyAVoice:
+    """The hook is installed by the window, beside the notice hook.
+
+    **The body cannot speak for itself.** `set_audible` is the sound half of
+    `set_notice`, and the notice half is wired: the window installs it at
+    `gui/window.py`, and a refusal in the middle of the tool loop reaches the
+    person because of it. The sound half had the same shape and no
+    installer, which is why the switch did nothing.
+
+    The installer is asked of the *window's own method*, driven here, and the
+    call site is asked of the source - because a test that drives the method
+    without also asking whether anything calls it proves the method works,
+    not that it happens.
+    """
+
+    class _Strip:
+        def __init__(self):
+            self.played = []
+
+        def play(self, organ):
+            self.played.append(organ)
+
+    def test_the_window_asks_the_strip_to_play(self):
+        from shani_chronoa import body as body_mod
+        from shani_chronoa.gui.window import ChronoaWindow
+
+        class _Window:
+            # **The real methods**, borrowed rather than reimplemented: a copy
+            # would pass while the window's own code did something else.
+            _install_body_sounds = ChronoaWindow._install_body_sounds
+            _play_organ_tone = ChronoaWindow._play_organ_tone
+
+        window = _Window()
+        window._organ_strip = self._Strip()
+        window._install_body_sounds()
+        try:
+            activity = body_mod.body.use("ears", "listening", "")
+            # **The tone is played on a thread**, so the test waits for it
+            # rather than assuming it has already happened.
+            deadline = time.monotonic() + 5.0
+            while (not window._organ_strip.played
+                   and time.monotonic() < deadline):
+                time.sleep(0.01)
+            assert window._organ_strip.played == ["ears"], (
+                f"the window's hook did not play the tone: "
+                f"{window._organ_strip.played}")
+        finally:
+            body_mod.body.set_audible(None)
+            body_mod.body.done(activity)
+
+    def test_the_window_actually_calls_the_installer(self):
+        """**The call site**, because a method nothing calls is a method.
+
+        Asked of the shape rather than of a literal: the window's own source
+        must call the installer, and the installer must be the one the window
+        owns.
+        """
+        source = package_source("gui.window")
+        assert "self._install_body_sounds()" in source, (
+            "the window builds the hook and never installs it, so the switch "
+            "does nothing however well the method works")
+        assert "def _install_body_sounds" in source, (
+            "the window's own installer is gone; the method the call site "
+            "names is not the window's")
 
 
 class TestTheStripHonoursTheSwitch:

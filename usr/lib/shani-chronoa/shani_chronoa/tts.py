@@ -245,9 +245,17 @@ class PiperTTS:
         """Why a cloned voice would not speak here, or "" when it would.
 
         Asked first inside `_engine()` only because `cloned_voice` has to be set
-        for the question to arise at all. Four refusals, all named rather than
+        for the question to arise at all. Five refusals, all named rather than
         collapsed, because they have different remedies: no voice chosen, the
-        capability switch, the consent record, and whether the runtime exists.
+        capability switch, the consent record, whether the *recording* is
+        usable, and whether the runtime exists.
+
+        **The recording is asked before the runtime**, and that order is the
+        point: the file is the one a person can do something about, and the
+        runtime is the one they cannot, on this machine. `check()`'s digest
+        already refuses a recording that is gone or has been replaced - this
+        is the case it cannot make, which is a recording that is far too big
+        to hash and use.
 
         **The switch is asked before the runtime**, in the same order and for
         the same reason as `_kokoro_reason`: somebody who never turned cloning
