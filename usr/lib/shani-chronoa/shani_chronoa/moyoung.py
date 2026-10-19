@@ -80,6 +80,45 @@ class WatchError(Exception):
 
 # --- framing ---------------------------------------------------------------------
 
+#: How a refused bluez `Connect` is retried. bluez answers a watch that is still
+#: bringing its LE link up with "Operation already in progress", and a watch
+#: bluez has not finished registering with "UnknownObject" - **both transient,
+#: both arriving within a second or two of the call, and both previously ending
+#: the whole watch skill on the first attempt.** Four attempts at 0.4 s doubling
+#: is ~2.8 s of waiting in the worst case, which is inside the 25 s budget this
+#: class already spends polling, so a retry cannot make a real failure feel like
+#: a hang. Bounded on purpose: an unbounded retry against a watch that is genuinely
+#: gone is a hang wearing a retry's clothes.
+CONNECT_ATTEMPTS = 4
+CONNECT_BACKOFF = 0.4
+CONNECT_BACKOFF_CAP = 4.0
+
+
+def _retry(do, attempts: int, backoff: float, wait):
+    """Call `do()` until it succeeds or `attempts` are spent. Raise the last error.
+
+    **A separate function, and `wait` a parameter**, for the reason
+    `speech_gate.wait` takes a clock: the thing worth proving is *that the delay
+    grows and that the loop stops*, and a test that has to sleep 2.8 real seconds
+    to watch it do so is a slow test rather than a clear one. `wait` is the
+    class's own `_pump`, which drains the pushed main context - a bare
+    `time.sleep` would block the very replies bluez is about to send.
+    """
+    delay = backoff
+    last: Optional[BaseException] = None
+    for attempt in range(max(1, attempts)):
+        try:
+            return do()
+        except Exception as exc:  # noqa: BLE001 - bluez's error types move between versions
+            last = exc
+            if attempt + 1 >= attempts:
+                break
+            wait(min(delay, CONNECT_BACKOFF_CAP))
+            delay *= 2
+    assert last is not None          # attempts >= 1, so the loop ran and failed
+    raise last
+
+
 def frame(command: int, payload: bytes = b"") -> bytes:
     """Gadgetbridge's `MoyoungPacketOut.buildPacket(mtu=20, ...)`."""
     total = len(payload) + 5
@@ -526,10 +565,22 @@ class BluezWatch(Watch):
                 Gio.DBusSignalFlags.NONE, self._on_props))
             self._ensure_known()
             if not self._prop(self.device, self._DEV, "Connected"):
+                # **Retried, because the first refusal is usually not the final
+                # one.** bluez says "Operation already in progress" while a watch
+                # finishes coming up, and "UnknownObject" while it is still
+                # registering - and both used to end the whole skill here, on the
+                # first attempt, with a watch that was sitting on the desk
+                # advertising. `self._pump` is the sleeper rather than
+                # `time.sleep` because it drains the pushed main context, so the
+                # `PropertiesChanged` that says "connected" can actually land.
                 try:
-                    self._call(self.device, self._DEV, "Connect", timeout=self.timeout)
+                    _retry(lambda: self._call(self.device, self._DEV, "Connect",
+                                              timeout=self.timeout),
+                           CONNECT_ATTEMPTS, CONNECT_BACKOFF, self._pump)
                 except Exception as exc:  # noqa: BLE001 - said below with the reason
-                    raise WatchError(f"bluez could not connect to the watch ({str(exc)[-120:]})") from exc
+                    raise WatchError(
+                        f"bluez could not connect to the watch after "
+                        f"{CONNECT_ATTEMPTS} tries ({str(exc)[-120:]})") from exc
             end = time.monotonic() + self.timeout
             while not self._prop(self.device, self._DEV, "ServicesResolved"):
                 if time.monotonic() > end or not self._prop(self.device, self._DEV, "Connected"):
