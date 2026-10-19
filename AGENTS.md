@@ -1479,10 +1479,12 @@ biased toward the phrase, matched at the start; openWakeWord was dropped
 (`AudioRecorder.start_auto_stop`, `vad.py`) rather than requiring a second
 button press - pressing the orb again while listening just ends the turn
 early (`cancel_auto_stop`). Barge-in has two layers: talking again always
-interrupts TTS mid-reply (`AudioPlayer.stop()`, unconditional), plus an
-opt-in continuous-VAD layer (`BargeInMonitor`, gated behind
-`barge-in-vad-enabled`, off by default - no acoustic echo cancellation, so
-it can self-interrupt on speaker output without headphones).
+interrupts TTS mid-reply (`AudioPlayer.stop()`, unconditional), plus a
+continuous-VAD layer (`BargeInMonitor`, gated behind
+`barge-in-vad-enabled`, **on by default since 2026-10-19** - there is no
+acoustic echo cancellation, so on speakers (not headphones) the mic may pick
+up Chronoa's own voice and self-interrupt, which is what the switch is there
+to turn off).
 `tools.py` + `assistant.py` are what make it an actual task-doing assistant
 rather than a chatbot: a fixed whitelist of local system actions (open an
 app, volume, mute, datetime, timers, battery status, web search) wired
@@ -6223,7 +6225,8 @@ as an open item rather than a fix.
   reason. Fixed the same way, mutation-verified.
 - **`test_skills.py::test_execute_tool_non_dict_arguments_are_ignored` picked its
   handler by insertion order**, and the first candidate is `airplane_mode` —
-  which is consent-gated (`radio-control-enabled`, off by default). So the test
+  which is consent-gated (`radio-control-enabled`; off by default at the time,
+  and on by default now). So the test
   passed or failed depending on whether an earlier test in the process had left
   that switch on: intermittent in a full run, never in isolation. It now picks
   the first **sorted**, **ungated**, non-read-only handler with no required
@@ -27418,3 +27421,109 @@ right to be rude. The trap is what to do with the waiting: **the runner is
 never safe to SIGKILL** - it kills its children with `killpg`, but killing the
 runner itself skips its `finally` restore and can leave a mutated source file
 in the tree. Wait for it and run the suites after; that is the whole move.
+
+## A microphone's mute state is readable, and three modules said it was not (2026-10-19)
+
+Found by the sweep's re-measurement, and the root cause is **one belief stated in
+three places**, each of which produced a different wrong answer.
+
+### The belief, and what is actually true
+
+`set_mic_mute.py` said: *"wpctl has no `get-mute` ... so mute can be set but not
+read back through it."* The first half is true. The conclusion is false, and
+`volume.py` had been contradicting it all along.
+
+**Measured**, by muting a live source on this box and reading both commands
+back (the source was unmuted again immediately afterwards, and the restoration
+was verified - `wpctl get-volume 61` printed `Volume: 1.00` again):
+
+| command | muted | unmuted |
+|---|---|---|
+| `wpctl status` | `│  61. ... Stereo Microphone [vol: 1.00 MUTED]` | `[vol: 1.00]` |
+| `wpctl get-volume 61` | `Volume: 1.00 [MUTED]` | `Volume: 1.00` |
+
+**The two commands use different markers.** `status` puts `MUTED` *inside* the
+volume bracket; `get-volume` puts `[MUTED]` *after* the level. And there is no
+`[muted: yes]` anywhere - the wpctl binary carries no such string, and its only
+bracketed annotation is ` [vol: %.2f%s`.
+
+### Three readers, three wrong answers
+
+- **`senses/audio.py` and `skills/privacy.py`** parsed `wpctl status` for
+  **`[muted: yes]`** - a string wpctl does not write, so the parse could only
+  ever have matched a device's own description, and it never fired. The audio
+  sense's count of muted devices was therefore **always zero**, whatever was
+  actually muted, while its own schema description promised *"each with its
+  volume, whether it is muted, and which is the default"*.
+- **`set_mic_mute.py`** ran `wpctl get-volume` and then returned `None` on every
+  path - it read the answer and threw it away, so *"is the microphone muted"*
+  was always UNKNOWN.
+- **`skills/privacy.py`'s post-condition** read a GSettings key,
+  `privacy-mic-muted`, that **nothing writes** and that is not in the schema.
+  The effect was never a setting: `_mute_mic` runs `wpctl set-mute`. So the
+  check could not tell its two cases apart - **muting was FAILED every time**
+  even when the microphone was muted, and **unmuting was VERIFIED every time**
+  without having checked anything. The second is the worse of the two: a
+  verified verdict is what the learning layer trains on.
+
+The two readers now live in `pipewire` - `status_muted` (the status line) and
+`mute_state` (get-volume) - so the three modules have one answer rather than
+three, and the two markers are each in one place.
+
+### A setting's default is stated twice, and the two places had drifted
+
+`get_bool(key, default)` reads the **schema** whenever the key is declared in
+it; the `default` is only reached on an install whose schema predates the key -
+and `ChronoaConfig._new_settings` builds an explicit keyfile backend, so that
+is not a hypothetical machine.
+
+`324e597` (privacy mode off by default) moved `privacy-mode`'s Python fallback
+with the schema and **missed a second reader of the same key** in
+`gui/surfaces/senses.py`, which still fell back to `True` - so the Senses
+panel's footer said *"Privacy mode is on, so a sense that reaches outside this
+machine stays refused"* on a machine whose privacy mode was off. The same
+commit swept **ten keys** in the schema to `true` and left the code's fallbacks
+at `False` (17 sites), and swept **three sense defaults** back on, undoing a
+measured decision (`ef3e952`) that `containers`/`listeners`/`stale` report
+*process identity* - owner process names and PIDs, per-PID executable paths,
+container names and images - which is why `git` was already off for that class
+of reason. `setup_wizard.py` was reading `cloud-fallback-enabled` with a
+`False` fallback while `config.py` read the same key with `True`, so a fresh
+install chose the cloud mode and an older one chose local.
+
+### **And the scan that found the first two missed the third**
+
+The first pass collected a **set of fallbacks per key** and reported a
+disagreement only when the schema's value was absent from the whole set. A key
+read in two places with two different fallbacks therefore **hid** its wrong
+one, because the set also held the right one - and `cloud-fallback-enabled`
+was read with `True` in `config.py` and `False` in `setup_wizard.py` exactly
+that way. `tests/test_schema_and_code_defaults_agree.py` is **per-site**, and
+one of its mutations is aimed at that hole: a *set*-based check was written
+first, the mutation was applied to it, and the suite did not move. The same
+hole was in the **first scan** - it is why the wizard's site was missed, and
+it is the fourth time in this file that a scan's own shape hid the finding it
+was written for.
+
+### The third state, which this class of reader most often loses
+
+The integrated camera is the real case: `wpctl set-mute` on it answers *"Node
+79 does not support mute"*, `get-volume` answers *"does not support volume"*,
+and its status line carries no annotation at all. A node whose state was never
+reported is **unknown**, not unmuted - so `status_muted` answers `None` for it,
+and `mute_state` answers `None` for a command that exited 0 and printed
+nothing (the marker is absent from every unmuted node, so an empty output and
+an unmuted node are the same absence, and only one of them is a fact).
+
+### And a checker that could not answer was reported as a failed write
+
+`volume.py`'s post-condition returned `(False, "could not read <device> back")`
+when `wpctl get-volume` failed - and `verification.verify` maps a false
+callable verdict to **FAILED**. So a volume change that worked was reported as
+one that did not, whenever the *check* could not be made. `verification.py`'s
+own docstring draws exactly this line - *"reporting a read as a failed write is
+a confident wrong answer"* - and the **argv** form of the same contract was
+fixed earlier; the callable form here was not. The three modules that read a
+mute state back now all answer `None` (UNVERIFIED) when they cannot.
+
+
