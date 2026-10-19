@@ -1820,7 +1820,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._apply_css()
         self._apply_motion_preference()
 
-    def _home_board(self) -> "Optional[Gtk.Widget]":
+    def _home_board(self) -> "Gtk.Widget | None":
         """What an empty conversation shows under the suggestions.
 
         **Why (2026-10-15).** Measured on a 1100x760 window, the empty state
@@ -3452,7 +3452,17 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             self.present()
             return True
         if page_id == "quick-ask":
-            action = self.lookup_action("app.quick-ask")
+            # **Unprefixed, and measured.** `Gio.Application.lookup_action`
+            # strips nothing: on a registered `status` action, `lookup_action
+            # ("status")` returns it and `lookup_action("app.status")` returns
+            # `None`. Every other `lookup_action` in this package is unprefixed
+            # for the same reason - the prefixed spelling is `set_action_name`'s
+            # convention (the widget's, where GTK resolves against the window's
+            # action group) and `activate_action`'s mistake, not this one's. So
+            # `app.quick-ask` could never be found here, `show_page` returned
+            # False for it, and `--show-page=main:quick-ask` logged "refused"
+            # while the page was registered and resolvable.
+            action = self.lookup_action("quick-ask")
             if action is None:
                 return False
             action.activate(None)

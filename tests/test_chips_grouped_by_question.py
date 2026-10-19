@@ -177,7 +177,7 @@ def test_no_control_picks_a_model_except_the_answers_with_button(window):
     for widget in _descendants(window):
         if isinstance(widget, Gtk.MenuButton) and widget.get_menu_model() is not None:
             for rows in _sections(widget).values():
-                assert all(a != "app.answer-model" for _l, a, _t in rows), (
+                assert all(a != "answer-model" for _l, a, _t in rows), (
                     f"a menu on screen picks a model: {rows}")
 
 

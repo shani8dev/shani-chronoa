@@ -899,13 +899,57 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         self.config.set_cloud_model(provider_id, model)
 
         if self.current_llm_kind() != "cloud":
-            # Saved for next time, and said rather than assumed.
-            logger.info("answer-cloud-model: this machine is answering locally, "
-                        "so %s is saved as %s's choice for when the cloud "
-                        "answers", model, provider_id)
+            # **A chosen cloud model is a request to use the cloud.** Saving
+            # the choice and returning leaves "Answers with" unchanged, which
+            # reads as "nothing happened". So when privacy mode is off, turn on
+            # the cloud fallback and switch now; when privacy mode is on, the
+            # choice is saved and the user is told why it cannot be used yet.
+            if self.privacy.is_local_only:
+                logger.info("answer-cloud-model: this machine is answering "
+                            "locally and privacy mode is on, so %s is saved "
+                            "as %s's choice for when privacy mode is off",
+                            model, provider_id)
+                if self.window is not None:
+                    try:
+                        self.window.set_status(
+                            f"Saved {model} ({provider_id}) for cloud answers. "
+                            "Turn off privacy mode in Settings to use it.")
+                    except Exception:  # noqa: BLE001
+                        pass
+                self._refresh_strip()
+                return
+            # Privacy is off: enable cloud fallback if it is not already on,
+            # so the chosen model can actually answer.
+            if not self.config.cloud_fallback_enabled:
+                self.config.set("cloud-fallback-enabled", "true")
+            problem = self.select_llm("cloud")
+            if problem:
+                logger.warning("answer-cloud-model: could not switch to cloud: "
+                               "%s", problem)
+                if self.window is not None:
+                    try:
+                        self.window.set_status(
+                            f"Saved {model} ({provider_id}), but could not "
+                            f"switch: {problem}")
+                    except Exception:  # noqa: BLE001
+                        pass
+            else:
+                logger.info("answer-cloud-model: now answering with %s via %s",
+                            model, provider_id)
+                if self.window is not None:
+                    try:
+                        self.window.set_status(
+                            f"Now answering with {model} ({provider_id})")
+                    except Exception:  # noqa: BLE001
+                        pass
             self._refresh_strip()
             return
 
+        # **The already-cloud branch speaks too, and it is the branch the picker
+        # sends a person down.** A row that is already the choice is pressable so
+        # that pressing it answers "is this the one?" - which means this branch is
+        # reached on purpose, and it used to say nothing at all and leave the
+        # picker's own sentence as the only feedback.
         problem = self.select_llm("cloud")
         if problem:
             logger.warning("answer-cloud-model: %s is saved for %s but the "
@@ -914,6 +958,14 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         else:
             logger.info("answer-cloud-model: now answering with %s via %s",
                         model, provider_id)
+        if self.window is not None:
+            try:
+                self.window.set_status(
+                    f"{model} ({provider_id}) is saved, but the provider chain "
+                    f"did not switch: {problem}" if problem else
+                    f"Now answering with {model} ({provider_id})")
+            except Exception:  # noqa: BLE001
+                pass
         self._refresh_strip()
 
     def _refresh_strip(self) -> None:
@@ -1211,9 +1263,22 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
                                 who = info.get("name") or info.get("number") or "someone"
                                 GLib.idle_add(lambda: (self.mascot.notice("call", f"Call from {who}"), False)[1])
                         try:
+                            # **Imported here, and it has to be.** `landline` was
+                            # only bound in `do_shutdown` and in the startup path,
+                            # neither of which is in scope on the second activate -
+                            # so this line raised `NameError` on every activate of
+                            # a machine whose mascot was running, and the bare
+                            # `except` below swallowed it. The feature (the mascot
+                            # showing an incoming landline call) was therefore dead
+                            # on every machine and nothing said so, which is the
+                            # "a control wired to nothing" class with a Python
+                            # traceback instead of a missing handler.
+                            from shani_chronoa import landline
+
                             landline.listen(_landline_to_mascot)
                         except Exception:  # noqa: BLE001
-                            pass
+                            logger.debug("mascot: landline notifications "
+                                         "unavailable", exc_info=True)
                 except Exception:  # noqa: BLE001
                     logger.exception("mascot: could not start the companion")
             self.window.set_browser_available(browser_available())

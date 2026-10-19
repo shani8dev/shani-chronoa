@@ -497,7 +497,11 @@ class ModelPicker(Gtk.Popover):
         else:
             row.add_prefix(Gtk.Image.new_from_icon_name(_CLOUD))
         if model:
-            row.set_activatable(not chosen)
+            # **Activatable even when chosen.** A row that is already the
+            # choice still answers a press: it tells the person it is the one
+            # answering, which is the only feedback a greyed-out row cannot
+            # give. Selecting it again does no work - `_choose_cloud` notices.
+            row.set_activatable(True)
             row.connect("activated", lambda _r, p=provider_id, m=model:
                         self._choose_cloud(p, m))
         elif pending:
@@ -521,12 +525,22 @@ class ModelPicker(Gtk.Popover):
             logger.debug("model picker: nothing to hand the cloud choice to")
             return
         try:
-            action("app.answer-cloud-model",
+            action("answer-cloud-model",
                    GLib.Variant("(ss)", (provider_id, model)))
         except Exception:  # noqa: BLE001
             logger.warning("model picker: could not switch to %s on %s",
                            model, provider_id, exc_info=True)
             return
+        # **No status here, deliberately.** `answer-cloud-model` writes the
+        # status line itself in every outcome a person can reach, and three of
+        # those sentences are strictly better than anything this could say:
+        # "Now answering with X (P)", "Saved X (P) ... turn off privacy mode",
+        # and - the one this used to overwrite - "Saved X (P), but could not
+        # switch: <reason>". Writing a fourth sentence on top of them replaced
+        # a refusal with "Selected X for cloud answers", which claims a switch
+        # that did not happen. Two places answering one question is the failure
+        # this module's docstring is written against, and the action is the one
+        # that knows the outcome.
         self.popdown()
 
     @staticmethod
@@ -574,7 +588,7 @@ class ModelPicker(Gtk.Popover):
         try:
             from gi.repository import GLib
 
-            action("app.answer-model", GLib.Variant("s", key))
+            action("answer-model", GLib.Variant("s", key))
         except Exception:  # noqa: BLE001
             logger.warning("model picker: could not switch to %s", key,
                            exc_info=True)

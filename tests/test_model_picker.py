@@ -380,7 +380,7 @@ class TestTheChoice:
         monkeypatch.setattr(model_picker.ModelPicker, "popdown",
                             lambda self: seen.append("closed"), raising=False)
         picker._choose("qwen3-8b")
-        assert seen == [("app.answer-model", "qwen3-8b"), "closed"], seen
+        assert seen == [("answer-model", "qwen3-8b"), "closed"], seen
 
     def test_nothing_to_hand_the_choice_to_is_logged_not_raised(
             self, monkeypatch):
@@ -589,7 +589,7 @@ class TestAFreshMachineIsNotADeadEnd:
         machine["active"] = ""
         picker = self._picker(machine, monkeypatch)
         picker._choose("qwen3-8b")
-        assert ("app.answer-model",) == tuple(machine["actions"][0][:1]), machine["actions"]
+        assert ("answer-model",) == tuple(machine["actions"][0][:1]), machine["actions"]
 
     def test_the_answering_row_is_the_only_one_that_is_inert(self, machine, monkeypatch):
         """The active model is not a choice - pressing it would switch to itself."""
