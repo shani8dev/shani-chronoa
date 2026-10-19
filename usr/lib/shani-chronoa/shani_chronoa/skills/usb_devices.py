@@ -129,7 +129,6 @@ def _usb_devices_detail() -> list[str]:
 
 
 def _run(_arguments: dict) -> str:
-    import re
     lines = ["USB:"]
     config = ChronoaConfig()
     allowed, why = _consent(config)

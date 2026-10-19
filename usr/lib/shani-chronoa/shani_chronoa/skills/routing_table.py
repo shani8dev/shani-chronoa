@@ -59,7 +59,6 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from shani_chronoa import files
 from shani_chronoa.skills import Skill
 
 _PROC_ROUTE = Path("/proc/net/route")

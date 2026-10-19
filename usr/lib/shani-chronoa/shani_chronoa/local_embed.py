@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import logging
 import math
-import os
 from array import array
 from pathlib import Path
 from typing import Callable, List, Optional, Sequence

@@ -118,8 +118,8 @@ def _verify_stopwatch(arguments: dict, tool=None):
         return (False, f"asked to start, but the stopwatch reads "
                        f"running={running}")
     if action == "stop" and running:
-        return (False, f"asked to stop, but the stopwatch still reads "
-                       f"running=True")
+        return (False, "asked to stop, but the stopwatch still reads "
+                       "running=True")
     detail = f"running={running}"
     if elapsed is not None:
         detail += f", elapsed={elapsed}"

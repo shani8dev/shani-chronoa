@@ -57,7 +57,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import GLib, Gtk  # noqa: E402
+from gi.repository import Gtk  # noqa: E402
 
 from shani_chronoa.config import _SENSE_CONSENT_KEYS  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402

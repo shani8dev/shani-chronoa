@@ -45,8 +45,6 @@ from typing import List, Optional
 
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.senses import SENSITIVITY_PUBLIC, Sense
-from shani_chronoa.senses.context import Percept
-from shani_chronoa import sysfs
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +114,7 @@ def _resolvers(raw: Optional[str]) -> List[str]:
     for entry in entries:
         if not isinstance(entry, list) or len(entry) < 3:
             continue
-        _ifindex, family, octets = entry[0], entry[1], entry[2]
+        family, octets = entry[1], entry[2]
         if not isinstance(octets, list):
             continue
         if family == 2 and len(octets) == 4:

@@ -37,7 +37,7 @@ gets a clear message instead of an ImportError.
 from __future__ import annotations
 
 import logging
-from typing import Callable, Dict, List, NamedTuple, Optional, Tuple
+from typing import Callable, List, NamedTuple, Optional, Tuple
 
 from shani_chronoa import outcome_model as core
 

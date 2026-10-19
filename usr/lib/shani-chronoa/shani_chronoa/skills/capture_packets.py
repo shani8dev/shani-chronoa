@@ -42,7 +42,7 @@ import logging
 import re
 import shutil
 import subprocess
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill

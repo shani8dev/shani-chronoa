@@ -35,7 +35,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, Gio, Gtk  # noqa: E402
+from gi.repository import Gdk, Gtk  # noqa: E402
 
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 

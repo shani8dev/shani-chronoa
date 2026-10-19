@@ -128,7 +128,7 @@ def _head(path: Path, count: int = 64) -> Optional[bytes]:
     try:
         with Path(path).open("rb") as handle:
             return handle.read(count)
-    except OSError as exc:
+    except OSError:
         return None
 
 

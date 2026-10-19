@@ -12,7 +12,7 @@ import subprocess
 import os
 import shutil
 import tempfile
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, List, Optional, Union
 
 from shani_chronoa import engines, files
 

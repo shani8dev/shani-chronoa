@@ -80,7 +80,6 @@ def _missing_kde_tools() -> "list[str]":
     """
     import shutil
 
-    from shani_chronoa import files
 
     return [tool for tool in _KDE_TOOLS if shutil.which(tool) is None]
 

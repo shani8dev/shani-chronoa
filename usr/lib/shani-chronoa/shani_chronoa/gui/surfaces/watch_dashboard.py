@@ -17,7 +17,6 @@ watch worn and still for up to a minute.
 from __future__ import annotations
 
 import logging
-import math
 import threading
 from datetime import datetime
 from typing import Any, Callable, Optional
@@ -33,7 +32,7 @@ gi.require_version("Graphene", "1.0")
 # measured on the dev box, every chart came out blank with "Couldn't find
 # foreign struct converter for 'cairo.Context'". `Gsk.PathBuilder` (GTK 4.14+)
 # draws the same shapes with nothing extra, and the text is real labels.
-from gi.repository import Adw, Gdk, GLib, Graphene, Gsk, Gtk  # noqa: E402
+from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

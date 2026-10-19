@@ -1758,6 +1758,11 @@ def _factor_poly(expr, variable: str):
     coefficients = _polynomial_coefficients(expr, symbol)
     if coefficients is None or len(coefficients) < 3:
         return None
+    # `degree` is assigned and never read. pyflakes says so, and it is
+    # still here: it is the marker for the unfixed defect documented by
+    # tests/test_factor_poly_the_degree_is_dead.py - the loop below
+    # returns after the FIRST rational root. Delete it and that file's
+    # guard fires with "the defect this file names has moved".
     degree = len(coefficients) - 1
     constant = coefficients[0]
     if constant == 0:

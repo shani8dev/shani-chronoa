@@ -83,7 +83,7 @@ def _launch_outside(desktop_id: str) -> str:
     if not desktop_id:
         return ""
     try:
-        from shani_chronoa.windows import gnome, WindowError
+        from shani_chronoa.windows import gnome
         shell = gnome.launch_backend()
         if shell is not None:
             shell.launch_app(desktop_id)
@@ -141,7 +141,6 @@ def _wait_for_window(before, info, label: str) -> str:
 
 
 def _run(arguments: dict) -> str:
-    import time
     name = (arguments.get("name") or "").strip()
     if not name:
         return "No application name given."

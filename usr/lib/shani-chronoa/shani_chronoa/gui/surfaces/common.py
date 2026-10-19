@@ -792,7 +792,7 @@ def model_banner(app: Any, kind: str, needed_for: str = "") -> "Optional[Gtk.Wid
     why = needed_for or info.enables
     return banner(f"{info.label} is not downloaded yet, so Chronoa cannot {why}.",
                   "Download", lambda: open_setup(app, page=info.setup_page),
-                  f"Opens Setup on its page, where the download size is shown")
+                  "Opens Setup on its page, where the download size is shown")
 
 
 def with_model_banners(app: Any, content: Gtk.Widget, kinds) -> Gtk.Widget:

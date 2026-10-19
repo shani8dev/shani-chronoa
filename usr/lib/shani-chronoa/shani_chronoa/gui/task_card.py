@@ -20,7 +20,6 @@ section already answers "is there anything outstanding".
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 import gi
 

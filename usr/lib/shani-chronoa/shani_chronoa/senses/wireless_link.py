@@ -47,8 +47,6 @@ from typing import List, Optional
 
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.senses import SENSITIVITY_PUBLIC, Sense
-from shani_chronoa.senses.context import Percept
-from shani_chronoa import sysfs
 
 logger = logging.getLogger(__name__)
 

@@ -57,7 +57,6 @@ from __future__ import annotations
 
 import os
 import time
-from pathlib import Path
 
 from shani_chronoa import files
 from shani_chronoa.config import ChronoaConfig

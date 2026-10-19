@@ -39,8 +39,8 @@ from shani_chronoa import (argfile, capabilities, config as config_mod,
 from shani_chronoa import outcome_model
 from shani_chronoa.reaction import ReactionLayer, destructive_tools
 from shani_chronoa.sandbox.profiles import command_profile
-from shani_chronoa.sandbox import (PROFILE_FULL_ACCESS, SandboxConfig,
-                                   SandboxExecutor, SandboxLevel)
+from shani_chronoa.sandbox import (SandboxConfig, SandboxExecutor,
+                                   SandboxLevel)
 
 #: Tools whose programs need more than the default sandbox ceiling.
 _HEAVY_TOOLS = frozenset({"run_command"})

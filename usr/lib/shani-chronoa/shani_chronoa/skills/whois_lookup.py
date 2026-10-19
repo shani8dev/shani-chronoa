@@ -40,7 +40,7 @@ import logging
 import re
 import shutil
 import subprocess
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 from shani_chronoa import egress, files
 from shani_chronoa.skills import Skill
@@ -141,8 +141,8 @@ def _run(arguments: dict) -> str:
     if any(marker in low for marker in _LIMITED):
         detail = [ln.strip() for ln in text.splitlines() if ln.strip()][:3]
         return (
-            f"Not done: the whois server refused the query rather than "
-            f"answering it"
+            "Not done: the whois server refused the query rather than "
+            "answering it"
             + (f" ({detail[0][:120]})" if detail else "")
             + ". Public whois servers rate-limit by address, and that refusal is "
               "NOT evidence that the domain is unregistered - it means nobody "
@@ -181,7 +181,7 @@ def _run(arguments: dict) -> str:
     if len(lines) > len(shown):
         out.append(f"  ... {len(lines) - len(shown)} more line(s) not shown.")
 
-    egress.record(f"skill:whois_lookup", target, method="whois",
+    egress.record("skill:whois_lookup", target, method="whois",
                   privacy_mode=False)
     return "\n".join(out)
 

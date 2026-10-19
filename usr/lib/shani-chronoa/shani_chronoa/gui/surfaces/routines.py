@@ -171,7 +171,7 @@ class _RoutinesSurface:
             self.refresh()
             return
         # The notice first: a refresh after `submit_text` would race the turn.
-        self._notice = f"Asked it, as if you had typed it."
+        self._notice = "Asked it, as if you had typed it."
         self.refresh()
         GLib.idle_add(lambda: (submit(request), False)[1])
 

@@ -27,21 +27,17 @@ from __future__ import annotations
 import datetime
 import hashlib
 import logging
-import os
-import shutil
-import sys
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional
 
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, Gio, Gtk, Pango  # noqa: E402
 
-from shani_chronoa import conversation_store  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 
 logger = logging.getLogger(__name__)

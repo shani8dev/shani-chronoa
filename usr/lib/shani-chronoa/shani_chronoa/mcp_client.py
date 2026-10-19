@@ -31,7 +31,7 @@ import os
 import re
 import subprocess
 import threading
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 

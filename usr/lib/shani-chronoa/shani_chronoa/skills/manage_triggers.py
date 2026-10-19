@@ -43,7 +43,6 @@ would not happen.
 from __future__ import annotations
 
 import json
-import re
 
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
