@@ -37,7 +37,7 @@ started.
 from pathlib import Path
 from typing import Dict, List, Optional
 
-import numpy as np
+from shani_chronoa import gguf_header
 
 
 #: The metadata keys that look like they decide compatibility and do not.
@@ -66,68 +66,39 @@ def is_adapter(path: Path) -> bool:
 
 
 def _header(path: Path) -> Dict[str, str]:
-    """The adapter's own strings, read without the reader's numeric decoding."""
-    try:
-        from gguf import GGUFReader
-        fields = GGUFReader(str(path)).fields
-    except Exception:                                          # noqa: BLE001
-        return {}
-    out: Dict[str, str] = {}
-    for key, field in fields.items():
-        parts = getattr(field, "parts", None)
-        # **The shape of `ReaderField.parts` is not documented and guessing it
-        # cost this module its whole first run.** Measured on the installed
-        # gguf-py: a string field arrives as FIVE parts -
-        #   [0] the type table offset, [1] the KEY bytes, [2] the value-type
-        #   index, [3] the length, [4] the VALUE bytes.
-        # The first version read `parts[-1]` as the value and `parts[1]` as the
-        # key, so every string came back as the digits of an offset -
-        # `general.type` read as `'97'`, `general.name` as `'81'` - and
-        # `is_adapter()` returned False on a file that declares itself an
-        # adapter. The key is `parts[1]` and the value is `parts[-1]`, and a
-        # reader that guesses reports a confident wrong answer rather than
-        # failing.
-        if parts is None or len(parts) < 2:
-            continue
-        key_bytes = parts[1]
-        try:
-            key_bytes = bytes(key_bytes).decode("utf-8", "replace")
-        except Exception:                                      # noqa: BLE001
-            continue
-        if key_bytes != key:
-            continue
-        raw = parts[-1]
-        # **`tolist()` on the byte memmap yields a list of INTS**, not a string,
-        # so a `isinstance(raw, str)` check after it never fires and `str(raw)`
-        # prints the ASCII of the first byte. That is how `general.type` came
-        # back as `'97'`: 97 is ASCII for `a`, the first letter of `adapter`.
-        # Decode the bytes BEFORE touching the numeric form.
-        if isinstance(raw, (bytes, bytearray)):
-            out[key] = bytes(raw).decode("utf-8", "replace")
-            continue
-        if hasattr(raw, "dtype") and raw.dtype == np.uint8:
-            out[key] = bytes(np.asarray(raw)).decode("utf-8", "replace")
-            continue
-        try:
-            raw = raw.tolist()
-        except Exception:                                      # noqa: BLE001
-            pass
-        if isinstance(raw, list) and raw and isinstance(raw[0], int):
-            # **Only a byte field decodes as text.** A u32 field is also a list
-            # of ints, and `bytes()` on it raises `ValueError: byte must be in
-            # range(0, 256)` - which is the crash that stopped `is_adapter()`
-            # running on a real model. Anything outside 0..255 is a number.
-            if all(isinstance(v, int) and 0 <= v <= 255 for v in raw):
-                out[key] = bytes(bytearray(raw)).decode("utf-8", "replace")
-            else:
-                out[key] = str(raw[0])
-        elif isinstance(raw, list) and raw and isinstance(raw[0], (bytes, bytearray)):
-            out[key] = ",".join(bytes(v).decode("utf-8", "replace") for v in raw)
-        elif isinstance(raw, list) and raw:
-            out[key] = str(raw[0])
-        else:
-            out[key] = str(raw)
-    return out
+    """Every header key, each value rendered as text.
+
+    **Was `ReaderField.parts[1]` and `parts[-1]`, and is now one parse.**
+    `GGUFReader.fields` carries a string field as five parts - the type-table
+    offset, the KEY bytes, the value-type index, the length, the VALUE bytes -
+    and a reader that guesses which part is the value reads `general.type` as
+    `'97'`, which is ASCII for the first letter of `adapter`. Every branch in the
+    version this replaced existed to undo one such guess: `tolist()` on a uint8
+    memmap yields *ints*, so an `isinstance(raw, str)` check after it never
+    fires; and a u32 field is also a list of ints, so `bytes()` on it raises
+    `ValueError: byte must be in range(0, 256)`, which is the crash that stopped
+    `is_adapter()` running on a real model at all.
+
+    `gguf_header.read_metadata` parses the file rather than decoding numpy views,
+    so a string arrives as a `str` because the format says it is one and there is
+    no `parts` to misread - **and the same call costs 0.127 s instead of 3.5 s**,
+    which is the difference between `is_adapter()` being usable on a scan of a
+    model directory and not.
+
+    **Values are still `str(...)`, and that is now a stated contract rather than
+    a decoding accident** - `general.quantization_version` is a u32 and reads
+    `"4294967295"`, which is what `tests/test_adapter.py` pins. The one shape
+    difference from the old route is an **array** value: it used to arrive as its
+    last element (`"8"` for `[8, 4]`) and is now the whole list (`"[8, 4]")`,
+    because `parts[-1]` was never the array. Nothing in the tree reads one, and
+    a dict that cannot express a list is the reason this module needed guessing.
+
+    An unreadable file is `{}`, which is what every caller here treats as "this
+    file does not declare itself": `is_adapter()` answers False rather than
+    raising, because a foreign file is not an adapter and is not a fault.
+    """
+    return {key: str(value)
+            for key, value in gguf_header.read_metadata(path).items()}
 
 
 def mismatches(adapter: Path, base: Path) -> List[str]:

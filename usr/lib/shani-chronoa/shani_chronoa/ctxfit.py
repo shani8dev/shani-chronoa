@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from shani_chronoa import gguf_header
+
 MB = 1024 * 1024
 _KV_BYTES_PER_TOKEN = 40 * 1024      # ~40 kB/token for a mid-size model
 _OVERHEAD = 400 * MB                 # compute buffers, cuda context, etc.
@@ -495,37 +497,91 @@ def free_vram_bytes() -> Optional[int]:
     return None
 
 
+#: `(cache_key) -> metadata dict`, bounded. Six call sites read the same header
+#: inside one startup, and the cost was not the six reads but the 3.5 s each one
+#: cost - so the same answer held for every one of them was still paid six times.
+#: Bounded because this is process-lifetime state keyed on a path: a machine
+#: being pointed at different models (the Models panel's re-quantise writes new
+#: files) would otherwise grow a header-sized dict per file for the life of the
+#: app. 8 is well past "every model on this machine" and well under "a leak".
+_INFO_CACHE_LIMIT = 8
+_INFO_CACHE: "dict[tuple, dict]" = {}
+
+
+def _cached_header(read, path, tag):
+    """`read(path)`, memoised on `(tag, gguf_header.cache_key(path))`.
+
+    **The key is the stat, inside the cache, not around it.** `cache_key` is
+    `(path, mtime_ns, size)`: mtime alone misses an in-place rewrite that keeps
+    its timestamp, and size alone misses a rewrite that lands on the same length
+    - and both are how a header cache hands back the *previous* model's numbers
+    while `current.gguf` points somewhere else. A path that cannot be stat'd
+    yields no key, so it simply misses rather than being cached against nothing.
+
+    **`tag` is required, and it is the prefix this function's docstring used to
+    claim it had.** Metadata and tensor shapes are two different reads of one
+    file, keyed by the same `(path, mtime, size)`, and with no prefix the first
+    to fill an entry served the second one its own answer:
+    `read_tensor_shapes` handed back the metadata dict, so `kv_width_disagreement`
+    sorted a list of `(key, value)` pairs into `kv_width_from_shapes` and raised
+    `TypeError: 'int' object is not iterable` on `("qwen3.block_count", 28)`.
+    `local_llm._context_arg` wraps that call in `except Exception`, so the
+    cross-check **raised and was swallowed on every startup** - a check that
+    passes by not running, which is the failure this wiring was built to detect.
+
+    Required rather than inferred from `read`, because `read` is a callable: a
+    caller who forgets to pass one gets a silent collision instead of a
+    `TypeError`, and a silent collision is what happened here.
+    """
+    key = gguf_header.cache_key(path)
+    if key is None:
+        return read(path)
+    key = (tag,) + key
+    hit = _INFO_CACHE.get(key)
+    if hit is not None:
+        return hit
+    value = read(path)
+    if len(_INFO_CACHE) >= _INFO_CACHE_LIMIT:
+        # Drop the oldest *inserted*, not an arbitrary one: dicts keep order, so
+        # this is the cheapest honest eviction and it is the one whose answer is
+        # "the file least recently asked about".
+        _INFO_CACHE.pop(next(iter(_INFO_CACHE)))
+    _INFO_CACHE[key] = value
+    return value
+
+
 def gguf_model_info(path) -> Optional[dict]:
     """The live model's GGUF header as an `/api/show`-shaped dict, or None.
 
-    The `gguf` reader is local to this call - no server, no network - which is
-    why this runs on every `server_args` refresh rather than once.
-    """
-    try:
-        from gguf import GGUFReader
+    **Read from the first few MB of the file, and cached, where it used to walk
+    the whole thing through `gguf.GGUFReader`.** That reader's `__init__` opens
+    with `np.memmap(path)`, so it maps the entire checkpoint - 1,107,409,472
+    bytes for the model measured here - and `GGUFReader(path)` on its own costs
+    **3.5 s**, with a field walk on top taking 7.7-9.1 s. Six call sites did it
+    during one startup (`local_llm._context_arg`, `_cpu_context_arg`,
+    `bytes_per_token`, `model_registry.scan`, `model_registry.active_entry`,
+    `describe`), and `model_registry.active_entry` runs on the GTK main thread,
+    which is the whole reason the window froze.
 
-        reader = GGUFReader(str(path))
-        out = {}
-        for name, field in reader.fields.items():
-            try:
-                value = field.parts[-1]
-                if hasattr(value, "tolist"):
-                    value = value.tolist()
-                # GGUF strings arrive as uint8 byte arrays (`general.architecture`
-                # comes back as memmap([113, 119, 101, 110, 51])); scalar numbers
-                # as one-element lists (memmap([28]) -> [28]). Flatten both to
-                # the shape the existence check in kv_bytes_per_token expects.
-                if isinstance(value, list) and value:
-                    if all(isinstance(b, int) and 32 <= b < 127 for b in value):
-                        value = bytes(value).decode("ascii", "replace")
-                    elif len(value) == 1 and isinstance(value[0], (int, float)):
-                        value = value[0]
-                out[name] = value
-            except (AttributeError, IndexError, TypeError):
-                continue
-        return out or None
-    except Exception:  # noqa: BLE001 - a corrupt or foreign file is not fatal here
-        return None
+    Two changes, measured separately:
+
+    - **the read**: `gguf_header.read_metadata` parses the header directly and
+      reads only the first `HEADER_BYTES`, taking **0.127 s** for all 32 keys -
+      a **27x** saving against `GGUFReader` alone. It has no `numpy` and no
+      `gguf` import, which also matters because `gguf` is packaged by no
+      ecosystem manifest and is therefore absent on a real install.
+    - **the cache**: the six reads become one, so a startup pays 0.127 s rather
+      than 6 x 3.5 s.
+
+    **The values are better, not merely cheaper.** `GGUFReader`'s
+    `ReaderField.parts[-1]` is a string field's *bytes* and an array field's
+    *last element*, so the old dict could not express a per-layer
+    `head_count_kv` at all - which means `metadata_kv_width`'s refusal of a list
+    could never fire. Arrays decode to **lists** now, and that refusal is
+    reachable for the first time. `metadata_kv_width` is unchanged by this and
+    is covered in both directions by `tests/test_ctxfit.py`.
+    """
+    return _cached_header(gguf_header.read_metadata, path, "metadata") or None
 
 
 def metadata_kv_width(model_info: dict) -> Optional[int]:
@@ -599,15 +655,11 @@ def kv_width_disagreement(path, model_info: dict) -> Optional[str]:
     truth = metadata_kv_width(model_info)
     if truth is None or not path:
         return None
-    try:
-        from gguf import GGUFReader
-
-        shapes = {t.name: [int(d) for d in t.shape]
-                  for t in GGUFReader(str(path)).tensors}
-    except Exception:  # noqa: BLE001 - a foreign file is not fatal here
+    shapes = _cached_header(gguf_header.read_tensor_shapes, path, "shapes")
+    if not shapes:
         return None
     return kv_width_disagreement_from_shapes(
-        [(name, shape) for name, shape in sorted(shapes.items())], model_info)
+        sorted(shapes.items()), model_info)
 
 
 def expert_bytes_per_token(model_info: dict, file_bytes: int) -> Optional[int]:
