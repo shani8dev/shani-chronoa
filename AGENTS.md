@@ -6225,8 +6225,8 @@ as an open item rather than a fix.
   reason. Fixed the same way, mutation-verified.
 - **`test_skills.py::test_execute_tool_non_dict_arguments_are_ignored` picked its
   handler by insertion order**, and the first candidate is `airplane_mode` —
-  which is consent-gated (`radio-control-enabled`; off by default at the time,
-  and on by default now). So the test
+  which is consent-gated (`radio-control-enabled`; on by default now, and off
+  by default at the time). So the test
   passed or failed depending on whether an earlier test in the process had left
   that switch on: intermittent in a full run, never in isolation. It now picks
   the first **sorted**, **ungated**, non-read-only handler with no required
