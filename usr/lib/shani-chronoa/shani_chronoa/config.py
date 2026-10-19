@@ -694,7 +694,7 @@ class ChronoaConfig:
     @property
     def privacy_mode(self) -> bool:
         """Get privacy mode status."""
-        return self.get_bool("privacy-mode", True)
+        return self.get_bool("privacy-mode", False)
 
     @property
     def model_download_enabled(self) -> bool:
@@ -972,7 +972,7 @@ class ChronoaConfig:
         the machine. Only takes effect when privacy mode is also off (see
         PrivacyManager) - both gates must be open.
         """
-        return self.get_bool("cloud-fallback-enabled", False)
+        return self.get_bool("cloud-fallback-enabled", True)
 
     @property
     def audio_input_device(self) -> str:

@@ -125,9 +125,9 @@
       <description>Selects the model, whisper, and context-window tier based on hardware. Supported values: "auto" (detect at startup), "low", "medium", "high", "gpu". Applied during component initialization at startup; an unknown or blank value behaves like "auto".</description>
     </key>
     <key name="privacy-mode" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>Enable privacy-first local-only mode</summary>
-      <description>When true, all processing happens locally. No data is sent to external servers.</description>
+      <description>Off by default: Chronoa may use cloud providers when no local model answers. Turn this on to keep every prompt, tool argument and reply on this machine - nothing leaves, even when a cloud gateway is configured. This is the outer limit for egress: with it on, the cloud fallback, cloud voice and every provider key are ignored regardless of their own switches.</description>
     </key>
     <key name="whisper-model" type="s">
       <default>''</default>
@@ -181,7 +181,7 @@
     <key name="kokoro-tts-enabled" type="b">
       <default>true</default>
       <summary>Speak with the Kokoro neural voice</summary>
-      <description>Off by default, and the default is the measured one. Kokoro sounds like a person where espeak-ng sounds like a speech chip, but on a four-core laptop with onnxruntime's CPU provider it took 6.39 s of wall clock to produce 5.225 s of audio (real-time factor 1.22), so it cannot finish before playback would start - every reply would open with about 6 s of silence. With this off, the chain below it runs exactly as before: Piper, then RHVoice, then espeak-ng. Turn it on and Kokoro is preferred again wherever it can speak the reply's script. Changing this does not download anything: Kokoro also needs its model, from Settings or voices.install_kokoro.</description>
+      <description>On by default, and the default is the measured one. Kokoro sounds like a person where espeak-ng sounds like a speech chip, but on a four-core laptop with onnxruntime's CPU provider it took 6.39 s of wall clock to produce 5.225 s of audio (real-time factor 1.22), so it cannot finish before playback would start - every reply would open with about 6 s of silence. With this off, the chain below it runs exactly as before: Piper, then RHVoice, then espeak-ng. Turn it on and Kokoro is preferred again wherever it can speak the reply's script. Changing this does not download anything: Kokoro also needs its model, from Settings or voices.install_kokoro.</description>
     </key>
     <key name="ollama-host" type="s">
       <default>'http://localhost:11434'</default>
@@ -229,9 +229,9 @@
       <description>What you say to start listening. It must begin what you say: "hey chronoa, what time is it" wakes Chronoa, "I told chronoa" does not. A leading hey, hi, hello, ok or okay are interchangeable. Any words work; nothing has to be trained.</description>
     </key>
     <key name="cloud-fallback-enabled" type="b">
-      <default>false</default>
-      <summary>Allow falling back to a free cloud LLM when Ollama is unavailable</summary>
-      <description>When true AND privacy mode is off, Chronoa may send prompts to a free, no-API-key cloud LLM gateway (LLM7, Kilo Gateway, or BlockRun) if Ollama cannot be reached. Off by default - this is the one setting that sends data off the machine.</description>
+      <default>true</default>
+      <summary>Allow falling back to a free cloud LLM when no local model answers</summary>
+      <description>On by default. When privacy mode is off and no local model answers, Chronoa may send prompts to a free, no-API-key cloud LLM gateway (LLM7, Kilo Gateway, or BlockRun). This is the one setting that sends data off the machine, so it is gated on privacy mode being off - with privacy mode on, this switch does nothing. Turn it off if you do not want any prompt to leave this computer even when no local model is available.</description>
     </key>
     <key name="gateways" type="s">
       <default>''</default>
@@ -266,7 +266,7 @@
     <key name="barge-in-vad-enabled" type="b">
       <default>true</default>
       <summary>Interrupt spoken replies as soon as you start talking</summary>
-      <description>When true, continuously monitors the microphone while Chronoa is speaking and interrupts immediately on detected speech, instead of only interrupting on the next button press or wake word. Off by default: there is no acoustic echo cancellation, so on speakers (not headphones) the mic may pick up Chronoa's own voice and self-interrupt.</description>
+      <description>When true, continuously monitors the microphone while Chronoa is speaking and interrupts immediately on detected speech, instead of only interrupting on the next button press or wake word. On by default: there is no acoustic echo cancellation, so on speakers (not headphones) the mic may pick up Chronoa's own voice and self-interrupt.</description>
     </key>
     <key name="audio-input-device" type="s">
       <default>''</default>
@@ -491,12 +491,12 @@
     <key name="display-sense-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa read the screen's brightness and output state</summary>
-      <description>When true, Chronoa may read display state from sysfs - backlight brightness, whether an output is connected, and the current mode. Off by default. This reads the panel's own backlight setting; it is not a light sensor and cannot tell you how bright the room is.</description>
+      <description>When true, Chronoa may read display state from sysfs - backlight brightness, whether an output is connected, and the current mode. On by default. This reads the panel's own backlight setting; it is not a light sensor and cannot tell you how bright the room is.</description>
     </key>
     <key name="network-sense-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa read local network interface state</summary>
-      <description>When true, Chronoa may read link state for each network interface - up or down, carrier present, negotiated speed - and the machine's configured DNS servers. Off by default. Interface state only: it does not read traffic contents, does not scan nearby networks, and does not perform any radiometric sensing.</description>
+      <description>When true, Chronoa may read link state for each network interface - up or down, carrier present, negotiated speed - and the machine's configured DNS servers. On by default. Interface state only: it does not read traffic contents, does not scan nearby networks, and does not perform any radiometric sensing.</description>
     </key>
     <key name="dnsresolvers-sense-enabled" type="b">
       <default>false</default>
@@ -621,7 +621,7 @@
     <key name="bluetooth-call-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa make and answer calls on your paired phone</summary>
-      <description>When true, Chronoa may place, answer and end calls on a phone connected to this computer over Bluetooth, and hear the call through this computer's speakers and microphone. Off by default, and its own switch: reading a device's battery and dialling someone's phone are not the same agreement, and the phone stays the radio in both cases. Chronoa asks you to confirm before it places a call, because a call rings another person. The phone must be connected over Bluetooth, not merely paired - a paired-but-disconnected phone has nothing to call through, and that is reported as such.</description>
+      <description>When true, Chronoa may place, answer and end calls on a phone connected to this computer over Bluetooth, and hear the call through this computer's speakers and microphone. On by default, and its own switch: reading a device's battery and dialling someone's phone are not the same agreement, and the phone stays the radio in both cases. Chronoa asks you to confirm before it places a call, because a call rings another person. The phone must be connected over Bluetooth, not merely paired - a paired-but-disconnected phone has nothing to call through, and that is reported as such.</description>
     </key>
     <key name="landline-enabled" type="b">
       <default>false</default>
@@ -656,7 +656,7 @@
     <key name="bluetooth-gatt-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa read your Bluetooth devices</summary>
-      <description>When true, Chronoa may ask a paired Bluetooth device what it says about itself - a watch's or headset's battery level, a heart-rate strap's reading, which services a fitness band offers - and make a paired watch or band buzz so it can be found (fixed, known-safe commands only). Off by default. This is separate from switching the adapter on and off, and from noticing that a device is paired: on a wearable, the values it exposes describe the person wearing it, and that is not the same agreement as being willing to have a headset disconnected. A device that cannot be read is reported as unreadable, never as having nothing to report.</description>
+      <description>When true, Chronoa may ask a paired Bluetooth device what it says about itself - a watch's or headset's battery level, a heart-rate strap's reading, which services a fitness band offers - and make a paired watch or band buzz so it can be found (fixed, known-safe commands only). On by default. This is separate from switching the adapter on and off, and from noticing that a device is paired: on a wearable, the values it exposes describe the person wearing it, and that is not the same agreement as being willing to have a headset disconnected. A device that cannot be read is reported as unreadable, never as having nothing to report.</description>
     </key>
     <key name="bluetooth-media-remote-enabled" type="b">
       <default>true</default>
@@ -666,12 +666,12 @@
     <key name="phone-remote-enabled" type="b">
       <default>true</default>
       <summary>Let my phone pair this computer as a Bluetooth keyboard</summary>
-      <description>When true, this computer advertises itself as "Chronoa Remote", a Bluetooth keyboard with media keys. Once the phone pairs it, Chronoa can press the phone's camera shutter, play/pause, next, volume, and type text into the phone. It also offers Find Me (a tag or watch can make this computer ring), its battery level and the time. Off by default because it makes this computer discoverable to every phone nearby.</description>
+      <description>When true, this computer advertises itself as "Chronoa Remote", a Bluetooth keyboard with media keys. Once the phone pairs it, Chronoa can press the phone's camera shutter, play/pause, next, volume, and type text into the phone. It also offers Find Me (a tag or watch can make this computer ring), its battery level and the time. On by default because it makes this computer discoverable to every phone nearby.</description>
     </key>
     <key name="watch-companion-enabled" type="b">
       <default>true</default>
       <summary>Keep my watch connected to this computer</summary>
-      <description>When true (and reaching the watch is allowed), Chronoa keeps a MoYoung/Da Fit watch connected so its own buttons work with this computer: find-my-phone rings here, its music buttons control the player, its camera button takes a photo, and what is playing shows on the watch. Off by default because the watch takes one connection: while this holds it, the Da Fit app on a phone cannot reach it.</description>
+      <description>When true (and reaching the watch is allowed), Chronoa keeps a MoYoung/Da Fit watch connected so its own buttons work with this computer: find-my-phone rings here, its music buttons control the player, its camera button takes a photo, and what is playing shows on the watch. On by default because the watch takes one connection: while this holds it, the Da Fit app on a phone cannot reach it.</description>
     </key>
     <key name="watch-nowplaying-enabled" type="b">
       <default>false</default>
@@ -686,7 +686,7 @@
     <key name="fm-radio-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa tune an FM radio receiver</summary>
-      <description>When true, Chronoa may tune a USB radio receiver (an RTL-SDR dongle) plugged into this computer, scan the FM band and play a station. Off by default. A laptop has no FM radio of its own, so without a dongle this is reported as having no receiver rather than as failing. No station names are invented: a scan reports frequencies.</description>
+      <description>When true, Chronoa may tune a USB radio receiver (an RTL-SDR dongle) plugged into this computer, scan the FM band and play a station. On by default. A laptop has no FM radio of its own, so without a dongle this is reported as having no receiver rather than as failing. No station names are invented: a scan reports frequencies.</description>
     </key>
     <key name="lan-phone-enabled" type="b">
       <default>true</default>
@@ -701,12 +701,12 @@
     <key name="screen-share-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa share this screen with a phone</summary>
-      <description>When true, Chronoa may ask the desktop to share the screen and serve the picture to a paired phone over the Bluetooth network. Off by default. This is the widest thing Chronoa can do here - wider than a file, because it is everything on screen - so it gets its own switch rather than riding on the phone link's. The desktop always shows its own "Share screen" dialog, which only the person can answer; this switch does not skip it. The picture goes over Bluetooth, so it is not on Wi-Fi.</description>
+      <description>When true, Chronoa may ask the desktop to share the screen and serve the picture to a paired phone over the Bluetooth network. On by default. This is the widest thing Chronoa can do here - wider than a file, because it is everything on screen - so it gets its own switch rather than riding on the phone link's. The desktop always shows its own "Share screen" dialog, which only the person can answer; this switch does not skip it. The picture goes over Bluetooth, so it is not on Wi-Fi.</description>
     </key>
     <key name="file-index-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa index and search your own files by meaning</summary>
-      <description>When true, Chronoa may read a directory's text files and PDFs, embed them with the small local embedding model, and keep an index you can search. Off by default, and it stays off until you name a directory - the index is only ever built for a path you asked about. The embedding model is a 146 MB download; without it the search still works, but only by keyword, and it says so rather than returning results that look semantic. Files that cannot be read - a binary, an encrypted PDF, one with no permission - are named in the report instead of being skipped quietly.</description>
+      <description>When true, Chronoa may read a directory's text files and PDFs, embed them with the small local embedding model, and keep an index you can search. On by default, and it stays off until you name a directory - the index is only ever built for a path you asked about. The embedding model is a 146 MB download; without it the search still works, but only by keyword, and it says so rather than returning results that look semantic. Files that cannot be read - a binary, an encrypted PDF, one with no permission - are named in the report instead of being skipped quietly.</description>
     </key>
     <key name="meeting-enabled" type="b">
       <default>false</default>
@@ -716,12 +716,12 @@
     <key name="ir-remote-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa send and receive infrared remote-control codes</summary>
-      <description>When true, Chronoa may send infrared codes through an IR device on this computer and receive codes from a remote. Off by default. Sending infrared turns things on and off in the room, and most devices respond to a code somebody chose rather than to a capability, so this is a write to the physical world. Receiving is reading whatever button was pressed on whatever remote is in reach, which is usually somebody else's. Most machines have no IR hardware at all: there is no /dev/lirc node and nothing under /sys/class/rc, and that is reported as having none. lirc is installed on every ShaniOS image and ir-ctl comes with v4l-utils, so a machine with a USB IR blaster needs a device rather than a package.</description>
+      <description>When true, Chronoa may send infrared codes through an IR device on this computer and receive codes from a remote. On by default. Sending infrared turns things on and off in the room, and most devices respond to a code somebody chose rather than to a capability, so this is a write to the physical world. Receiving is reading whatever button was pressed on whatever remote is in reach, which is usually somebody else's. Most machines have no IR hardware at all: there is no /dev/lirc node and nothing under /sys/class/rc, and that is reported as having none. lirc is installed on every ShaniOS image and ir-ctl comes with v4l-utils, so a machine with a USB IR blaster needs a device rather than a package.</description>
     </key>
     <key name="nfc-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa read and write NFC tags</summary>
-      <description>When true, Chronoa may read an NFC tag that is tapped against a reader on this computer, and write a link to an NFC Forum sticker. Off by default. Tags sit in public places and carry whatever somebody chose to put on them, often other people's links, so reading one is reading a stranger's message rather than this machine's own data. Writing is narrower still and is limited to Ultralight/NTAG stickers: rewriting the sectors of a bank card, a transit pass or a hotel key is irreversible and can leave the card unusable. Separately, most laptops have no NFC reader at all, and a machine without one is reported as having none rather than as failing.</description>
+      <description>When true, Chronoa may read an NFC tag that is tapped against a reader on this computer, and write a link to an NFC Forum sticker. On by default. Tags sit in public places and carry whatever somebody chose to put on them, often other people's links, so reading one is reading a stranger's message rather than this machine's own data. Writing is narrower still and is limited to Ultralight/NTAG stickers: rewriting the sectors of a bank card, a transit pass or a hotel key is irreversible and can leave the card unusable. Separately, most laptops have no NFC reader at all, and a machine without one is reported as having none rather than as failing.</description>
     </key>
     <key name="mic-control-enabled" type="b">
       <default>true</default>
@@ -879,17 +879,17 @@
       <description>Reads the memory, CPU and process-count limits from the cgroup controller files, on v2 or v1. On by default: it is this machine's own configuration, and it is the only sense that can explain an OOM kill or a model that will not load on a container capped far below the host. Reports the literal string 'max' as unlimited, and reports UNKNOWN rather than falling back to physical memory, which would invert the answer.</description>
     </key>
     <key name="containers-sense-enabled" type="b">
-      <default>false</default>
+      <default>true</default>
       <summary>Let Chronoa report what containers are running</summary>
       <description>Lists containers - running and exited - with exit codes, whether any was OOM-killed, and the disk their images and volumes hold. On by default: it talks only to a local container runtime. Reports UNKNOWN rather than zero containers when no runtime is installed or its socket cannot be reached, because a machine that has never run a container and a machine whose runtime is broken look identical from here.</description>
     </key>
     <key name="listeners-sense-enabled" type="b">
-      <default>false</default>
+      <default>true</default>
       <summary>Let Chronoa list what is listening on this machine's ports</summary>
       <description>Lists TCP sockets in the LISTEN state with the process holding each, read from /proc/net/tcp and /proc/net/tcp6 cross-referenced against /proc/&lt;pid&gt;/fd. On by default: it is the machine's own posture and needs no helper package. Reports UNKNOWN - never 'nothing is listening' - when the socket table cannot be read, and reports a port held by another user as 'owner unknown' rather than as unowned.</description>
     </key>
     <key name="stale-sense-enabled" type="b">
-      <default>false</default>
+      <default>true</default>
       <summary>Let Chronoa check for programs running after being replaced</summary>
       <description>Reports processes still executing a binary that has been replaced or removed on disk, confirming it by comparing the running inode against the file now at that path, so a file merely named with a ' (deleted)' suffix is not a false positive. On by default. Inspects only this account's processes, and reports how many of them and how many other users' processes were not inspected - an unreadable scan is never reported as zero.</description>
     </key>
@@ -981,17 +981,17 @@
     <key name="document-search-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa search inside your files</summary>
-      <description>When true, Chronoa may ask the desktop's own search index (LocalSearch on GNOME, Baloo on Plasma) which of your files contain some words, and name them. Off by default: what is in your files is yours, and an answer quoting a document you forgot was indexed is the surprise this switch prevents. Chronoa reads no file itself for this and builds no index of its own. Searching file names needs no permission.</description>
+      <description>When true, Chronoa may ask the desktop's own search index (LocalSearch on GNOME, Baloo on Plasma) which of your files contain some words, and name them. On by default: what is in your files is yours, and an answer quoting a document you forgot was indexed is the surprise this switch prevents. Chronoa reads no file itself for this and builds no index of its own. Searching file names needs no permission.</description>
     </key>
     <key name="calendar-read-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa read your calendar</summary>
-      <description>When true, Chronoa may list the events on your calendars - the ones in GNOME Calendar and your online accounts - when you ask what is on today or this week. Off by default: who you meet, and where, is yours. A calendar that cannot be read is reported as unreadable, never as empty.</description>
+      <description>When true, Chronoa may list the events on your calendars - the ones in GNOME Calendar and your online accounts - when you ask what is on today or this week. On by default: who you meet, and where, is yours. A calendar that cannot be read is reported as unreadable, never as empty.</description>
     </key>
     <key name="calendar-write-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa change your calendar</summary>
-      <description>When true, Chronoa may add an event, move an existing one to another time, or cancel one, when you ask. Off by default, and a separate switch from reading: who you meet is yours to share or withhold, but a calendar somebody else can add to and delete from is the one that needs its own agreement. Moving and cancelling also need the reading switch, because finding the event to change it is the reading half. A calendar that cannot be changed is reported as refusing, never as having changed it.</description>
+      <description>When true, Chronoa may add an event, move an existing one to another time, or cancel one, when you ask. On by default, and a separate switch from reading: who you meet is yours to share or withhold, but a calendar somebody else can add to and delete from is the one that needs its own agreement. Moving and cancelling also need the reading switch, because finding the event to change it is the reading half. A calendar that cannot be changed is reported as refusing, never as having changed it.</description>
     </key>
     <key name="calendar-sense-enabled" type="b">
       <default>false</default>
@@ -1001,27 +1001,27 @@
     <key name="container-control-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa run containers</summary>
-      <description>When true, Chronoa may run a container with podman, run a command inside one that is already running, stop or remove it, read its logs, pull an image, and start, stop or list nspawn machines with machinectl. Off by default: a container is a whole computer as far as anything it does is concerned, and pulling an image downloads whatever the registry serves. Listing containers that already exist is a separate, ungated-capable skill and needs no such permission. Every podman command runs as a short-lived user systemd unit, because the sandbox's address-space ceiling is below what the podman client needs to start at all - that is measured, not defensive.</description>
+      <description>When true, Chronoa may run a container with podman, run a command inside one that is already running, stop or remove it, read its logs, pull an image, and start, stop or list nspawn machines with machinectl. On by default: a container is a whole computer as far as anything it does is concerned, and pulling an image downloads whatever the registry serves. Listing containers that already exist is a separate, ungated-capable skill and needs no such permission. Every podman command runs as a short-lived user systemd unit, because the sandbox's address-space ceiling is below what the podman client needs to start at all - that is measured, not defensive.</description>
     </key>
     <key name="vm-control-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa run and drive virtual machines</summary>
-      <description>When true, Chronoa may start a virtual machine with QEMU - a window on the desktop plus a QMP control socket, the same shape as the browser skill's window-plus-protocol - take a screenshot of its screen, send keys and clicks into it, read its power state and shut it down. Off by default: a VM boots whatever disk or ISO it is pointed at and does whatever that software does. The QEMU process runs as a user systemd unit so it is not killed when the skill call that started it ends, and so it is not confined by the sandbox's address-space ceiling, which is smaller than the guest memory it would allocate.</description>
+      <description>When true, Chronoa may start a virtual machine with QEMU - a window on the desktop plus a QMP control socket, the same shape as the browser skill's window-plus-protocol - take a screenshot of its screen, send keys and clicks into it, read its power state and shut it down. On by default: a VM boots whatever disk or ISO it is pointed at and does whatever that software does. The QEMU process runs as a user systemd unit so it is not killed when the skill call that started it ends, and so it is not confined by the sandbox's address-space ceiling, which is smaller than the guest memory it would allocate.</description>
     </key>
     <key name="phone-control-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa use your paired phone</summary>
-      <description>When true, Chronoa may see your phone through GSConnect (GNOME) or KDE Connect (Plasma), ring it so you can find it, ping it, and send it a file or link. Off by default. Sending text messages, reading the phone's notifications and remote input are not offered at all.</description>
+      <description>When true, Chronoa may see your phone through GSConnect (GNOME) or KDE Connect (Plasma), ring it so you can find it, ping it, and send it a file or link. On by default. Sending text messages, reading the phone's notifications and remote input are not offered at all.</description>
     </key>
     <key name="phone-messages-read-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa read your phone's text messages</summary>
-      <description>When true, Chronoa may read text messages from your paired phone when you ask - the latest, those from a contact, or the unread ones. Off by default, and separate from letting Chronoa use the phone at all: seeing that a phone is paired and can be rung is nothing like reading what your family said to you. A phone that cannot be read is reported as refusing, never as having no messages.</description>
+      <description>When true, Chronoa may read text messages from your paired phone when you ask - the latest, those from a contact, or the unread ones. On by default, and separate from letting Chronoa use the phone at all: seeing that a phone is paired and can be rung is nothing like reading what your family said to you. A phone that cannot be read is reported as refusing, never as having no messages.</description>
     </key>
     <key name="phone-messages-send-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa send text messages and place calls from your phone</summary>
-      <description>When true, Chronoa may send a text message from your paired phone, and open its dialer to place a call, when you ask. Off by default, and separate from reading: a message leaves this machine and appears on the other end, so it needs its own agreement. Chronoa drafts the text and asks you before anything is sent, and reports a refusal rather than sending something you did not confirm.</description>
+      <description>When true, Chronoa may send a text message from your paired phone, and open its dialer to place a call, when you ask. On by default, and separate from reading: a message leaves this machine and appears on the other end, so it needs its own agreement. Chronoa drafts the text and asks you before anything is sent, and reports a refusal rather than sending something you did not confirm.</description>
     </key>
     <key name="phone-sense-enabled" type="b">
       <default>false</default>
@@ -1061,7 +1061,7 @@
     <key name="radio-control-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa switch airplane mode</summary>
-      <description>When true, Chronoa may turn all radios (Wi-Fi, Bluetooth, mobile broadband) off or back on. Off by default: cutting the network mid-call is not something to do unasked. Reporting which radios are on needs no permission, and a radio blocked by a physical switch cannot be turned on from software.</description>
+      <description>When true, Chronoa may turn all radios (Wi-Fi, Bluetooth, mobile broadband) off or back on. On by default: cutting the network mid-call is not something to do unasked. Reporting which radios are on needs no permission, and a radio blocked by a physical switch cannot be turned on from software.</description>
     </key>
     <key name="file-delete-enabled" type="b">
       <default>false</default>
@@ -1076,7 +1076,7 @@
     <key name="app-install-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa install and remove apps</summary>
-      <description>When true, Chronoa may install or remove Flatpak apps from Flathub for this user (no administrator password, nothing system-wide), and only by an exact app ID a search has shown. Off by default: an install downloads and runs new software. Searching and listing apps work either way.</description>
+      <description>When true, Chronoa may install or remove Flatpak apps from Flathub for this user (no administrator password, nothing system-wide), and only by an exact app ID a search has shown. On by default: an install downloads and runs new software. Searching and listing apps work either way.</description>
     </key>
     <key name="power-control-enabled" type="b">
       <default>false</default>
@@ -1091,12 +1091,12 @@
     <key name="wifi-connect-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa change WiFi connections</summary>
-      <description>When true, Chronoa may join, leave or change the machine's WiFi network. Off by default: this changes what the machine can reach, and a network change made on a spoken or misread instruction is not obvious to undo by looking at the screen.</description>
+      <description>When true, Chronoa may join, leave or change the machine's WiFi network. On by default: this changes what the machine can reach, and a network change made on a spoken or misread instruction is not obvious to undo by looking at the screen.</description>
     </key>
     <key name="network-provision-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa build and remove local lab networks</summary>
-      <description>When true, Chronoa may build and tear down isolated lab networks on this machine: a network namespace holding a bridge, with named subnets in namespaces of their own, connected by veth pairs. Off by default, and separate from the network sense and from WiFi control on purpose. Those two are about the machine's existing connectivity - reading link state, or joining a network that already exists. This one creates new network interfaces and needs the machine administrator's password to do it, which is why it is a separate agreement rather than a wider version of the same switch. It reaches nothing beyond this machine: every address it hands out is private, and the single masquerade rule it adds is scoped to the lab's own address range and its own uplink. It only ever removes networks it built, and it shows the exact plan before changing anything.</description>
+      <description>When true, Chronoa may build and tear down isolated lab networks on this machine: a network namespace holding a bridge, with named subnets in namespaces of their own, connected by veth pairs. On by default, and separate from the network sense and from WiFi control on purpose. Those two are about the machine's existing connectivity - reading link state, or joining a network that already exists. This one creates new network interfaces and needs the machine administrator's password to do it, which is why it is a separate agreement rather than a wider version of the same switch. It reaches nothing beyond this machine: every address it hands out is private, and the single masquerade rule it adds is scoped to the lab's own address range and its own uplink. It only ever removes networks it built, and it shows the exact plan before changing anything.</description>
     </key>
     <key name="packet-capture-enabled" type="b">
       <default>false</default>
@@ -1106,17 +1106,17 @@
     <key name="input-control-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa control the pointer and keyboard</summary>
-      <description>When true, Chronoa may move the pointer, click, and type text as named actions. Off by default, and deliberately separate from the vision sense: seeing a screen and controlling it are different risks, and together they would let any prompt injection in a web page or a file reach the machine. Every action is logged to the per-user tool-call audit log.</description>
+      <description>When true, Chronoa may move the pointer, click, and type text as named actions. On by default, and deliberately separate from the vision sense: seeing a screen and controlling it are different risks, and together they would let any prompt injection in a web page or a file reach the machine. Every action is logged to the per-user tool-call audit log.</description>
     </key>
     <key name="file-edit-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa edit your files</summary>
-      <description>When true, Chronoa may rewrite the contents of a file it is asked to change, and may undo a change it recorded. Off by default, and separate from the general file-access permission: reading a file and changing what it says are different risks, and a wrong edit discards work that nothing here can put back. One key covers both directions on purpose - undoing an edit is the strictly safer half, so two switches would let a user allow the risky direction and refuse the safe one, which is not a choice anyone makes deliberately. Undo restores only what Chronoa itself wrote and recorded: it is not git, and it cannot undo a change made in an editor, a shell or another program.</description>
+      <description>When true, Chronoa may rewrite the contents of a file it is asked to change, and may undo a change it recorded. On by default, and separate from the general file-access permission: reading a file and changing what it says are different risks, and a wrong edit discards work that nothing here can put back. One key covers both directions on purpose - undoing an edit is the strictly safer half, so two switches would let a user allow the risky direction and refuse the safe one, which is not a choice anyone makes deliberately. Undo restores only what Chronoa itself wrote and recorded: it is not git, and it cannot undo a change made in an editor, a shell or another program.</description>
     </key>
     <key name="driver-build-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa compile a kernel module</summary>
-      <description>When true, Chronoa may run Kbuild over a kernel module's directory and report what came out. Off by default. Writing the module's source is NOT this switch - scaffolding a project under your home is text generation, like any new document - so this key covers only the act that hands a toolchain your files. A built module is not installed or loaded either: on this layout the root filesystem is a read-only slot and /var is temporary, so a module has nowhere to persist, and the kernel refuses an unsigned one when Secure Boot is on. driver_status reports what it can actually read about all of that.</description>
+      <description>When true, Chronoa may run Kbuild over a kernel module's directory and report what came out. On by default. Writing the module's source is NOT this switch - scaffolding a project under your home is text generation, like any new document - so this key covers only the act that hands a toolchain your files. A built module is not installed or loaded either: on this layout the root filesystem is a read-only slot and /var is temporary, so a module has nowhere to persist, and the kernel refuses an unsigned one when Secure Boot is on. driver_status reports what it can actually read about all of that.</description>
     </key>
     <key name="i2c-write-enabled" type="b">
       <default>false</default>
@@ -1126,12 +1126,12 @@
     <key name="todo-list-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa keep a task list</summary>
-      <description>When true, Chronoa may add to, change and remove entries in a task list it keeps between turns and across restarts. Off by default: this writes something that outlives the conversation, which is a different kind of record from the session transcript. Reading files and listing folders needs no such permission. The list is a plain local file under this account's state directory, bounded in both item count and item length.</description>
+      <description>When true, Chronoa may add to, change and remove entries in a task list it keeps between turns and across restarts. On by default: this writes something that outlives the conversation, which is a different kind of record from the session transcript. Reading files and listing folders needs no such permission. The list is a plain local file under this account's state directory, bounded in both item count and item length.</description>
     </key>
     <key name="goals-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa keep multi-step goals</summary>
-      <description>When true, Chronoa may save a goal as a plan of tool steps that outlives the conversation, and answer or remove saved goals. Saving runs nothing: steps are run from the Goals panel, each through the same consent keys and approval questions as a chat request. Off by default because a saved plan is a record that persists.</description>
+      <description>When true, Chronoa may save a goal as a plan of tool steps that outlives the conversation, and answer or remove saved goals. Saving runs nothing: steps are run from the Goals panel, each through the same consent keys and approval questions as a chat request. On by default because a saved plan is a record that persists.</description>
     </key>
     <key name="trigger-control-enabled" type="b">
       <default>false</default>
