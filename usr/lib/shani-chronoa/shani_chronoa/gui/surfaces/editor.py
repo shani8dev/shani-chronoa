@@ -499,10 +499,46 @@ class _Page:
                 f"Read-only. {editor.path.stat().st_size} bytes is past the "
                 f"{MAX_EDIT_BYTES}-byte limit for editing."))
 
-        name = f"file:{editor.path}"
-        self.stack.add_named(page, name)
+        # **Named `"file"`, which is the name `open()` reveals.** It used to be
+        # `f"file:{editor.path}"`, so `open()`'s `set_visible_child_name("file")`
+        # found nothing and GTK said so - *"Child name 'file' not found in
+        # GtkStack"* - leaving the **status** page on screen after a successful
+        # open. A path in a widget name is a second key to one page: nothing
+        # removes a previous file page either, so a second open added a fourth
+        # child that nothing could ever reveal again. One page, one name.
+        self._drop_file_page()
+        self.stack.add_named(page, "file")
         self._widgets = widgets
         refresh()
+
+    def _drop_file_page(self) -> None:
+        """Remove whatever currently holds the name `"file"`, if anything does.
+
+        Called before every mount, which is what keeps a second `open()` from
+        accumulating a page nobody can reach - the same defect the duplicate name
+        above was, arriving by a different route.
+
+        **The hide is measured, and the reason it was written for is not.**
+        It used to read *"a `GtkStack` refuses to remove its visible child, so
+        this hides first and the remove that follows is the one that can
+        actually happen"*. Measured on this GTK (4.22): removing the visible
+        child **succeeds**, and leaves the stack with **no visible child at
+        all** - `get_visible_child_name()` answers `None`. So the removal never
+        depended on the hide, and that sentence was a claim about a GTK
+        behaviour this one does not have.
+
+        What the hide is for is the frame in between: without it there is a
+        moment where the stack holds `status` and `list` and is showing
+        neither. That is why it stays. It is **not** covered by a test, and no
+        behavioural test can cover it - the state exists only between two
+        statements inside this method - so this is recorded here as defence
+        rather than claimed as verified.
+        """
+        previous = self.stack.get_child_by_name("file")
+        if previous is None:
+            return
+        self.stack.set_visible_child_name("list")
+        self.stack.remove(previous)
 
     def _save(self, refresh) -> None:
         """Write the buffer through `write_text_file`, and report what it said."""
@@ -536,7 +572,19 @@ def build(app: Any) -> Gtk.Widget:
     try:
         page = _Page()
         page.stack.set_vexpand(True)
-        page.stack.add_named(page.status, "status")
+        # **No `add_named(page.status, "status")` here.** `_Page.__init__` already
+        # called `_show_status(...)`, which is what puts the status page into the
+        # stack under that name - so this line added **the same widget a second
+        # time**, and GTK said both halves of it:
+        #
+        #     Gtk-WARNING  Duplicate child name in GtkStack: status
+        #     Gtk-CRITICAL gtk_widget_set_parent: assertion
+        #                 '_gtk_widget_get_parent (widget) == NULL' failed
+        #
+        # The second is the worse one: re-parenting a widget that already has a
+        # parent is undefined behaviour, so the status page was being moved out of
+        # the stack by a line that was supposed to add it. Measured on a real
+        # stack, before the fix, in `tests/test_editor_stack_has_one_status_page`.
         page.show_list()
         # **Through `common.surface`**, which gives it a header bar - title and
         # back button. A bare `NavigationPage` has neither, so this was the one
