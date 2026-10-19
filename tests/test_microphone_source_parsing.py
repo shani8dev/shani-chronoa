@@ -14,21 +14,34 @@ and the skill answered "no capture source was reported".
 
 Parsing is now delegated to `senses.audio`, which already gets it right.
 
-## wpctl cannot report a mute state at all
+## wpctl can report a mute state, and the first version said it could not
 
 Its commands are status, get-volume, inspect, set-default, set-volume, set-mute,
-set-profile and clear-default. Mute can be *set*; it cannot be *read*. `wpctl
-inspect` does not expose it either - no key containing "mute" appears in a live
-node's entire property dump.
+set-profile and clear-default. Mute can be set, and it can be read - but not
+through a command of its own, which is what the first version believed.
 
-The first version called `wpctl get-mute <id>`, which does not exist, so every
-status call answered UNKNOWN. UNKNOWN is honest, and it is now said *with its
-reason* rather than left looking like a finding.
+**`wpctl inspect` genuinely does not expose it**: no key containing "mute"
+appears in a live node's entire property dump. That part of the old belief was
+right. The conclusion drawn from it was wrong, because the state comes back
+through two other commands:
 
-And an unreadable state must not block the change: `set-mute` takes an absolute 1
-or 0, so the action does not depend on what the current state was. Refusing would
-have left the microphone permanently uncontrollable through this skill on every
-machine, which is worse than setting it and saying so.
+- `wpctl get-volume <id>` prints `Volume: 1.00 [MUTED]` when the node is
+  muted, and `Volume: 1.00` when it is not;
+- `wpctl status` prints the same state inside the volume annotation - a muted
+  node's line ends `[vol: 1.00 MUTED]`.
+
+Both were measured, by muting a live source and reading both commands back
+(the source was unmuted again immediately afterwards). The first version of this
+skill called `wpctl get-mute <id>`, which does not exist, so every status call
+answered UNKNOWN.
+
+So UNKNOWN is still a state this code can represent - it is what a *failed*
+read reports - but it is no longer what a healthy machine produces.
+
+And an unreadable state must still not block the change: `set-mute` takes an
+absolute 1 or 0, so the action does not depend on what the current state was.
+Refusing would have left the microphone permanently uncontrollable through this
+skill on every machine, which is worse than setting it and saying so.
 """
 
 from __future__ import annotations
@@ -95,18 +108,72 @@ def status(monkeypatch):
             return True
     monkeypatch.setattr(M, "ChronoaConfig", lambda: _On())
     calls = []
+    state = {"muted": False}
 
     def run(*args):
         calls.append(list(args))
         if args[:1] == ("status",):
             return _Proc(STATUS)
+        if args[:1] == ("get-volume",):
+            # What the real wpctl prints for a node, measured on this machine.
+            # The first version of this fixture answered `get-volume` with an
+            # empty string, which is not a thing wpctl does - and an empty
+            # answer is not an unmuted node, it is a command that said
+            # nothing. The mute state is tracked so that a `set-mute` is
+            # reflected in the read-back, which is what a real wpctl does.
+            if state["muted"]:
+                return _Proc("Volume: 0.43 [MUTED]")
+            return _Proc("Volume: 0.43")
+        if args[:1] == ("set-mute",):
+            state["muted"] = args[2] == "1"
+            return _Proc("")
         return _Proc("", 0)
 
     monkeypatch.setattr(M, "run_wpctl", run)
+    # The mute state is read back through `pipewire.mute_state`, which calls
+    # `pipewire.run_wpctl` - a different name from the skill's own import, so
+    # stubbing only the skill left the *read* reaching the real machine. The
+    # comment on the sense's own stub below says the same thing about the parse.
+    from shani_chronoa import pipewire
+    monkeypatch.setattr(pipewire, "run_wpctl", run)
     # `_default_source` delegates parsing to `senses.audio`, so that module has
     # its own wpctl call. Stubbing only the skill's left the *test* reading the
     # real machine's status - which is why one test asserted against this
     # fixture's names and found this machine's instead.
+    from shani_chronoa.senses import audio as audio_sense
+    monkeypatch.setattr(audio_sense, "_run_wpctl", run)
+    return calls
+
+
+@pytest.fixture
+def unreadable(monkeypatch):
+    """A `wpctl` whose volume read fails, so the mute state cannot be seen.
+
+    The same consent and the same status, but `get-volume` fails the way a
+    missing node does. This is the case UNKNOWN is for - a read that could not
+    be made - and it is a different thing from a node that is known to be
+    unmuted.
+    """
+    class _On:
+        def get_bool(self, key, default=False):
+            return True
+
+        def sense_allowed(self, name):
+            return True
+    monkeypatch.setattr(M, "ChronoaConfig", lambda: _On())
+    calls = []
+
+    def run(*args):
+        calls.append(list(args))
+        if args[:1] == ("status",):
+            return _Proc(STATUS)
+        if args[:1] == ("get-volume",):
+            return _Proc("", 1, "No such node")
+        return _Proc("", 0)
+
+    monkeypatch.setattr(M, "run_wpctl", run)
+    from shani_chronoa import pipewire
+    monkeypatch.setattr(pipewire, "run_wpctl", run)
     from shani_chronoa.senses import audio as audio_sense
     monkeypatch.setattr(audio_sense, "_run_wpctl", run)
     return calls
@@ -197,7 +264,9 @@ class TestItFindsTheMicrophone:
         )
 
 
-class TestMuteStateIsHonestAboutBeingUnreadable:
+class TestTheMuteStateIsReadBack:
+    """It is readable, so a healthy machine must not be answered UNKNOWN."""
+
     def test_it_does_not_call_a_command_that_does_not_exist(self, status):
         """`wpctl get-mute` is not a command; `set-mute` is the only one."""
         M._run({"action": "status"})
@@ -205,12 +274,23 @@ class TestMuteStateIsHonestAboutBeingUnreadable:
             "a status call reached for a wpctl subcommand that does not exist"
         )
 
-    def test_status_says_why_it_is_unknown(self, status):
+    def test_status_reads_the_state_back(self, status):
+        """`wpctl get-volume` prints the mute state, so the skill asks for it.
+
+        Measured on this machine: `wpctl get-volume 61` printed `Volume: 1.00`
+        for an unmuted source and `Volume: 1.00 [MUTED]` for a muted one, the
+        marker having been put there and taken away again.
+        """
+        M._run({"action": "status"})
+        assert ["get-volume", "56"] in status, (
+            "the mute state was not read back, so the answer cannot be a fact"
+        )
+
+    def test_status_reports_the_state_it_read(self, status):
         out = M._run({"action": "status"})
-        assert "UNKNOWN" in out
-        assert "cannot report it" in out, (
-            "a bare UNKNOWN looks like a finding about the microphone rather "
-            "than an admission that the tool cannot answer"
+        assert "Mute state: unmuted" in out, (
+            "a readable state was reported as UNKNOWN, which is a refusal to "
+            "answer on a machine that answered"
         )
 
     def test_status_still_names_the_microphone(self, status):
@@ -218,22 +298,83 @@ class TestMuteStateIsHonestAboutBeingUnreadable:
         assert "Built-in Audio Analog Stereo" in out
 
 
+class TestTheChangeIsVerifiedByReadingItBack:
+    """A mute that worked, confirmed by reading the state back.
+
+    This is the symptom the whole cluster produced on this skill: `_is_muted`
+    returned `None` on every path, so the read-back after `set-mute` was
+    always "could not be read" and a microphone that really was muted was
+    reported as **not verified**.
+    """
+
+    def test_a_mute_is_confirmed_by_reading_it_back(self, status):
+        out = M._run({"action": "mute"})
+        assert "verified by reading it back" in out, (
+            "a mute that worked was reported as unverified, because the state "
+            "could not be read back"
+        )
+
+    def test_an_unmute_is_confirmed_too(self, status):
+        M._run({"action": "mute"})
+        out = M._run({"action": "unmute"})
+        assert "verified by reading it back" in out
+
+    def test_the_post_condition_verifies_the_mute(self, status):
+        """The skill's own post-condition, which read the same broken state."""
+        M._run({"action": "mute"})
+        ok, evidence = M.POST_CONDITION({"action": "mute"})
+        assert ok is True, evidence
+        assert "read back" in evidence
+
+    def test_the_post_condition_refuses_to_claim_an_unmute_that_did_not_happen(self, status):
+        """The other direction: a mute that did not take must not verify."""
+        ok, evidence = M.POST_CONDITION({"action": "mute"})
+        assert ok is False, (
+            "the post-condition verified a mute the microphone was not muted for"
+        )
+
+
+class TestAnUnreadableStateIsSaidAsSuch:
+    """UNKNOWN is for a read that could not be made - not for a healthy machine."""
+
+    def test_status_says_the_state_could_not_be_read(self, unreadable):
+        out = M._run({"action": "status"})
+        assert "UNKNOWN" in out
+        assert "could not read" in out, (
+            "a bare UNKNOWN looks like a finding about the microphone rather "
+            "than an admission that the tool could not answer"
+        )
+
+    def test_it_does_not_claim_wpctl_cannot_report_it(self, unreadable):
+        """The old sentence was a claim about the tool, and it was false.
+
+        `wpctl get-volume` does report the mute state; what failed here was
+        this one read. Saying the command has no way to report it would send
+        the next reader looking for a missing capability rather than a broken
+        read.
+        """
+        out = M._run({"action": "status"})
+        assert "cannot report it" not in out, (
+            "the answer blames wpctl for a read this skill could not make"
+        )
+
+
 class TestAnUnreadableStateDoesNotBlockTheChange:
     """`set-mute` is absolute, so the current state is not needed."""
 
-    def test_mute_still_works(self, status):
+    def test_mute_still_works(self, unreadable):
         out = M._run({"action": "mute"})
-        assert ["set-mute", "56", "1"] in status, (
+        assert ["set-mute", "56", "1"] in unreadable, (
             "an unreadable starting state blocked the change, which would "
             "leave the microphone uncontrollable on every machine"
         )
         assert "Muted" in out
 
-    def test_unmute_still_works(self, status):
+    def test_unmute_still_works(self, unreadable):
         M._run({"action": "unmute"})
-        assert ["set-mute", "56", "0"] in status
+        assert ["set-mute", "56", "0"] in unreadable
 
-    def test_and_the_answer_says_it_set_rather_than_changed(self, status):
+    def test_and_the_answer_says_it_set_rather_than_changed(self, unreadable):
         """So the result is checkable by the user instead of resting on a
         claim about state nobody could read."""
         out = M._run({"action": "mute"})

@@ -28,7 +28,7 @@ from typing import Optional, Tuple
 
 from shani_chronoa import files
 from shani_chronoa.config import ChronoaConfig
-from shani_chronoa.pipewire import run_wpctl
+from shani_chronoa.pipewire import mute_state, run_wpctl
 from shani_chronoa.skills import Skill
 
 _CONSENT_KEY = "mic-control-enabled"
@@ -104,25 +104,21 @@ def _default_source() -> Optional[Tuple[str, str]]:
 def _is_muted(ident: str) -> Optional[bool]:
     """Whether a source is muted, or None because wpctl cannot tell us.
 
-    **wpctl has no `get-mute`.** Its commands are status, get-volume, inspect,
-    set-default, set-volume, set-mute, set-profile and clear-default - mute can
-    be *set* but not read back through it. `wpctl inspect` does not expose it
-    either; there is no key containing "mute" in a node's whole property dump,
-    confirmed by inspecting a live source on this machine.
+    **wpctl has no `get-mute`** - its commands are status, get-volume, inspect,
+    set-default, set-volume, set-mute, set-profile and clear-default - so mute
+    can be *set* but not read back through a command of its own. But
+    `wpctl get-volume <id>` prints the mute state in its own output
+    (`Volume: 0.50 [MUTED]`), so the state **is** readable, through the volume
+    command rather than a mute command.
 
-    So the first version of this called `wpctl get-mute <id>`, which does not
-    exist, and every status call answered UNKNOWN. UNKNOWN is the honest result
-    and the code now says *why*, rather than leaving a reader to wonder whether
-    the microphone is muted.
-
-    This is the same shape as the senses that report UNKNOWN when a read fails:
-    the inability to observe is a state the code can represent, and it is not
-    rounded up to a clean yes or no.
+    This function used to run `wpctl get-volume` and then return None on every
+    path, so "is the microphone muted" was always UNKNOWN and a mute was always
+    reported as an unknown outcome. The belief behind it - that the state cannot
+    be read - was contradicted by `volume.py`, which has read it that way all
+    along. The reader now lives in `pipewire.mute_state`, so the three modules
+    that ask this question have one answer.
     """
-    proc = run_wpctl("get-volume", ident)
-    if proc.returncode != 0:
-        return None
-    return None
+    return mute_state(ident).muted
 
 
 def _run(arguments: dict) -> str:
@@ -149,10 +145,16 @@ def _run(arguments: dict) -> str:
         # finding. "UNKNOWN" alone invites the reader to wonder whether the
         # microphone is muted, and there is no way for them to find out either.
         if muted is None:
+            # Says why the state is UNKNOWN rather than leaving it looking like a
+            # finding. "UNKNOWN" alone invites the reader to wonder whether the
+            # microphone is muted, and there is no way for them to find out
+            # either. The reason is now the *read* failing, not the command
+            # line: `wpctl get-volume` does report the state, so a failure here
+            # is this node or this audio server, not a missing capability.
             return (f"Default microphone: {description}\n"
-                    f"Mute state: UNKNOWN - wpctl can set a microphone's mute "
-                    f"state but cannot report it, so this is not knowable from "
-                    f"the command line on this system.")
+                    f"Mute state: UNKNOWN - wpctl could not read this "
+                    f"microphone's volume back, so its mute state could not be "
+                    f"seen from here.")
         return f"Default microphone: {description}\nMute state: {state}"
 
     allowed, reason = _consent(ChronoaConfig())
@@ -163,8 +165,8 @@ def _run(arguments: dict) -> str:
         # Not a reason to refuse, and not a reason to guess. `set-mute` takes an
         # absolute 1 or 0, so this change does not depend on the current state
         # and is safe to make. Refusing here would leave the microphone
-        # permanently uncontrollable through this skill on every machine, since
-        # wpctl cannot report the state to compare against.
+        # permanently uncontrollable through this skill on any machine where the
+        # read fails, for a change that does not need the read.
         proc = run_wpctl("set-mute", ident, "1" if action == "mute" else "0")
         if proc.returncode != 0:
             detail = (proc.stderr or "").strip()
@@ -175,8 +177,9 @@ def _run(arguments: dict) -> str:
         # than resting on a claim about state nobody could read.
         return (f"{'Muted' if action == 'mute' else 'Unmuted'} the microphone "
                 f"({description}). Note: its previous mute state could not be "
-                f"read - wpctl has no way to report it - so this set it rather "
-                f"than changing it from a known starting point.")
+                f"read - wpctl could not read this microphone's volume back - so "
+                f"this set it rather than changing it from a known starting "
+                f"point.")
 
     want = action == "mute"
     if muted == want:

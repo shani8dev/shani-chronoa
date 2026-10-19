@@ -27,6 +27,8 @@ disable anything. A driver without the control is not a permission problem and
 not a silent success.
 """
 
+import re
+
 import pytest
 
 from shani_chronoa.skills import privacy
@@ -84,6 +86,101 @@ def wired(monkeypatch):
     monkeypatch.setattr(privacy.shutil, "which", lambda n: f"/usr/bin/{n}")
     monkeypatch.setattr(privacy.subprocess, "run", fake)
     return fake
+
+
+class TestThePostConditionReadsTheStateBack:
+    """The check that the effect happened, and it used to check the wrong thing.
+
+    `_mute_mic` runs `wpctl set-mute`, so the effect is the audio server's
+    mute state - not a GSettings key. The post-condition used to read
+    `privacy-mic-muted`, a key that **nothing writes** and that is not in the
+    schema, so it always read `False`. The check could not tell its two cases
+    apart: muting was reported as FAILED every time even when the microphone
+    really was muted, and unmuting was reported as VERIFIED every time without
+    having checked anything at all.
+    """
+
+    def _status(self, monkeypatch, muted):
+        """A status in which every source is muted, or none of them is.
+
+        Every source, because `_mute_mic` mutes every source - so a status
+        where one is muted and the other is not is a state the skill would
+        not have produced, and the check rightly refuses it.
+        """
+        marker = " MUTED]" if muted else "]"
+        text = re.sub(r"\[vol: [0-9.]+\]", "[vol: 1.00" + marker, WPCTL_STATUS)
+
+        def fake(*arguments, **kwargs):
+            class R:
+                stdout = text
+                stderr = ""
+                returncode = 0
+            return R()
+        monkeypatch.setattr(privacy.shutil, "which", lambda n: f"/usr/bin/{n}")
+        monkeypatch.setattr(privacy.subprocess, "run", fake)
+
+    def test_muting_is_verified_when_the_microphone_is_muted(self, monkeypatch):
+        self._status(monkeypatch, muted=True)
+        ok, evidence = privacy.POST_CONDITION({"action": "mute_mic"})
+        assert ok is True, evidence
+        assert "muted" in evidence
+
+    def test_muting_is_failed_when_the_microphone_is_not_muted(self, monkeypatch):
+        self._status(monkeypatch, muted=False)
+        ok, evidence = privacy.POST_CONDITION({"action": "mute_mic"})
+        assert ok is False, (
+            "muting was reported as done while the microphone was not muted"
+        )
+
+    def test_unmuting_is_verified_when_the_microphone_is_not_muted(self, monkeypatch):
+        self._status(monkeypatch, muted=False)
+        ok, evidence = privacy.POST_CONDITION({"action": "unmute_mic"})
+        assert ok is True, evidence
+
+    def test_unmuting_is_failed_when_the_microphone_is_muted(self, monkeypatch):
+        """The direction that used to be vacuously true.
+
+        With a key nothing writes, `unmute_mic` always read `False` and always
+        matched its expectation, so it was reported as verified on every call
+        whatever the microphone was doing.
+        """
+        self._status(monkeypatch, muted=True)
+        ok, evidence = privacy.POST_CONDITION({"action": "unmute_mic"})
+        assert ok is False, (
+            "unmuting was reported as verified while the microphone was muted"
+        )
+
+    def test_the_evidence_names_the_audio_server(self, monkeypatch):
+        """Not "settings" - the effect was never a setting."""
+        self._status(monkeypatch, muted=True)
+        _ok, evidence = privacy.POST_CONDITION({"action": "mute_mic"})
+        assert "audio server" in evidence
+        assert "settings" not in evidence
+
+    def test_a_read_action_is_not_checked(self, monkeypatch):
+        self._status(monkeypatch, muted=False)
+        assert privacy.POST_CONDITION({"action": "status"}) is None, (
+            "a read was reported as a failed write"
+        )
+
+    def test_a_state_that_cannot_be_read_is_unverified_not_failed(self, monkeypatch):
+        """**None, not a verdict.**
+
+        A check that could not answer is UNVERIFIED. Reporting it as FAILED
+        tells the caller the microphone is not muted - the opposite of what is
+        known - and a failed verdict is what the learning layer trains on.
+        """
+        monkeypatch.setattr(privacy, "_audio_targets", lambda: [])
+        assert privacy.POST_CONDITION({"action": "mute_mic"}) is None, (
+            "a check that could not read the state reported the write as failed"
+        )
+
+    def test_a_source_with_no_reported_state_is_unverified_not_failed(self, monkeypatch):
+        """The integrated camera: wpctl will not report a mute state for it."""
+        monkeypatch.setattr(privacy, "_audio_targets", lambda: [
+            {"id": "79", "name": "Integrated Camera (V4L2)", "default": True,
+             "muted": None}])
+        assert privacy.POST_CONDITION({"action": "mute_mic"}) is None
 
 
 class TestTheWpctlTree:

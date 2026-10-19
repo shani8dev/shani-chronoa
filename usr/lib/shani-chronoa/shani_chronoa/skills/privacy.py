@@ -148,22 +148,21 @@ def _audio_targets() -> List[dict]:
         # an endswith("@") test never matches this form.
         named = re.match(r"^(@[A-Za-z0-9_]+@)", token)
         if named:
+            described = bare[len(named.group(1)):].strip()
             found.append({"id": named.group(1),
-                          "name": bare[len(named.group(1)):].strip(),
-                          "default": "*" in line, "muted": None})
+                          "name": described,
+                          "default": "*" in line,
+                          "muted": pipewire.status_muted(described)})
             continue
         match = re.match(r"^(\d+)\.\s+(.*)$", bare)
         if not match:
             continue
         name = re.sub(r"\s*\[vol:.*$", "", match.group(2)).strip()
-        muted = None
-        if "[muted:" in bare:
-            muted = "yes" in bare.split("[muted:")[1].split("]")[0]
         found.append({
             "id": match.group(1),
             "name": name,
             "default": "*" in line,
-            "muted": muted,
+            "muted": pipewire.status_muted(match.group(2)),
         })
     return found
 
@@ -400,8 +399,9 @@ def _status() -> str:
     lines = []
     if mic:
         for source in mic:
-            state = ("unknown" if source["muted"] is None
-                     else ("muted" if source["muted"] else "unmuted"))
+            muted = source.get("muted")
+            state = ("unknown" if muted is None
+                     else ("muted" if muted else "unmuted"))
             default = " (default)" if source["default"] else ""
             lines.append(
                 f"microphone {source['id']}: {source['name']}{default} - {state}"
@@ -450,10 +450,11 @@ def _post_privacy(arguments: dict):
     """Read the state back, rather than trusting the write.
 
     This is the first mutator given a post-condition, and it is the cheapest
-    kind there is: the effect is a GSettings key, so verifying it means reading
-    that key. That turns "Chronoa believes it muted the microphone" into
-    something checkable, which is what makes the recorded verdict `verified`
-    rather than `unverified`.
+    kind there is: the effect is a change to the audio server's mute state, so
+    verifying it means reading that state back with the same tool the write
+    used. That turns "Chronoa believes it muted the microphone" into something
+    checkable, which is what makes the recorded verdict `verified` rather than
+    `unverified`.
 
     **92% of the recorded traffic is `unverified`, and that is the reason
     nothing in the learning layer can train.** `learning.train_and_save()`
@@ -462,8 +463,19 @@ def _post_privacy(arguments: dict):
     mutators like this one having no post-condition, so the gap is worth
     closing one skill at a time rather than by assertion.
 
-    Returns `(ok, evidence)` because "it says it is muted" and "the key says
-    muted" are different claims, and the evidence should say which.
+    Returns `(ok, evidence)` because "it says it is muted" and "the audio server
+    says it is muted" are different claims, and the evidence should say which.
+
+    **It used to read a GSettings key.** The docstring said "the effect is a
+    GSettings key, so verifying it means reading that key" - but the effect is
+    not a GSettings key. `_mute_mic` runs `wpctl set-mute`, and
+    `privacy-mic-muted` is written by nothing and is not even declared in the
+    schema, so `get_bool` took its Python default on every call. The
+    consequence was that the check could not distinguish its two cases: muting
+    was reported as FAILED every single time even when the microphone really was
+    muted, and unmuting was reported as VERIFIED every single time without
+    having checked anything. The effect is now read back from the audio server,
+    which is where the write put it.
     """
     action = str(arguments.get("action") or "").strip()
     if action not in ("mute_mic", "unmute_mic"):
@@ -471,17 +483,41 @@ def _post_privacy(arguments: dict):
 
     expected = action == "mute_mic"
     try:
-        from shani_chronoa import config as config_mod
-        actual = bool(config_mod.ChronoaConfig().get_bool("privacy-mic-muted", False))
+        targets = _audio_targets()
     except Exception as exc:  # noqa: BLE001 - cannot check is not a failure
-        return (False, f"could not read the microphone state back: "
-                       f"{type(exc).__name__}")
-    if actual == expected:
-        return (True, f"microphone is {'muted' if expected else 'unmuted'}, "
-                      f"read back from settings")
+        # **None, not a verdict** - see the note on the other "could not
+        # determine" branch below. A check that could not answer is UNVERIFIED.
+        logger.warning("could not read the microphone state back: %s",
+                       type(exc).__name__)
+        return None
+    if not targets:
+        # "I could not determine" is not "the effect is absent", so this is a
+        # refusal to answer rather than a verdict.
+        return None
+
+    states = []
+    for target in targets:
+        muted = target.get("muted")
+        if muted is None:
+            continue
+        states.append((str(target.get("name") or target["id"]), muted))
+    if not states:
+        # **None, not a verdict.** The state could not be read, and a check
+        # that could not answer is UNVERIFIED - reporting it as a failed write
+        # tells the caller the microphone is not muted, which is the opposite
+        # of what is known. `verification.verify` draws exactly this line: a
+        # callable that returns None is "this call changed nothing I can
+        # check", never FAILED.
+        return None
+
+    names = ", ".join(name for name, _ in states)
+    if all(muted == expected for _, muted in states):
+        return (True, f"microphone is {'muted' if expected else 'unmuted'} on "
+                      f"{names}, read back from the audio server")
     return (False, f"expected the microphone to be "
-                   f"{'muted' if expected else 'unmuted'}, but settings say "
-                   f"{'muted' if actual else 'unmuted'}")
+                   f"{'muted' if expected else 'unmuted'}, but the audio "
+                   f"server reports {names} as "
+                   f"{'muted' if any(m for _, m in states) else 'unmuted'}")
 
 
 POST_CONDITION = _post_privacy

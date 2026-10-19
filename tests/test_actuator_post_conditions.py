@@ -228,6 +228,20 @@ def test_volume_level_and_mute(bindir, tmp_path):
     assert _verify("volume", {}, tool="get_volume").verdict is Verdict.UNVERIFIED
 
 
+def test_a_volume_read_that_cannot_be_made_is_unverified(bindir):
+    """**UNVERIFIED, not FAILED.**
+
+    A check that could not answer is not a failed write. `wpctl get-volume`
+    failing says the *read* could not be made - the set may well have worked -
+    and reporting it as FAILED tells the caller the volume did not change,
+    which is a claim nobody made. `verification.verify` draws exactly this
+    line in its own docstring.
+    """
+    _stub(bindir, "wpctl", "exit 1\n")
+    assert _verify("volume", {"percent": 50}, tool="set_volume").verdict is Verdict.UNVERIFIED
+    assert _verify("volume", {"mute": True}, tool="set_mute").verdict is Verdict.UNVERIFIED
+
+
 def test_power_profile(bindir):
     _stub(bindir, "powerprofilesctl", 'echo balanced\n')
     assert _verify("power_profile", {"profile": "balanced"}).verdict is Verdict.VERIFIED

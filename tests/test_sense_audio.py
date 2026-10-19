@@ -51,9 +51,9 @@ WPCTL_STATUS = """PipeWire 'pipewire-0' [1.0.5, host]
  │  *   54. Tiger Lake-LP Smart Sound Technology Audio Controller Speaker + Headphones  [vol: 0.50]
  │
  ├─ Sources:
- │      55. Tiger Lake-LP Smart Sound Technology Audio Controller Headphones Stereo Microphone  [vol: 1.00]
+ │      55. Tiger Lake-LP Smart Sound Technology Audio Controller Headphones Stereo Microphone  [vol: 1.00 MUTED]
  │  *   56. Tiger Lake-LP Smart Sound Technology Audio Controller Digital Microphone  [vol: 0.43]
- │      49. Integrated Camera (V4L2)                    [muted: yes]
+ │      49. Integrated Camera (V4L2)
 """
 
 WPCTL_EMPTY = "PipeWire 'pipewire-0' [1.0.5, host]\n   └─ Clients:\n"
@@ -110,10 +110,85 @@ class TestTheTree:
         assert isinstance(found["sinks"][1]["volume"], float)
 
     def test_the_mute_flag_is_parsed_separately_from_volume(self, wired):
+        """The two are separate facts, and both are in the same annotation.
+
+        A muted node's line ends `[vol: 1.00 MUTED]` - measured by muting a
+        live source and reading the status back - so the volume and the mute
+        state come out of one bracket and must not swallow each other.
+
+        This used to look for `[muted: yes]`, a marker wpctl does not write:
+        its binary carries no such string, so the parse could only ever have
+        matched a device's own description, and the mute flag was None on every
+        machine. The sense's own count of muted devices was therefore always
+        zero, whatever was actually muted.
+        """
+        muted = [s for s in audio._parse_status(WPCTL_STATUS)["sources"]
+                 if s["id"] == "55"][0]
+        assert muted["muted"] is True
+        assert muted["volume"] == 1.00, "a muted node still reports its volume"
+        unmuted = [s for s in audio._parse_status(WPCTL_STATUS)["sources"]
+                   if s["id"] == "56"][0]
+        assert unmuted["muted"] is False, (
+            "a node with a volume and no MUTED marker is known to be unmuted, "
+            "not unknown"
+        )
+
+    def test_a_node_with_no_annotation_is_not_known_to_be_unmuted(self, wired):
+        """The integrated camera is the real case: wpctl refuses to mute it.
+
+        Measured on this machine - `wpctl set-mute` on the camera answers "Node
+        does not support mute" and `wpctl get-volume` answers "does not support
+        volume", and its status line carries no annotation at all. A node whose
+        state was never reported is unknown, not unmuted.
+        """
         camera = [s for s in audio._parse_status(WPCTL_STATUS)["sources"]
                   if "Camera" in s["name"]][0]
-        assert camera["muted"] is True
-        assert camera["volume"] is None, "a muted device with no [vol:] is not volume 0"
+        assert camera["muted"] is None
+        assert camera["volume"] is None
+
+
+class TestTheMutedCount:
+    """The number the sense reports, which used to be zero on every machine.
+
+    `wpctl status` carries the mute state inside the volume annotation, so the
+    count could always have been right - and was not, because two modules
+    parsed a `[muted: yes]` marker that wpctl does not write. A count of muted
+    devices that is always zero is the confident wrong answer: it says nothing
+    is muted, on a machine where something is.
+    """
+
+    def test_a_muted_device_is_counted(self, wired, granted):
+        percept = audio._run({})
+        assert percept.metadata["muted"] == 1, (
+            "a muted microphone was not counted - the marker is "
+            "[vol: 1.00 MUTED], and this used to look for [muted: yes]"
+        )
+
+    def test_the_count_is_not_the_number_of_annotations(self, wired, granted):
+        """A device with no annotation is unknown, and unknown is not muted.
+
+        The camera in the fixture carries no volume and no mute state, so it is
+        not counted - and it is not counted as *unmuted* either, which is why
+        the count is a count of muted devices and not of all devices.
+        """
+        percept = audio._run({})
+        assert percept.metadata["sinks"] == 2
+        assert percept.metadata["sources"] == 3
+        assert percept.metadata["muted"] == 1
+
+    def test_no_muted_device_reads_as_zero(self, wired, granted, monkeypatch):
+        """The control: with nothing muted the count really is zero.
+
+        A test that only ever saw a non-zero count could not tell a count that
+        works from a constant.
+        """
+        monkeypatch.setattr(audio, "_run_wpctl",
+                            lambda *a: type("R", (), {
+                                "stdout": WPCTL_STATUS.replace(
+                                    "[vol: 1.00 MUTED]", "[vol: 1.00]"),
+                                "stderr": "", "returncode": 0})())
+        percept = audio._run({})
+        assert percept.metadata["muted"] == 0
 
     def test_the_id_is_the_first_number_not_the_vendor(self, wired):
         assert audio._parse_status(WPCTL_STATUS)["sinks"][0]["id"] == "51"
@@ -133,18 +208,23 @@ class TestSinksAreNotSources:
         assert "V4L2 device is an audio capture node" in content
 
     def test_every_annotation_is_stripped_from_the_name(self, wired):
-        """Only `[vol: …]` was being removed, so a muted device with no volume
-        annotation carried the whole bracket into its name — and the name is
-        what a person reads."""
+        """Only `[vol: …]` was being removed, so a muted device carried the
+        whole bracket into its name — and the name is what a person reads.
+
+        The bracket a muted node carries is `[vol: 1.00 MUTED]`, so the strip
+        has to take the whole group rather than the part after `[vol:`.
+        """
         for entry in (audio._parse_status(WPCTL_STATUS)["sinks"]
                       + audio._parse_status(WPCTL_STATUS)["sources"]):
             assert "[" not in entry["name"], entry["name"]
             assert "vol:" not in entry["name"], entry["name"]
-            assert "muted:" not in entry["name"], entry["name"]
-        camera = [s for s in audio._parse_status(WPCTL_STATUS)["sources"]
-                  if "Camera" in s["name"]][0]
-        assert camera["name"] == "Integrated Camera (V4L2)"
-        assert camera["muted"] is True
+            assert "MUTED" not in entry["name"], entry["name"]
+        muted = [s for s in audio._parse_status(WPCTL_STATUS)["sources"]
+                 if s["id"] == "55"][0]
+        assert muted["name"] == (
+            "Tiger Lake-LP Smart Sound Technology Audio Controller "
+            "Headphones Stereo Microphone")
+        assert muted["muted"] is True
 
     def test_a_real_microphone_is_not_mistaken_for_the_camera(self, wired, granted):
         sources = [s["name"] for s in audio._parse_status(WPCTL_STATUS)["sources"]]

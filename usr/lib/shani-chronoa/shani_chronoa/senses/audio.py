@@ -114,8 +114,8 @@ def _parse_status(text: str) -> Dict[str, List[dict]]:
         if not match:
             continue
         # Every bracketed annotation comes off, not just `[vol:` — a device
-        # with `[muted: yes]` and no volume annotation otherwise carries the
-        # whole bracket into its name, and the name is what a person reads.
+        # whose description ends in a bracket otherwise carries the whole thing
+        # into its name, and the name is what a person reads.
         name = re.sub(r"\s*\[[^]]*\]\s*$", "", match.group(2)).strip()
         if not name:
             continue
@@ -126,9 +126,14 @@ def _parse_status(text: str) -> Dict[str, List[dict]]:
                 volume = float(volume_match.group(1))
             except ValueError:
                 volume = None
-        muted = None
-        if "[muted:" in bare:
-            muted = "yes" in bare.split("[muted:")[1].split("]")[0]
+        # The mute state comes out of the same annotation: a muted node's line
+        # reads `[vol: 1.00 MUTED]`, measured by muting a live source and
+        # reading the status back. This used to look for `[muted: yes]`, a
+        # marker wpctl does not write — its binary carries no such string — so
+        # the parse never fired and this sense reported "0 muted" whatever was
+        # actually muted. `pipewire.status_muted` owns the rule, so the two
+        # modules that read wpctl's status have one answer.
+        muted = pipewire.status_muted(match.group(2))
         found[section].append({
             "id": match.group(1),
             "name": name,

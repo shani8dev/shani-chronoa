@@ -103,9 +103,98 @@ def run_wpctl(*args: str) -> "subprocess.CompletedProcess[str]":
     )
 
 
+def status_muted(entry: str) -> Optional[bool]:
+    """Whether a `wpctl status` node entry says the node is muted.
+
+    Measured against a live PipeWire 1.6.2 / wireplumber, by muting a source
+    and reading the status back: a muted node's line ends
+
+        [vol: 1.00 MUTED]
+
+    and an unmuted one ends `[vol: 1.00]`. So the marker is `MUTED` **inside**
+    the volume bracket.
+
+    Two forms this is not, both of which this tree had believed:
+
+    - **`[muted: yes]`** - two modules parsed that, and wpctl's binary carries
+      no such string at all, so it could only ever have matched a device's own
+      description. It never fired, which is why the audio sense reported "0
+      muted" on every machine whatever was actually muted.
+    - **`[MUTED]`** - that is the form `wpctl get-volume` prints
+      (`Volume: 1.00 [MUTED]`), not the one `status` prints. The two commands
+      differ, and a reader that took one for the other would read a
+      permanently-unmuted machine as muted.
+
+    None when the entry carries no volume annotation at all: a node with
+    neither a volume nor a mute state is not a node known to be unmuted. The
+    integrated camera is such a node - `wpctl` refuses to mute it and it
+    refuses to report a volume for it.
+
+    `entry` is the "name [annotation]" part of a status line, with the
+    box-drawing characters already stripped.
+    """
+    start = entry.rfind("[")
+    if start < 0 or not entry.endswith("]"):
+        return None
+    annotation = entry[start + 1:-1].strip()
+    if not annotation.startswith("vol:"):
+        return None
+    return annotation.rstrip().endswith("MUTED")
+
+
 def is_available() -> bool:
     """Whether a live PipeWire graph can be queried."""
     return bool(shutil.which("pw-dump")) and bool(_graph_nodes())
+
+
+@dataclass(frozen=True)
+class MuteState:
+    """What `wpctl` says about one node's mute state, and the text it came from.
+
+    `muted` is None when wpctl could not tell us - which is a state the code can
+    represent, and is not rounded up to a clean yes or no.
+    """
+
+    muted: Optional[bool]
+    text: str
+
+
+def mute_state(ident: str) -> MuteState:
+    """Whether a node is muted, or None because wpctl cannot tell us.
+
+    **wpctl has no `get-mute`.** Its commands are status, get-volume, inspect,
+    set-default, set-volume, set-mute, set-profile and clear-default - mute can
+    be *set*, but not read back through a command of its own. That is why
+    `set_mic_mute.py` used to answer UNKNOWN for "is the microphone muted" and
+    why `privacy.py`'s post-condition used to read a GSettings key that nothing
+    writes: both believed the state was unreadable.
+
+    **It is readable.** `wpctl get-volume <id>` prints the mute state in its own
+    output -
+
+        Volume: 0.50 [MUTED]
+
+    - and omits the marker when the node is not muted. So the state comes back
+    through the volume command's output rather than through a mute command, and
+    the tree's own captured output says so (`tests/conftest.py` fakes exactly
+    that line). `volume.py`'s post-condition has read it that way all along,
+    which is what makes the other two readings a belief rather than a fact.
+
+    One reader, one rule. Three modules had three answers to the same question
+    - one correct, one that threw the answer away, and one that looked
+    somewhere the state was never written.
+    """
+    proc = run_wpctl("get-volume", ident)
+    if proc.returncode != 0:
+        return MuteState(None, (proc.stderr or "").strip())
+    text = (proc.stdout or "").strip()
+    if "Volume:" not in text:
+        # A command that exited 0 and printed nothing has not answered. Reading
+        # that as "not muted" would be the absence-shaped wrong answer: the
+        # marker is absent from every unmuted node, so an empty output and an
+        # unmuted node are the same absence and only one of them is a fact.
+        return MuteState(None, text)
+    return MuteState("[MUTED]" in text, text)
 
 
 def _devices(kind: str) -> list[AudioDevice]:

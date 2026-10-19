@@ -156,16 +156,29 @@ def _post_condition(arguments: dict, tool: "str | None" = None):
     device = _device(arguments)
     if isinstance(device, _Refusal):
         return None
-    shown = _run_wpctl("get-volume", device)
-    if shown.returncode != 0:
-        return False, f"could not read {device} back"
-    text = shown.stdout.strip()
     if tool == "set_mute":
         want = arguments.get("mute")
         if not isinstance(want, bool):
             return None
-        muted = "[MUTED]" in text
-        return muted == want, f"read back: {text}"
+        # The `[MUTED]` rule is `pipewire`'s, so the three modules that ask
+        # this question have one answer. It used to be written out here, and
+        # `set_mic_mute.py` and `privacy.py` each had their own - one correct,
+        # one that threw the answer away, and one that looked where the state
+        # was never written.
+        state = pipewire.mute_state(device)
+        if state.muted is None:
+            return None
+        return state.muted == want, f"read back: {state.text}"
+    shown = _run_wpctl("get-volume", device)
+    if shown.returncode != 0:
+        # **None, not a verdict.** The read could not be made, and a check that
+        # could not answer is UNVERIFIED - `verification.verify` says so in its
+        # own docstring: "reporting a read as a failed write is a confident
+        # wrong answer". The set may well have worked; wpctl simply could not
+        # be asked about it afterwards. The same line applies to the two
+        # sibling modules that read a mute state back.
+        return None
+    text = shown.stdout.strip()
     percent = arguments.get("percent")
     if isinstance(percent, bool) or not isinstance(percent, int):
         return None
