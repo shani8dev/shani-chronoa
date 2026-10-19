@@ -361,6 +361,18 @@ def test_starting_a_new_conversation_clears_the_composer():
     `ChronoaWindow.clear_input()` had existed for this and had no caller, which
     is the unwired-helper class this repository records repeatedly - and here the
     helper was right and the wiring was missing, which is the harder half to see.
+
+    **The open conversation is given something in it first**, and that is the
+    half this test was missing. `conversation_store.new_session` *reuses* an
+    empty open conversation rather than piling up blanks - so on a fresh app
+    Ctrl+N started no new conversation at all, and the composer correctly kept
+    the text, because it still belonged to the conversation it was written for.
+    The test therefore never reached the case it describes.
+
+    With a conversation that has something in it, Ctrl+N really does start a new
+    one - and then the composer must show the *new* conversation's draft, which
+    is empty. The text is not destroyed: it is that conversation's draft, and
+    going back finds it.
     """
     import gi
     gi.require_version("Gtk", "4.0")
@@ -368,6 +380,7 @@ def test_starting_a_new_conversation_clears_the_composer():
     from gi.repository import Adw, GLib
     Adw.init()
     from shani_chronoa.app import ChronoaApplication
+    from shani_chronoa import conversation_store
 
     app = ChronoaApplication()
     app.set_property("application-id", "test.chronoa.reset.composer")
@@ -378,6 +391,10 @@ def test_starting_a_new_conversation_clears_the_composer():
     def step():
         try:
             window = app.window
+            # Something in the open conversation, so Ctrl+N starts a new one.
+            conversation_store.append(
+                {"role": "user", "content": "an earlier question"},
+                conversation_store.active_path(conversation_store.session_dir()))
             window._set_input_text("half-typed question I never sent")
             before = window.get_input_text()
             app.activate_action("reset-conversation", None)

@@ -124,7 +124,15 @@ class _Section(Gtk.Box):
             self._body.append(_label(detail, "dim-label"))
 
     def _loud(self) -> None:
-        """Something to show: the full section again."""
+        """Something to show: the full section again.
+
+        **And the quiet line's text goes with it.** It was hidden rather than
+        emptied, so a stale claim stayed in the tree - and "No rule has fired"
+        left in a section that could not be read at all is a lie told to
+        anything that walks the labels, visible or not.
+        """
+        self._quiet.set_text("")
+        self._quiet.set_tooltip_text("")
         self._quiet.set_visible(False)
         self._body.set_visible(True)
         self.remove_css_class("rail-quiet")
@@ -138,6 +146,13 @@ class _Section(Gtk.Box):
             self._body.set_visible(False)
             self.add_css_class("rail-quiet")
             return
+        # **A fault is loud, and the quiet line it replaces is a lie.** The
+        # section has usually already said "No rule has fired" - which is what
+        # it says when there is nothing to show - and a fault arriving after
+        # that was appended to a body that had been *hidden*, so the section
+        # kept saying nothing had fired when in fact it could not be read at
+        # all. So the quiet line goes and the body comes back.
+        self._loud()
         self._body.append(_label(text, "dim-label"))
 
     def controlled(self, text: str, detail: str,

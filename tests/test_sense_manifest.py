@@ -187,8 +187,18 @@ class TestEverySenseHasAConsentKey:
     def test_only_senses_whose_schema_default_is_true_are_allowed_out_of_the_box(
         self, chronoa_config, registry, gsettings_env
     ):
-        # Given: a fresh install - no user overrides, privacy mode on - and
+        # Given: a fresh install - no user overrides, privacy mode ON - and
         # each sense's consent key default as declared in the compiled schema
+        #
+        # **Privacy mode is turned on here rather than assumed.** It used to
+        # default to true and the test asserted the default instead of
+        # arranging it, so when the default moved (2026-10-19: "a fresh
+        # install could not answer") this failed for a reason that had
+        # nothing to do with what it measures. What the default *is* is
+        # `test_the_defaults_are_the_everyday_preset.py`'s business; what
+        # this test is about is that a default-on sense is allowed and an
+        # overridden one is not.
+        chronoa_config.set("privacy-mode", "true")
         assert chronoa_config.privacy_mode is True, (
             "the hermetic keyfile store must start in privacy mode, or this "
             "test cannot tell a default-on sense from an overridden one"

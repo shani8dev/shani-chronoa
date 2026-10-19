@@ -308,12 +308,37 @@ def test_the_mascot_is_created_in_the_apps_own_process():
     app's preload is no longer needed and **should** be removed rather than left
     costing every launch 7 ms. That is why the claim is a test and not a note:
     the thing that justifies the change is exactly what can retire it.
+
+    **Through `mascot.create()`, which is the one construction site.** The app
+    used to write `mascot.Mascot(self)`, and it now asks the module for a
+    companion: `create()` returns the layer-shell `Mascot` where the
+    compositor allows one, and the Shell's own notch where it does not. Both
+    are built **in the app's process**, so the preload is still load-bearing
+    for the first of them - and a test that pinned the old spelling would
+    have called a *spelling* a decision, and the preload would have stayed
+    out of inertia while the test said it was fine.
+
+    So the claim is asked of the shape rather than of a literal: the app
+    builds its companion here, and the module offers exactly one way to
+    build one.
     """
     source = package_source("app.application")
+    mascot_source = package_source("mascot")
 
-    assert "mascot.Mascot(self)" in source, (
+    assert "mascot.create(self)" in source, (
         "the app used to build the mascot in-process; if that has changed, the "
         "preload in usr/bin/shani-chronoa needs a decision rather than inertia")
+    assert "def create(" in mascot_source, (
+        "the module offers no way to build a companion, so the app's call to "
+        "it cannot be the one construction site")
+    # **One construction site, so the choice of class is made in one place.**
+    # The app used to name `Mascot` directly, and the notch was added
+    # afterwards; a second `Mascot(app)` in the app would be a class chosen
+    # away from the module that says which one to use.
+    assert mascot_source.count("Mascot(app)") == 2, (
+        "the module builds a Mascot in more than one place, so the class is "
+        "not chosen in one place and the app's preload may not cover the "
+        "one it gets")
 
 
 def test_the_mascot_asks_for_a_layer_surface():

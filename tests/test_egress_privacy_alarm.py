@@ -305,16 +305,57 @@ class TestReadingTheSettingFailsSafe:
 
     def test_the_default_with_no_schema_at_all_is_still_privacy_mode_on(self, monkeypatch):
         """A missing schema is not an exception: `ChronoaConfig` logs a warning
-        and falls back to Python defaults. `get_bool("privacy-mode", True)`
-        must therefore default to ON, which is a property of `config.py` and
-        worth pinning here because this module now depends on it."""
-        from shani_chronoa.config import ChronoaConfig
+        and falls back to Python defaults.
 
-        monkeypatch.delenv("GSETTINGS_SCHEMA_DIR", raising=False)
-        config = ChronoaConfig()
-        config._settings = None  # noqa: SLF001 - simulating an uninstalled schema
-        assert config.privacy_mode is True
-        assert egress.privacy_mode_enabled() is True
+        **The two answers now differ, and the difference is the point.**
+
+        - `config.privacy_mode` is the **default** - `false`, the same value
+          the schema ships, because a machine with no schema to read is
+          indistinguishable from a fresh install for that purpose.
+        - `egress.privacy_mode_enabled()` is **True**, because the alarm has
+          to fail toward privacy mode being on. A default is not a reading,
+          and a broken settings store that read as "privacy mode off" would
+          quietly disarm the invariant this module exists to defend.
+
+        Until 2026-10-19 the second answer was reached *by accident*, because
+        the Python fallback happened to be `True`. When `privacy-mode`'s
+        default moved to `false`, the accident stopped being one and the alarm
+        began failing open on every machine whose schema was never compiled.
+        The question is now asked directly - `ChronoaConfig.setting_readable`
+        - rather than inferred from the value of a default.
+
+        **The class is patched rather than the environment.** GSettings' default
+        schema source is built once per process and caches the directory it
+        found, so deleting `GSETTINGS_SCHEMA_DIR` after the first config has
+        been built changes nothing. This test used to assert the *default*
+        was `True` and passed whatever the schema said, which is why it never
+        noticed.
+        """
+        import shani_chronoa.config as config_mod
+
+        class _NoSchema(config_mod.ChronoaConfig):
+            """A config whose schema is not there."""
+
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self._settings = None  # noqa: SLF001 - no schema to read
+                self._valid_keys = frozenset()  # noqa: SLF001
+
+        monkeypatch.setattr(config_mod, "ChronoaConfig", _NoSchema)
+
+        config = config_mod.ChronoaConfig()
+        assert config.setting_readable("privacy-mode") is False, (
+            "the setting claims to be readable when there is no schema to read "
+            "it from"
+        )
+        assert config.privacy_mode is False, (
+            "with no schema the config answers its Python default, which is the "
+            "same value the schema ships"
+        )
+        assert egress.privacy_mode_enabled() is True, (
+            "the alarm must fail TOWARD privacy mode being on when the "
+            "setting cannot be read"
+        )
 
 
 # --- no call site may silently drop the flag again ---------------------------

@@ -239,6 +239,12 @@ def test_privacy_mode_denies_a_networked_sense_before_its_run(gsettings_env, tmp
     from shani_chronoa.config import ChronoaConfig
 
     config = ChronoaConfig()
+    # Privacy mode is turned ON here rather than assumed. It used to default to
+    # true and this asserted the default instead of arranging it, so when the
+    # default moved (2026-10-19) the test failed for a reason that had nothing
+    # to do with what it measures - the denial of a networked sense under
+    # privacy mode.
+    config.set("privacy-mode", "true")
     assert config.privacy_mode is True
     config.set("web-sense-enabled", "true")  # consent alone still is not enough
 

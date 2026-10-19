@@ -132,7 +132,17 @@ class TestTheSenseIsRegisteredAndConsentGated:
 
     def test_consent_is_off_on_a_fresh_install(self, chronoa_config):
         # The shipped default is the whole point: screen capture is opt-in.
-        assert chronoa_config.privacy_mode is True
+        #
+        # **The vision sense's own key is what decides it now.** This used to
+        # assert `privacy_mode is True` as well, which was a *proxy* for the
+        # same thing: privacy mode used to default on, and it denied the
+        # networked senses. It no longer does (2026-10-19), and the sense is
+        # off on its own account instead - which is a stronger guarantee than
+        # the proxy, because it no longer depends on another switch being on.
+        assert chronoa_config.get_bool("vision-sense-enabled", False) is False, (
+            "the vision sense is the widest privacy surface this app has and it "
+            "ships off"
+        )
         assert chronoa_config.sense_allowed("vision") is False
         said = chronoa_config.sense_allowed_reason("vision")
         assert "Take and describe photos" in said, said

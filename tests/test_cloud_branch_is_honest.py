@@ -289,17 +289,24 @@ def test_completing_the_cloud_branch_leaves_setup_reopenable_when_hearing_is_abs
 def test_turning_on_cloud_recognition_removes_the_ears_download(cloud_config):
     """Opting into the cloud must actually stop charging for a local model.
 
-    **Both gates are opened explicitly**, because `privacy-mode` defaults to
-    **true** in the schema - which is the correct default and the reason a first
+    **Both gates are opened explicitly**, and that is the reason a first
     version of this test saw no difference at all: with privacy mode on, cloud
-    speech is unavailable by design, so both branches of the comparison were the
-    same branch. Stating the precondition is what turns that from a passing test
-    of nothing into a test.
+    speech is unavailable by design, so both branches of the comparison were
+    the same branch. Stating the precondition is what turns that from a
+    passing test of nothing into a test.
+
+    **The precondition has moved with the default.** `privacy-mode` shipped
+    `true` when this was written and ships `false` now (2026-10-19: a fresh
+    install that cannot answer is a fresh install that needs two switches
+    flipped before it says anything). The *method* is unchanged - the gate is
+    still opened explicitly - and it is still what makes the comparison
+    meaningful: with privacy mode on, neither branch reaches the cloud.
     """
-    assert cloud_config.get_bool("privacy-mode", True) is True, (
-        "privacy-mode no longer defaults to true; if that changed on purpose, "
-        "this test's premise - that both gates must be opened explicitly - "
-        "needs revisiting")
+    assert cloud_config.get_bool("privacy-mode", False) is False, (
+        "privacy-mode's default moved again; this test's method - opening the "
+        "gate explicitly - is what makes the comparison meaningful, and it "
+        "needs revisiting if that method ever stops being necessary"
+    )
 
     def collect(enabled, privacy):
         cloud_config.set("privacy-mode", "true" if privacy else "false")
@@ -310,7 +317,10 @@ def test_turning_on_cloud_recognition_removes_the_ears_download(cloud_config):
             return _open(cloud_config, after)
         finally:
             cloud_voice._read_switch, cloud_voice._provider_key = original
-            cloud_config.set("privacy-mode", "true")
+            # Back to the default, which is what the fixture found. The keyfile
+            # backend is a process-wide singleton, so a value left behind here
+            # is a value the next test reads.
+            cloud_config.set("privacy-mode", "false")
 
     cloud_on = collect(True, False)
     cloud_off = collect(False, False)

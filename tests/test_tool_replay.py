@@ -38,13 +38,14 @@ _SRC = _REPO / "usr" / "lib" / "shani-chronoa"
 #: coverage is the claim: if a post-condition is added elsewhere the coverage
 #: widens, and this test should be the thing that says so rather than the thing
 #: that quietly stops being true.
-COVERED = ["airplane_mode", "close_window", "container", "control_service",
-           "conversations", "default_apps", "delete_file",
+COVERED = ["airplane_mode", "click_pointer", "close_window", "container",
+           "control_service", "conversations", "default_apps", "delete_file",
            "desktop_setting", "driver_build", "edit_file",
            "find_and_replace", "git_branch", "git_commit", "git_push",
            "kill_process", "manage_mount", "manage_triggers",
-           "office_document", "power_action", "print_queue",
-           "set_hostname", "set_locale", "take_photo", "toggle_wifi", "vm"]
+           "move_pointer", "office_document", "power_action", "print_queue",
+           "set_hostname", "set_locale", "take_photo", "toggle_wifi",
+           "type_text", "vm"]
 #: Kept by hand, deliberately, because the whole point of this list is to be a
 #: **claim** about coverage rather than a re-derivation of it: if it were
 #: computed from the registry it would agree with the registry by construction

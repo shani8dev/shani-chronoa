@@ -1,39 +1,29 @@
-"""The organ strip is centred - measured on the cells, not on its own box.
+"""The organ lights sit at the end of the status row, measured on the cells.
 
 `tests/test_now_rail.py::test_the_organ_lights_are_separated_by_a_gap` exists
 because a width test passed while the strip was one unreadable run-on string.
 This is the same class of defect from the other side, and it is why this file
 measures rather than asserts a property.
 
-**The defect it records.** AGENTS.md carried the strip as an open lead: *"is the
-row aligned? labels span x=296..791 (centre 543) while the mode chips below span
-477..782 (centre 629) - **86px off**"*, with two attempted fixes *"measurably
-no-ops"*. Both were true **and later superseded**: `OrganStrip.do_measure` now
-reports the real sum of the cells' widths instead of `Gtk.FlowBox`'s
-widest-child-x-count, so the strip is allocated exactly what its lights need and
-`halign=CENTER` finally has slack to work with. The lead was never closed, so it
-sat in the file describing a bug that had been fixed - which is the reading that
-costs somebody an afternoon.
+**The defect it records, and the change that superseded it.** AGENTS.md carried
+the strip as an open lead: *"is the row aligned? labels span x=296..791 (centre
+543) while the mode chips below span 477..782 (centre 629) - **86px off**"*, with
+two attempted fixes *"measurably no-ops"*. The first repair was
+`OrganStrip.do_measure` reporting the real sum of the cells' widths instead of
+`Gtk.FlowBox`'s widest-child-x-count, so the strip stopped claiming 815px for
+479px of lights.
 
-**Two mutations reproduce it exactly**, and both were run before this test
-existed:
+**The row was then redesigned, and this file's premise went with it.** The two
+strips are one row now - "what Chronoa *is* on the left, what it is *doing* on
+the right" - so the lights are beside the mode chips rather than above them,
+and there is no second row for them to be misaligned with. The lights are at
+the **end** of that row, and that is the property measured here.
 
-| change | `reported_natural` | content left | content right | verdict |
-|---|---|---|---|---|
-| as shipped | 479 | 130 | 131 | centred |
-| `halign` -> `FILL` | 479 | 0 | 258 | 129px off |
-| `do_measure` removed | **815** | 1 | 260 | 130px off |
-
-815 is the exact figure AGENTS.md recorded for the un-overridden flow box, so
-the historical root cause is reproduced, not approximated.
-
-**Why the cells and not the strip's box** - the mistake this file's first version
-made, and it took a mutation to catch. With `halign=FILL` the strip's *box* is
-trivially centred: left margin 0, right margin 0, `off_by` 0. Its lights are
-hard against the column's left edge with 258px of nothing on the right, which is
-the original defect exactly. A check that reports "centred" for the broken
-layout is worse than no check, and it was green under mutation before this
-sentence was written.
+**Why the cells and not the strip's box** - the mistake this file's first
+version made, and it took a mutation to catch. A strip's own box is centred by
+construction under `halign=FILL` while its *content* sits at one end, so a
+check that reads the box reports "centred" for a layout that is not. The
+measurements below are the cells' own allocations.
 """
 
 from __future__ import annotations
@@ -100,28 +90,35 @@ def measure_strip(monkeypatch):
 
     _shipped_init = OrganStrip.__init__
 
-    def run(halign=None):
+    def run(margin_end=0):
         from shani_chronoa.gui import organs
 
         # **Reset on every call, not only when patching.** `monkeypatch` undoes
         # at test teardown, so a second `run()` inside one test inherited the
-        # previous call's `FILL` and the control measured the broken strip
-        # twice - reporting "not centred" against the *shipped* build. The
+        # previous call's patch and the control measured the broken strip
+        # twice - reporting a broken layout against the *shipped* build. The
         # original is captured here, once, and restored first so that
-        # `halign=None` always means "as shipped".
+        # `margin_end=0` always means "as shipped".
+        #
+        # **A margin, and not an alignment.** The row is exactly full at the
+        # default width - the mode chips and the lights together fill it - so
+        # moving the strip within the leftover space changes no pixel, and a
+        # control built on an alignment would measure the shipped build twice
+        # and call it broken. A right margin pushes the *content* away from
+        # the row's end, which is the thing the property is about.
         monkeypatch.setattr(organs.OrganStrip, "__init__", _shipped_init)
-        if halign is not None:
+        if margin_end:
 
             def patched(self, *a, **k):
                 _shipped_init(self, *a, **k)
-                self.set_halign(halign)
+                self.set_margin_end(margin_end)
 
             monkeypatch.setattr(organs.OrganStrip, "__init__", patched)
 
         measured: dict = {}
         outcome: list = []
         app = Gtk.Application(
-            application_id=f"dev.shani.chronoa.OrganAlign{int(halign or 0)}")
+            application_id=f"dev.shani.chronoa.OrganAlign{int(margin_end)}")
 
         def activate(application):
             window = ChronoaWindow(application)
@@ -186,23 +183,27 @@ def measure_strip(monkeypatch):
     return run
 
 
-def test_the_lights_are_centred_in_the_chat_column(measure_strip):
-    """The 86px misalignment, as a property rather than a screenshot.
+def test_the_lights_sit_at_the_end_of_the_status_row(measure_strip):
+    """The row's shape, as a property rather than a screenshot.
 
-    Asserted on the **content's** margins, because a strip's own box is centred
-    by construction under `halign=FILL` while its lights sit at the left. A
-    check that passes for the broken layout is a negative control that cannot
-    fail, and the first version of this file was one.
+    **The status row is one row: the mode chips on the left, the organ lights
+    on the right.** "What Chronoa *is* on the left, what it is *doing* on the
+    right" - so the lights end where the row ends, and there is no second row
+    for them to be misaligned with.
+
+    Asserted on the **content's** margins, because a strip's own box is placed
+    by construction while its *content* sits at one end. A check that reads the
+    box reports "in place" for a layout that is not, and the first version of
+    this file was one.
     """
     m = measure_strip()
     assert m["cells"] == 8, (
-        f"the strip rendered {m['cells']} cells, so the row being centred is "
+        f"the strip rendered {m['cells']} cells, so the row being measured is "
         f"not the row of eight lights")
-    assert abs(m["left"] - m["right"]) <= 4, (
-        f"the lights sit {m['left']}px from the left of a {m['column']}px column "
-        f"and {m['right']}px from the right - the row is "
-        f"{abs(m['left'] - m['right'])}px off centre, which is what the strip "
-        f"looked like before `do_measure` reported the real sum")
+    assert m["right"] <= 4, (
+        f"the lights end {m['right']}px short of the row's right edge (they "
+        f"start {m['left']}px into a {m['column']}px row) - the row is meant to "
+        f"put them at the end, beside the mode chips")
 
 
 def test_the_strip_does_not_claim_more_width_than_it_uses(measure_strip):
@@ -224,19 +225,22 @@ def test_the_strip_does_not_claim_more_width_than_it_uses(measure_strip):
 def test_the_measurement_can_see_a_broken_strip(measure_strip):
     """The control, and it is the reason the other two are worth anything.
 
-    `halign=FILL` is the one-word change that reproduces the original
-    appearance. Measured here it reads **129px off centre**, against the
-    shipped strip's 0.5. So the property above is not a check that cannot fail -
-    and had it been written against the strip's own *box* rather than its
-    content, it would have reported "centred" for this layout and passed. That
-    version existed and is why the assertion is on the margins.
+    **A right margin** is the one-word change that reproduces a plausible
+    defect: the lights are pushed away from the end of the row, which is
+    exactly what the property above forbids. Measured here it reads a hundred
+    pixels clear of the edge, against the shipped row's 0.
+
+    So the property is not a check that cannot fail - and had it been written
+    against the strip's own *box* rather than its content, it would have
+    reported "in place" for this layout and passed. That version existed and is
+    why the assertion is on the cells.
     """
-    broken = measure_strip(halign=Gtk.Align.FILL)
+    broken = measure_strip(margin_end=120)
     shipped = measure_strip()
-    assert abs(broken["left"] - broken["right"]) > 40, (
-        f"the forced-FILL strip measures {broken['left']}px left and "
-        f"{broken['right']}px right, which the centred property would have to "
-        f"call fine - so this control has stopped discriminating")
-    assert abs(shipped["left"] - shipped["right"]) <= 4, (
-        "the shipped strip is not centred, so the row above is not measuring "
-        "the fix it claims to measure")
+    assert broken["right"] > 40, (
+        f"the strip with a right margin measures {broken['right']}px clear of "
+        f"the row's edge, which the property above would have to call fine - so "
+        f"this control has stopped discriminating")
+    assert shipped["right"] <= 4, (
+        f"the shipped strip ends {shipped['right']}px short of the row's edge, "
+        f"so the row above is not measuring the fix it claims to measure")

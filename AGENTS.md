@@ -27527,3 +27527,149 @@ fixed earlier; the callable form here was not. The three modules that read a
 mute state back now all answer `None` (UNVERIFIED) when they cannot.
 
 
+
+## "Fix all": the whole suite, and a filter that hid the failures (2026-10-19)
+
+Asked to fix everything, so the whole 696-file suite was run - one process per
+file, serial - rather than the 170 files the previous pass had covered. **34
+files were red.** The first thing to fix was in the reporting, not the code.
+
+### The filter that hid them, and what it cost
+
+The previous sweep reported "0 failures" because the grep that read its results
+excluded any line containing `" passed in "` - and a failing line reads
+`3 failed, 24 passed in 6.17s`, which contains it. **Fifteen files were
+failing and I reported none.** The correct filter is "the line says `failed`,
+or `error`, or `Exit:`, or it is dots only" - a timeout is a failure with no
+words in it.
+
+**A scanner whose needle is in its own input reports nothing**, and this was
+the fifth time in this file that shape has cost something. The rule that
+generalises: *the filter must be able to say "failed"*, and a filter that
+cannot be seen to fail is not a filter.
+
+### The privacy-mode family: seven files, one root cause
+
+`324e597` moved `privacy-mode`'s default from `true` to `false`, and seven
+tests encoded **the old default as a premise**. The fix is not to assert the
+default - it is to **arrange the state the test is about**:
+
+| file | what it asserted | what it should arrange |
+|---|---|---|
+| `test_sense_manifest` | the store starts in privacy mode | turn privacy mode on |
+| `test_sense_scheduler` | `config.privacy_mode is True` | turn it on |
+| `test_vision_sense` | `privacy_mode is True` | the sense's **own** key is off |
+| `test_egress_panel_says_why` | the recorded `privacy_mode` is True | turn it on, so the read is proven |
+| `test_cloud_branch_is_honest` | the default is true | it is off; the *method* is unchanged |
+| `test_egress_privacy_alarm` | the fallback default is True | see below |
+| `test_the_defaults_are_the_everyday_preset` | the schema matches the preset | the preset moves with the schema |
+
+**The vision sense is now off on its own account** - `vision-sense-enabled`
+ships false - so it no longer depends on another switch being on. That is a
+*stronger* guarantee than the proxy it replaced, and the test says so.
+
+### And a real defect the family was covering: a default is not a reading
+
+`egress.privacy_mode_enabled()` is documented as *"never raises, and fails
+toward ON"*, and it did - **by accident**. A config with no compiled schema
+answers `get_bool("privacy-mode", <default>)`, and the *direction* of the
+fallback was carried by the *value* of that default, which was `True` only
+while the default happened to be `True`. When it moved to `false`, every
+machine whose schema was never compiled began reading as "privacy mode off" -
+and the egress alarm, the invariant the audit log exists to defend, stopped
+firing.
+
+`ChronoaConfig.setting_readable(key)` asks the question directly: *could this
+setting be read, or is a default standing in for one?* A **default is not a
+reading**, and the two are now different answers.
+
+### The wizard's engine seam: 396 seconds and a gigabyte
+
+`b90c105` moved the engine check into `engines.ensure(...)`, and the tests in
+`test_setup_wizard.py` still patched `local_llm.server_binary` - which
+`ensure` does not consult. So the check passed and the test went on to the
+next step: **one test provisioned the 1.7 GB model for real** and took six
+minutes to fail on a message the code no longer produces, and three more had
+been parked as `_unused_test_*` one-line stubs that asserted nothing.
+
+Patching the seam the code now uses fixes all four, and the file runs in
+**5.4 s**. The three parked tests are real again.
+
+### Two hangs, and they looked like different things
+
+**A harness that dies inside a callback looks exactly like a hang.** My own
+`test_a_refusal_records_what_was_actually_said.py` hung past 600 s. The app was
+waiting - correctly - for an answer to a question nobody was going to answer,
+because the harness's `buttons()` had died on an `AttributeError` when the
+question row became a `Gtk.FlowBox` and its children became `FlowBoxChild`
+wrappers. The traceback was in the child's stderr, one level below what the
+parent could see.
+
+**`landline.stop()` waited 32 seconds for a REGISTER nobody would answer.** The
+un-registration is a courtesy, and a router that is gone - powered off, out of
+range, already stopped - never answers it. Two seconds, and the file of calls
+goes from minutes to 40 s.
+
+### A real bug the tests found: an `else` bound to the wrong `if`
+
+`phone.py`'s `call_action` had three actions as three `if`s with the `else` on
+the **last** one - so a *hold* press also ran the *merge* branch, and the note
+said what merge said. Measured: the hold note read **"the landline is not
+connected"** while the hold had in fact been taken. `elif`, and the action and
+the sentence agree.
+
+### The chrome shrank by 76px, and the minimum followed it
+
+The mode chips and the organ lights are **one row** now, so the strip no
+longer has a row of its own to give up - and a wrapped strip makes the
+*shared* line taller, which the chips had already made the tall one. So the
+wrapping costs nothing at any width.
+
+**The chrome is 367 at every width and every height** (it was 443, then 451),
+measured off real mapped windows, one process per window. The window's
+minimum was `chrome + 120`, so it is now **487 instead of 571** - the same
+promise, 84px shorter. Every table in
+`test_the_window_minimum_is_not_below_the_layouts_floor.py` was re-measured,
+and the file's claim that "the two layouts differ by 34px" is now "**the two
+layouts are the same shape**".
+
+### A feature nothing could reach
+
+The mascot's four settings - `mascot-enabled`, `mascot-corner`,
+`mascot-sounds`, `mascot-sounds-volume` - were **declared in the schema, read
+by the code, and written by nothing**: not in the settings window, not in a
+panel, not in the mascot itself. So the companion was off by default with no
+way to turn it on, and the settings-surface guard was right to say so. A
+"Desktop companion" group in System now reaches all four.
+
+### And the smaller ones, each with its own measurement
+
+- **`landline/` shipped with no organ claiming it** - the anatomy's own guard
+  caught it, and the `hands` organ now names it.
+- **The desktop panel's gate button** was "Open Privacy settings" on both
+  rows - two identical buttons sending the person to find which of two
+  switches each meant. It is "Turn on" now, for exactly that row's key, and
+  the test asks the *product* which chip each action opens rather than
+  keeping a table of chip names beside it - the strip has been regrouped once
+  already, and the table was the thing that drifted.
+- **The wearables panel read a value it threw away**: a notify-only
+  characteristic has no stored value, so the read cannot succeed, and it
+  cost a gatttool connection each. It is not read any more.
+- **`landline_call`'s refusal named the raw key** while its Settings row says
+  "Let Chronoa use your JioFiber landline" - the same defect the sense
+  refusals were converted away from, and the count of refusals naming a raw
+  key went back up by one because of it.
+- **`list_services` could not say what it was listing** when `systemctl`
+  failed, and the two answers it gave for the same question were identical -
+  so a test could not show that a boolean argument had arrived. It now names
+  the service units, and which filter it applied.
+- **`delegate`'s parameters were read by the assistant, not by its skill
+  module**, and the audit looked in the wrong file. `assistant.HANDLED_HERE`
+  says which tools the assistant handles itself, so the audit asks the
+  product.
+- **`mascot.create()` is the one construction site**, so the test that says
+  "the mascot is created in the app's own process" now asks for the call
+  rather than for a spelling that has since moved.
+- **`tools.py`'s replay-coverage comment** was a list of 22 names and two
+  numbers; the registry says 28 of 81. The list and the numbers were
+  updated together, which is what the test asks for.

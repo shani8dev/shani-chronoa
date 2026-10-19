@@ -68,8 +68,14 @@ MULTI_WRITE_SITES = {
     ("gui/surfaces/models.py", "_pick"):
         ("model",
         "piper-voice",
+        "stt-backend",
         "vision-model",
         "whisper-model"),
+    ("settings_window/window.py", "_desktop_companion"):
+        ("mascot-corner",
+        "mascot-enabled",
+        "mascot-sounds",
+        "mascot-sounds-volume"),
     ("settings_window/privacy.py", "_build_privacy"):
         ("custom-llm-base-url",
         "custom-llm-model",

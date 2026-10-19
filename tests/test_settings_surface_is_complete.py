@@ -59,6 +59,12 @@ CONTROLLED = {
     # action name.
     "voice-clone-enabled", "voice-clone-voice",
     "model-download-enabled",   # toggle-model-download
+    # The desktop companion's four settings. They had **no control anywhere**
+    # - the schema declared them, the code read them, and nothing wrote them,
+    # so the feature was off by default with no way to turn it on. They are
+    # rows in the System group now (`_desktop_companion`), and the mascot's
+    # own corner and volume are read fresh on every draw and every sound.
+    "mascot-enabled", "mascot-corner", "mascot-sounds", "mascot-sounds-volume",
     # switches, reached through a GAction - the action name is what the window
     # calls, so the GSettings key never appears in the file next to it
     "privacy-mode",            # toggle-privacy

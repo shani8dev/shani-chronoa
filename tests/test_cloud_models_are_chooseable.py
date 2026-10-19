@@ -48,10 +48,18 @@ from shani_chronoa.gui.window import ChronoaWindow  # noqa: E402
 class _Config:
     """The three things both surfaces ask a config for, and nothing else."""
 
-    def __init__(self, models=None, keys=None, base=""):
+    def __init__(self, models=None, keys=None, base="", cloud_fallback=True):
         self._models = models or {}
         self._keys = keys or {}
         self._base = base
+        #: **Added because the test failed without it.** `app/application.py`
+        #: reads `config.cloud_fallback_enabled` when the chosen model is a
+        #: cloud one, so a stub missing it raised `AttributeError` - and the
+        #: test then reported it as "the choice was not written", which reads
+        #: like a product defect and was not one. The stub is the thing under
+        #: test when a stub is incomplete, not the code - the same lesson
+        #: `test_switching_the_answering_engine.py` records for its own stub.
+        self.cloud_fallback_enabled = cloud_fallback
 
     def cloud_llm_models(self):
         return dict(self._models)
@@ -537,18 +545,38 @@ class TestTheCloudModelAction:
             "split it correctly")
 
     @staticmethod
-    def _handler_app(**cfg):
+    def _handler_app(privacy=False, **cfg):
         _registered, app = TestTheCloudModelAction._app_and_handler()
         app.config = type("C", (), {
             "written": [],
+            "settings": [],
             "set_cloud_model": lambda self, p, m: app.config.written.append((p, m)),
+            # **Added because the test failed without it.** The handler reads
+            # `config.cloud_fallback_enabled` and, when it is off, writes
+            # `cloud-fallback-enabled` so the chosen model can answer. A stub
+            # missing either raised `AttributeError`, and the test then
+            # reported it as "the choice was not written", which reads like a
+            # product defect and was not one. The stub is the thing under test
+            # when a stub is incomplete, not the code - the same lesson
+            # `test_switching_the_answering_engine.py` records for its own.
+            "cloud_fallback_enabled": False,
+            "set": lambda self, key, value: app.config.settings.append((key, value)),
         })()
         app.config.written = []
+        app.config.settings = []
         for key, value in cfg.items():
             setattr(app.config, key, value)
         app.llm = None
         app.rebuilt = []
         app.select_llm = lambda what: app.rebuilt.append(what) or ""
+        # **Privacy mode is arranged here rather than inherited from the
+        # default.** It used to default to `true`, so the handler took the
+        # "privacy is on" branch and returned before it read anything else -
+        # which is why this stub could be incomplete for months. It ships
+        # `false` now (2026-10-19), so the handler goes on to the cloud
+        # branch, and a test that means to exercise the privacy branch has to
+        # say so.
+        app.privacy = type("P", (), {"is_local_only": privacy})()
         return app
 
     def test_a_choice_is_written(self):
@@ -556,10 +584,14 @@ class TestTheCloudModelAction:
         app._on_answer_cloud_model(None, GLib.Variant("(ss)",
                                                       ("kilo", "kilo-pro")))
         assert app.config.written == [("kilo", "kilo-pro")]
+        assert app.config.settings == [("cloud-fallback-enabled", "true")], (
+            "the chosen model cannot answer until the cloud fallback is on, so "
+            "picking one turns it on"
+        )
 
     def test_a_machine_answered_locally_is_not_moved_to_the_cloud(self):
         """Picking a cloud model is not asking to answer in the cloud."""
-        app = self._handler_app()
+        app = self._handler_app(privacy=True)
         app._on_answer_cloud_model(None, GLib.Variant("(ss)",
                                                       ("kilo", "kilo-pro")))
         assert app.config.written == [("kilo", "kilo-pro")], (
@@ -568,6 +600,10 @@ class TestTheCloudModelAction:
             f"select_llm was called {app.rebuilt} - that moves a person off "
             f"this machine without being asked, which is the opposite of what "
             f"picking a model asks for")
+        assert app.config.settings == [], (
+            "privacy mode is on, so nothing may be switched on behind the "
+            "person's back"
+        )
 
     def test_a_cloud_engine_is_rebuilt_so_the_choice_takes_effect_now(self):
         app = self._handler_app()

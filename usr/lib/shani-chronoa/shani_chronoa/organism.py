@@ -142,7 +142,7 @@ INVENTORY: Tuple[Organ, ...] = (
     Organ("hands", "Action", "Hands",
           "acting: changing the world - files, windows, services, settings, devices",
           ("tools.py", "skills/", "office/", "portal.py",
-           "desktop_session.py", "phone.py"),
+           "desktop_session.py", "phone.py", "landline/"),
           BUILT, gerund="acting", source="an actuator (tools.py execute_tool)", indicator="hands"),
     Organ("legs", "Action", "Legs",
           "getting about without being asked: rules that fire on their own",

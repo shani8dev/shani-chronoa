@@ -351,12 +351,37 @@ _HARNESS = textwrap.dedent(
         return bool(predicate())
 
     def buttons(window):
+        # The question's option buttons, wherever they now live.
+        #
+        # **Walked, not indexed.** This used to take the children of
+        # `_question_widgets[1]` and assume each one was a button - and the
+        # question row became a `Gtk.FlowBox`, whose children are
+        # `FlowBoxChild` wrappers. So `b.get_label()` raised `AttributeError`
+        # on the first wrapper, the harness died *inside the idle callback*,
+        # and the app never quit: the child ran until the harness's own
+        # timeout killed it, with no result and no error the parent could
+        # see.
+        #
+        # **A harness that dies inside a callback looks exactly like a
+        # hang**, and the symptom pointed at the app - which was waiting,
+        # correctly, for an answer to a question nobody was going to answer.
         if len(window._question_widgets) < 2:
             return []
-        got, child = [], window._question_widgets[1].get_first_child()
-        while child is not None:
-            got.append(child)
-            child = child.get_next_sibling()
+        got, stack = [], [window._question_widgets[1]]
+        while stack:
+            node = stack.pop()
+            if isinstance(node, Gtk.Button):
+                got.append(node)
+            # **Pushed in reverse, so the walk comes out in the order the
+            # buttons are laid out.** A stack pops the last child first, and
+            # the order is the point: the first option is the one a keyboard
+            # user reaches by pressing Enter.
+            children = []
+            child = node.get_first_child()
+            while child is not None:
+                children.append(child)
+                child = child.get_next_sibling()
+            stack.extend(reversed(children))
         return got
 
     def ask(window, label):
@@ -525,7 +550,7 @@ class TestThroughTheRealWindow:
     @needs_display
     def test_the_prompt_offers_the_answers_this_action_may_offer(self,
                                                                 real_window):
-        """**Three, not four** - and the missing one is the control.
+        """**Four, not five** - and the missing one is the control.
 
         `ACTION` is `delete_file`, which is bypass-immune, and
         `options_with_cancel()` withholds "Allow for this session" for exactly
@@ -538,6 +563,14 @@ class TestThroughTheRealWindow:
         first version and it failed against correct code, which is the way this
         repository records: a fixture shaped unlike the real data tests the
         fixture.
+
+        **"Allow for this turn" is a fifth option, and it is not the session
+        one.** It grants the call for *this turn* rather than for the
+        session, and the cancel path files the same decision - so it is a
+        promise the mechanism keeps, where the session grant for a
+        bypass-immune action is not. It arrived after this test was written,
+        and the list below is the product's own order: the first option is
+        the one a keyboard user reaches by pressing Enter.
         """
         options = real_window["click_options"]
         assert permissions.ALLOW_SESSION_CHOICE not in options, (
@@ -547,6 +580,7 @@ class TestThroughTheRealWindow:
         )
         assert options == [
             permissions.ALLOW_ONCE_CHOICE,
+            permissions.ALLOW_TURN_CHOICE,
             permissions.DENY_CHOICE,
             permissions.CANCEL_CHOICE,
             permissions.FEEDBACK_CHOICE,

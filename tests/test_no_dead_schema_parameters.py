@@ -120,6 +120,21 @@ class TestEveryAdvertisedParameterIsRead:
     def test_no_declared_parameter_is_unread(self):
         modules = self._modules()
         tools, _ = skills.discover_skills()
+        # **A tool the assistant handles itself is read there, not in its
+        # skill module.** `delegate` needs the model and the window, so the
+        # assistant runs it; its skill module's `run` is a refusal stub reached
+        # only by a dispatcher with no assistant behind it, and that stub reads
+        # nothing. The audit looked in the skill module and called two live
+        # parameters dead - which is the same mistake in the other direction:
+        # reporting a control that works as one that does not.
+        #
+        # `assistant.HANDLED_HERE` says which tools those are, so this is a
+        # fact read from the code rather than a list kept beside it.
+        from shani_chronoa import assistant as assistant_mod
+        handled_here = set(assistant_mod.HANDLED_HERE)
+        assistant_source = Path(
+            inspect.getsourcefile(assistant_mod.Assistant) or "").read_text(
+                errors="replace")
         dead = []
         unchecked = []
         for tool in tools:
@@ -128,11 +143,14 @@ class TestEveryAdvertisedParameterIsRead:
                 "properties", {})
             if not properties:
                 continue
-            path = modules.get(name)
-            if path is None or not path.exists():
-                unchecked.append(name)
-                continue
-            read = read_identifiers(path.read_text(errors="replace"))
+            if name in handled_here:
+                read = read_identifiers(assistant_source)
+            else:
+                path = modules.get(name)
+                if path is None or not path.exists():
+                    unchecked.append(name)
+                    continue
+                read = read_identifiers(path.read_text(errors="replace"))
             for prop in properties:
                 if prop not in read:
                     dead.append(f"{name}.{prop}")

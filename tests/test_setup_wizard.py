@@ -14,9 +14,30 @@ import threading
 import httpx
 import pytest
 
-from shani_chronoa import local_llm, setup_wizard, stt_provision, voices
+from shani_chronoa import engines, local_llm, setup_wizard, stt_provision, voices
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.stt_provision import ConsentRequired, ModelSpec
+
+
+@pytest.fixture
+def engine_present(monkeypatch):
+    """`engines.ensure` says the program is there, without fetching one.
+
+    The engine check moved into `engines.ensure` when the programs became a
+    package a machine could get on its own (2026-10-19, `b90c105`), and
+    every test here still patched `local_llm.server_binary` - which
+    `ensure` does not consult. So the check passed, and the tests went on to
+    the *next* step: three of them were parked as `_unused_test_*` with
+    one-line stubs that asserted nothing, and the fourth **downloaded the
+    1.7 GB model for real** and took six minutes to fail on a message that
+    no longer existed.
+
+    The engine is stubbed here rather than left to the machine, so a test
+    says what it is about and never reaches the network.
+    """
+    monkeypatch.setattr(engines, "ensure",
+                        lambda *a, **k: "/usr/bin/llama-server")
+    return "/usr/bin/llama-server"
 
 
 def test_default_model_follows_ram_and_gpu(monkeypatch):
@@ -152,10 +173,8 @@ def test_brain_step_downloads_verifies_and_links(monkeypatch):
     assert local_llm.verify("qwen3-0.6b")
 
 
-def test_a_tampered_download_is_refused_and_leaves_nothing(monkeypatch):
+def test_a_tampered_download_is_refused_and_leaves_nothing(monkeypatch, engine_present):
     _grant_download_consent()
-
-def _unused_test_a_tampered_download_is_refused_and_leaves_nothing(monkeypatch):
     data = os.urandom(500)
     spec = ModelSpec("qwen3-0.6b", "t.gguf", len(data), "0" * 64, "", "https://huggingface.co/x")
     monkeypatch.setitem(local_llm.SPECS, "qwen3-0.6b", spec)
@@ -165,10 +184,8 @@ def _unused_test_a_tampered_download_is_refused_and_leaves_nothing(monkeypatch):
     assert not (local_llm.model_dir() / "t.gguf").exists()
 
 
-def test_cancel_stops_a_download(monkeypatch):
+def test_cancel_stops_a_download(monkeypatch, engine_present):
     _grant_download_consent()
-
-def _unused_test_cancel_stops_a_download(monkeypatch):
     data = os.urandom(5000)
     spec = ModelSpec("qwen3-0.6b", "c.gguf", len(data), hashlib.sha256(data).hexdigest(), "", "https://huggingface.co/x")
     monkeypatch.setitem(local_llm.SPECS, "qwen3-0.6b", spec)
@@ -181,14 +198,35 @@ def _unused_test_cancel_stops_a_download(monkeypatch):
 
 
 def test_without_llama_cpp_the_brain_step_says_so(monkeypatch):
-    monkeypatch.setattr(local_llm, "server_binary", lambda: "")
-    assert setup_wizard.setup_brain("qwen3-1.7b").startswith("llama.cpp is not installed")
+    """No engine, and the step says so - without fetching a gigabyte.
+
+    The engine check moved into `engines.ensure` (2026-10-19, `b90c105`)
+    and this test still patched `local_llm.server_binary`, which `ensure`
+    does not consult. So it went past the check, **provisioned the 1.7 GB
+    model for real**, and only then failed at `start_service` - six minutes
+    later, on a message the code no longer produces.
+
+    The check is stubbed where it now lives, and the model's own download is
+    made to fail loudly if it is reached: a test that says "the engine is
+    missing" must not quietly fetch one.
+    """
+    def missing(name, **kwargs):
+        raise engines.EngineMissing(
+            "llama-server is not installed (the llama-cpp package).")
+    monkeypatch.setattr(engines, "ensure", missing)
+
+    def no_download(*args, **kwargs):
+        raise AssertionError(
+            "the model was downloaded after the engine was reported missing")
+    monkeypatch.setattr(local_llm, "provision", no_download)
+
+    said = setup_wizard.setup_brain("qwen3-1.7b")
+    assert "llama-server is not installed" in said, said
+    assert "Ollama" in said, said
 
 
-def test_voice_step_installs_piper_and_a_voice(monkeypatch):
+def test_voice_step_installs_piper_and_a_voice(monkeypatch, engine_present):
     _grant_download_consent()
-
-def _unused_test_voice_step_installs_piper_and_a_voice(monkeypatch):
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
         exe = b"#!/bin/sh\necho piper\n"

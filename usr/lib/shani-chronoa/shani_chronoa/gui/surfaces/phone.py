@@ -231,6 +231,47 @@ class PhonePanel:
 
     # --- the page ------------------------------------------------------------
 
+    #: The panel's own look, installed once per display by `build`.
+    #:
+    #: **The tab bar is the panel's widest thing and it has to fit.**
+    #:
+    #: `GtkStackSwitcher` is the only `Gtk.StackSwitcher` in this tree, and
+    #: GTK gives each of its buttons a fixed minimum of about 133px - measured
+    #: with a bare switcher and five short titles, so it is the switcher and
+    #: not this panel's labels. Five tabs therefore needed **666px**, and this
+    #: panel's narrow budget is 480: the tab bar was 70% wider than the
+    #: window it had to fit in, so it was clipped or gave a sideways
+    #: scrollbar. The theme's floor is a *style* choice (even tab buttons)
+    #: and this panel cannot afford it.
+    #:
+    #: With the floor removed the five tabs need **389px** and the panel
+    #: measures 413 - inside the budget, with room to spare. The buttons are
+    #: then as wide as their labels, which is how a tab bar looks in most
+    #: applications; GTK keeps the selection border inside the button, so
+    #: choosing a tab does not move the others.
+    PANEL_CSS = b"""
+/* The Phone panel's tab bar. */
+stackswitcher button {
+    min-width: 0;
+}
+"""
+
+    def _install_panel_css(self) -> None:
+        """Put the panel's own stylesheet on the display, once.
+
+        Here rather than in the window's stylesheet, so the panel looks the
+        same wherever it is shown - the same reason the dialer's own sheet
+        lives here.
+        """
+        display = Gdk.Display.get_default()
+        if display is None or getattr(PhonePanel, "_panel_css_installed", False):
+            return
+        provider = Gtk.CssProvider()
+        provider.load_from_data(self.PANEL_CSS, len(self.PANEL_CSS))
+        Gtk.StyleContext.add_provider_for_display(
+            display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        PhonePanel._panel_css_installed = True
+
     def build(self) -> Gtk.Widget:
         page, set_content = common.surface(TITLE, SUBTITLE)
         page.status = self.status_recorder.status
@@ -241,6 +282,7 @@ class PhonePanel:
         # recorder and redrawn when the phone answers, never set without a row.
         self.status_box = common.page_body(0)
         body.append(self.status_box)
+        self._install_panel_css()
         if not self.ok(CONTROL_KEY):
             # **This branch is the dead end the panel is built around**, and it
             # had the same two defects as the notes below: it printed the
@@ -909,13 +951,21 @@ class PhonePanel:
             # Hold and Swap are landline-only: the paired phone's route toggle
             # is a different control and there is no far-end call to hold here.
             try:
+                # **`elif`, not three `if`s with an `else` on the last.**
+                # The `else` used to belong to the *swap* test, so a hold
+                # press also ran the merge branch - and `merge()` raises
+                # "the landline is not connected" when there is no line, so
+                # the note said that instead of "Held". The action and the
+                # sentence disagreed, and the one the person read was the
+                # wrong one. Measured: the hold note read "the landline is
+                # not connected" while the hold had in fact been taken.
                 if action == "hold":
                     self.call_note.set_text(
                         "Held - dial another number, or Swap."
                         if landline.hold() else
                         "That call was not held. It may already be held, or the "
                         "other side would not take it.")
-                if action == "swap":
+                elif action == "swap":
                     self.call_note.set_text(
                         "Swapped." if landline.swap() else
                         "Not swapped: Swap needs two answered calls.")

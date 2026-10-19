@@ -224,8 +224,19 @@ class TestTheDevices:
         assert "100%" not in text
 
     def test_the_detail_block_does_read_and_labels_it(self, monkeypatch):
-        """The other half of the pair: the page must *not* be read-only."""
+        """The other half of the pair: the page must *not* be read-only.
+
+        **`paired` is stubbed here because this test builds the page**, and the
+        page reads the paired list for itself. It used to leave that to the
+        real adapter, so the answer depended on whether the machine happened
+        to have a watch near it: on a box with one, the page listed it; on
+        this one, the page said "no Bluetooth devices are paired" and the
+        detail block was never built - so the test failed with the *empty
+        state's* text and read as though the panel could not read a battery
+        it had never been given a device for.
+        """
         _patch(monkeypatch,
+               paired=lambda: list(PAIRED),
                services=lambda mac: [BATTERY_SERVICE],
                attributes=lambda mac: [BATTERY],
                read_value=lambda mac, handle, label="", uuid="": ("64", ""),

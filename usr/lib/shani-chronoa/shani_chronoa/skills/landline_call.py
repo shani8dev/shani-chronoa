@@ -29,8 +29,15 @@ def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
     """(allowed, refusal). The one place the landline gate is read."""
     if config.get_bool(CONSENT_KEY, False):
         return True, ""
-    return False, ("Using the JioFiber landline is off. Turn on 'landline-enabled' and set the "
-                   "line up on the Phone page first. Nothing was done.")
+    # **The row's own wording, not the key.** The row in Settings is titled
+    # "Let Chronoa use your JioFiber landline", and a refusal that says
+    # `landline-enabled` sends the person hunting for a switch spelled a way
+    # no screen ever spells it. The label is read from its one owner, so the
+    # refusal and the row cannot drift apart.
+    from shani_chronoa.capabilities import gate_label
+    return False, (f"Using the JioFiber landline is off. Turn on "
+                   f"“{gate_label(CONSENT_KEY)}” in Settings, and set the "
+                   f"line up on the Phone page first. Nothing was done.")
 
 
 def _run(arguments: dict) -> str:

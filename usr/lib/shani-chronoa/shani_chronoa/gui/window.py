@@ -77,7 +77,7 @@ CHAT_TAG = "chronoa-chat"
 #: So two lines is not a compromise between two costs - it costs the same 33px
 #: whether the refusal is 150 characters or 1200, and the extra 16px arrives
 #: **only** for text that needs it. That matters because the window's chrome has
-#: **zero slack**: `set_size_request(380, 571)` is 451 of chrome plus exactly
+#: **zero slack**: `set_size_request(380, 487)` is 367 of chrome plus exactly
 #: 120 of transcript, so a permanent extra line would have to be paid for out of
 #: the conversation. A bound that only costs when it wraps is not that.
 DETAIL_MAX_LINES = 2
@@ -1811,11 +1811,23 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # `tests/test_the_window_minimum_is_not_below_the_layouts_floor.py` now
         # measures both chromes off real mapped windows.
         #
-        # **This treats the symptom and the root cause is recorded in AGENTS.md:**
-        # 451px of fixed chrome is the real number, and an orb at 88px is a fifth
-        # of it. A minimum that is honest beats a minimum that promises a window
-        # with nothing in it; the chrome is the next thing to shrink.
-        self.set_size_request(380, 571)
+        # **The minimum is the chrome plus the smallest conversation worth
+        # reading** - 367 + 120 - and both halves are measured, not remembered.
+        # `tests/test_the_window_minimum_is_not_below_the_layouts_floor.py` reads
+        # the chrome off real mapped windows.
+        #
+        # **The chrome was 451 when this was 571, and it is 367 now**, because
+        # the two strips became one row: the mode chips and the organ lights
+        # share a line instead of taking two. So the minimum followed it down by
+        # the same 84px, which is the same promise - 120px of conversation - at a
+        # window that is 84px shorter.
+        #
+        # **This still treats the symptom and the root cause is recorded in
+        # AGENTS.md:** 367px of fixed chrome is the real number, and an orb at
+        # 88px is a quarter of it. A minimum that is honest beats a minimum
+        # that promises a window with nothing in it; the chrome is the next thing
+        # to shrink.
+        self.set_size_request(380, 487)
         self.set_decorated(True)
         self._apply_css()
         self._apply_motion_preference()
@@ -4512,7 +4524,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         popover.popup()
         return True
 
-    def _activate_mode(self, action_name: str) -> None:
+    def _activate_mode(self, action_name: str):
         """Leave a mode's own dropdown open on its current row.
 
         **One keystroke should not change a mode.** Changing it needs a chosen
@@ -4529,6 +4541,14 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         have been opened. A name that resolves to `None` reads exactly like a
         control that is not there, which is the failure this whole palette was
         built to avoid.
+
+        **Returns the chip it opened, or None.** Which chip a setting lives in
+        is the product's business - the strip has been regrouped once already,
+        from seven chips to three grouped ones, and the individual ones are
+        still built but no longer on screen. A caller that wanted to know where
+        the dropdown went was asking a question this module already answers,
+        and it answered it from a hand-kept table beside it, which is how the
+        two drift apart.
         """
         strip = getattr(self, "_mode_strip", None)
         # **Each setting opens the control it now lives in** - the grouped chip
@@ -4546,6 +4566,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         }.get(action_name)
         if chip is not None and hasattr(chip, "popup"):
             self._open_chip_dropdown(chip)
+        return chip
 
     #: Set by a caller that wants to decide rewinds itself; None means use the
     #: real dialogue. It is a seam for tests, and the seam takes the **action**

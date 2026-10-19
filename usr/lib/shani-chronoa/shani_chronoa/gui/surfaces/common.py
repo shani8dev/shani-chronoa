@@ -733,6 +733,38 @@ def empty_state(icon: str, title: str, description: str = "",
     return scrolled(box)
 
 
+def setup_route(app: Any, widget: "Gtk.Widget | None" = None) -> str:
+    """Which way the setup wizard can be opened from here, or `''` for none.
+
+    **One place, so a button and its click cannot disagree.** The button's
+    sensitivity says whether Setup can be opened; the click opens it. Both must
+    ask the same question, or a panel can offer an action and then do nothing
+    - the dead end this is here to prevent.
+
+    Three routes, in the order `open_setup` tries them:
+
+    - `"app"` - the application object has the action.
+    - `"window"` - the window's own `Gtk.Application` has it, which is what a
+      panel built outside the app object reaches.
+    - `"toast"` - no application is reachable, but a toast can at least say
+      where the wizard *is*, which is better than silence.
+
+    `''` means there is nowhere to go: a bare stub, as the tests build. A
+    button in that state must say so rather than sit there looking live.
+    """
+    activate = getattr(app, "activate_action", None)
+    if callable(activate):
+        return "app"
+    window = getattr(app, "window", None)
+    gtk_app = window.get_application() if window is not None else None
+    if gtk_app is not None and hasattr(gtk_app, "activate_action"):
+        return "window"
+    if widget is not None and adw_ready():
+        if _toast_overlay(widget) is not None:
+            return "toast"
+    return ""
+
+
 def open_setup(app: Any, widget: "Gtk.Widget | None" = None, page: str = "") -> None:
     """Open the setup wizard - the only thing in the app that installs a model.
 
@@ -752,22 +784,23 @@ def open_setup(app: Any, widget: "Gtk.Widget | None" = None, page: str = "") -> 
     the window may be able to name the real `Gtk.Application`. When neither
     answers, the click is reported as a toast rather than swallowed - a button
     that does nothing and says nothing is the dead end this whole change is
-    about.
+    about. `setup_route` is what decides that, so a button can ask the same
+    question before offering the action.
     """
     # `page` lands on that model's page ("ears", "eyes", ...) through the
     # `setup-page` action; the tooltip on every "Set up" button promised it,
     # and this used to ignore it and open Welcome.
     name, value = ("setup-page", GLib.Variant("s", page)) if page else ("setup", None)
-    activate = getattr(app, "activate_action", None)
-    if callable(activate):
-        activate(name, value)
+    route = setup_route(app, widget)
+    if route == "app":
+        app.activate_action(name, value)
         return
-    window = getattr(app, "window", None)
-    gtk_app = window.get_application() if window is not None else None
-    if gtk_app is not None and hasattr(gtk_app, "activate_action"):
+    if route == "window":
+        window = getattr(app, "window", None)
+        gtk_app = window.get_application() if window is not None else None
         gtk_app.activate_action(name, value)
         return
-    if widget is not None and adw_ready():
+    if route == "toast":
         overlay = _toast_overlay(widget)
         if overlay is not None:
             overlay.add_toast(

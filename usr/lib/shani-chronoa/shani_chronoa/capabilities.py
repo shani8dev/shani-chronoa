@@ -807,7 +807,7 @@ GATE_NAMES: dict[str, str] = {
     "comms-typing-enabled": "Let Chronoa type into chat and mail windows",
     # The one gate here whose subject is a person rather than a machine. Named
     # with the wording the settings row carries, like every row below it.
-    "voice-clone-enabled": "Let Chronoa speak with a recorded voice",
+    "voice-clone-enabled": "Clone a recorded voice",
     "ui-require-verified-focus": "Only type into a known field",
     # The Settings sense rows' own titles, so Help sends people to a row that exists.
     "snapshots-sense-enabled": "Rollback points",
@@ -1582,12 +1582,24 @@ ACTION_CONSENT_KEYS = tuple(sorted(
 #: person hits by asking for something; each is a standing intrusion, which is
 #: the one thing a default should not be.
 #:
+#: **`landline-enabled` is the fourth, and it is a different reason again.**
+#: Asking for a call is consent to make a call - so this one is a permission,
+#: and the distinction above does not fit it. What it does is reach *outside*
+#: this machine: it registers with the ISP's service and it **rings another
+#: person**, which is the one thing a switch on this computer should not be
+#: able to do without being set up for it first. Its schema default is off and
+#: it is set up once from the Phone page; the preset's rule would otherwise
+#: have enabled it, because it is not destructive and not a standing
+#: intrusion, and a rule that derives a default cannot know about a third
+#: party.
+#:
 #: `full` still enables them, because a person who has chosen "Full control" has
 #: chosen, and the settings window offers each as its own switch.
 NEVER_DEFAULTED_ON = frozenset({
     "meeting-enabled",
     "packet-capture-enabled",
     "wake-word-enabled",
+    "landline-enabled",
 })
 
 PRESETS = {

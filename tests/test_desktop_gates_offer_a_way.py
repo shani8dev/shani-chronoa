@@ -14,9 +14,14 @@ two rows whose own module docstring says
     Privacy panels are where that happens.
 
 So a person told exactly which two keys were off, and which page granted them,
-had nothing to click. Both keys are written in `settings_window/privacy.py` and
-nowhere else, so `settings:privacy` is not a guess - it is the only place the
-answer can be changed.
+had nothing to click.
+
+**The button writes the switch rather than sending the person to find it.**
+It used to be labelled "Open Privacy settings" on both rows - two identical
+buttons, and a person arriving at a page with two switches had to work out
+which of them each button meant. It is now "Turn on", for exactly that row's
+key, and its tooltip names the switch - the same shape as
+`common.consent_banner`, which every other panel with a shut gate uses.
 
 **The button is offered only when the gate is off**, following `devices.py`'s
 rule that a button opening Settings to change nothing is a worse dead end than
@@ -45,7 +50,7 @@ Adw.init()
 from shani_chronoa import pages  # noqa: E402
 from shani_chronoa.gui.surfaces import desktop  # noqa: E402
 
-BUTTON = "Open Privacy settings"
+BUTTON = "Turn on"
 
 
 class _Config:
@@ -54,6 +59,8 @@ class _Config:
     def __init__(self, values=None, explode=False):
         self._values = values or {}
         self._explode = explode
+        #: Every write, so a test can see **which** switch a button turned on.
+        self.written = []
 
     def get(self, key, default=""):
         return str(self._values.get(key, default))
@@ -65,6 +72,11 @@ class _Config:
 
     def get_double(self, key, default=0.0):
         return float(default)
+
+    def set(self, key, value):
+        """The write the "Turn on" button makes."""
+        self.written.append((key, value))
+        self._values[key] = value
 
 
 class _App:
@@ -107,26 +119,37 @@ def _both_off():
     return {desktop.SHORTCUT_KEY: False, desktop.DOCUMENT_KEY: False}
 
 
-def test_a_shut_gate_offers_the_page_that_opens_it(shown):
-    """Both gates off -> one button per shut gate, and the press reaches Privacy.
+def test_a_shut_gate_offers_a_button_that_turns_it_on(shown):
+    """Both gates off -> one button per shut gate, and each turns on its own.
 
-    Two shut gates means two buttons, and that is the point: they are two
-    independent settings and a person should be able to turn either on. The
-    assertion is the *route*, not the label - a button with the right words that
-    opens nothing is the orb.
+    The assertion is the *effect*, not the label: a button with the right
+    words that changes nothing is the orb. And the two are distinguishable
+    only by what they write - two identical labels on two rows would send a
+    person to the same switch twice, which is the defect the label change
+    was made to fix.
     """
-    page = desktop.build(_App(_Config(_both_off())))
+    config = _Config(_both_off())
+    page = desktop.build(_App(config))
 
     found = [b for b in _buttons(page) if b.get_label() == BUTTON]
     assert len(found) == 2, (
-        f"expected a route on each of the two shut gates, found {len(found)}. "
-        "A panel that names the page and offers no way there is the dead end "
-        "this file exists to prevent.")
+        f"expected a button on each of the two shut gates, found {len(found)}. "
+        "A panel that names the switch and offers no way to turn it on is the "
+        "dead end this file exists to prevent.")
 
     found[0].emit("clicked")
-    assert shown == ["settings:privacy"], (
-        f"the press reached {shown!r}, not the page that grants the keys. Both "
-        "keys are written in settings_window/privacy.py and nowhere else.")
+    found[1].emit("clicked")
+    assert {key for key, _value in config.written} == {
+        desktop.SHORTCUT_KEY, desktop.DOCUMENT_KEY}, (
+        f"the two buttons wrote {config.written!r} - each must turn on its own "
+        "row's switch, or a person fixing one of them has to guess which "
+        "button is which")
+    assert all(value == "true" for _key, value in config.written), (
+        f"a button wrote {config.written!r} - the switch it turns on must be "
+        "on afterwards")
+    assert shown == [], (
+        "the button writes the switch, so it has no page to open; a route "
+        "beside it would be a second way to do the same thing")
 
 
 def test_a_gate_that_is_already_on_gets_no_button(shown):

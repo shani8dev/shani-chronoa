@@ -208,7 +208,7 @@ def test_the_row_reports_the_choice_not_the_machine():
         + window._presence_cycle_button.get_label())
 
 
-def test_a_released_model_shows_the_verb_for_a_released_model():
+def test_a_released_model_shows_the_verb_for_a_released_model(monkeypatch):
     """**Both labels were written once at build time and never read again.**
 
     Open Settings after releasing the model and it still said "Free the model" -
@@ -221,7 +221,17 @@ def test_a_released_model_shows_the_verb_for_a_released_model():
     tested the helper and not the site that calls it, which is this repo's own
     "a test that calls the function is not a test that the skill is reachable"
     rule, hit three times in one file.
+
+    **The machine's state is arranged, not inherited.** The row reconciles the
+    stored choice with what the machine is doing, so the label follows
+    `local_llm.is_up()`. This test used to read the real one - so it passed on
+    a box with no model running and failed on a box with one, and the answer
+    changed with what the machine happened to be doing. "A released model" is
+    a claim about the machine, so the machine is put in that state.
     """
+    from shani_chronoa import local_llm
+
+    monkeypatch.setattr(local_llm, "is_up", lambda: False)
     app = _App(choice=Presence.DROWSY)
     window = settings_window.SettingsWindow(app)
     assert window._presence_cycle_button.get_label() == "Go to sleep", (

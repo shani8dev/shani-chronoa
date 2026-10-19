@@ -227,7 +227,18 @@ def test_a_browser_navigation_is_recorded_with_a_purpose():
     """
     import types
 
+    from shani_chronoa.config import ChronoaConfig
     from shani_chronoa.gui import browser as browser_mod
+
+    # Privacy mode is turned ON here, so the assertion below proves the call
+    # site READS the flag rather than that the flag happens to be on. It used
+    # to default on, and the test asserted the recorded value - so when the
+    # default moved (2026-10-19) the test failed for a reason that had
+    # nothing to do with what it measures. The value is now the interesting
+    # part: a call site that omits the read computes `violation=False`
+    # structurally, which is how `webtext.retrieve` was uninstrumented while
+    # looking instrumented.
+    ChronoaConfig().set("privacy-mode", "true")
 
     recorded = []
     original = egress.record

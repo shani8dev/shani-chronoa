@@ -381,9 +381,19 @@ def _card(app: Any, card: Dict[str, Any], on_changed: Callable) -> Gtk.Widget:
         # Insensitive only for the model already in use. A missing one keeps
         # its "Set up" live - it was `installed and not in_use`, which disabled
         # every Set up on the panel (the defect `_activate` documents, back).
-        button.set_sensitive(not in_use)
+        #
+        # **And a "Set up" that cannot open Setup is not live either.** The
+        # button delegates to the wizard, which needs an application to reach;
+        # where there is none, a live button would do nothing at all. So the
+        # sensitivity is read from the same place the click uses, and the
+        # tooltip says how to do it by hand.
+        route = common.setup_route(app, button)
+        can_set_up = bool(route)
+        button.set_sensitive(not in_use and (installed or can_set_up))
         button.set_tooltip_text(
-            "Set this one up, then choose it - the setup window opens on its page"
+            ("Set this one up, then choose it - the setup window opens on its page"
+             if can_set_up else
+             "Set up Chronoa from the header, or with Ctrl+Shift+S")
             if not installed else
             ("This is the model answering now" if in_use else
              ("Downloaded, but the assistant is not answering with it" if loaded

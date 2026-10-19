@@ -85,19 +85,25 @@ def test_the_destructive_keys_ship_shut():
     processes, power the machine off and change system services, so they are
     asserted individually rather than through the preset.
 
-    **`DESTRUCTIVE_CONSENT_KEYS` has thirteen members and this asserts twelve.**
-    The thirteenth is `file-edit-enabled`, which is classified destructive and
+    **`DESTRUCTIVE_CONSENT_KEYS` has fourteen members and this asserts thirteen.**
+    The fourteenth is `file-edit-enabled`, which is classified destructive and
     enabled anyway - the preset rule carves it out with `or key ==
     "file-edit-enabled"`. Asserting the whole set failed on it, which is the
     first version of this test doing exactly what it is for: the classification
     and the preset are different things, and only the intersection the preset
     shuts is the safety line.
+
+    **Thirteen, not twelve**, because `run-command-enabled` joined the
+    destructive set on 2026-10-16: `run_command` runs a shell command, which
+    is the sharpest thing in this list. A new destructive key has to move this
+    number, and that is the point of pinning it - a destructive key that
+    arrives without a review is a default that deletes something.
     """
     settings = _settings()
     shut = sorted(k for k in capabilities.DESTRUCTIVE_CONSENT_KEYS if not EVERYDAY(k))
 
-    assert len(shut) == 12, (
-        "the set of destructive keys the preset shuts is %d, not 12: %s"
+    assert len(shut) == 13, (
+        "the set of destructive keys the preset shuts is %d, not 13: %s"
         % (len(shut), shut))
 
     for key in shut:
@@ -221,10 +227,24 @@ UNPROMPTED_OFF = {
 
 #: Off because they move data to a third party, or for a stated engineering
 #: reason. Not the same category as the three above - just not defaults.
+#:
+#: **`cloud-fallback-enabled` is NOT here, and it used to be.** It shipped on
+#: by default on 2026-10-19, with `privacy-mode` shipped off beside it, for
+#: a reason that is worth stating rather than losing: with both off - which
+#: is what a fresh install used to get - **Chronoa could not answer anything
+#: at all**. Every egress path was closed and the one path that would have
+#: answered was closed too, so a new user had to find two switches in
+#: Settings before a question got an answer. The pair is deliberate, and
+#: `privacy-mode` is the outer limit: turn it on and the cloud fallback, the
+#: cloud voice and every provider key are ignored whatever their own
+#: switches say.
+#:
+#: What is left of the concern is that a fresh install *with* a cloud
+#: provider configured does send its conversations to that provider. The
+#: switch is still in Settings, and the egress panel records what left.
 EGRESS_OR_SPECIAL_OFF = {
     "cloud-stt-enabled": "sends audio off the machine",
     "cloud-tts-enabled": "sends audio off the machine",
-    "cloud-fallback-enabled": "sends a conversation to a free cloud model",
     "debug-mode": "a debugging switch",
     "setup-complete": "flipping it skips first run",
     "setup-dismissed": "flipping it pretends the wizard was closed",

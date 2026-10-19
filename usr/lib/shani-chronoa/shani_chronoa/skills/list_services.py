@@ -46,26 +46,38 @@ SCHEMA = {
 
 
 def _run(arguments: dict) -> str:
+    # **What was being asked for, in every answer.** "could not list services"
+    # names a category; "could not list the failed service unit(s)" names the
+    # thing the question was about, and it says which filter was applied - so
+    # two different questions get two different answers even when the machine
+    # cannot answer either of them. That matters here: the test suite
+    # deliberately points the system bus at a dead socket (so a test cannot
+    # poke the real one), which means every systemctl call in a test fails,
+    # and a failure that reads the same either way cannot show that the
+    # argument arrived.
+    failed_only = bool(arguments.get("failed_only"))
+    wanted = "the failed service unit(s)" if failed_only else "service unit(s)"
     if shutil.which("systemctl") is None:
         return (
-            "Could not list services: systemctl is not installed, so this "
+            f"Could not list {wanted}: systemctl is not installed, so this "
             "machine is not systemd-managed. That is an empty answer to a "
             "question that was not asked, not an empty list of services."
         )
     args = ["systemctl", "list-units", "--type=service", "--no-legend",
             "--no-pager", "--plain", "--all"]
-    if arguments.get("failed_only"):
+    if failed_only:
         args.insert(2, "--state=failed")
     try:
         proc = subprocess.run(args, capture_output=True, text=True,
                               timeout=_TIMEOUT, check=False)
     except subprocess.TimeoutExpired:
-        return f"systemctl did not answer within {_TIMEOUT}s, so no services are listed."
+        return (f"systemctl did not answer within {_TIMEOUT}s, so no "
+                f"{wanted} are listed.")
     except OSError as exc:
-        return f"Could not list services: {exc}"
+        return f"Could not list {wanted}: {exc}"
     if proc.returncode != 0:
         detail = (proc.stderr or "").strip().splitlines()
-        return f"systemctl could not list services (exit {proc.returncode})" + (
+        return f"systemctl could not list {wanted} (exit {proc.returncode})" + (
             f": {detail[-1]}" if detail else ".")
 
     needle = (arguments.get("name_filter") or "").strip().lower()

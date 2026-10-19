@@ -220,11 +220,26 @@ def privacy_mode_enabled() -> bool:
     quietly disarm the invariant this module exists to defend, and the result
     would be indistinguishable from a clean run. A false alarm is a log line
     and a message; a missed breach is a user who believes nothing left.
+
+    **A default is not a reading.** `get_bool` answers its `default` argument
+    for a key the running schema does not declare, so asking it for
+    `privacy-mode` could not tell "the user turned privacy mode off" from
+    "there is no schema to read it from". That difference was carried by the
+    *value* of the Python default until 2026-10-19, when `privacy-mode`'s
+    default moved to `false` - and with it, a machine whose schema was never
+    compiled began reading as "privacy mode off" and the alarm stopped
+    firing. The question is now asked directly, through
+    `ChronoaConfig.setting_readable`.
     """
     try:
         from shani_chronoa.config import ChronoaConfig
 
-        return bool(ChronoaConfig().privacy_mode)
+        config = ChronoaConfig()
+        if not config.setting_readable("privacy-mode"):
+            raise RuntimeError(
+                "the running schema does not declare privacy-mode, so the "
+                "setting cannot be read")
+        return bool(config.privacy_mode)
     except Exception as exc:  # noqa: BLE001 - must not raise into a request path
         logger.warning(
             "Could not read the privacy-mode setting (%s: %s); treating it as ON for "

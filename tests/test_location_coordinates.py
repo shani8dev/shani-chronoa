@@ -273,7 +273,7 @@ class TestTheFileRowIsReachableByKeyboard:
         real = Gtk.Widget.update_property
 
         def recorder(self, properties, values):
-            recorded.append((list(properties), list(values)))
+            recorded.append((self, list(properties), list(values)))
             return real(self, properties, values)
 
         monkeypatch.setattr(Gtk.Widget, "update_property", recorder)
@@ -287,9 +287,17 @@ class TestTheFileRowIsReachableByKeyboard:
 
         # `update_property(properties, values)` takes two parallel lists, so a
         # value sits beside its property rather than inside it.
-        labels = [value for properties, values in recorded
+        #
+        # **The row's own label, and not the first one recorded.** A row holds
+        # a "Revert" button as well as its filename, and the button carries an
+        # accessible label of its own - "Revert fstab" - set *before* the
+        # row's. So the first label recorded is the button's, and a check that
+        # read it was checking the button. The row is a Box with the accessible
+        # *role* of a button, so the discriminator is the class, not the role.
+        labels = [value for widget, properties, values in recorded
                  for value, prop in zip(values, properties)
-                 if prop == Gtk.AccessibleProperty.LABEL]
+                 if prop == Gtk.AccessibleProperty.LABEL
+                 and not isinstance(widget, Gtk.Button)]
         assert labels, (
             f"no accessible label was set on the file row; the calls made were "
             f"{recorded!r}")
@@ -361,6 +369,18 @@ class TestTheFileRowIsReachableByKeyboard:
                 walk(c)
                 c = c.get_next_sibling()
         walk(box)
-        assert len(focusable) == 3, (
-            f"{len(focusable)} of 3 file rows are focusable; before this change "
+        # **The rows, not every focus stop.** A row holds a "Revert" button,
+        # and a button is a focus stop of its own - so the count is six
+        # (three rows and three buttons) where it used to be three. The
+        # thing this test is about is the *rows*: the bug was that a row
+        # could be chosen with the mouse and not with the keyboard, and a
+        # focusable button inside an unfocusable row is exactly the state
+        # that could not be reached at all. The button being focusable is
+        # correct - it is an action - and it is counted separately.
+        rows = [w for w in focusable if isinstance(w, diff_mod._DiffFileItem)]
+        assert len(rows) == 3, (
+            f"{len(rows)} of 3 file rows are focusable; before this change "
             "the whole list was pointer-only")
+        assert len(focusable) > len(rows), (
+            "the rows are focusable but the buttons inside them are not, so a "
+            "keyboard user can choose a file and not act on it")

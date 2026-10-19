@@ -300,6 +300,19 @@ def _stale_citations():
                     found.append((path, lineno, cited))
                     continue
 
+                # `self._method` cited inside the class that defines it. The
+                # escape hatch above covers `self._x = ...` - an attribute
+                # assigned at runtime, which is undecidable. A **method** is
+                # decidable: it is in this file, in one of its classes. So
+                # `self._pump` in a comment about `pump` was reported as a
+                # citation of a *module* named `self`, which is a category
+                # error - it is not a module, it is the class the comment is
+                # in.
+                if module_part == "self":
+                    if any(attr in _class_members(tree, n.name)
+                           for n in tree.body if isinstance(n, ast.ClassDef)):
+                        continue
+
                 # `module._member`: the codebase also cites `module._method` for
                 # a method of the one obvious class in that module
                 # (`application._init_components`), so a class member counts.

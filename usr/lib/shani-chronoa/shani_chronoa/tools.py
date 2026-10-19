@@ -583,17 +583,18 @@ REPLAY_CAPACITY = 64
 #: with the stale refusal instead of running. **A stale refusal is worse than no
 #: replay protection at all**, so `VERIFIED` is the whole rule.
 #:
-#: What that costs, measured on this tree: **22 of the 66 gated tools** have a
+#: What that costs, measured on this tree: **28 of the 81 gated tools** have a
 #: post-condition and can therefore reach `VERIFIED` -
-#: `airplane_mode`, `close_window`, `control_service`, `conversations`,
-#: `default_apps`, `delete_file`, `desktop_setting`, `edit_file`,
-#: `find_and_replace`, `git_branch`, `git_commit`, `git_push`,
-#: `kill_process`, `manage_mount`, `manage_triggers`, `office_document`,
-#: `power_action`, `print_queue`, `set_hostname`, `set_locale`,
-#: `take_photo`, `toggle_wifi` - of which twelve are
-#: also classified destructive. The other 44 are not replay-protected, and
-#: `install_app`, `move_pointer`, `click_pointer`, `type_text` and
-#: `connect_wifi` are among them. That is the honest coverage, recorded here
+#: `airplane_mode`, `click_pointer`, `close_window`, `container`,
+#: `control_service`, `conversations`, `default_apps`, `delete_file`,
+#: `desktop_setting`, `driver_build`, `edit_file`, `find_and_replace`,
+#: `git_branch`, `git_commit`, `git_push`, `kill_process`, `manage_mount`,
+#: `manage_triggers`, `move_pointer`, `office_document`, `power_action`,
+#: `print_queue`, `set_hostname`, `set_locale`, `take_photo`, `toggle_wifi`,
+#: `type_text`, `vm` - of which twelve are
+#: also classified destructive. The other 53 are not replay-protected, and
+#: `install_app`, `connect_wifi`, `run_command` and `press_key` are among
+#: them. That is the honest coverage, recorded here
 #: rather than implied by the feature's presence.
 #:
 #: **Recomputed rather than retyped, and the guard that says so is

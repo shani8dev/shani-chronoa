@@ -491,8 +491,19 @@ def _device_detail(mac: str, name: str) -> Gtk.Widget:
             return ("chars", exc, svc_rows, kinds)
         values = {}
         for handle, uuid, _kind in chars[:MAX_ROWS]:
+            label = gatt.uuid_name(uuid)
+            # **A characteristic the device will not return on a plain read is
+            # not read at all.** The module names those (`_NOTIFY_ONLY` is its
+            # own list and its own reason for each), and the row below would
+            # throw the value away anyway - it shows the note and a Listen
+            # button instead. Reading it first cost a gatttool connection per
+            # characteristic and returned nothing, and the read is the slow
+            # part: the whole point of this being on a thread is that a
+            # connection to a real device takes seconds.
+            if gatt._NOTIFY_ONLY.get(label) is not None:
+                continue
             try:
-                values[handle] = gatt.read_value(mac, handle, gatt.uuid_name(uuid), uuid)
+                values[handle] = gatt.read_value(mac, handle, label, uuid)
             except Exception as exc:  # noqa: BLE001 - shown on its row
                 values[handle] = exc
         return ("ok", (chars, values), svc_rows, kinds)

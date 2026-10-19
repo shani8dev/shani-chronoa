@@ -49,7 +49,16 @@ _ENFORCEMENT = re.compile(
 
 #: Words a docstring may use to say "this one is not wired". Synonyms, not a
 #: sentence: a reason is a reason however it is phrased.
-_DECLARED = ("no caller", "never called", "nobody calls", "has no callers")
+#:
+#: **"only the test server" is in the list** because the shipped tree holds
+#: helpers that exist for the test suite - the SIP digest challenge is one,
+#: and `tests/fake_jio_router.py` is what calls it. The scan covers
+#: `usr/lib` and `usr/bin` only, so a function the *tests* call reads as
+#: uncalled unless its docstring says what it is for. The phrase is kept
+#: narrow on purpose: "only the test server" says who calls it, where
+#: "not wired" would not.
+_DECLARED = ("no caller", "never called", "nobody calls", "has no callers",
+             "only the test server", "only the test suite")
 
 #: **Exceptions we have decided to accept *undocumented*.** Empty on purpose.
 #
@@ -277,3 +286,35 @@ class TestTheCheckItself:
             "    return refuse_caller()\n".replace(
                 "refuse_caller()", "refuse({})"))
         assert _orphans_of(module) == []
+
+    def test_a_test_only_helper_may_say_so(self, tmp_path):
+        """A helper the *tests* call is not an orphan, it is a helper.
+
+        The scan covers the shipped tree only, so the shipped tree's own
+        test-server helpers read as uncalled unless they say who calls them.
+        """
+        module = tmp_path / "helper.py"
+        module.write_text(
+            "def check_authorization(header):\n"
+            "    '''Whether the header is right. Only the test server calls\n"
+            "    this, and it is the answering half of a challenge no shipped\n"
+            "    server ever receives.'''\n"
+            "    return True\n")
+        assert _orphans_of(module) == [], (
+            "a helper that says which side calls it was still reported")
+
+    def test_the_test_only_phrase_does_not_admit_an_undocumented_one(self, tmp_path):
+        """The new phrase must not become a way past the gate.
+
+        The words have to be *there*; a function that does not say anything
+        about being unwired is still reported.
+        """
+        module = tmp_path / "sneaky.py"
+        module.write_text(
+            "def check_authorization(header):\n"
+            "    '''Whether the header is right.'''\n"
+            "    return True\n")
+        assert [name for _, name in _orphans_of(module)] == [
+            "check_authorization"], (
+            "a function that says nothing about being unwired was accepted "
+            "because a phrase exists for the other case")

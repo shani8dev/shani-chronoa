@@ -389,12 +389,43 @@ class TestInputControlSchemas:
         assert schema["function"]["parameters"]["required"] == ["text"]
 
     def test_no_free_form_command_skill_exists(self):
-        # The fixed-whitelist boundary: there must be no generic shell-exec
-        # skill anywhere in the registered tools.
+        """The fixed-whitelist boundary, as it now stands.
+
+        There is no **unconfined** shell-exec skill. `run_command` exists
+        (2026-10-16) and it is not the thing this test forbids: it is gated
+        behind `run-command-enabled`, which ships **off**; it is in
+        `DESTRUCTIVE_CONSENT_KEYS`, so "Ask first" asks about every call;
+        and every way it offers to run - a bubblewrap+Landlock sandbox, a
+        rootless podman container, an nspawn/vmspawn machine - is confined.
+
+        So the boundary is not "no shell at all"; it is **a command only
+        inside the jail, and only when the person says so**. A skill that
+        ran a command on the host would be the violation, and that is what
+        this now checks: the schema offers no unconfined option at all.
+        """
+        from shani_chronoa import capabilities
         from shani_chronoa.skills import discover_skills
 
         tools, _ = discover_skills()
-        names = {s["function"]["name"] for s in tools}
+        schemas = {s["function"]["name"]: s for s in tools}
 
-        forbidden = {"shell", "exec", "run_command", "execute", "command"}
-        assert not (names & forbidden)
+        # The generic names are still gone: a skill that took a command line
+        # and ran it as asked, with no jail of its own, is the violation.
+        forbidden = {"shell", "exec", "execute", "command"}
+        assert not (set(schemas) & forbidden), (
+            "a skill that runs a command line as asked, with no jail of its "
+            f"own, is registered: {sorted(set(schemas) & forbidden)}"
+        )
+
+        run = schemas.get("run_command")
+        if run is None:
+            return
+        where = run["function"]["parameters"]["properties"]["where"]
+        assert set(where["enum"]) == {"sandbox", "container", "machine"}, (
+            "a command skill must offer confined ways to run and nothing "
+            f"else; it offers {where['enum']}"
+        )
+        assert "run-command-enabled" in capabilities.DESTRUCTIVE_CONSENT_KEYS, (
+            "a command can do anything the person can, so it must ask every "
+            "time - the same class as deleting a file"
+        )

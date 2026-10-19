@@ -1943,7 +1943,7 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         # `do_activate` anyway** - so a fallback there *is* reachable. It would
         # still change nothing for the better, and the reason is the one that
         # matters: every reader of `self.mascot` (`do_shutdown`,
-        # `do_activate`, `voice._on_level`) already treats absence as "no
+        # `do_activate`, `voice._level_to_mascot`) already treats absence as "no
         # companion" rather than as a fault, so the fallback's only observable
         # effect would be to **show a mascot on an application that failed to
         # start**.

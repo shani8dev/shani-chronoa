@@ -594,6 +594,28 @@ class ChronoaConfig:
             logger.warning("Keyring unavailable (%s); %s stays in settings", type(e).__name__, key)
             return False
 
+    def setting_readable(self, key: str) -> bool:
+        """Whether `key` can actually be READ, as opposed to taking a default.
+
+        `get_bool` answers `default` for a key the running schema does not
+        declare, and **a default is not a reading**. The distinction matters
+        wherever a default is not a safe answer.
+
+        `egress.privacy_mode_enabled()` is the case: its alarm has to fail
+        TOWARD privacy mode being on, because a broken settings store would
+        otherwise quietly disarm the invariant the audit log exists to defend -
+        a false alarm is a log line, and a missed breach is a user who
+        believes nothing left. Before `privacy-mode`'s default moved to `false`
+        (2026-10-19) that direction was reached *by accident*, because the
+        Python fallback happened to be `True`; with the fallback now `False`, a
+        machine whose schema was never compiled read as "privacy mode off" and
+        the alarm never fired at all.
+
+        So the reader asks the question it actually has: could this setting be
+        read, or is this a default standing in for one?
+        """
+        return self._settings is not None and key in self._valid_keys
+
     def get_bool(self, key: str, default: bool = False) -> bool:
         """Get a boolean configuration value (schema type "b").
 

@@ -168,7 +168,17 @@ class Line:
                 pass
         if self.registered:
             try:
-                self._register(expires=0)
+                # **A short wait, because this one is a courtesy.** The
+                # un-registration is the router being told to forget the
+                # line. A router that is gone - powered off, out of range, or
+                # already stopped - will never answer it, and a person
+                # closing the app must not wait the full request timeout for
+                # the silence.
+                #
+                # Measured: with the router stopped first, every `stop()`
+                # waited the full 32 seconds for a REGISTER nobody was going
+                # to answer, and a file of calls took minutes.
+                self._register(expires=0, timeout=2.0)
             except Exception:  # noqa: BLE001
                 pass
         self._close()
@@ -362,7 +372,7 @@ class Line:
     # --- registration --------------------------------------------------------------------
     _expires = EXPIRES
 
-    def _register(self, expires: int = EXPIRES) -> int:
+    def _register(self, expires: int = EXPIRES, timeout: float = 32.0) -> int:
         auth = ""
         for _attempt in range(2):
             self._reg_cseq += 1
@@ -379,7 +389,8 @@ class Line:
             ]
             if auth:
                 headers.append(("Authorization", auth))
-            reply = self._request(sip.Message(f"REGISTER {uri} SIP/2.0", headers))
+            reply = self._request(sip.Message(f"REGISTER {uri} SIP/2.0", headers),
+                                  timeout=timeout)
             if reply is None:
                 raise OSError("the router did not answer the registration")
             if reply.status == 401 and not auth:

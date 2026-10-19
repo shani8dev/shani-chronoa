@@ -212,6 +212,21 @@ _DELEGATE_PREAMBLE = (
     "summary of what you found or did: facts, paths, numbers, and anything you "
     "could not do.\n\n")
 
+#: Tools this assistant handles **itself**, rather than dispatching them to a
+#: skill module.
+#:
+#: `delegate` needs the model and the window, so it runs in this process. Its
+#: skill module's `run` is only ever reached by a dispatcher with no assistant
+#: behind it - the MCP server - and that run is a refusal, so **the parameters
+#: it advertises are read here and not there**.
+#:
+#: Named rather than written as an `if` at the call site, so that a reader
+#: asking "who reads this tool's arguments?" finds the answer instead of
+#: finding a stub. `tests/test_no_dead_schema_parameters.py` reads this
+#: tuple: an audit that looks for a parameter in the wrong file reports a
+#: live control as dead, which is the same mistake in the other direction.
+HANDLED_HERE = ("delegate",)
+
 # _history grew unboundedly across a session before this - combined with a
 # small num_ctx that was previously hardcoded, a long session would
 # silently truncate context (Ollama drops rather than errors) well before
@@ -1321,7 +1336,7 @@ class Assistant:
                 # What is fixed here is narrower and real: the guess is now
                 # made once, from the outcome the dispatcher already produced,
                 # and `_tool_verdict_of` documents what it can and cannot know.
-                if name == "delegate":
+                if name in HANDLED_HERE:
                     # In this process, not the skill sandbox: it needs the
                     # model and the window. See `skills/delegate.py`.
                     result, outcome = await self._delegate(arguments, origin, deadline), None

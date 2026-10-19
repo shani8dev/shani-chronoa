@@ -929,6 +929,43 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
         )
         self._switch(group, "Debug logging", "Verbose logs, including tool calls",
                      config.debug_mode, lambda a: self._app_toggle("toggle-debug", a))
+        self._desktop_companion(group, config)
+
+    def _desktop_companion(self, group, config) -> None:
+        """The mascot's four settings, which nothing could reach.
+
+        **They had no control anywhere.** The schema declared
+        `mascot-enabled`, `mascot-corner`, `mascot-sounds` and
+        `mascot-sounds-volume`, the code read all four, and **no writer
+        existed** - not in this window, not in a panel, not in the mascot
+        itself. So the feature was off by default with no way to turn it on,
+        and the settings surface's own guard was right to say so: a setting
+        nobody can reach is a switch that is not there.
+
+        The companion is an always-on overlay, which is why its own schema
+        description says it is off by default; this is where a person turns
+        it on.
+        """
+        self._switch(
+            group, "Show the desktop companion",
+            "A small companion in the corner that mirrors what Chronoa is doing",
+            config.get_bool("mascot-enabled", False),
+            lambda a: config.set("mascot-enabled", "true" if a else "false"))
+        self._choice(
+            group, "Where it sits",
+            "Top centre (a strip along the top edge), top right, or bottom right",
+            ["top-center", "top-right", "bottom-right"],
+            config.get("mascot-corner", "top-center"),
+            lambda value: config.set("mascot-corner", value))
+        self._switch(
+            group, "Play its sounds",
+            "A short sound when it appears, and when a build finishes",
+            config.get_bool("mascot-sounds", False),
+            lambda a: config.set("mascot-sounds", "true" if a else "false"))
+        self._number(
+            group, "Sound volume", "How loud the companion is",
+            config.get_double("mascot-sounds-volume", 0.6), 0.0, 1.0, 0.05,
+            lambda v: config.set("mascot-sounds-volume", str(v)))
 
     def _app_toggle(self, action: str, active: bool) -> None:
         """Route a switch through the app's own action.

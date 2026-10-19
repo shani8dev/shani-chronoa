@@ -36,6 +36,12 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
+#: Where this belongs. It is not a sidebar panel of its own - the wearables
+#: panel draws it - but it lives in the surfaces package, and the package's
+#: rule is that every module in it says where it belongs, so a module cannot
+#: arrive without that decision being made.
+SECTION = "Sensing"
+
 #: The goal the ring is drawn against when the watch's own is not known.
 DEFAULT_STEP_GOAL = 8000
 #: Sleep stage colours, deep to awake (GNOME palette).

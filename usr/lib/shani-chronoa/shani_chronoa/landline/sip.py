@@ -219,7 +219,17 @@ def authorization(challenge: str, method: str, uri: str, user: str, password: st
 
 
 def check_authorization(header: str, method: str, password: str) -> bool:
-    """For a test server: whether `header` is a right answer for `password`."""
+    """For a test server: whether `header` is a right answer for `password`.
+
+    **Only the test server calls this** - `tests/fake_jio_router.py`, and the
+    test that exercises it. Nothing in the shipped tree calls it, because
+    nothing in the shipped tree *is* a SIP server: this is the answering half
+    of the digest challenge, and the router that would need to answer one is
+    a test fixture.
+
+    The name reads as enforcement, so the reason it is not wired belongs here
+    rather than only in the test that happens to call it.
+    """
     a = _challenge(header)
     md5 = lambda s: hashlib.md5(s.encode()).hexdigest()  # noqa: E731
     ha1 = md5(f"{a['username']}:{a['realm']}:{password}")

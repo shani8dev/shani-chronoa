@@ -240,11 +240,21 @@ class TestAgainstTheRealWindow:
                 orphan = [a for _, a in MODE_CHIPS if not in_tree[a]]
 
                 results = {}
-                for action, attr in MODE_CHIPS:
-                    window._activate_mode(action)
-                    chip = getattr(strip, attr)
-                    results[attr] = _inside(
-                        window, chip.get_popover().get_parent())
+                for action, _attr in MODE_CHIPS:
+                    # **The chip the product opens, not one this file names.**
+                    # The strip has been regrouped once already - seven
+                    # individual chips became three grouped ones, and two
+                    # settings live on buttons of the window - so the table
+                    # below named six chips that are built but no longer on
+                    # screen. The test then measured popovers the product
+                    # never opens and reported every entry "not anchored
+                    # inside the window" while the product was anchoring all
+                    # of them correctly.
+                    chip = window._activate_mode(action)
+                    results[action] = (
+                        chip is not None
+                        and _inside(window, chip)
+                        and _inside(window, chip.get_popover().get_parent()))
 
                 # the model entry builds its list by hand, and called
                 # `_model_chip.popup()` directly - the same broken call on the
