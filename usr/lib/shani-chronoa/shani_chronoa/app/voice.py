@@ -746,7 +746,7 @@ class VoiceMixin:
             self._mark("spoken")
             q0 = holder.get("q")
             if q0 is not None and q0.spoken and getattr(self, "_voice_turn", False) \
-                    and self.config.get_bool("follow-up-enabled", False):
+                    and self.config.get_bool("follow-up-enabled", True):
                 GLib.idle_add(self._listen_for_follow_up)
             self._log_latency()
             self._on_speech_finished()

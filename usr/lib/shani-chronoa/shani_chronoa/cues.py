@@ -32,7 +32,7 @@ def play(name: str, config=None) -> bool:
     if config is None:
         from shani_chronoa.config import ChronoaConfig
         config = ChronoaConfig()
-    if not config.get_bool("sound-cues-enabled", False):
+    if not config.get_bool("sound-cues-enabled", True):
         return False
     sound = path_for(name)
     player = shutil.which("pw-play") or shutil.which("paplay")

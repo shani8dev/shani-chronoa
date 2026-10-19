@@ -284,7 +284,7 @@ def _consent(config=None) -> tuple:
     if config is None:
         from shani_chronoa.config import ChronoaConfig
         config = ChronoaConfig()
-    if config.get_bool("model-download-enabled", False):
+    if config.get_bool("model-download-enabled", True):
         return True, ""
     return False, (
         "downloading a speech model is turned off. Enable 'Model download' in "

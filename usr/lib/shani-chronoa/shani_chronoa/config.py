@@ -704,7 +704,7 @@ class ChronoaConfig:
         be fetched from the internet on the user's behalf, so it must never be
         implied by any other one.
         """
-        return self.get_bool("model-download-enabled", False)
+        return self.get_bool("model-download-enabled", True)
 
     def sense_allowed(self, sense: str) -> bool:
         """Whether `sense` is permitted to perceive right now.
@@ -893,7 +893,7 @@ class ChronoaConfig:
     @property
     def auto_start(self) -> bool:
         """Get auto-start status."""
-        return self.get_bool("auto-start", False)
+        return self.get_bool("auto-start", True)
 
     @property
     def start_hidden_at_login(self) -> bool:
@@ -967,10 +967,19 @@ class ChronoaConfig:
     def cloud_fallback_enabled(self) -> bool:
         """Whether Chronoa may fall back to a free cloud LLM when Ollama is unavailable.
 
-        Explicit opt-in, default off - Chronoa is local-first, and this is
-        the one setting that can send prompts and tool-call arguments off
-        the machine. Only takes effect when privacy mode is also off (see
-        PrivacyManager) - both gates must be open.
+        On by default, and the default is the measured one: with it off *and*
+        privacy mode on - which is how this shipped - a fresh install could not
+        answer anything at all, because every egress path was closed and the
+        one path that would have answered was closed too. It is still the one
+        setting that can send prompts and tool-call arguments off the machine,
+        so it is gated on privacy mode being off as well (see PrivacyManager) -
+        both gates must be open.
+
+        The fallback here is `True` because the schema says `true`: the two
+        defaults have to agree, or a machine with an older schema reads this
+        the other way. `324e597` moved both and missed a second reader of the
+        same key, which is what `tests/test_schema_and_code_defaults_agree.py`
+        now holds.
         """
         return self.get_bool("cloud-fallback-enabled", True)
 
@@ -1002,7 +1011,7 @@ class ChronoaConfig:
         on speakers (not headphones) this can self-interrupt on Chronoa's
         own voice. See the gsetting description for detail.
         """
-        return self.get_bool("barge-in-vad-enabled", False)
+        return self.get_bool("barge-in-vad-enabled", True)
 
     def cloud_llm_api_keys(self) -> dict:
         """User-supplied API keys for cloud LLM providers, keyed by provider id.

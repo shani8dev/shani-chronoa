@@ -44,7 +44,7 @@ class DesktopIntegrationMixin:
         """
         if getattr(self, "_shortcut_thread", None) is not None:
             return
-        if not self.config.get_bool("global-shortcut-enabled", False):
+        if not self.config.get_bool("global-shortcut-enabled", True):
             return
         trigger = self.config.get("global-shortcut") or "CTRL+ALT+space"
 
@@ -178,7 +178,7 @@ class DesktopIntegrationMixin:
 
     def _sync_background_mode(self) -> None:
         """Enable or disable the background-mode user unit to match the setting (installed, never on by default)."""
-        want = self.config.get_bool("background-mode-enabled", False)
+        want = self.config.get_bool("background-mode-enabled", True)
         if shutil.which("systemctl") is None:
             return
         try:

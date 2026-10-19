@@ -207,7 +207,7 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         self.message_watcher.start()
         # This computer's music, for Bluetooth remotes (AVRCP target), when its switch is on.
         self.avrcp_target = None
-        if self.config.get_bool("bluetooth-media-remote-enabled", False):
+        if self.config.get_bool("bluetooth-media-remote-enabled", True):
             from shani_chronoa.avrcp_target import AvrcpTarget
             self.avrcp_target = AvrcpTarget()
             self.avrcp_target.start()

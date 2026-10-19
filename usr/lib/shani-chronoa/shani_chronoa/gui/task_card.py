@@ -177,7 +177,7 @@ def _outstanding() -> "list[dict]":
     plans = _plans_waiting()
 
     from shani_chronoa import config as config_mod
-    if not config_mod.ChronoaConfig().get_bool("todo-list-enabled", False):
+    if not config_mod.ChronoaConfig().get_bool("todo-list-enabled", True):
         return plans
     from shani_chronoa.skills import todo_list
     items, problem = todo_list.open_tasks()

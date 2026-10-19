@@ -1225,6 +1225,72 @@ class TestRegistration:
                 f"container name - and the rest are the machine's own hardware"
             )
 
+    def test_every_registered_sense_agrees_with_the_schema(self):
+        """The whole table, not the eight this file added.
+
+        `test_the_schema_agrees_with_the_python_default` covers the senses
+        this file added, against a list of names hard-coded here.
+        `config._SENSE_DEFAULT_ENABLED` is the fallback for an install whose
+        schema predates a key, so a sense that is in one place and not the
+        other is one machine reading a consent key one way and another
+        machine reading it the other way.
+
+        The registry is the source of the population, so a sense added later
+        is covered without this file being edited - which is the whole point
+        of a table that is hand-kept on both sides.
+        """
+        from shani_chronoa.senses import discover_senses
+        from shani_chronoa.config import (_SENSE_CONSENT_KEYS,
+                                           _SENSE_DEFAULT_ENABLED)
+
+        root = ElementTree.parse(SCHEMA_XML).getroot()
+        defaults = {}
+        for key in root.iter("key"):
+            if key.get("type") != "b":
+                continue
+            child = key.find("default")
+            if child is not None and child.text is not None:
+                defaults[key.get("name")] = child.text.strip() == "true"
+
+        registry = discover_senses()
+        assert len(registry) > 40, (
+            f"only {len(registry)} senses registered - the registry was not read"
+        )
+        for name in sorted(registry):
+            consent_key = _SENSE_CONSENT_KEYS.get(name)
+            assert consent_key, (
+                f"{name} has no consent key, so it is permanently ungrantable"
+            )
+            assert consent_key in defaults, (
+                f"{consent_key} is not declared in {SCHEMA_XML.name}; "
+                f"glib-compile-schemas discards the whole file on a malformed "
+                f"key, and a key the schema does not declare makes the sense "
+                f"permanently ungrantable"
+            )
+            assert defaults[consent_key] is (name in _SENSE_DEFAULT_ENABLED), (
+                f"{consent_key} defaults to {defaults[consent_key]} in the "
+                f"schema and to {name in _SENSE_DEFAULT_ENABLED} in "
+                f"config._SENSE_DEFAULT_ENABLED - the two disagree, so a "
+                f"machine whose schema predates the key reads it the other way"
+            )
+
+    def test_no_python_default_names_a_sense_that_does_not_exist(self):
+        """The other direction: a name in the table that is not a sense.
+
+        A name that no sense answers for is a table entry that reads as
+        somebody's default for a sense that does not exist - and, worse, a
+        sense added later with that name would inherit it silently.
+        """
+        from shani_chronoa.senses import discover_senses
+        from shani_chronoa.config import _SENSE_DEFAULT_ENABLED
+
+        registry = discover_senses()
+        orphans = sorted(n for n in _SENSE_DEFAULT_ENABLED if n not in registry)
+        assert not orphans, (
+            "config._SENSE_DEFAULT_ENABLED names senses that are not "
+            f"registered: {', '.join(orphans)}"
+        )
+
     def test_the_schema_agrees_with_the_python_default(self):
         root = ElementTree.parse(SCHEMA_XML).getroot()
         defaults = {}

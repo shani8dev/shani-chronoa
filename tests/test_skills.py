@@ -483,7 +483,18 @@ class TestWebSearchPrivacy:
     to a window."""
 
     def test_web_search_blocked_in_local_only_mode(self, mock_launch_uri, privacy_manager):
-        # Given: local-only privacy mode is active (schema default privacy-mode=true)
+        # Given: local-only privacy mode is active.
+        #
+        # Turned **on here** rather than relied upon from the schema. `privacy-mode`
+        # ships `false` on purpose - its own description says "Off by default:
+        # Chronoa may use cloud providers when no local model answers" - so a test
+        # that assumed the default was asserting a default nobody chose. It read
+        # green for as long as the key was `true` and went red at 9fde500, and the
+        # fix is to arrange the state this test is about rather than to move the
+        # product back. `is_local_only` re-reads the setting on every access, so
+        # writing through the same config is enough - the same shape its sibling
+        # below uses for the opposite case.
+        privacy_manager.config.set("privacy-mode", "true")
         assert privacy_manager.is_local_only
         from shani_chronoa.skills.web_search import _run
         # When: the web search skill is invoked

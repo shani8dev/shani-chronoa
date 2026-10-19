@@ -138,10 +138,10 @@ def state(config=None) -> dict:
                  "recommended": stt_provision.DEFAULT_MODEL},
         "voice": {"piper": bool(voices.piper_binary()), "voice": voice if voices.voice_installed(voice) else "",
                   "ready": (bool(voices.piper_binary()) and voices.voice_installed(voice))
-                           or (config.get_bool("kokoro-tts-enabled", False) and voices.kokoro_installed(
+                           or (config.get_bool("kokoro-tts-enabled", True) and voices.kokoro_installed(
                                config.get("kokoro-voice", voices.KOKORO_DEFAULT_VOICE))),
                   "chosen": voice if voice in voices.VOICES else "en_US-lessac-medium"},
-        "kokoro": {"installed": voices.kokoro_installed(), "enabled": config.get_bool("kokoro-tts-enabled", False),
+        "kokoro": {"installed": voices.kokoro_installed(), "enabled": config.get_bool("kokoro-tts-enabled", True),
                    "voice": config.get("kokoro-voice", voices.KOKORO_DEFAULT_VOICE)},
         "eyes": {"ocr": bool(shutil.which("tesseract")), "installed": local_vision.installed(),
                  "active": local_vision.active(), "ready": local_vision.available(),
@@ -1126,7 +1126,7 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         re-locks the page, which is the point of a switch rather than a
         checkbox.
         """
-        already = bool(config.get_bool("model-download-enabled", False))
+        already = bool(config.get_bool("model-download-enabled", True))
         row = Adw.SwitchRow(
             title="Allow downloading models from the internet",
             # A few words, because libadwaita 1.5 does not wrap a row subtitle:
@@ -1460,7 +1460,7 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
     # page without one of them being the default, and the default would be the
     # one people did not mean.
     mode = config.get("setup-mode", "") or ("cloud" if config.get_bool(
-        "cloud-fallback-enabled", False) else "local")
+        "cloud-fallback-enabled", True) else "local")
 
     def _mode() -> str:
         return config.get("setup-mode", "local") or "local"

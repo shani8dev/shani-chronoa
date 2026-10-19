@@ -657,7 +657,7 @@ class NowRail(Gtk.Box):
     def _fill_tasks(self) -> None:
         self._tasks.clear()
         config = config_mod.ChronoaConfig()
-        if not config.get_bool("todo-list-enabled", False):
+        if not config.get_bool("todo-list-enabled", True):
             # The consent key governs the rail exactly as it governs the skill:
             # a list the user switched off is not shown here either. Saying so
             # is better than silence, because silence would read as "no tasks"

@@ -346,7 +346,15 @@ def _footer(config: Any) -> str:
     """The one line where this surface and `sense_allowed()` can disagree."""
     text = "Each switch writes its own key, so there is no global permission here. "
     try:
-        privacy = config is not None and bool(config.get_bool("privacy-mode", True))
+        # The fallback is `False` because `privacy-mode` ships `false` - and this
+        # surface's whole job here is to agree with `config.py:697`, which reads
+        # the same key with the same fallback. A `True` fallback meant a machine
+        # whose schema predates the key was told "Privacy mode is on, so a sense
+        # that reaches outside this machine stays refused" while the product
+        # itself was not in privacy mode: the footer describing a policy the app
+        # was not enforcing. 324e597 flipped the default in config.py and missed
+        # this second reader of the same key.
+        privacy = config is not None and bool(config.get_bool("privacy-mode", False))
     except Exception:  # noqa: BLE001 - a config that cannot be read is not a crash
         privacy = False
     if privacy:

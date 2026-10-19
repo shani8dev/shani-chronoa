@@ -136,9 +136,9 @@ class VoicePage:
             config.model_download_enabled,
             lambda a: self._app_toggle("toggle-model-download", a))
         self._switch(group, "Listen for a follow-up", "Keep the microphone open for six seconds after a spoken reply",
-                     config.get_bool("follow-up-enabled", False), lambda a: self._set_bool("follow-up-enabled", a))
+                     config.get_bool("follow-up-enabled", True), lambda a: self._set_bool("follow-up-enabled", a))
         self._switch(group, "Sound cues", "A short sound when listening starts or a request was not understood",
-                     config.get_bool("sound-cues-enabled", False), lambda a: self._set_bool("sound-cues-enabled", a))
+                     config.get_bool("sound-cues-enabled", True), lambda a: self._set_bool("sound-cues-enabled", a))
         # The named character, above the individual timbre sliders, because it is
         # the control most people will actually use and the sliders are the ones
         # to reach for when it is not enough.

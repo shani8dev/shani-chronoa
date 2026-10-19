@@ -835,7 +835,7 @@ class _ModeStrip(Gtk.Box):
         would start acting on a machine whose owner never asked it to.
         """
         try:
-            running = bool(self._config.get_bool("background-mode-enabled", False))
+            running = bool(self._config.get_bool("background-mode-enabled", True))
         except Exception:                               # noqa: BLE001
             logger.warning("could not read the background-mode setting",
                            exc_info=True)
