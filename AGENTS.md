@@ -27673,3 +27673,116 @@ way to turn it on, and the settings-surface guard was right to say so. A
 - **`tools.py`'s replay-coverage comment** was a list of 22 names and two
   numbers; the registry says 28 of 81. The list and the numbers were
   updated together, which is what the test asks for.
+
+## "Fix all", again: the population the tests do not cover (2026-10-20)
+
+The suite is green - 696/696 files, 12,895 passed - so "fix all" moved to
+everything the suite cannot see. Four populations, each measured before
+anything was changed.
+
+### The lint population was ten, and all ten were real
+
+The package's own 346 are deliberate (311 `__init__.py` re-exports, 34
+`# noqa: F401` facades, one deliberately-kept dead local). Everything else
+was in `tools/` and one launcher, and none of it was a re-export:
+
+- `usr/bin/shani-chronoa-lab-network` imported `json` and never used it.
+- `tools/cli_matrix.py` had an unused `importlib` and **a local map built
+  from `m["commands"]` and never used**, one letter away from the
+  `owners` parameter the code below it actually reads. The dead one was
+  also the *wrong* map: it lists the commands the image **has**, and the
+  question there is which package provides a command the image does not
+  have.
+- `tools/rerank.py` computed the training split's pair count and threw it
+  away - it is now in the output - and imported the training stack twice.
+- Four f-strings with no placeholders in them.
+
+**Ten findings, ten fixes, and pyflakes is now clean apart from the
+deliberate ones.** A lint finding is evidence about the code, not a
+verdict on it: "assigned but never used" says the value went nowhere, and
+the question worth asking is what the *call* was for. Two of the ten
+answered that question with a real defect rather than a deletion.
+
+### Two switches that were shipped and wired to nothing
+
+**The organ tone.** `organ-audible-enabled` says, in the schema's own
+words: *"starting to listen, look at the screen or the camera, speak,
+reach the network or act on something plays a short quiet tone naming the
+organ class"*. The body had the API for it - `announce()` asks,
+`set_audible()` installs the answer - and the organ strip had the tone
+player in `OrganStrip.play`, and **nothing joined them**. So the switch
+did nothing at all: a person who turned it on heard silence, and a person
+who left it off could not tell the difference.
+
+`body.use()` now asks at the moment an organ starts (a pulse counts - "reached
+the network" is a pulse), and the window installs the hook beside the
+notice hook, because the two are the same idea: the body cannot speak for
+itself and the window is what gives it a voice. The tone is played on a
+thread, because a wav is written before it is played and the GTK thread
+must not wait for that.
+
+**The voice recording.** `voice_clone.clip_problem(path)` measures whether a
+*reference clip* is usable - there, empty, too big - and its own docstring
+says it "is what the voice surface and `speak`'s own refusal print". **Neither
+asked it**: both asked `clone_problem()`, which answers a different question
+(whether the *engine* can run on this machine at all). So a recording that
+had been deleted was reported as fine. The voice surface's row now says
+what is wrong with the file, and `speak`'s refusal asks about the recording
+before the engine, because the file is the one a person can do something
+about.
+
+### The dead-code scan reported 42 names, and a third of them were its own blind spot
+
+`tools/deadcode.py` does not scan string constants - that is what removes
+the prose false positives - and the cost of that is recorded in the tool's
+own docstring. Two of the 42 were that cost, and the tool already had a
+mechanism for it:
+
+- `argfile.run_from_file` is called from the source string
+  `_REFERENCE_PROGRAM` builds, which is the program a skill's child process
+  is started with. It was allowlisted by hand, next to
+  `apply_filesystem_allowlist`, which is the same shape.
+- `senses/vision.describe_captured` is a **third** kind, and it is a
+  *pattern* rather than an instance: `argfile.reference_command(module,
+  function, arguments)` writes the name into the child's program text and
+  the child does `getattr(module, function)`, so **every** function passed
+  that way is called without its name ever appearing as an identifier. The
+  tool now finds those wherever they appear, so the next function passed
+  that way is not a new finding.
+
+**The 38 it still reports are accounted for**, and the categories are the
+ones that keep coming up:
+
+| what | how many | why it stays |
+|---|---|---|
+| the learning toolbox | 18 | `learning.py` is *"twelve groups of methods... everything this package learns with is reachable from here"* - the module's own docstring establishes the surface |
+| a name reached by a string | 10 | the AST scan cannot see a `getattr`, a D-Bus method name or a dispatch tuple |
+| deliberately not called, in its own docstring | 3 | `best_available`, `check_health`, `prctl_set_seccomp_attempt` - and now four more, each with the reason written where a reader will look |
+| a module's own surface, like the learning toolbox | 2 | `fmdsp.bandpass` - *"filter and resampling primitives in the standard library"* |
+| **a real defect** | 2 | `set_audible` and `announce` - the organ tone, above |
+
+**The four that were neither deliberate nor a string seam** - `iter_parts`,
+`local_ip_towards`, `missing_reason` and `needs_answer` - now say so in
+their own docstrings, with the reason each is unwired, so the next sweep
+stops there instead of re-deriving it. Two of them are *second answers to
+a question already answered*: `local_ip_towards` asks the kernel to route
+towards a host and report the source address, while the SIP client reads
+the address off the socket it connected with - and the two can disagree on
+a machine with more than one interface. `needs_answer` encodes "BlueZ is
+still waiting" where the window asks the same thing by kind, because a
+`show-pin` prompt is BlueZ *telling* the person a code with nothing to
+answer.
+
+### And a false promise in a docstring
+
+`learning.py` said: *"the standalone modules are thin re-exports of it so an
+older import path keeps working"*. **No such module has ever existed here**:
+`git log --all --diff-filter=A -- '*bandits.py'` is empty, and
+`from shani_chronoa import bandits` raises `ModuleNotFoundError` today. The
+prose was inherited from a merge that happened somewhere else, and a
+compatibility promise nobody can rely on is worse than no promise.
+
+**A claim about a second import path is a claim about the *history*, so it
+is checkable** - and checking it took one `git log`. The sentence is
+corrected, and the `__all__` it sat next to is fine: all 36 of its names
+are exported from the module and a star-import brings every one.

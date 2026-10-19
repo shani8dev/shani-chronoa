@@ -35,6 +35,9 @@ above — and that has a known cost, recorded rather than hidden:
 - **`sandbox/landlock.py:apply_filesystem_allowlist`** is called from *inside the
   source string* `get_landlock_wrapper()` returns, which the executor writes to
   the workspace and runs. It reads as dead and is not.
+- **`argfile.py:run_from_file`** is the same shape: it is called from the
+  source string `_REFERENCE_PROGRAM` builds, which is the program a skill's
+  child process is started with. It reads as dead and is not.
 - **`usr/bin/` is a root, not an afterthought.** `netprovision.revalidate` and
   `read_envelope` are called only by `usr/bin/shani-chronoa-lab-network`, and a
   scan of `usr/lib` alone calls them dead. The scripts there import the package
@@ -107,6 +110,10 @@ GENERATED_CODE_CALLERS = {
     "apply_filesystem_allowlist":
         "called from the source string get_landlock_wrapper() returns, which "
         "the executor writes to the workspace and runs",
+    "run_from_file":
+        "called from the source string _REFERENCE_PROGRAM builds, which is the "
+        "program a skill's child process is started with - so the child calls "
+        "it without the name ever appearing as an identifier here",
 }
 
 
@@ -260,6 +267,31 @@ def _discovered_modules(names: "set[str]") -> "dict[str, str]":
     return found
 
 
+def _by_reference_targets(tree: ast.AST) -> "set[str]":
+    """The function names `argfile.reference_command` hands to a child process.
+
+    **A pattern, not an allowlist entry.** `reference_command(module, function,
+    arguments)` writes the *name* into the child's program text and the child
+    does `getattr(module, function)` - so a function passed that way is called
+    without its name ever appearing as an identifier in the tree. That is the
+    same class as `apply_filesystem_allowlist` and `run_from_file`, and the
+    first two were allowlisted by hand; this finds the third kind wherever it
+    appears, so the next function passed this way is not a new finding.
+    """
+    out: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or len(node.args) < 2:
+            continue
+        func = node.func
+        called = getattr(func, "attr", None) or getattr(func, "id", None)
+        if called != "reference_command":
+            continue
+        second = node.args[1]
+        if isinstance(second, ast.Constant) and isinstance(second.value, str):
+            out.add(second.value)
+    return out
+
+
 def scan() -> "dict[str, object]":
     production, tests = _files()
     defined: dict[str, list[str]] = {}
@@ -276,6 +308,7 @@ def scan() -> "dict[str, object]":
         for name in _defines(tree, path):
             defined.setdefault(name, []).append(rel)
         used_in_production |= _references(tree)
+        used_in_production |= _by_reference_targets(tree)
 
     for path in tests:
         tree = _tree(path)

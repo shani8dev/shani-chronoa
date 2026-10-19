@@ -721,7 +721,6 @@ def chronoa_inventory() -> dict:
                    "default_on": defaults.get(f"{n}-sense-enabled", "false") == "true",
                    "summary": re.split(r"(?<=[.!?])\s", x.schema["function"].get("description", ""), maxsplit=1)[0][:140]}
                   for n, x in sorted(found.items())]
-    import importlib
     post = {}
     for t in inv_tools:
         if t["role"] == "actuator" and t["module"] not in post:
@@ -1493,7 +1492,7 @@ def audit_packaging(matrices: "list[dict]", pkgbuilds: Path, profiles: Path) -> 
         L += [f"### {prof}", "",
               f"- {len(listed)} packages listed in {', '.join(lists) or 'no lists'}; "
               f"**{len(absent)} not installed**: " + (", ".join(f"`{p}`" for p in absent) or "none") + ".",
-              f"- Listed twice: " + (", ".join(f"`{p}`" for p in dup) or "none") + "."]
+              "- Listed twice: " + (", ".join(f"`{p}`" for p in dup) or "none") + "."]
         missing_deps = []
         for meta in listed:
             for dep in builds.get(meta, {}).get("depends", []):
@@ -1696,7 +1695,7 @@ def distro_findings(matrices: "list[dict]", builds: dict) -> "list[str]":
               f"defaults; {len(units)} enablement links in all): " + ", ".join(f"`{u}`" for u in chosen[:50]),
               f"- **Shanios packages not rebuilt in 180 days** ({len(ours_old)}): "
               + (", ".join(f"`{n}` ({d} d)" for d, n in ours_old) or "none")
-              + f"; oldest builds overall: " + ", ".join(f"`{n}` ({d} d)" for d, n in oldest),
+              + "; oldest builds overall: " + ", ".join(f"`{n}` ({d} d)" for d, n in oldest),
               f"- **Shanios packages older on the image than in shani-pkgbuilds** ({len(lag)}) - the image lags "
               "the repo; a rebuild (or the repo publish it is waiting on) ships these: " + (", ".join(lag) or "none"),
               f"- **Orphaned packages** ({len(orphans)}) - installed, not explicitly wanted, required by nothing "
@@ -1890,7 +1889,15 @@ def suggestions(matrices: "list[dict]", builds: dict, owners: "Optional[dict]" =
             add("fix", b.get("package") or "?", f"{b['kind']} runs a program that is not installed",
                 f"{b['file']} -> {b['program']}", prof, 60)
         # 3. what Chronoa runs and imports
-        owner = {r["command"]: r["package"] for r in m["commands"]}
+        #
+        # **The command -> package map here is `owners`, not the matrix's own
+        # command list.** The matrix records the commands the *image* has, and
+        # the question here is which package provides a command the image
+        # **does not** have - so the image's own list cannot answer it, and
+        # `COMMAND_PACKAGES` (or `owners`, with pacman's files database) is
+        # what can. A local map built from `m["commands"]` read as the answer
+        # and was never used, which is the same one-letter difference as the
+        # `owners` parameter it shadowed.
         other_desktop = {"gnome": KDE_TOOLS, "plasma": GNOME_TOOLS}.get(prof, set())
         for x in m.get("chronoa", {}).get("tools", []) + m.get("chronoa", {}).get("senses", []):
             for c in x.get("missing", []):
@@ -2289,7 +2296,7 @@ def write_markdown(path: str, data: dict) -> None:
               f"{sum(x['default_on'] for x in inv['senses'])} on by default; sensitivity "
               + ", ".join(f"{k} {v}" for k, v in collections.Counter(x["sensitivity"] for x in inv["senses"]).items())
               + ").",
-              f"- **Trigger event types**: " + "; ".join(f"`{e['type']}` ({e['question']})" for e in inv["events"]),
+              "- **Trigger event types**: " + "; ".join(f"`{e['type']}` ({e['question']})" for e in inv["events"]),
               f"- **Percept rules**: {inv['percept_rules']}.",
               f"- **Memory kinds**: {', '.join(inv['memory_kinds'])}.",
               f"- **Entry points**: launchers {', '.join(inv['entry_points']['launchers'])}; "

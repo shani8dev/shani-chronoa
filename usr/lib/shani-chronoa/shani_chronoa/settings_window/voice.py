@@ -293,10 +293,18 @@ class VoicePage:
             # correct one rather than the lazy one.
             row.set_use_markup(False)
             row.set_title(f"Recorded voice: {name}")
-            row.set_subtitle(
+            subtitle = (
                 f"{consent.speaker}, on the basis of: {consent.basis}. "
                 f"Agreed on {time.strftime('%d %b %Y', time.localtime(consent.registered_at))}"
                 f" for {os.path.basename(consent.clip)}.")
+            # **And whether the recording is still usable.** The row named the
+            # file; it did not say whether the file was there. A recording
+            # that was deleted, emptied, or replaced with something enormous
+            # left the row reading like an agreement that was fine.
+            clip_problem = voice_clone.clip_problem(consent.clip)
+            if clip_problem:
+                subtitle += f" The recording cannot be used: {clip_problem}"
+            row.set_subtitle(subtitle)
             remove = Gtk.Button(label="Remove", valign=Gtk.Align.CENTER)
             remove.add_css_class("destructive-action")
             remove.connect("clicked", lambda _b, v=name: self._forget_voice(v))

@@ -50,8 +50,17 @@ logger = logging.getLogger(__name__)
 
 #: The twelve method groups plus the feature space, the outcome model, the
 #: estimator set and the running bandit. Everything this package learns with
-#: is reachable from here; the standalone modules are thin re-exports of it
-#: so an older import path keeps working.
+#: is reachable from here.
+#:
+#: **There is no second import path, and this sentence used to say there
+#: was.** It claimed "the standalone modules are thin re-exports of it so an
+#: older import path keeps working" - and no such module has ever existed
+#: here: `git log --all --diff-filter=A -- '*bandits.py'` is empty, and
+#: `from shani_chronoa import bandits` raises `ModuleNotFoundError` today.
+#: The prose was inherited from a merge that happened somewhere else, and a
+#: compatibility promise nobody can rely on is worse than no promise. The
+#: groups are exported *from here*, and `from shani_chronoa.learning import
+#: *` is the one that works.
 __all__ = ["stats", "regression", "online", "bandits", "rl", "bayes",
            "clustering", "anomaly", "timeseries", "memory", "decision",
            "features", "OutcomeModel", "Example", "Report", "evaluate",

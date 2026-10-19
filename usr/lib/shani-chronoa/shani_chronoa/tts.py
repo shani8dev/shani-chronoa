@@ -276,7 +276,17 @@ class PiperTTS:
                                          config=self._settings())
         if not allowed:
             return why
-        problem = voice_clone.clone_problem()
+        # **The recording first, then the engine.** The voice is agreed and
+        # the switch is on, so what is left to go wrong is either the file it
+        # was built from or the engine that would build it - and the file is
+        # the one a person can do something about. `clip_problem` measures it
+        # and was written for exactly this; nothing was calling it, so a
+        # recording that had been deleted or replaced with something enormous
+        # was reported as "fine" and the failure surfaced somewhere else.
+        clip = voice_clone.clip_of(self.cloned_voice)
+        problem = (voice_clone.clip_problem(clip) if clip else "")
+        if not problem:
+            problem = voice_clone.clone_problem()
         if problem:
             return (f"a voice called {self.cloned_voice!r} is agreed and the "
                     f"switch is on, but {problem}")

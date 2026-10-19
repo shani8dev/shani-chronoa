@@ -31,7 +31,6 @@ still exists, so `destroy` can clean up rather than leaving namespaces behind.
 """
 
 import argparse
-import json
 import os
 import subprocess
 import sys

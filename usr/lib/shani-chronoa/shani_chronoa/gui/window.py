@@ -2,6 +2,7 @@
 
 import logging
 import os
+import threading
 import time
 
 import gi
@@ -1979,6 +1980,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
 
     def _setup_ui(self) -> None:
         self._install_body_notices()
+        self._install_body_sounds()
 
         main_box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
@@ -3309,6 +3311,43 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         else:
             self._state_label.remove_css_class("dim-label")
             self._state_label.set_tooltip_text("")
+
+    def _install_body_sounds(self) -> None:
+        """Let the body ask for a tone, so the switch on the Settings page works.
+
+        **The switch was shipped and wired to nothing.** `organ-audible-enabled`
+        says "starting to listen, look at the screen or the camera, speak,
+        reach the network or act on something plays a short quiet tone naming
+        the organ class" - and the body had the API for it (`announce`,
+        `set_audible`) and the strip had the tone player, with **nothing
+        joining them**. So the switch did nothing at all: a person who turned
+        it on heard silence, and a person who left it off could not tell the
+        difference.
+
+        The hook is installed here, beside the notice hook, because the two
+        are the same idea: the body cannot speak for itself, and the window is
+        what gives it a voice.
+        """
+        try:
+            from shani_chronoa import body
+            body.body.set_audible(self._play_organ_tone)
+        except Exception:                               # noqa: BLE001
+            logger.warning("could not install the organ tone",
+                           exc_info=True)
+
+    def _play_organ_tone(self, organ: str, what: str) -> None:
+        """The body's sound hook: the short tone naming the organ's class.
+
+        **On a thread, because a sound file is written before it is played.**
+        `body.use` is called from the tool dispatcher and from the voice path,
+        and the GTK thread must not wait for a wav to be written and a player
+        to be started. The switch is read at play time, so turning it on
+        takes effect without a restart.
+        """
+        strip = getattr(self, "_organ_strip", None)
+        if strip is None:
+            return
+        threading.Thread(target=strip.play, args=(organ,), daemon=True).start()
 
     def _install_body_notices(self) -> None:
         """Show a refusal on the detail line, the way a sound cannot.

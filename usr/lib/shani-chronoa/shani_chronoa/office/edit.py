@@ -233,5 +233,14 @@ def docx_append(path: Path, markdown: str) -> bytes:
 
 
 def iter_parts(path: Path) -> "Iterable[str]":
+    """Every part name inside a package, in the order the archive holds them.
+
+    **Deliberately not called, and recorded here so the next sweep stops
+    here.** The editor rewrites `word/document.xml` by name and never has to
+    address a part it does not already know, so nothing in the tree needs the
+    list. It is kept because it is the one obvious way to look, and a package
+    with a part this module does not know about is a thing a future edit
+    would need.
+    """
     with _open(path) as z:
         return list(z.namelist())

@@ -88,7 +88,7 @@ def main() -> None:
         "  what is missing, points at a light that does not exist, or gets dropped",
         "  when the panel groups it. It also fails if the inventory stops being",
         "  larger than the strip, which is what would make it redundant.",
-        f"- `body.ORGAN_NOUNS` and `body.ORGAN_SOURCE` are *derived* from the",
+        "- `body.ORGAN_NOUNS` and `body.ORGAN_SOURCE` are *derived* from the",
         "  inventory, so the strip cannot describe itself in words that have",
         "  stopped matching the code lighting it.",
         "- The strip answers **\"is it doing something now\"**. The Inventory panel",

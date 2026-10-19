@@ -165,6 +165,18 @@ class Body:
             self._prune_locked()
             self._activities.append(activity)
         self._notify()
+        # **The tone, when the person asked for one.** `announce` asks
+        # whoever installed the hook, and the hook is installed by the window -
+        # so in a daemon, or in a skill's own process, there is nobody and
+        # this is silence. That is the design: a sound a person has learned
+        # to mute is worse than no sound, and the switch says so.
+        #
+        # It is asked for here, at the moment the organ starts, because that
+        # is the event the switch's own description names: "starting to
+        # listen, look at the screen or the camera, speak, reach the network
+        # or act on something plays a short quiet tone naming the organ
+        # class". A pulse counts - "reached the network" is a pulse.
+        self.announce(organ, what)
         return activity
 
     def pulse(self, organ: str, what: str, detail: str = "",

@@ -168,7 +168,8 @@ def dry_run() -> int:
     print("  corpus        %s  (%d requests, %d pairs, seed %s)"
           % (CORPUS.name, data["counts"]["requests"], data["counts"]["pairs"],
              data["seed"]))
-    print("  train / held  %d / %d requests" % (len(train), len(held)))
+    print("  train / held  %d / %d requests  (%d training pairs)"
+          % (len(train), len(held), pairs))
     print("  per request   1 positive + %.1f negatives (max %d)"
           % (sum(negs) / len(negs), max(negs)))
     print("  objective     listwise softmax cross-entropy over the candidate list")
@@ -229,15 +230,12 @@ def _require_libs():
     import sys
     sys.path.insert(0, str(LIB_DIR))
     try:
-        import torch  # noqa: F401
-        import peft  # noqa: F401
-        import transformers  # noqa: F401
+        import torch
+        import peft
+        import transformers
     except ImportError as exc:
         raise SystemExit("could not import the training stack from %s: %s"
                          % (LIB_DIR, exc))
-    import torch
-    import peft
-    import transformers
     return torch, peft, transformers
 
 

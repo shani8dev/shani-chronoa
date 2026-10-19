@@ -471,6 +471,20 @@ def clone_problem() -> str:
     return ""
 
 
+def clip_of(voice: str) -> str:
+    """The recording a registered voice was built from, or "" if there is none.
+
+    **The path, not the name.** The consent registry holds the clip's path,
+    and the clip is what `clip_problem` measures - handing it a name would be
+    a file that is not there, which is the very failure the measurement
+    exists to catch.
+    """
+    for entry in _read_registry():
+        if entry.voice == voice:
+            return entry.clip
+    return ""
+
+
 def voices() -> List[Tuple[str, Consent]]:
     """`(name, consent)` for every registered voice, for `speak`'s `voices`.
 
