@@ -35,7 +35,7 @@ from __future__ import annotations
 import logging
 import threading
 
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 import gi
 
@@ -65,9 +65,52 @@ CARD_KINDS = ("llm", "stt", "voice", "vision")
 _BREAKPOINTS: List[Any] = []
 
 
+def _downloaded(path: Any, size_bytes: int) -> bool:
+    """Whether a model file is here at its pinned length, without re-hashing it.
+
+    **Measured, not assumed.** The card list called `local_llm.verify` and
+    `local_vision.verify` for every LLM and Eyes card, and each of those is
+    `file_matches`: a full SHA-256 over the whole file. Six LLM tiers, read
+    twice in one build, is 12 passes over 36.8 GB of pinned weights. Profiled in
+    the rebuilt AppDir on 2026-10-19 that was **12.1 s inside a single GTK
+    main-loop turn** - 10.5 s of it in `_hashlib.update`, 11704 calls - and it
+    was the whole of the Models panel's build. A list of cards is a "what do I
+    have" view; it is not where integrity is decided.
+
+    The digest is not lost, it is moved to where the question is actually asked:
+    `local_llm.provision` still calls `verify` on a file already in place before
+    trusting it, and the Download button is the only route to using a model
+    this panel does not already have. So a corrupted file still cannot be loaded
+    - it is caught when it is fetched, not when it is listed.
+
+    What this *does* give up is the one case a length check cannot see: a file
+    of exactly the right length whose bytes are wrong. `file_matches` checks the
+    length first and returns before hashing when it differs, so **a truncated
+    or partially-written copy is still caught here** - which is the case that
+    actually happens, because that is what an interrupted download leaves
+    behind. The rest of the engines already answered it this way: `stt`'s
+    `is_provisioned` is `model_path(key).is_file()`, `local_vision.installed()`
+    is `is_file()` on both of its files, and the voice and Kokoro cards below
+    are presence checks too. The LLM and Eyes cards were the only two asking for
+    a stronger answer than any of their neighbours.
+    """
+    try:
+        return path.stat().st_size == size_bytes
+    except OSError:
+        return False
+
+
 def _cards(config=None) -> List[Dict[str, Any]]:
     """Every model the package knows how to fetch, newest first within a kind."""
     from shani_chronoa import local_llm, stt_provision, voices
+
+    # The machine's effective bandwidth is one measurement of one machine, and
+    # every LLM card divides *its* per-token cost by it. Asked per tier it was a
+    # `/props` round trip per card: profiled 2026-10-19, twelve of them and 1.4 s
+    # of network on the main thread, for six answers that cannot differ.
+    # `expected_decode_tps` already takes the figure as an argument; this is the
+    # one place that has to pass it.
+    bandwidth = local_llm.effective_bandwidth()
 
     out: List[Dict[str, Any]] = []
     for spec, label, _ram in local_llm.TIERS:
@@ -77,8 +120,10 @@ def _cards(config=None) -> List[Dict[str, Any]]:
         # it at. This card reads that one; `_ram` was discarded here, so a card
         # could never say why a tier was refused.
         out.append({"kind": "llm", "key": spec.key, "label": label,
-                    "size": spec.size_bytes, "installed": local_llm.verify(spec.key),
-                    "requires": _llm_requirements(spec.key)})
+                    "size": spec.size_bytes,
+                    "installed": _downloaded(local_llm.model_dir() / spec.filename,
+                                             spec.size_bytes),
+                    "requires": _llm_requirements(spec.key, bandwidth)})
     for key, spec in stt_provision.MODELS.items():
         out.append({"kind": "stt", "key": key,
                     "label": f"{key.split('-')[0].title()} ({key})",
@@ -117,21 +162,30 @@ def _cards(config=None) -> List[Dict[str, Any]]:
                     "size": voices._KOKORO_MODEL.size_bytes,
                     "installed": voices.kokoro_installed(key),
                     "shared": "one download covers every Kokoro voice"})
-    # `verify`, not `is_provisioned`: the first version called a function this
-    # engine does not have, the `except` swallowed it, and the panel quietly
-    # shipped **with no Eyes cards at all** - the very models the "what do I
-    # have" view exists to show. A bare `except: pass` around a probe is how a
-    # panel ends up silently incomplete, so the engine's own check is named here
-    # and the whole engine is only skipped when it cannot be imported at all.
+    # Named module attributes only, never a guessed function name: the first
+    # version called `local_vision.is_provisioned`, which this engine does not
+    # have, the `except` swallowed it, and the panel quietly shipped **with no
+    # Eyes cards at all** - the very models the "what do I have" view exists to
+    # show. A bare `except: pass` around a probe is how a panel ends up silently
+    # incomplete, so the whole engine is only skipped when it cannot be imported
+    # at all, and the one property the cards rely on - that the files are named -
+    # is asserted in `tests/test_model_manager_and_tray.py`.
     try:
         from shani_chronoa import local_vision
     except Exception as exc:               # noqa: BLE001 - no engine, no cards
         logger.debug("no vision engine for the model list: %s", exc)
     else:
         for key, spec in local_vision.MODELS.items():
+            # Both of its files, because a projector without its weights is not
+            # a vision model - the same two-file rule its own `installed()`
+            # applies, and the reason the length check is written twice here.
+            here = local_vision.model_dir()
             out.append({"kind": "vision", "key": key, "label": key,
                         "size": spec.size_bytes,
-                        "installed": local_vision.verify(key)})
+                        "installed": _downloaded(here / spec.model.filename,
+                                                 spec.model.size_bytes)
+                        and _downloaded(here / spec.mmproj.filename,
+                                        spec.mmproj.size_bytes)})
     return out
 
 
@@ -148,7 +202,7 @@ def _matches(card: Dict[str, Any], needle: str) -> bool:
         or n in card["kind"].lower()
 
 
-def _llm_requirements(key: str) -> Dict[str, Any]:
+def _llm_requirements(key: str, bandwidth: Optional[float] = None) -> Dict[str, Any]:
     """What a tier needs from this machine, and what it would get here.
 
     Everything on the card comes from `local_llm`'s own table rather than from
@@ -164,6 +218,13 @@ def _llm_requirements(key: str) -> Dict[str, Any]:
       answering. **None means "not measured"**, never a guess.
     * `missing` - `requirements_met`'s own reasons, so the card cannot disagree
       with the code that picks the default.
+
+    `bandwidth` is the measured figure for this machine, passed in rather than
+    looked up: it is one decode divided by nothing that varies per tier, and
+    asked here it was an HTTP round trip to the local server for every card in
+    the list. `None` still means "not measured" - it is the same value
+    `expected_decode_tps` returns when no server answers, so a card cannot come
+    out optimistic by omission.
     """
     from shani_chronoa import local_llm
 
@@ -177,7 +238,7 @@ def _llm_requirements(key: str) -> Dict[str, Any]:
         "vram": need.get("vram", 0),
         "min_tps": need.get("min_tps", local_llm.MIN_USABLE_TPS),
         "reads": local_llm.bytes_per_token(key),
-        "tps": local_llm.expected_decode_tps(key),
+        "tps": local_llm.expected_decode_tps(key, bandwidth),
         "measured": need.get("measured", True),
         "usable": met,
         "missing": [m for m in (missing if isinstance(missing, list) else [missing]) if m],
@@ -898,6 +959,25 @@ def _other_files_in_the_model_folder() -> List[Gtk.Widget]:
     return rows
 
 
+#: Not built in the window's start-up pass (`ChronoaWindow._seed_status_dots`
+#: reads this as `getattr(module, "PREBUILD", True)`): building this panel reads
+#: every `.gguf` in the model directory, and `model_registry.scan()` asks
+#: `ctxfit.gguf_model_info()` about each one - which used to be a
+#: `gguf.GGUFReader`, whose `__init__` is `np.memmap(path)`, a mapping of the
+#: **whole checkpoint**. Measured on the 1.7 B model here: **3.5 s** for the
+#: reader alone, ~7.7-9.1 s once its fields are walked, and the scan walks a
+#: directory rather than one file. All of it ran on the GTK main thread while
+#: the window was still settling, which is the freeze.
+#:
+#: Two things made it survivable and both are in place independently: the read is
+#: now `gguf_header.read_metadata` (0.127 s for all 32 keys, a **27x** saving)
+#: and `gguf_model_info` is cached on `(path, mtime, size)` so the six call sites
+#: in one startup pay for one read. This flag is the third: the panel is built
+#: when it is opened, which is the only place the answer is wanted. The same
+#: arrangement `diagnostics.py` has carried since 2026-10-08, for the same reason.
+PREBUILD = False
+
+
 def build(app: Any) -> Gtk.Widget:
     """The model manager for `app` - anything with a `config` will do."""
     page, set_content = common.surface(TITLE, SUBTITLE)
@@ -1049,7 +1129,16 @@ def build(app: Any) -> Gtk.Widget:
     root.append(body)
 
     # --- the cards, and the search over them --------------------------------
-    cards = _cards(getattr(app, "config", None))
+    # **The same `cards` the tally above counted.** This was a second
+    # `_cards(getattr(app, "config", None))` with the same argument, 85 lines
+    # below the first, and the comment between them already claimed *"one tally
+    # of one card list"* - so the code contradicted the note explaining it.
+    #
+    # Profiled 2026-10-19 in the rebuilt AppDir, one panel build: `_cards` was
+    # called twice, and each call re-ran `local_llm.verify` for all six tiers.
+    # That is a SHA-256 over every pinned model already on disk, so the panel
+    # build hashed **12.2 GB** where reading the directory once would do - and
+    # did it on the GTK main thread.
     state: Dict[str, Any] = {"needle": ""}
 
     def _switch_tab(tab_name: str) -> None:

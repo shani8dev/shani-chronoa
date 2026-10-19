@@ -88,8 +88,55 @@ def test_every_kind_of_model_gets_a_card():
 def test_the_vision_check_is_a_function_that_exists():
     from shani_chronoa import local_vision
     assert callable(getattr(local_vision, "verify", None)), (
-        "the model list calls local_vision.verify; if it is renamed, this fails "
-        "here rather than as a silently empty Eyes list")
+        "local_vision.verify is what checks the two files a vision model needs; "
+        "if it is renamed this fails here rather than as a silently empty Eyes "
+        "list. The card list no longer calls it - see "
+        "test_a_card_does_not_hash_the_model_it_is_asking_whether_it_exists")
+
+
+def test_a_card_does_not_hash_the_model_it_is_asking_whether_it_exists():
+    """A card is a "do I have this" list, and it is drawn on the main thread.
+
+    `local_llm.verify` is `stt_provision.file_matches`: a SHA-256 over the whole
+    file, documented as "about a second per GB". Six tiers of it, read twice in
+    one panel build, hashed **12.2 GB** - measured 2026-10-19, profiling a
+    window's start-up pass in the rebuilt AppDir, and all of it inside one GTK
+    main-loop turn.
+
+    The digest did not go anywhere: `local_llm.provision` still calls `verify` on
+    a file already in place before trusting it, so a corrupted model cannot be
+    loaded. What moved is only *which question* each caller asks. `file_matches`
+    checks the length before it hashes, so a truncated copy - what an interrupted
+    download actually leaves - is still caught by the card.
+    """
+    calls = []
+    monkey = local_llm.verify
+    local_llm.verify = lambda key: calls.append(key) or monkey(key)
+    try:
+        manager._cards(ChronoaConfig())
+    finally:
+        local_llm.verify = monkey
+    assert calls == [], (
+        f"_cards hashed {len(calls)} model file(s) to draw a list of cards")
+
+
+def test_a_truncated_model_is_still_not_reported_as_installed(tmp_path,
+                                                              monkeypatch):
+    """The half of `verify` the card keeps: right name, wrong length.
+
+    This is the case that actually happens, because it is what an interrupted
+    download leaves behind, and it is the one the digest was doing double duty
+    for.
+    """
+    spec = local_llm.SPECS[local_llm.TIERS[0][0].key]
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    directory = tmp_path / "shani-chronoa" / "llm"
+    directory.mkdir(parents=True)
+    (directory / spec.filename).write_bytes(b"\0" * (spec.size_bytes - 1))
+
+    cards = {c["key"]: c for c in manager._cards(ChronoaConfig())}
+    assert cards[spec.key]["installed"] is False, (
+        "a file one byte short of its pinned length is not a model")
 
 
 def test_cards_come_from_the_engines_and_track_what_is_installed():
@@ -100,7 +147,11 @@ def test_cards_come_from_the_engines_and_track_what_is_installed():
     assert stt_keys <= {card["key"] for card in cards if card["kind"] == "stt"}
     for card in cards:
         if card["kind"] == "llm":
-            assert card["installed"] == local_llm.verify(card["key"])
+            spec = local_llm.SPECS[card["key"]]
+            assert card["installed"] == (
+                (local_llm.model_dir() / spec.filename).stat().st_size
+                == spec.size_bytes
+                if (local_llm.model_dir() / spec.filename).is_file() else False)
 
 
 def test_the_parakeet_catalogue_is_on_the_panel_too(tmp_path, monkeypatch):

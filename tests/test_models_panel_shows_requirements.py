@@ -65,9 +65,18 @@ PINNED_TPS = 9.8
 
 @pytest.fixture(autouse=True)
 def _pinned_decode_rate(monkeypatch):
-    """Give the panel a decode rate, so the card's wording is what is measured."""
+    """Give the panel a decode rate, so the card's wording is what is measured.
+
+    The stub takes ``*args`` rather than naming one parameter. The panel now
+    passes the machine's measured bandwidth through - one figure for the whole
+    card list instead of an `/props` round trip per card - so a stub written
+    against the old one-argument call raised `TypeError` on every card. A stand-in
+    shaped like the call rather than like the thing being called is this
+    repository's own recorded failure (`meeting.notes`'s `_Engine`, written to
+    match a broken signature).
+    """
     monkeypatch.setattr(local_llm, "expected_decode_tps",
-                        lambda key: PINNED_TPS, raising=True)
+                        lambda *a, **k: PINNED_TPS, raising=True)
 
 
 def _card(key):
