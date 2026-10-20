@@ -153,7 +153,16 @@ def test_an_unreadable_plan_does_not_take_the_rail_down():
     rail = rail_module.NowRail(get_senses=_boom, get_state=lambda: "thinking",
                                on_open=lambda _n: None)
     rail.refresh()
-    assert "thinking" in _text_of(rail), "a failing sense read cost the whole rail"
+    # **The evidence is another section, not the state word.** The Now card
+    # used to repeat the window's own state word - "Ready" under the orb and
+    # "Ready" in the rail, and on a 1280px capture the word was on screen
+    # three times - and this assertion was reading that repeat as proof
+    # that the rail had rendered. A section that is not the failing one is
+    # the evidence the test means: the other seven survived.
+    text = _text_of(rail)
+    assert "No timers pending" in text, (
+        f"a failing sense read cost the whole rail: {text!r}")
+    assert "Could not read what is being watched" in text, text
 
 
 def test_the_failing_section_says_it_failed():

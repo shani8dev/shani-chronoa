@@ -161,6 +161,20 @@ def _on_map(win):
         _seed_code(win)
     elif os.environ.get("SEED") == "ask":
         _seed_ask(win)
+    elif os.environ.get("SEED") == "palette":
+        # **The palette, open.** It is the one surface that is built but
+        # never *seen* in a capture, because nothing opens it - a person
+        # presses Ctrl+K, and a script cannot. Measured on the real app: the
+        # palette had five groups and no skills, and no picture of it had
+        # ever been taken, which is how a control that cannot reach 260
+        # capabilities went unnoticed.
+        win._palette.set_visible(True)
+        win._palette.focus_search()
+        # **And a search string**, so the group can be looked at rather
+        # than counted.
+        needle = os.environ.get("PALETTE_SEARCH", "")
+        if needle:
+            win._palette._search.set_text(needle)
     page = os.environ.get("PAGE", "")
     if page:
         print("PAGE", page, win.show_page(page), flush=True)

@@ -157,10 +157,46 @@ class TestTheRailShowsRealState:
         text = "\n".join(_labels(widget))
         for heading in ("Now", "Timers", "Changed", "Tasks", "Safety"):
             assert heading in text, f"the rail has no {heading} section: {text!r}"
-        assert "Ready" in text
+        # **The state word is not repeated in the rail.** The window says
+        # "Ready" under the orb, and this card said it a second time -
+        # measured on a 1280px capture, "Ready" appeared three times on one
+        # screen. What the card is for is what is *running*, which the state
+        # word does not say.
+        assert "Ready" not in text, (
+            f"the rail repeats the state the window already shows: {text!r}")
         # Empty states are sentences, not blanks: a section with nothing must
         # still answer, or the rail looks broken rather than quiet.
         assert "No timers pending" in text
+        assert "Nothing is running" in text, text
+
+    def test_the_context_breakdown_shows_every_segment(self, tmp_path,
+                                                        monkeypatch):
+        """**The breakdown is dynamic, so the first four were not enough.**
+
+        The list has a row per kind of message - system, percepts, user,
+        assistant, tool, other - and a real turn fills six of them. The card
+        rendered `segment_rows()[:4]` and dropped the rest *silently*, so a
+        person reading it could not tell the model had been given a whole
+        other slice of its window.
+        """
+        class _Report:
+            headline = lambda self: "8,120 of 32,768 tokens"
+            usable_percent = 25.0
+            reply_reserve = 0
+            percent = 25.0
+            elided = False
+
+            def segment_rows(self):
+                return [("system", 1200, 15.0), ("percepts", 900, 11.0),
+                        ("user", 800, 10.0), ("assistant", 700, 9.0),
+                        ("tool", 500, 6.0), ("other", 300, 4.0)]
+
+        widget = _rail(tmp_path, monkeypatch, get_context=_Report)
+        widget.refresh()
+        text = "\n".join(_labels(widget))
+        for label in ("system", "percepts", "user", "assistant", "tool", "other"):
+            assert label in text, (
+                f"the context breakdown dropped the {label!r} segment: {text!r}")
 
     def test_a_timer_can_be_extended_and_cancelled_from_the_rail(self, tmp_path, monkeypatch):
         """Both used to need a chat request; they are buttons on the row now."""

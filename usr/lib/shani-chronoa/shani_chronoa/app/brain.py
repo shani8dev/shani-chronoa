@@ -46,7 +46,15 @@ class BrainMixin:
         if self.llm is None or not self.llm.is_available():
             return "No model is answering yet"
         if isinstance(self.llm, CloudLLMChain):
-            return f"Answering from the cloud: {self.llm.model}"
+            # **The provider that answered, not the chain's membership.**
+            # `CloudLLMChain.model` is every backend's model joined - measured
+            # on a real chain: "default, kilo-auto/free, cohere/north-mini-code"
+            # - which is a list of what *could* answer, printed as if it were
+            # what did. `last_provider` is the one that did, by display name.
+            provider = str(getattr(self.llm, "last_provider", "") or "").strip()
+            if provider:
+                return f"Answering from the cloud: {provider}"
+            return "Answering from the cloud"
         if getattr(self.llm, "local", False):
             # "local" is the provider's placeholder when no model file is
             # chosen, not a model anyone could recognise.

@@ -236,6 +236,33 @@ def test_orb_reports_its_own_state_independently():
     assert "state-thinking" in list(orb.get_css_classes())
 
 
+def test_the_header_title_is_folded_away_on_a_narrow_window(gtk_app):
+    """**A four-character title is worse than no title.**
+
+    The title is the header bar's *title widget*, so it lives in the centre
+    box and gets only what the start and end boxes leave - and at the app's
+    own 460px that is about thirty pixels, so the window's name rendered as
+    **"S..."**. Measured on a 460x640 capture of the real app.
+
+    A truncated word looks like a mistake; an absent title looks like a
+    decision. So the title goes with the spare buttons when the header
+    folds - and it comes back when it does not, because a title that never
+    appears is not a fix.
+    """
+    win = ChronoaWindow(gtk_app)
+    try:
+        title = win._header_title
+        win._apply_narrow_layout()
+        assert title.get_visible() is False, (
+            "the header title is still on a narrow window, where it renders "
+            "as four characters")
+        win._fold_header(False)
+        assert title.get_visible() is True, (
+            "the header title did not come back on a wide window")
+    finally:
+        win.destroy()
+
+
 def test_stop_button_is_reachable_by_keyboard(gtk_app):
     """Accessibility: a mouse-only stop control would be unusable by keyboard."""
     win = ChronoaWindow(gtk_app)

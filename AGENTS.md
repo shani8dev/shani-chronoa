@@ -28064,3 +28064,79 @@ local ones are not, and a pass that ships a broken test suite is worse than
 the lint findings it was cleaning up. **Left as measured work, with the
 mechanism written down**, rather than shipped as a script that silently
 corrupts files.
+
+## The UI's own work order, measured rather than believed (2026-10-20)
+
+Asked to "wire all fix all ui and ux". The main UI's own work order is
+`MAIN-UI-TODO.md` - a durable notepad with ~30 open items and **checkboxes**,
+so the first move was to measure each claim rather than to work the list.
+
+**Three of the items were already done**, and the list said otherwise:
+**2a** (the turn's cost and tokens, which the footer has carried since the
+turn-footer work) and **8o** (the startup flash, which `_apply_narrow_layout`
+solves by reading `get_default_size()` before the window is allocated) were
+stale entries, and **12c**'s first half - the boilerplate empty cards - had
+already been collapsed into one line beside each heading.
+
+**And the counts were stale too.** 9r said twelve raw consent keys in the
+panels; re-measured, it was **two**. The rest had been converted.
+
+### What the photographs showed, which the code did not
+
+The instrument came first: `tools/live_window.sh` photographs the **real**
+app on a headless gnome-shell, and the wide layout had never been looked at
+through it. Two defects were visible in the picture and invisible in the
+source:
+
+- **The window's own name rendered as "S..."** at the app's own 460px. The
+  title is the header bar's *title widget*, so it lives in the centre box and
+  gets only what the start and end boxes leave - about thirty pixels. A
+  truncated word looks like a mistake; an absent title looks like a decision,
+  so the title now folds with the spare buttons.
+- **The status line named the chain's membership**: *"Answering from the
+  cloud: default, kilo-auto/free, cohere/north-mini-code"*. That is
+  `CloudLLMChain.model` - every backend's model joined - printed as if it
+  were what answered. The chain records who did, in `last_provider`, so the
+  line names that.
+
+### The palette could not reach 256 of 260 capabilities
+
+**3a**: the palette had five groups - Go to, Panels, Modes, Commands, the
+cloud models - and **no skills**, while its own placeholder read *"Go to a
+panel, a command, a skill..."*. A skill was reachable only by asking for it
+in words.
+
+The group is built from `capabilities`, which already knows the plain label
+for every tool and the prompt that exercises it - so it is one list, not a
+second hand-kept one. **Pressing one fills the composer rather than running
+it**: a skill that writes files or leaves the machine should be *asked for*,
+not fired by a keystroke in a search box.
+
+And the harness grew `-P` and `PALETTE_SEARCH=`, because the palette was
+the one surface that was built but never *seen* in a capture - nothing opens
+it, since a person presses Ctrl+K and a script cannot. That is how a control
+that cannot reach 260 capabilities went unnoticed.
+
+### The rail repeated the state and dropped the breakdown
+
+**12c**: measured on a 1280px capture, "Ready" was on screen **three
+times**. NOW now says what is *running*, which the state word does not say.
+
+**7a**: the Context card rendered `segment_rows()[:4]` of a list with a row
+per kind of message, and a real turn fills six of them - so two were
+dropped *silently*, and a person reading the card could not tell the model
+had been given a whole other slice of its window.
+
+### Three tests pinned the defects, and one of them was the evidence
+
+The senses-rail test asserted `"thinking" in rail_text` as proof that the
+rail had rendered - and "thinking" was the **state word the Now card
+repeated**, so the assertion was reading the defect as the evidence. It now
+points at a section that is not the failing one, which is what the test
+means: the other seven survived.
+
+The same shape twice more: the rail's own "Ready" assertion, and the
+capture refusal's `"x11-apps"` - a package that does not exist in Arch.
+
+**A test that pins a defect reports the fix as a regression**, and three of
+them did.

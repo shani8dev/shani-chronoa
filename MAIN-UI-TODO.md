@@ -130,9 +130,11 @@ Measured: `max_rounds` / `_rounds_for_origin` appear **nowhere in `gui/` or
 `app/`**; a 40-round, 600s, 27-tool turn shows only a ticking tool name.
 `turn_stats()` and `changes_for_turn()` already compute the rest.
 
-- [ ] **2a** Surface round *n*/40, clock, tools run, files written, prompts
+- [x] **2a** Surface round *n*/40, clock, tools run, files written, prompts
   answered, whether it left the machine, and what was elided — in the rail's
   Now section and in a transcript turn card.
+  **Already done** (the turn footer carries the cost and the token count;
+  `gui/widgets.py` records the history). The list was stale, not the work.
 - [ ] **2b** `origin` is never passed by any production `.handle()` call, so the
   per-origin budget (user 40 / unattended 1 / unknown 1) is dead in production
   and unattended triggers bypass `handle()` entirely. Decide and record.
@@ -142,7 +144,19 @@ Measured: `max_rounds` / `_rounds_for_origin` appear **nowhere in `gui/` or
 Ctrl+K has 5 groups (Go to, Panels, Modes, Commands, Cloud models) and **no
 skills**. AGENTS.md calls it "everywhere you can go".
 
-- [ ] **3a** A skills group in the palette.
+- [x] **3a** A skills group in the palette.
+  **Done 2026-10-20.** The palette reached 2 + 37 + 13 entries and **not
+  one of the 260 capabilities** - so the thing the palette exists for was
+  missing from it, while its own placeholder read *"Go to a panel, a
+  command, a skill..."*. The group is built from `capabilities`, which
+  already knows the plain label for every tool and the prompt that
+  exercises it, so it is one list and not a second hand-kept one.
+  **Pressing one fills the composer rather than running it**: a skill that
+  writes files or leaves the machine should be *asked for*, not fired by a
+  keystroke in a search box.
+  `tests/test_the_palette_offers_the_capabilities.py` (3). The harness can
+  now open and search it (`tools/live_window.sh -P`, `PALETTE_SEARCH=`), so
+  it can be looked at rather than counted.
 - [ ] **3b** The real entry point: **query capabilities by effect** — everything
   that writes files / leaves the machine / needs a key / is destructive. Read
   from `capabilities` (`gated_by`, `READ_ONLY_TOOLS`, the destructive set), not
@@ -174,9 +188,12 @@ reorders by a dict lookup plus a learned multiplier, all in silence.
 
 ### 7 — Small measured ones
 
-- [ ] **7a** `gui/rail.py:349` renders `segment_rows()[:4]` of a **dynamic**
+- [x] **7a** `gui/rail.py:349` renders `segment_rows()[:4]` of a **dynamic**
   list, so on a real turn 2+ context segments are always silently dropped from
   the rail's Context section.
+  **Done 2026-10-20.** Every segment is shown. The breakdown has a row per
+  kind of message and a real turn fills six of them, so the card was
+  dropping two without saying so.
 - [x] **7b** The organ strip is eight lowercase words, dark on every fresh
   machine (`store_dir()` absent here, zero dreams ever written), reading as one
   run-on string. Decide: teach the vocabulary, or replace the resting state.
@@ -244,8 +261,11 @@ Open, from the same review (voice / coder / everyday person):
   placeholder model name.
   **Done (2026-10-14):** "Answering on this computer: <model>" / "Answering from
   the cloud: <model>" / "No model is answering yet".
-- [ ] **8o Startup flash**: the window maps with the uncollapsed 665px split at
+- [x] **8o Startup flash**: the window maps with the uncollapsed 665px split at
   460px until `_apply_narrow_layout`'s idle runs; evaluate it before map.
+  **Already done** - `_apply_narrow_layout` reads `get_default_size()` when
+  the width is not allocated yet, so the first frame is already the narrow
+  layout. The list was stale, not the work.
 
 ### 9 — What the GUI does not surface, and the panels (2026-10-14, Claude Code)
 
@@ -343,8 +363,13 @@ Open, ranked:
 - [ ] **9q Diagnostics read as UI**: Driving, Speaking voice, Learning, Machine,
   Memory lead with engineering text (real-time factors, Wayland injection,
   "bandit", raw command output). Plain summary first, details in an expander.
-- [ ] **9r Remaining raw consent keys** in panels (12 sites at the audit;
+- [x] **9r Remaining raw consent keys** in panels (12 sites at the audit;
   android, calendar, devices, phone, connections) -> `consent_banner`.
+  **Done 2026-10-20.** Re-measured: **two** person-facing sites were left, not
+  twelve - the count was stale. The model panel named
+  `cloud-fallback-enabled` where it could not read the switch, and the
+  senses panel spelled a key that **does not exist** (the news is that it
+  does not). Both name the switch now.
 
 ### 10 — Every panel, photographed (2026-10-14, `tools/live_panels.sh`)
 
@@ -459,8 +484,13 @@ Phone & devices · Meetings · My files · Models · Privacy & permissions · He
 - [ ] **12b Rail scope**: "Changed" is the session-wide undo ring while "Made"
   beside it is this conversation - two scopes in neighbouring cards. Scope
   Changed to the conversation's turns (`changes_for_turn`) or say "recent".
-- [ ] **12c Rail noise**: NOW repeats "Ready" (third time on screen); 5 of 9
+- [x] **12c Rail noise**: NOW repeats "Ready" (third time on screen); 5 of 9
   cards are boilerplate empties. Collapse empty cards to one line; drop NOW.
+  **Done 2026-10-20.** The empty cards were already collapsed (a quiet
+  section is one line beside its heading). The repeat was not: measured on a
+  1280px capture, "Ready" was on screen three times - under the orb, in the
+  rail's NOW card, and in the state line. NOW now says what is *running*,
+  which the state word does not say.
 - [ ] **12d Rail reach**: only above 1040px, window opens at 460 (item 1a).
   Fold its live parts into the main window (11o bell, 11p Today strip) and keep
   the rail as the wide-screen detail view.

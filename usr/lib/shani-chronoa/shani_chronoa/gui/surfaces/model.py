@@ -384,8 +384,13 @@ def _cloud_engine(config: Any) -> _Engine:
     privacy = _read_bool(config, "privacy-mode", True)
     enabled = _read_bool(config, "cloud-fallback-enabled", False)
     if privacy is None or enabled is None:
+        # **The switch's name, not its key.** A person reading this is
+        # looking for a switch on the Privacy page, and the key is not how
+        # it is spelled there.
+        from shani_chronoa import capabilities
+        label = capabilities.gate_label("cloud-fallback-enabled")
         return _Engine("cloud", "Cloud fallback", None,
-                       "unknown - the cloud-fallback-enabled switch could not be read", source)
+                       f'unknown - the "{label}" switch could not be read', source)
     if privacy or not enabled:
         shut = []
         if privacy:

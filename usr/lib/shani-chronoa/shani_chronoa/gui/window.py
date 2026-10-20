@@ -2070,6 +2070,12 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         header_bar.pack_start(self._sidebar_toggle)
         header = Gtk.Label(label="Shani Chronoa")
         header.add_css_class("cajita-header")
+        # **Kept for the narrow layout.** The title is the header bar's *title
+        # widget*, so it lives in the centre box and gets only what the start
+        # and end boxes leave - and at the app's own 460px that is about
+        # thirty pixels, so the window's own name rendered as "S...". Measured
+        # on a 460x640 capture.
+        self._header_title = header
         # May shorten. Unellipsised, the title reserved its full width and the
         # header bar as a whole needed 632px - wider than the 600px narrow
         # layout - so every narrow window clipped the right of the chat.
@@ -2913,11 +2919,21 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         return button
 
     def _fold_header(self, narrow: bool) -> None:
-        """Move the three spare header buttons into "More", or back out."""
+        """Move the three spare header buttons into "More", or back out.
+
+        **And the title goes with them.** The window's own name is in the
+        taskbar and the title bar, and at the size the app opens at there
+        was no room for it in the header: measured on a 460x640 capture it
+        rendered as "S...", which is worse than no title at all - it looks
+        like a truncated word rather than a deliberate absence.
+        """
         self._quick_button.set_visible(not narrow)
         self._help_button.set_visible(not narrow)
         self._browser_button.set_visible(self._browser_available and not narrow)
         self._overflow_button.set_visible(narrow)
+        title = getattr(self, "_header_title", None)
+        if title is not None:
+            title.set_visible(not narrow)
 
     def _on_window_activated(self, *_args) -> None:
         """The window came forward: re-read the modes from their owners.
@@ -4192,6 +4208,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
                 title, section or "Panel", icon,
                 (lambda sid=surface_id: self._show_surface(sid)),
                 group="Panels", weight=0))
+        entries.extend(self._palette_skill_entries())
         entries.extend(self._palette_mode_entries())
         for name in slash.names():
             # `system-run-symbolic` rather than `terminal-symbolic`, for the
@@ -4204,6 +4221,51 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         entries.extend(self._palette_action_entries())
         entries.extend(self._palette_settings_entries())
         return entries
+
+    def _palette_skill_entries(self) -> list:
+        """The things Chronoa can do, by the name a person would use for them.
+
+        **The palette had five groups and no skills.** So "everywhere you can
+        go" reached the panels, the commands and the modes, and not one of the
+        260 things the assistant can actually do - a skill was reachable only
+        by asking for it in words, and by the registry's name rather than a
+        person's. Measured on the real window: the palette offered 2 + 37 +
+        13 entries and **no capability at all**.
+
+        Pressing one **fills the composer** rather than running it. A skill
+        that writes files or leaves the machine should be *asked for*, not
+        fired by a keystroke in a search box - and `set_input_text` is the
+        window's own "show this in the box" half, which leaves the question
+        with the person, which is the only place it belongs.
+
+        The names come from `capabilities`, which already knows the plain
+        label for each tool and the prompt that exercises it - so this is one
+        list, not a second hand-kept one.
+        """
+        from shani_chronoa import capabilities as caps
+        from shani_chronoa import skills as skills_module
+        from shani_chronoa.gui import palette as palette_module
+        try:
+            schemas, _handlers = skills_module.discover_skills()
+        except Exception as exc:  # noqa: BLE001 - a broken registry must not take the palette down
+            logger.warning("palette: skills unreadable: %s", exc)
+            return []
+        out = []
+        for capability in caps.find_capabilities(schemas):
+            label = (capability.label or capability.tool or "").strip()
+            if not label:
+                continue
+            # **The short name where there is one.** `SUGGESTION_WORDS` maps a
+            # prompt to the name a person would use for it - "Battery left?" -
+            # and the palette's rows are titles, so the long prompt is the
+            # subtitle and the short name is the title.
+            prompt = (capability.example or "").strip()
+            title = caps.SUGGESTION_WORDS.get(prompt, label)
+            out.append(palette_module.Entry(
+                title, capability.description, "system-run-symbolic",
+                (lambda p=prompt or label: self.set_input_text(p)),
+                group="Skills", weight=0))
+        return out
 
     #: (title, subtitle, icon, app action) - things that were a shortcut or a
     #: chat request and nothing else. `app.<action>` so the palette fires the

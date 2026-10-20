@@ -374,11 +374,16 @@ class NowRail(Gtk.Box):
 
     def _fill_now(self) -> None:
         self._now.clear()
-        state = str(self.get_state() or "").strip()
-        self._now.row(state or "Idle", "" if state else "Nothing is running")
+        # **The state word is not repeated here.** The window says "Ready"
+        # under the orb, and this card said it a second time - measured on a
+        # 1280px capture, "Ready" appeared three times on one screen. What
+        # the card is for is what is *running*, which the state word does not
+        # say.
         tool = str(self.get_tool() or "").strip()
         if tool:
             self._now.row(f"Running {tool}", "")
+        else:
+            self._now.empty("Nothing is running")
 
     def _fill_context(self) -> None:
         """How full the model's window is, and what is filling it.
@@ -425,7 +430,12 @@ class NowRail(Gtk.Box):
         elif report.percent is not None:
             self._context.meter(report.percent / 100.0,
                                 f"{report.percent:.0f}% of the model's window in use")
-        for label, tokens, share in report.segment_rows()[:4]:
+        # **Every segment, not the first four.** The list is dynamic - the
+        # breakdown has a row per kind of message, and a real turn fills
+        # six of them - so `[:4]` dropped the rest *silently*, and a person
+        # reading the card could not tell the model had been given a whole
+        # other slice of its window.
+        for label, tokens, share in report.segment_rows():
             self._context.row(label, f"{tokens:,} tokens ({share:.0f}%)")
         if report.elided:
             # The one line that has to be here: what was cut, so that a change

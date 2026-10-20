@@ -9,6 +9,7 @@
 #   -a       an edit waiting for approval, with the change shown in the question
 #   -t EXPR  print the widget tree of EXPR (over `win`), e.g. -t win._mode_strip
 #   -p ID    open this panel first (see `--list` in render_ui.py / SURFACE_IDS)
+#   -P       open the command palette, so it can be looked at
 #   -M JSON  preload the `mcp-servers` setting (and let discovery run)
 #   -k       keep the app running after the shot (kill it yourself)
 #
@@ -33,11 +34,12 @@
 # Output: OUT.png, and OUT.log with the app's log plus PROBE/TREE/SHOT lines.
 set -u
 SIZE=460x640 SEED=1 TREE="" QUIT=1 PAGE="" MCP=""
-while getopts "s:ecat:kp:M:" opt; do
+while getopts "s:ecat:kp:M:P" opt; do
   case $opt in
     s) SIZE=$OPTARG ;;
     e) SEED=0 ;;
     c) SEED=code ;;
+    P) SEED=palette ;;
     a) SEED=ask ;;
     t) TREE=$OPTARG ;;
     k) QUIT=0 ;;
@@ -62,6 +64,7 @@ DISPLAY_NAME=chronoa-live-$$
 
 setsid env -u DISPLAY -u WAYLAND_DISPLAY GDK_BACKEND=wayland PYTHONDONTWRITEBYTECODE=1 \
   XDG_STATE_HOME="$STATE/st" XDG_DATA_HOME="$STATE/da" XDG_CONFIG_HOME="$STATE/cf" \
+  PALETTE_SEARCH="${PALETTE_SEARCH:-}" \
   SIZE="$SIZE" SEED="$SEED" SHOT="$OUT" TREE="$TREE" QUIT="$QUIT" PAGE="$PAGE" MCP="$MCP" \
   dbus-run-session -- bash -c '
     echo -n "" | gnome-keyring-daemon --unlock --components=secrets >/dev/null

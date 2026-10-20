@@ -264,8 +264,11 @@ def _state_text(name: str, consent: _Consent, granted: bool) -> Tuple[str, str]:
     """The (state line, accessible label) pair for one row."""
     if not consent.mapped:
         return (
-            f"UNKNOWN - no consent key names this sense, so {name}-sense-enabled "
-            "would have to exist in the installed schema before it can be granted",
+            # **The sense is named; the key is not.** The key does not
+            # exist - that is the news - and spelling it would put a
+            # setting name on screen that no switch anywhere carries.
+            f"UNKNOWN - no consent key names this sense, so one would have to "
+            f"exist in the installed schema before {name} can be granted",
             f"Consent switch for the {name} sense: unavailable, no consent key",
         )
     state = "granted" if granted else "not granted"
