@@ -548,11 +548,21 @@ class _ExportView(Gtk.Box):
             # `compare` held for its empty store until a render showed it, and
             # the same fix `compare.py` records as `STATUS_OK` / "Nothing to
             # compare yet". This is that correction in the sibling it missed.
+            # **The reason is the banner's sentence, and the banner is
+            # above everything** - so this row does not repeat it. It said
+            # it three times: in the banner, in this row's subtitle, and in
+            # the group's description below, so the reader met the same
+            # sentence three times before the rows that are greyed out
+            # because of it.
+            #
+            # **The word and the summary stay.** "Ready" says the panel is
+            # healthy and "Nothing to export yet" says what is missing, and
+            # neither is in the banner - the banner says *why*, in the
+            # words the reason was written in.
             self._body.append(self.status_recorder.row(
                 common.STATUS_ATTENTION if could_not_read else common.STATUS_OK,
                 ("Could not read the conversation store" if could_not_read
-                 else "Nothing to export yet"),
-                reason))
+                 else "Nothing to export yet")))
         elif root is not None and sid:
             try:
                 count = len(_turns(root, sid))
@@ -585,10 +595,14 @@ class _ExportView(Gtk.Box):
         # that parses markup is a group's description: a conversation titled
         # `A & B` fails its parse there and the description renders empty, so
         # the panel would name no conversation at all without it.
+        # **The group's description is the count when there is something to
+        # count, and nothing when there is not** - the banner above already
+        # said why, and a third copy of the reason is the sentence the
+        # reader meets three times.
         group = common.group(
             "The open conversation",
             _adw_text(f"{title} - {said} message(s) you and Chronoa exchanged."
-                      if not reason else reason[0].upper() + reason[1:] + "."),
+                      if not reason else ""),
         )
         for kind, label, fields in (
             ("markdown", "Markdown", MARKDOWN_FIELDS),

@@ -13,6 +13,7 @@ TEST_FILE = "tests/test_one_statement_per_page.py"
 
 _PHONE = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/phone.py"
 _PHONE_LINK = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/phone_link.py"
+_EXPORT = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/export.py"
 
 MUTATIONS = [
     {
@@ -53,5 +54,23 @@ MUTATIONS = [
         # different words.
         "label": "the Phone panel's row is back beside the banner",
         "expect": ["test_no_panel_repeats_a_sentence_its_banner_already_said[phone]"],
+    },
+    {
+        "file": _EXPORT,
+        "old": '                 else "Nothing to export yet")))\n',
+        "new": '                 else "Nothing to export yet"),\n'
+               '                reason))\n',
+        # The Export panel said its reason three times: in the banner, in
+        # the status row's subtitle, and in the group's description below.
+        "label": "the Export panel's status row repeats the reason",
+        "expect": ["test_no_panel_repeats_a_sentence_its_banner_already_said[export]"],
+    },
+    {
+        "file": _EXPORT,
+        "old": '                      if not reason else ""),\n',
+        "new": '                      if not reason else reason[0].upper() + reason[1:] + "."),\n',
+        # The group's description is the third copy of the same reason.
+        "label": "the Export panel's group repeats the reason",
+        "expect": ["test_no_panel_repeats_a_sentence_its_banner_already_said[export]"],
     },
 ]

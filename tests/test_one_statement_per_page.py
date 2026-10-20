@@ -159,9 +159,20 @@ _SENTENCE = re.compile(r"[^.;:!?\n]+[.;:!?]?")
 
 
 def _sentences(text):
-    return [part.strip()
-            for part in _SENTENCE.findall(text.replace("\n", " "))
-            if len(part.strip()) > 12]
+    """The sentences of a text, **lowercased and without their stops**.
+
+    **The case has to go.** The Export panel said its reason three times -
+    in a banner, in a status row's subtitle and in a group's description -
+    and the first version of this check missed it because the banner began
+    the sentence with a capital and the other two did not. Two spellings of
+    one sentence are one sentence.
+    """
+    out = []
+    for part in _SENTENCE.findall(text.replace("\n", " ")):
+        part = part.strip().rstrip(".;:!?").strip().lower()
+        if len(part) > 12:
+            out.append(part)
+    return out
 
 
 def _panel_texts(sid):
@@ -220,7 +231,7 @@ class TestOneStatementPerPage:
         labels, banners = _panel_texts(sid)
         for banner in banners:
             for sentence in _sentences(_banner_text(banner)):
-                elsewhere = [text for text in labels if sentence in text]
+                elsewhere = [text for text in labels if sentence in text.lower()]
                 assert not elsewhere, (
                     f"{sid}: the banner says {sentence[:80]!r} and so does "
                     f"{elsewhere[0][:120]!r} - one statement per page")

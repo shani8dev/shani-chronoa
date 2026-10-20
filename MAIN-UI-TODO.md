@@ -847,19 +847,23 @@ is trying to do, with the live things on the main window.
 - [x] **11n Status rows** ("Ready / Turned off / Needs attention") drop where a
   banner or empty state already says it - one statement per page.
   **Done 2026-10-20**, and the population was measured rather than guessed:
-  with every consent key off - the state a fresh install is in - **two
+  with every consent key off - the state a fresh install is in - **three
   panels** said the same thing twice. The **Phone** panel's status row named
   the switch its banner had already named, and repeated the banner's sentence
   word for word ("Nothing was asked of your phone."); the **Phone link**
   panel's empty state pointed back at a banner that was already on screen
-  ("Turn on "…" above first"). The Phone panel's row is **gone** - the
-  recorder still holds the word, because the sidebar dot reads it - and the
-  Phone link panel's empty state now says only what the list knows.
+  ("Turn on "…" above first"); and the **Export** panel said its reason
+  **three** times - in a banner, in the status row's subtitle and in the
+  group's description - so the reader met the same sentence three times
+  before the rows that are greyed out because of it. The Phone panel's row is
+  **gone** - the recorder still holds the word, because the sidebar dot reads
+  it - the Phone link panel's empty state now says only what the list knows,
+  and the Export panel's reason is the banner's sentence once.
   **The gate is a sweep, not a per-panel test**, because the failure is a
   shape: `tests/test_one_statement_per_page.py` builds **all 38 panels** and
   asserts that no visible banner is repeated elsewhere on its page - by the
   switch's name, and by its sentences. 78 tests.
-  `tools/mutations/one_statement.py` (**3 mutations, 3 caught, 0
+  `tools/mutations/one_statement.py` (**5 mutations, 5 caught, 0
   survivors**).
   **Two measurement traps, both recorded because both looked like a clean
   result.** A banner that carries a button is **not an `Adw.Banner`** -
@@ -869,6 +873,10 @@ is trying to do, with the live things on the main window.
   `get_visible()` is **per-widget**: a label inside a hidden banner still
   answers True, so a sweep that counts labels without walking *into* the
   visible ones measures pages nobody sees.
+  **And the sentence check has to be case-insensitive.** It missed the
+  Export panel at first because the banner began the sentence with a capital
+  and the two other copies did not - two spellings of one sentence are one
+  sentence.
 
 **Expose on the main window**
 - [x] **11o Activity bell** in the header: rules fired, memory proposals,
