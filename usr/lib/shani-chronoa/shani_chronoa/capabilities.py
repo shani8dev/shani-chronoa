@@ -1037,6 +1037,43 @@ def gated_by(tool: str, description: str) -> str | None:
     return match.group(1) if match else None
 
 
+#: What a tool does **to the machine**, in the words a person would use.
+#:
+#: **Read from the sets that already exist**, because a second hand-kept list
+#: of "which tools are dangerous" is a list that rots the moment a skill
+#: lands. The order is the order of urgency: a tool that can delete is
+#: described before one that needs permission, because that is the difference
+#: between "it asked" and "it took".
+#:
+#: The last case is the honest one: `READ_ONLY_TOOLS` is an **allowlist** -
+#: "not needing consent does not mean changing nothing", `open_application`
+#: and `speak` are ungated and both act - so a tool outside it is described
+#: as acting rather than as changing something it might not touch.
+EFFECT_READS = "only reads from this machine"
+EFFECT_ACTS = "acts on this machine"
+EFFECT_PERMISSION = "asks your permission first"
+EFFECT_DESTRUCTIVE = "can delete what you have"
+
+
+def effect_of(tool: str, description: str = "") -> str:
+    """What this tool does to the machine, in plain words.
+
+    **This is the answer to "what does this touch?"**, which nothing in the
+    interface could answer before: the palette's skill rows carried the tool's
+    whole description - wordy, model-facing prose, cut off mid-word in a
+    search result - and a person reading them could not tell a clipboard read
+    from a file delete.
+    """
+    key = gated_by(tool, description)
+    if key and key in DESTRUCTIVE_CONSENT_KEYS:
+        return EFFECT_DESTRUCTIVE
+    if key:
+        return EFFECT_PERMISSION
+    if tool in READ_ONLY_TOOLS:
+        return EFFECT_READS
+    return EFFECT_ACTS
+
+
 # An example prompt per skill. Only for skills with no free-text argument -
 # a suggestion that needs the user to supply "which app" is not a suggestion,
 # it is a question. An empty string means "shown in help, not offered as a

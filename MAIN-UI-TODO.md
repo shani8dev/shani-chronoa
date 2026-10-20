@@ -168,10 +168,25 @@ skills**. AGENTS.md calls it "everywhere you can go".
   `tests/test_the_palette_offers_the_capabilities.py` (3). The harness can
   now open and search it (`tools/live_window.sh -P`, `PALETTE_SEARCH=`), so
   it can be looked at rather than counted.
-- [ ] **3b** The real entry point: **query capabilities by effect** — everything
+- [x] **3b** The real entry point: **query capabilities by effect** — everything
   that writes files / leaves the machine / needs a key / is destructive. Read
   from `capabilities` (`gated_by`, `READ_ONLY_TOOLS`, the destructive set), not
   a second hand-kept list.
+  **Done 2026-10-20.** `capabilities.effect_of(tool)` answers it in plain
+  words — "can delete what you have", "asks your permission first", "only
+  reads from this machine", "acts on this machine" — read from the sets the
+  rest of the tree already reads, so a tool that becomes destructive is
+  described as destructive because *the set* says so. The palette's skill rows
+  now carry it, which makes it **searchable**: typing "delete" reaches the
+  destructive skills.
+  **What the palette showed instead**: the tool's whole description, cut off
+  mid-word ("your crontab, th…"). The descriptions are written to be read by
+  a model with the tool schema in front of it, so they are wordy and full of
+  qualifiers, and a person reading a search result needs the one thing a
+  search cannot tell them.
+  **Not covered: "leaves the machine."** No set in this tree says which tools
+  send data outward, and writing one here would be the second hand-kept list
+  the item warns against.
 
 ### 4 — The Activity panel is a graveyard
 

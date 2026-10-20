@@ -4454,8 +4454,16 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             # subtitle and the short name is the title.
             prompt = (capability.example or "").strip()
             title = caps.SUGGESTION_WORDS.get(prompt, label)
+            # **The subtitle is what it touches, not what it is.** The
+            # description is written to be read by a model with the tool
+            # schema in front of it - wordy, full of qualifiers - and it was
+            # the subtitle here, so a search result showed a paragraph cut
+            # off mid-word. What a person needs beside the name is the one
+            # thing a search cannot tell them: whether this touches the
+            # machine, and how.
+            effect = caps.effect_of(capability.tool, capability.description)
             out.append(palette_module.Entry(
-                title, capability.description, "system-run-symbolic",
+                title, effect, "system-run-symbolic",
                 (lambda p=prompt or label: self.set_input_text(p)),
                 group="Skills", weight=0))
         return out

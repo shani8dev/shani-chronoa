@@ -28485,3 +28485,63 @@ prompts, their short names, and that a build without the skill does not
 offer them.
 
 10 files, one process each: 136 passed, 0 failed.
+
+## The palette's rows said what a tool is, and not what it touches (2026-10-20)
+
+**3b** asked for the real entry point: **query capabilities by effect** -
+everything that writes files, leaves the machine, needs a key, or is
+destructive - read from `capabilities` and not from a second hand-kept list.
+
+### What the palette showed
+
+A real 460x640 capture of Ctrl+K with "timer" in the search box:
+
+> **What is scheduled to run: cron jobs and systemd timers**
+> your crontab, th…
+> **Set a timer**
+> Set a countdown timer that sends a desktop notification w…
+
+The subtitle was **the tool's whole description**, cut off mid-word. The
+descriptions are written to be read by *a model with the tool schema in
+front of it* - wordy, full of qualifiers - and this repository's own
+`_first_sentence()` exists because of it. A person reading a search result
+needs the one thing a search cannot tell them: **does this touch my
+machine, and how**.
+
+### The effect, read from the sets that already exist
+
+`capabilities.effect_of(tool)` answers it in plain words - **"can delete
+what you have"**, **"asks your permission first"**, **"only reads from this
+machine"**, **"acts on this machine"** - and it reads `gated_by()`,
+`DESTRUCTIVE_CONSENT_KEYS` and `READ_ONLY_TOOLS`, because a second
+hand-kept list of which tools are dangerous is a list that rots the moment a
+skill lands, and nothing would notice.
+
+**The order is the order of urgency**: a tool that can delete is described
+before one that needs permission, because that is the difference between
+"it asked" and "it took". And the last case is the honest one -
+`READ_ONLY_TOOLS` is an *allowlist* ("not needing consent does not mean
+changing nothing" - `open_application` and `speak` are ungated and both
+act), so a tool outside it is described as acting rather than as changing
+something it might not touch.
+
+**And because the effect is in the subtitle, the palette's search finds
+it**: typing "delete" reaches the destructive skills. That is the query the
+item asks for, and it is a consequence of putting the answer where the
+search looks.
+
+### What is not covered
+
+**"Leaves the machine."** No set in this tree says which tools send data
+outward, and writing one here would be exactly the second hand-kept list
+the item warns against. Recorded rather than guessed.
+
+### The witnesses
+
+`tests/test_the_palette_says_what_it_touches.py` - every skill row carries
+one of the four phrases, the destructive ones and the read-only ones are
+both there, the search finds them, and the function is checked to *read*
+the sets rather than to carry its own. Each of the three was confirmed by
+reverting the behaviour and watching the test fail.
+
+6 files, one process each: 221 passed, 0 failed.
