@@ -121,6 +121,10 @@ is inserted.
 - [ ] **1a** At ≤1040 the rail is deleted by `RailBreakpoint`. Replace with a
   compact always-present Now line (state · tokens · timers · files changed ·
   rules fired) and/or a pull-up sheet, so 10 composed facts survive at 460.
+  **One of the ten now survives: the rules that fired.** The activity bell
+  (9h) carries them in the header at every width, so the fact the rail was
+  holding is reachable at 460. The other nine - state, tokens, timers, files
+  changed and the rest - are still only in the rail.
 - [ ] **1b** Decide and record: rail-first at narrow widths (chat becomes the
   sheet) versus a one-line ticker. Allocation-measured at 380/460/760/1024.
 
@@ -303,10 +307,25 @@ From a read-only audit (33 GActions, 205 GSettings keys, 243 skill modules -
 
 Open, ranked:
 
-- [ ] **9h Background activity is invisible.** A rule firing shows only in the
+- [x] **9h Background activity is invisible.** A rule firing shows only in the
   rail (hidden below 1040px); sleep/dream proposals only inside Memory; no
   badge, no notification. An activity bell in the header (rules fired, proposals
   waiting, approvals) with Accept/Undo/Open, mirrored in the tray.
+  **Mostly done 2026-10-20.** A bell in the header, present when there is
+  something to say and gone when there is not. It answers the question the rail
+  answered and the rail cannot reach - **the rail is hidden below 1040px, which
+  is every window the app opens at (460x640)** - so on the default window a
+  rule that fired while the person was away left no trace at all. The menu
+  lists the rules that fired (with the rail's own description of each, so the
+  two never disagree) and the badge counts the **proposals waiting**, which are
+  a decision somebody owes rather than history. Doors: **Open Triggers** and
+  **Open Memory**.
+  **Two halves are still open.** **Accept is not in the menu** - accepting a
+  proposal without showing what it is would be a decision nobody made, so the
+  door goes to the panel where they can be read. And **the tray does not
+  mirror it**, because the tray is not built on a machine without
+  `libappindicator` (`app/tray.py`'s `build()` returns None), so there is no
+  icon to badge.
 - [ ] **9i A "Today" panel**: reminders, alarms, timers (Cancel, +5 min), notes,
   to-dos - all chat-only now; rail timers are read-only.
 - [ ] **9j One "What Chronoa can do"**: Help window, Inventory, Skills and /help

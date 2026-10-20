@@ -28205,3 +28205,56 @@ apply is the **sandbox profile**, and that one is live:
 
 **A guard can be live in one place and moot in another**, and a list of
 open items does not say which is which until it is measured.
+
+## Background activity was invisible at the size the app opens at (2026-10-20)
+
+The work order's **9h** ("Background activity is invisible") and its
+**1a** ("the rail is deleted at ≤1040") are the same fact measured twice:
+**the rail is hidden below 1040px, and the app opens at 460x640** - so every
+fact the rail holds was unreachable on the default window.
+
+### What the bell shows, and what it deliberately does not
+
+**Rules that fired** are *history*; **proposals waiting** are *a decision
+somebody owes*. So the badge counts the second and the menu lists the first -
+and a count of things that happened would be a number that only goes up, which
+is the wrong kind of number for a badge.
+
+**The menu uses the rail's own `describe_event`**, which was `_describe_event`
+and is now public. Two readers of one event describing it differently is how
+two surfaces end up disagreeing about what a rule did.
+
+**The proposals are read at most once a minute**, and the reason is arithmetic
+rather than taste: `pending_proposals` reads every digest on disk, and the
+window already runs a two-second tick - so reading them on every tick would
+turn that into a directory scan every two seconds for the life of the window.
+A proposal appears when the sleep pass writes a digest, which is a background
+job on its own schedule, so a minute's delay costs nothing.
+
+### Two halves deliberately left open
+
+**There is no Accept in the menu.** Accepting a proposal without showing what
+it *is* would be a decision nobody made, so the door goes to the Memory panel
+where the proposals can be read first. **The tray does not mirror the bell**,
+because the tray is not built on a machine without `libappindicator`
+(`app/tray.py`'s `build()` returns None) - there is no icon to badge.
+
+### Two things the build found
+
+**`Gtk.Button` has no `set_popover`** - only `Gtk.MenuButton` does. The
+conversations button beside it in the same header is a `Gtk.MenuButton`, which
+is the precedent and the reason the bell is one too.
+
+**The icon needed no new gate.** `test_every_icon_the_gui_names_exists_in_adwaita`
+already reads every `-symbolic` name in `gui/`, so `dialog-information-symbolic`
+is covered by the check that caught the Yaru-only names twice before.
+
+### The witnesses
+
+Nine tests in `tests/test_the_bell_shows_background_activity.py`, each of them
+checked by **reverting the behaviour and watching the test fail**: the bell
+appearing, the badge counting, each of the two doors, the menu listing the
+rules, the tooltip naming them, and the once-a-minute cache. The two
+properties that are *not* there - "accept is not offered" and "the tray does
+not mirror it" - are recorded in the work order rather than asserted, because
+the first is a decision and the second is a platform fact.

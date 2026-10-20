@@ -2177,6 +2177,15 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # `header_row` first and then packing the same button tripped
         # `adw_header_bar_pack_end`'s "child already has a parent" assertion four
         # times over, and every one of those buttons silently ended up nowhere.
+        # **Background activity, where a person at the app's own size can see
+        # it.** The rail has always shown the rules that fired, and the rail is
+        # hidden below 1040px - which is every window the app opens at (460x640,
+        # measured on a real capture). So on the default window a rule that
+        # fired while the person was away left no trace at all, and a proposal
+        # waiting for an answer was somewhere only the Memory panel could
+        # find.
+        self._bell_button, self._bell_badge, self._bell_popover = \
+            self._build_activity_bell()
         header_bar.set_title_widget(header)
         header_bar.pack_start(self._conversations_button)
         header_bar.pack_start(self._mic_icon)
@@ -2187,6 +2196,10 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         for widget in (quick_button, self._browser_button, help_button,
                        self._overflow_button, setup_button, settings_button):
             header_bar.pack_end(widget)
+        # **After the mode buttons, before the rail toggle.** The bell is
+        # about what happened without you, so it belongs with the standing
+        # controls rather than with the panels.
+        header_bar.pack_end(self._bell_button)
         # The page was assembled before the bar existed (the column is built
         # top-down), so the bar goes into the holder now. An `Adw.Bin` exists
         # exactly for this: one slot, fillable later, no re-parenting.
@@ -3258,7 +3271,183 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
                 self._rail.refresh()
             except Exception as exc:  # noqa: BLE001 - the tick must never die
                 logger.warning("The Now rail failed to refresh: %s", exc)
+        # **The bell is refreshed by the same tick**, because it answers the
+        # same question the rail does - and the rail is hidden below 1040px,
+        # so on the default window this is the only thing keeping background
+        # activity visible at all.
+        try:
+            self._refresh_activity_bell()
+        except Exception as exc:  # noqa: BLE001 - the tick must never die
+            logger.warning("The activity bell failed to refresh: %s", exc)
         return True
+
+    # ------------------------------------------------------------------
+    # Background activity (the bell)
+    # ------------------------------------------------------------------
+
+    def _build_activity_bell(self):
+        """A bell in the header for what happened while you were not looking.
+
+        **A `Gtk.MenuButton`, like the conversations button beside it** - so
+        the header has one idiom for "a thing you can open" rather than two.
+        (`Gtk.Button` has no `set_popover`; the popover is a menu button's
+        job, and the conversations button is the precedent.)
+
+        **The badge carries the count of things waiting**, not the count of
+        things that happened: a rule that fired is history and the menu
+        lists it, while a proposal is a decision somebody owes and only the
+        Memory panel can collect it.
+        """
+        button = Gtk.MenuButton()
+        button.add_css_class("flat")
+        button.set_valign(Gtk.Align.CENTER)
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        image = Gtk.Image.new_from_icon_name("dialog-information-symbolic")
+        image.set_pixel_size(16)
+        box.append(image)
+        badge = Gtk.Label(label="")
+        badge.add_css_class("dim-label")
+        box.append(badge)
+        button.set_child(box)
+        button.set_tooltip_text("Background activity")
+        button.update_property(
+            [Gtk.AccessibleProperty.LABEL], ["Background activity"])
+        popover = Gtk.Popover()
+        button.set_popover(popover)
+        # **Hidden until there is something to say.** A bell that is always
+        # there with nothing behind it is decoration, and decoration costs a
+        # glance on every turn.
+        button.set_visible(False)
+        self._bell_signature = ""
+        return button, badge, popover
+
+    def _proposal_count(self) -> int:
+        """How many proposals are waiting for an answer.
+
+        **Read at most once a minute.** `pending_proposals` reads every
+        digest on disk, and the two-second tick this window already runs
+        would turn that into a directory scan every two seconds for the life
+        of the window. A proposal appears when the sleep pass writes a
+        digest - a background job on its own schedule - so a minute's delay
+        costs nothing, and the Memory panel shows them the moment it is
+        opened.
+        """
+        now = time.monotonic()
+        cached = getattr(self, "_proposal_cache", None)
+        if cached is not None and now - cached[0] < 60.0:
+            return int(cached[1])
+        try:
+            from shani_chronoa.senses import memory
+            count = len(memory.pending_proposals())
+        except Exception as exc:  # noqa: BLE001 - sleep not installed is no proposals
+            logger.debug("bell: proposals unreadable: %s", exc)
+            count = 0
+        self._proposal_cache = (now, count)
+        return count
+
+    def _refresh_activity_bell(self) -> None:
+        """What happened in the background, and what is waiting.
+
+        **The rules are free to read** - the scheduler keeps them in memory
+        under its own lock - and **the proposals are not** (see
+        `_proposal_count`), so the two are read on different cadences and
+        the bell shows both.
+        """
+        try:
+            results = list(self._rail_events() or ())
+        except Exception as exc:  # noqa: BLE001 - the bell must never break the tick
+            logger.debug("bell: event results unreadable: %s", exc)
+            results = []
+        proposals = self._proposal_count()
+        if not results and not proposals:
+            self._bell_button.set_visible(False)
+            return
+        self._bell_button.set_visible(True)
+        self._bell_badge.set_label(str(proposals) if proposals else "")
+        said = []
+        if results:
+            said.append(f"{len(results)} rule(s) fired")
+        if proposals:
+            said.append(f"{proposals} proposal(s) waiting")
+        self._bell_button.set_tooltip_text(
+            "Background activity: " + ", ".join(said))
+        self._fill_activity_bell(results, proposals)
+
+    def _fill_activity_bell(self, results, proposals: int) -> None:
+        """The bell's menu: what happened, and where to go about it.
+
+        **Rebuilt only when it changes.** The menu is rebuilt on a two-second
+        tick, and a popover rebuilt under the person's cursor while they are
+        reading it is a popover that moves while it is read.
+        """
+        lines = []
+        for outcome in reversed(list(results)[-6:]):
+            label, detail, failed = rail_module.describe_event(outcome)
+            if not label:
+                continue
+            lines.append((label, detail, failed))
+        signature = repr((lines, proposals))
+        if signature == getattr(self, "_bell_signature", ""):
+            return
+        self._bell_signature = signature
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.set_margin_top(8)
+        box.set_margin_bottom(8)
+        box.set_margin_start(8)
+        box.set_margin_end(8)
+        if lines:
+            heading = Gtk.Label(label="Rules that fired on their own")
+            heading.add_css_class("dim-label")
+            heading.set_halign(Gtk.Align.START)
+            box.append(heading)
+            for label, detail, failed in lines:
+                row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+                title = Gtk.Label(label=label)
+                title.set_halign(Gtk.Align.START)
+                if failed:
+                    title.add_css_class("status-attention")
+                row.append(title)
+                if detail:
+                    sub = Gtk.Label(label=detail)
+                    sub.add_css_class("dim-label")
+                    sub.set_halign(Gtk.Align.START)
+                    sub.set_max_width_chars(40)
+                    sub.set_ellipsize(Pango.EllipsizeMode.END)
+                    row.append(sub)
+                box.append(row)
+        if proposals:
+            row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+            title = Gtk.Label(label=f"{proposals} proposal(s) waiting for you")
+            title.set_halign(Gtk.Align.START)
+            row.append(title)
+            sub = Gtk.Label(label="Open Memory to read them")
+            sub.add_css_class("dim-label")
+            sub.set_halign(Gtk.Align.START)
+            row.append(sub)
+            box.append(row)
+        if results:
+            button = Gtk.Button(label="Open Triggers")
+            button.add_css_class("flat")
+            button.set_halign(Gtk.Align.START)
+            button.connect("clicked", self._on_bell_open_triggers)
+            box.append(button)
+        if proposals:
+            button = Gtk.Button(label="Open Memory")
+            button.add_css_class("flat")
+            button.set_halign(Gtk.Align.START)
+            button.connect("clicked", self._on_bell_open_memory)
+            box.append(button)
+        self._bell_popover.set_child(box)
+
+    def _on_bell_open_triggers(self, _button) -> None:
+        """Open the Triggers panel and close the bell."""
+        self._bell_popover.popdown()
+        self._show_surface("triggers")
+
+    def _on_bell_open_memory(self, _button) -> None:
+        """Open the Memory panel, where the proposals can be read and decided."""
+        self._bell_popover.popdown()
+        self._show_surface("memory")
 
     def toggle_rail(self) -> None:
         if self._rail_toggle is not None:

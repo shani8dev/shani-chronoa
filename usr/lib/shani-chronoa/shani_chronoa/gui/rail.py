@@ -263,7 +263,7 @@ class RailBreakpoint:
         return breakpoint
 
 
-def _describe_event(outcome) -> "tuple[str, str, bool]":
+def describe_event(outcome) -> "tuple[str, str, bool]":
     """(label, detail, failed) from whatever a fired rule handed back.
 
     **Read defensively, because the shapes here are not uniform and none of them
@@ -625,7 +625,7 @@ class NowRail(Gtk.Box):
             self._events.empty("No rule has fired on its own")
             return
         for outcome in reversed(results[-6:]):
-            label, detail, failed = _describe_event(outcome)
+            label, detail, failed = describe_event(outcome)
             if not label:
                 continue
             if failed:
