@@ -28006,3 +28006,16 @@ provides it" and otherwise uses the user-local install the wizard sets up.
 There is no Arch package to name - and the repo already knows that `piper`
 on Arch is a **gaming-mouse configurator**, which is why the lookup is for
 a different name at all.
+
+### And the population is now a gate, not a list
+
+`tests/test_every_binary_we_look_for_names_a_package.py` (5) runs the audit
+and asserts the population is **exactly the one deliberate entry** - so the
+next binary that reaches a refusal with no package name is caught by the
+suite rather than by whoever runs the audit next.
+
+**And a count rather than a flag**, for the reason this file keeps
+recording: a flag that passes when the population is empty measures nothing,
+so the test also asserts the audit *ran* (it printed how many references it
+resolved, from how many files) ✓ - which is the control that makes the other
+assertion mean anything.

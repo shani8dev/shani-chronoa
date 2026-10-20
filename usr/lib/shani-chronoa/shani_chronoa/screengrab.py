@@ -27,7 +27,8 @@ nothing here is derived from a package name: each backend is resolved with
 with none of them installed gets a refusal naming what was looked for.
 
 - **X11**: `import` (ImageMagick) if present, else `xwd`. `xwd` is in
-  `x11-apps` and emits a raw ZPixmap dump, which is why this module carries an
+  `xorg-xwd` - **not** `x11-apps`, which is not an Arch package name at all -
+  and emits a raw ZPixmap dump, which is why this module carries an
   XWD decoder: without one, a machine with *only* `xwd` installed - a minimal
   container, a bare X session - simply cannot be seen, and the honest answer
   there is not a broken image. The decoder is verified against a real `xwd
@@ -84,7 +85,7 @@ MAX_CAPTURE_PIXELS = 1_200_000
 # picture from the one captured, without saying so.
 MAX_IMAGE_BYTES = 6 * 1024 * 1024
 
-# X11 fallback binary, in `x11-apps`. The hardcoded path exists for the same
+# X11 fallback binary, in `xorg-xwd`. The hardcoded path exists for the same
 # reason `stt.py` hardcodes /usr/bin/whisper-cli: a stripped PATH (a systemd
 # unit, a bare `su`) must not make an installed binary look absent.
 FALLBACK_XWD = "/usr/bin/xwd"
