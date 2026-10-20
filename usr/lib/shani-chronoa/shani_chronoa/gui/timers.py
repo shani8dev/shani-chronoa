@@ -21,7 +21,7 @@ click, about their own timer.
 from __future__ import annotations
 
 import logging
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Tuple
 
 import gi
 
@@ -164,9 +164,3 @@ class TimerStrip(Gtk.Box):
         self.set_visible(True)
 
 
-def find(identifier: str) -> Optional[Pending]:
-    """The pending timer with that identifier, or None."""
-    for one in pending_timers():
-        if str(one[0]) == str(identifier):
-            return one
-    return None

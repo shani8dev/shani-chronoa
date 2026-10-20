@@ -29230,3 +29230,42 @@ cannot tell a quotation from a statement.**
 
 `tests/test_the_two_speech_engines_are_interchangeable.py` (7),
 `tools/mutations/speech_engines.py` (3 mutations, 3 caught).
+
+## A full sweep found two dead helpers of mine, and one of them the guard could not see (2026-10-20)
+
+A full-suite sweep - **717 files, one process each, serial** - after this
+session's changes (the setup wizard's names, the palette's new
+destinations, the footer's door, the timers strip, the context bar, the
+phone keyboard's default, and the mutation harness's parse check) came back
+with **no real failures**.
+
+Two lines in the results were not passes, and both are known:
+
+- `test_no_unwired_public_helper.py` reported **NO SUMMARY (rc=124)** - `rc=124`
+  is `timeout`'s code, so the file takes longer than the runner's 300 s cap.
+  Run alone with a bigger cap it takes **431 s**.
+- `test_solve_math.py` was **skipped whole** - `python-symengine` is a hard
+  `depends` and is not on this Ubuntu box.
+
+### And the one file that needed a bigger cap had a real failure in it
+
+`test_no_unwired_public_helper.py` - "either wire it, or delete it, and
+there is no allowlist to add it to any more" - found **one public callable
+that nothing in the tree references**: `report_of`, in
+`gui/context_bar.py`, which I wrote this session and never called. The
+window reads the report through its own `_rail_context()`, which is the
+right owner of that reader, so the helper was a second copy of a thing that
+already had a home.
+
+**And `timers.find()` was dead too, and the guard did not see it.** The
+guard is **name-based**, and `find` is a name other modules use - so a
+dead `find` passes it while a dead `report_of` does not. **The AST-based
+scanner (`tools/deadcode.py`) is the stricter instrument** for this
+question, and the difference is worth remembering: a name that other
+modules also use is exactly the name a dead helper hides behind.
+
+Both are deleted ✓ - the guards and the suites are green ✓.
+
+**A sweep that reads the verdicts properly finds what a sweep that does
+not** - and the file that "failed" for a cap reason was the one file
+holding a real failure ✓.

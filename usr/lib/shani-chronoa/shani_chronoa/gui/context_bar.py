@@ -21,8 +21,6 @@ second one. The raw percentage is in the tooltip, so nothing is lost.
 from __future__ import annotations
 
 import logging
-from typing import Optional
-
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -124,18 +122,3 @@ class ContextBar(Gtk.Box):
         return "\n".join(str(part) for part in parts)
 
 
-def report_of(assistant) -> Optional[object]:
-    """The assistant's context report, or None.
-
-    **Through the application object**, because that is where the assistant
-    lives - the window's own `assistant` attribute is a placeholder-text
-    helper in some builds, and a meter wired to the wrong one reads zero.
-    """
-    reader = getattr(assistant, "context_report", None)
-    if reader is None:
-        return None
-    try:
-        return reader()
-    except Exception:  # noqa: BLE001 - a glance must not take the window down
-        logger.debug("context report unreadable", exc_info=True)
-        return None
