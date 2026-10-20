@@ -28716,3 +28716,85 @@ happens to have the switch off is a test that cannot run - so the config
 is stubbed to say otherwise.
 
 19 files, one process each: 628 passed, 0 failed.
+
+## The setup wizard called its pages by the organ names, and the palette could not open one of them (2026-10-20)
+
+Two changes from the same pass, and the second was found by measuring the
+first's list.
+
+### The rename, and the sentence it broke
+
+**"Brain", "Ears", "Eyes", "Imagine"** are the inside of this app - the
+organ names in `organism.py`, which the Inventory panel is *about*. The
+setup wizard is the first thing a new person reads, and it called its
+pages by them.
+
+The **titles** are the plain words now - Assistant, Hearing, Seeing,
+Pictures, Search - and the **keys stay**, because a stored page id has to
+keep opening the same page. Three places carried the names (the wizard's
+page list, its welcome rows, and the Models panel's cards) and the Help
+window's groups carried two of them as well.
+
+**"Voice" is deliberately not renamed** even though it is an organ's
+name: the voice page installs the voice, so "Voice" is the plain word for
+it too. A guard that forbade it would have had to be wrong about the one
+title that is right, and the guard says so in its own docstring.
+
+**The article is the defect the rename introduced, and reading the table
+back is what caught it.** "The assistant" reads correctly on its own and
+becomes "Open the The assistant page" in the sentence the wizard puts it
+into, because the wizard says "Open the {title} page". Nothing about the
+rename failed; the sentence round it did. The title is "Assistant" now,
+and a guard says a title carries no article of its own.
+
+**And the forward button's titles were a second copy of the page list** -
+two hand-kept maps that happened to agree, which is the arrangement this
+file keeps paying for. A rename that changed one and not the other
+produces a button saying "Next: Brain" on a page called "Assistant", and
+nothing says so. The map is derived from the page list now, and a source
+check says the builder holds no second copy.
+
+**The Help group names live in two tables** - the display order and the
+tool filed under it - so renaming one and not the other puts a tool under
+a heading the Help does not show. Both were renamed together, and a test
+asks the product which headings it shows.
+
+`tests/test_the_setup_pages_are_named_for_people.py` (8),
+`tools/mutations/setup_page_names.py` (5 mutations, 5 caught).
+
+### The palette, and the item that was two-thirds stale
+
+9k says the palette is the universal door. Measured, it already reached
+the **Settings pages** (a group of its own), **Find** and the **body
+register** (the Actions group), and the **routines** (a panel). The two
+that were missing were the **Setup pages** and the **in-app browser**.
+
+The palette could open the wizard but not **one of its pages**, so the
+hearing model had to be walked to - on the one surface whose whole job is
+to be the door to everything. The Setup rows are built from
+`setup_wizard._SETUP_PAGES`, so they are named by the page's own words
+("Setup: Hearing"), and Welcome and Done are left out because "Set
+Chronoa up" already opens the wizard at its first page.
+
+**The in-app browser is a window rather than a panel**, so it is in no
+sidebar and no panel, and the only way to it was `Ctrl+Shift+U`.
+
+**The palette's action rows are filtered by what the application really
+registers**, so a row for an action nothing has would be a row that does
+nothing - and a row naming a misspelled action is not a row that fails,
+it is a row that is **not offered at all**, which is the quieter of the
+two failures and the one the wording of the row cannot reveal. The test
+registers the two actions it needs on its own application and reads the
+application's source to check that the real one has them too.
+
+`tests/test_the_palette_reaches_the_setup_pages.py` (7),
+`tools/mutations/palette_setup.py` (4 mutations, 4 caught).
+
+### One harness fact, because it cost a round
+
+**A bare `Gtk.Application` in a test is not on a bus**, and activating an
+action on one is `GLib-GIO-CRITICAL: g_application_activate_action:
+assertion 'application->priv->is_registered' failed` - the action
+silently does nothing. The test replaces the application's own
+`activate_action` with a recorder and watches the palette's path above
+it, which is the product's code and not the test's.

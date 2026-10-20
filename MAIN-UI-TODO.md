@@ -308,9 +308,32 @@ Open, from the same review (voice / coder / everyday person):
   list down. The empty state offers **a voice and a routine** as well as the
   battery and the clock ("Listen", "My routines"), measured in a real
   460x640 capture: all eight chips sit above the organ strip, in three rows.
-  **Still open: "Brain/Ears/Eyes/Imagine" in setup**, and the jargon in
-  the Learning panel's rows ("a distilled router", "the outcome model"),
-  which 10d also names.
+  **Done 2026-10-20 (the setup half).** The wizard's pages are now the
+  plain words - **Assistant, Hearing, Seeing, Pictures, Search** - and the
+  **keys stay**, because a stored page id has to keep opening the same
+  page. Three places carried the names: the wizard's page list, the
+  wizard's welcome rows, and the Models panel's cards; the Help window's
+  groups carried two of them as well, and a group name lives in two
+  tables (the display order and the tool filed under it), so both were
+  renamed together.
+  **"Voice" was deliberately not renamed** even though it is an organ's
+  name: the voice page installs the voice, so "Voice" is the plain word
+  for it too, and a guard that forbade it would have had to be wrong
+  about the one title that is right.
+  **Two things fell out of the rename, and the second is the one the
+  rename could not see.** The first is the article: "The assistant" reads
+  correctly on its own and becomes "Open the The assistant page" in the
+  sentence the wizard puts it into, because it says "Open the {title}
+  page". The title is "Assistant" now, and a guard says a title carries
+  no article of its own. The second is that the forward button's titles
+  were a **hand-kept map beside the page list** - two copies that
+  happened to agree, and a rename that changed one and not the other
+  produces a button saying "Next: Brain" on a page called "Assistant".
+  The map is derived from the page list now, and a source check says the
+  builder holds no second copy.
+  **Still open: the jargon in the Learning panel's rows** ("a distilled
+  router", "the outcome model"), which 10d also names - that page is a
+  developer page (11j), so the words may be right there.
 - [x] **8n Status line duplicates the state word**: "Ready" then
   "Ready (this computer: local)" (`brain._llm_status_text`), and "local" is a
   placeholder model name.
@@ -368,8 +391,24 @@ Open, ranked:
 - [ ] **9j One "What Chronoa can do"**: Help window, Inventory, Skills and /help
   are four answers. One searchable view with plain names and "Try it" that
   fills the composer.
-- [ ] **9k Palette as the universal door**: Settings sections (`show-page`),
+- [x] **9k Palette as the universal door**: Settings sections (`show-page`),
   Setup, Find (Ctrl+F only), Body (Ctrl+Shift+B only), Browser, routines.
+  **Done 2026-10-20, and the item was two-thirds stale.** Measured, the
+  palette already reached the **Settings pages** (a group of its own),
+  **Find** and the **body register** (the Actions group), and the
+  **routines** (a panel). The two that were missing were the **Setup
+  pages** - the palette could open the wizard but not one of its pages,
+  so the hearing model had to be walked to - and the **in-app browser**,
+  which is a window rather than a panel and so was in no sidebar and no
+  panel, reachable only by `Ctrl+Shift+U`.
+  **The Setup rows are named by the page's own words** ("Setup:
+  Hearing"), so the palette and the page agree, and Welcome and Done are
+  left out because "Set Chronoa up" already opens the wizard at its
+  first page. **The palette's action rows are filtered by what the
+  application really registers**, so a row for an action nothing has
+  would be a row that does nothing - which is why the browser row names
+  an action the app really has, and why the test checks the app's own
+  source as well as the palette's.
 - [ ] **9l Fold Phone / Phone link / Android / Devices / Wearables** into one
   panel with tabs; "Answering now" into Models (41 rows -> ~30).
 - [ ] **9m Rule builder in plain words** ("When battery low -> notify"), JSON
@@ -581,8 +620,13 @@ is trying to do, with the live things on the main window.
 
 - [ ] **11q Project + branch** on the Work chip (done: project) and a git
   status count, linking to Changes.
-- [ ] **11r Search** button in the header (Ctrl+K palette is invisible today),
+- [x] **11r Search** button in the header (Ctrl+K palette is invisible today),
   and the palette gains every Settings page, Setup, Find, Body, routines.
+  **Done 2026-10-20.** The header **has had a search button** for a while
+  (`window.py`: a button that opens the palette), and the palette's half
+  was the missing part - which is 9k, and is done with it. The palette
+  reaches the Settings pages, the Setup pages, Find, the body register
+  and the routines.
 - [ ] **11s Turn footer** already carries cost/changed/Revert; add "Open in
   Changes" when files changed.
 
