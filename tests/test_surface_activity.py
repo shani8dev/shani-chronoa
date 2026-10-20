@@ -55,6 +55,36 @@ def _rows(widget):
     return out
 
 
+def _labels(widget):
+    out = []
+
+    def walk(node):
+        if isinstance(node, Gtk.Label) and node.get_label():
+            out.append(node.get_label())
+        child = node.get_first_child()
+        while child is not None:
+            walk(child)
+            child = child.get_next_sibling()
+
+    walk(widget)
+    return out
+
+
+def _buttons(widget):
+    out = []
+
+    def walk(node):
+        if isinstance(node, Gtk.Button):
+            out.append(node)
+        child = node.get_first_child()
+        while child is not None:
+            walk(child)
+            child = child.get_next_sibling()
+
+    walk(widget)
+    return out
+
+
 def _tracker(tmp_path, records=THREE_RECORDS):
     tracker = tool_tracking.ToolTracker(log_dir=pathlib.Path(tmp_path))
     for name, args, result in records:
@@ -98,6 +128,83 @@ class TestBuild:
         widget = activity.build(types.SimpleNamespace(tool_tracker=tracker))
         assert isinstance(widget, Gtk.Widget)
         assert _rows(widget) == []
+
+
+class TestThePanelIsAWorkbench:
+    """**The panel used to be a graveyard.**
+
+    It read a log of everything the machine had done - 19,000 records on a
+    real machine - and offered no way to do any of it again. Two things
+    make it a workbench, and both are things the log already knew.
+    """
+
+    def test_the_row_says_who_started_the_call(self, tmp_path):
+        """**The log has always known, and the panel never showed it.**
+
+        A call a person made and a call an armed rule made are different
+        events, and a panel that cannot tell them apart cannot answer
+        "what did this machine do on its own?".
+        """
+        tracker = _tracker(tmp_path)
+        tracker.record_call("set_volume", {"level": 40}, "set", 3.0,
+                            origin=tool_tracking.ORIGIN_UNATTENDED)
+        widget = activity.build(types.SimpleNamespace(tool_tracker=tracker))
+        text = "\n".join(_labels(widget))
+        assert "by rule" in text, (
+            f"the panel does not say a rule made the call: {text!r}")
+        assert "asked" in text, (
+            f"the panel does not say a person made the call: {text!r}")
+
+    def test_every_row_offers_to_run_the_call_again(self, tmp_path):
+        widget = activity.build(
+            types.SimpleNamespace(tool_tracker=_tracker(tmp_path)))
+        rows = _rows(widget)
+        assert rows, "the panel rendered no rows to put a button on"
+        for row in rows:
+            buttons = [b for b in _buttons(row) if b.get_label() == "Run again"]
+            assert buttons, "a row offers no way to run the call again"
+
+    def test_running_it_again_goes_through_the_real_dispatch(self, tmp_path,
+                                                             monkeypatch):
+        """**The same dispatch the chat uses** - so the consent gate, the
+        sandbox and the verification all still apply.
+
+        A private copy of the call would be a call with no consent and no
+        verification, which is the opposite of what a workbench is for.
+        """
+        from shani_chronoa import tools
+
+        seen = {}
+
+        class _Outcome:
+            text = "the answer"
+            verdict = "verified"
+            ran = True
+
+        def _fake(name, arguments, by_reference=False, origin=tools.ORIGIN_USER):
+            seen["name"] = name
+            seen["arguments"] = arguments
+            seen["origin"] = origin
+            return _Outcome()
+
+        monkeypatch.setattr(tools, "execute_tool_outcome", _fake)
+        widget = activity.build(
+            types.SimpleNamespace(tool_tracker=_tracker(tmp_path)))
+        rows = _rows(widget)
+        # **The row for the call being re-run**, by its title - the rows are
+        # newest first, so the first one is not the one this test is about.
+        row = next(r for r in rows
+                   if str(r.get_title() or "").startswith("get_datetime"))
+        button = next(b for b in _buttons(row) if b.get_label() == "Run again")
+        button.emit("clicked")
+        _pump(1500)
+        assert seen.get("name"), (
+            "pressing Run again did not run anything - the panel's button is "
+            "a label with no action behind it")
+        assert seen["arguments"] == {"tz": "utc"}, seen
+        assert seen["origin"] == tools.ORIGIN_USER, (
+            "a re-run is a person asking, so it must carry the person's "
+            "origin and not the rule's")
 
 
 class TestRecords:

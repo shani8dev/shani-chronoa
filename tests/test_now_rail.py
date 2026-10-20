@@ -212,6 +212,25 @@ class TestTheRailShowsRealState:
     #: **always pass**. That is a check that cannot fail.
     QUIET_MAX = 32
 
+    def test_the_two_file_cards_say_which_scope_they_are(self, tmp_path,
+                                                         monkeypatch):
+        """**Two scopes in neighbouring cards**, and a person reading them as
+        a pair could not tell.
+
+        "Changed" reads the undo ring - the last twenty changes on this
+        machine, which spans sessions - while the card beside it reads the
+        files *this conversation* made. So the first says "recently" and the
+        second says "yet", and the pair reads as one thought about one
+        scope rather than two answers to one question.
+        """
+        widget = _rail(tmp_path, monkeypatch)
+        widget.refresh()
+        text = "\n".join(_labels(widget))
+        assert "Changed recently" in text, (
+            f"the changed card does not say its scope: {text!r}")
+        assert "Nothing made yet" in text, (
+            f"the made card does not say its scope: {text!r}")
+
     def test_a_quiet_section_says_its_line_in_one_line(self, tmp_path,
                                                         monkeypatch):
         """**A quiet section is one line, not a card** - so a sentence too

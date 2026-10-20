@@ -356,7 +356,14 @@ class NowRail(Gtk.Box):
         self._now = _Section("Now")
         self._context = _Section("Context")
         self._timers = _Section("Timers")
-        self._changed = _Section("Changed")
+        # **"Changed recently", and the word is the point.** This card reads
+        # the undo ring - the last twenty changes on this machine, which
+        # spans sessions - while the card beside it reads the files *this
+        # conversation* made. Two scopes in neighbouring cards, and a person
+        # reading them as a pair could not tell. The card beside it says
+        # "yet", which is the conversation; this one now says "recently",
+        # which is the ring.
+        self._changed = _Section("Changed recently")
         self._made = _Section("Made")
         self._events = _Section("Triggers")
         self._sensing = _Section("Sensing")

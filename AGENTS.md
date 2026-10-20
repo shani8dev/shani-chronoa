@@ -28154,3 +28154,54 @@ capture refusal's `"x11-apps"` - a package that does not exist in Arch.
 
 **A test that pins a defect reports the fix as a regression**, and three of
 them did.
+
+## The Activity panel was a graveyard, and the rail's cards had two scopes (2026-10-20)
+
+Continuing the UI work order. Two items, both measured before they were
+touched.
+
+### The panel read 19,000 records and offered no way to do any of it again
+
+**4a/9o.** The Activity panel showed what the machine had done - a
+`tool_calls.log` of every skill call - and every row was a label and a
+tooltip. No button, no action, no way to repeat anything.
+
+The fix is not a private copy of the call. It is the **same dispatch the
+chat uses** - `execute_tool_outcome`, which carries the consent gate, the
+sandbox and the verification - so a call that changes something is verified
+exactly as it was the first time, and a call that needs asking asks. It runs
+on a thread, because a skill can take minutes and the window must not
+freeze while it does, and the answer comes back as a toast with the verdict
+in it.
+
+**And the log already knew who started each call.** The record carries
+`origin`, and "asked" against "by rule" is the first question asked of an
+audit trail - a panel that cannot tell a person from an armed rule cannot
+answer "what did this machine do on its own?". It is on every row now.
+
+### Two scopes in neighbouring cards
+
+**12b.** The rail's "Changed" card reads the undo ring - the last twenty
+changes **on this machine**, which spans sessions - while the card beside
+it reads the files **this conversation** made. A person reading them as a
+pair could not tell.
+
+The card says **"Changed recently"** now, and the one beside it says "yet",
+so the pair reads as one thought about one scope rather than two answers to
+one question. The other half of the item - scoping it to the conversation's
+turns instead - is still open.
+
+### And 2b was stale, and the item is moot
+
+**2b** said `origin` is never passed by any production `.handle()` call, so
+the per-origin budget is dead. It is not: `handle()` takes `origin` and
+defaults it to the person.
+
+And the *unattended* path does not go through `handle()` at all - a rule
+fires one skill through `execute_tool` - so the budget that bounds a chat
+turn has nothing to bound there. The unattended restriction that **does**
+apply is the **sandbox profile**, and that one is live:
+`profile_for_origin` gives `ORIGIN_UNATTENDED` the restricted profile.
+
+**A guard can be live in one place and moot in another**, and a list of
+open items does not say which is which until it is measured.

@@ -862,6 +862,18 @@ def _toast_overlay(widget: Gtk.Widget) -> "Adw.ToastOverlay | None":
     return None
 
 
+def toast(widget: Gtk.Widget, message: str) -> None:
+    """Say something over the window, briefly.
+
+    **The nearest `Adw.ToastOverlay` above `widget`**, which is the window's
+    own - so a panel can report the outcome of an action without knowing how
+    the window is built, and without a second way of saying it.
+    """
+    overlay = _toast_overlay(widget)
+    if overlay is not None:
+        overlay.add_toast(Adw.Toast.new(str(message)))
+
+
 def open_page(app: Any, target: str) -> None:
     """Navigate to a page of any window, through the one registry.
 

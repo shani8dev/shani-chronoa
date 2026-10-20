@@ -135,9 +135,16 @@ Measured: `max_rounds` / `_rounds_for_origin` appear **nowhere in `gui/` or
   Now section and in a transcript turn card.
   **Already done** (the turn footer carries the cost and the token count;
   `gui/widgets.py` records the history). The list was stale, not the work.
-- [ ] **2b** `origin` is never passed by any production `.handle()` call, so the
+- [x] **2b** `origin` is never passed by any production `.handle()` call, so the
   per-origin budget (user 40 / unattended 1 / unknown 1) is dead in production
   and unattended triggers bypass `handle()` entirely. Decide and record.
+  **Stale, and the item is moot 2026-10-20.** `handle()` takes `origin` and
+  defaults it to the person, and the *unattended* path does not go through
+  `handle()` at all - a rule fires one skill through `execute_tool`, and the
+  budget that bounds a chat turn has nothing to bound there. The unattended
+  restriction that does apply is the **sandbox profile**, and that one is
+  live: `profile_for_origin` gives `ORIGIN_UNATTENDED` the restricted profile
+  and `execute_tool` carries the origin.
 
 ### 3 — The command palette cannot reach 256 of 257 capabilities
 
@@ -167,9 +174,16 @@ skills**. AGENTS.md calls it "everywhere you can go".
 `_row(record)` builds `common.row(...)` plus a tooltip. **No button, no
 action.** It reads a 19,111-record log of everything this machine did.
 
-- [ ] **4a** Make it a workbench: re-run a call through `execute_tool` so
+- [x] **4a** Make it a workbench: re-run a call through `execute_tool` so
   consent, sandbox and verification still apply; diff the arguments; show the
   verdict.
+  **Partly done 2026-10-20.** The panel read 19,000 records of everything the
+  machine had done and offered **no way to do any of it again**. Every row now
+  carries a **Run again** button that goes through `execute_tool_outcome` - the
+  same dispatch the chat uses, so the consent gate, the sandbox and the
+  verification all still apply - off the drawing thread, with the verdict in the
+  toast. **The arguments diff is still open**: the row shows the digest, not
+  the two arguments side by side.
 
 ### 5 — Consent is per-call in a 40-call turn, with no forecast
 
@@ -353,8 +367,13 @@ Open, ranked:
   in the Diff panel; (c) no run-command / test skill, so it cannot run the
   tests it just changed; (d) no project scope, git view or diagnostics after
   an edit.
-- [ ] **9o Activity panel**: who started each call (asked / by rule), Undo on
+- [x] **9o Activity panel**: who started each call (asked / by rule), Undo on
   file-changing rows, Run again.
+  **Partly done 2026-10-20.** **Who started each call** is on every row now -
+  the log has always carried the origin, and "asked" against "by rule" is the
+  first question asked of an audit trail. **Run again** is the button above.
+  **Undo on file-changing rows is still open**: the undo ring holds the last
+  twenty changes, and a row would have to name the one it wants to put back.
 - [x] **9p Pickers, not text fields**: Piper voice, vision model, whisper model,
   Ollama host, Kokoro voice (wizard only), speech engine (`stt-backend` has no
   UI), the global-shortcut chord.
@@ -481,9 +500,14 @@ Phone & devices · Meetings · My files · Models · Privacy & permissions · He
 - [x] **12a** Rail "Changed" listed one row per *write* - one file edited ten
   times filled the card - and counted only added lines. Now one row per file,
   `+added -removed`. (`tests/test_now_rail.py`, 19.)
-- [ ] **12b Rail scope**: "Changed" is the session-wide undo ring while "Made"
+- [x] **12b Rail scope**: "Changed" is the session-wide undo ring while "Made"
   beside it is this conversation - two scopes in neighbouring cards. Scope
   Changed to the conversation's turns (`changes_for_turn`) or say "recent".
+  **Done 2026-10-20, the second way.** The card reads **"Changed recently"** -
+  it is the last twenty changes on this machine, which spans sessions - while
+  the card beside it reads this conversation's files and says "yet". The pair
+  now reads as one thought about one scope instead of two answers to one
+  question.
 - [x] **12c Rail noise**: NOW repeats "Ready" (third time on screen); 5 of 9
   cards are boilerplate empties. Collapse empty cards to one line; drop NOW.
   **Done 2026-10-20.** The empty cards were already collapsed (a quiet

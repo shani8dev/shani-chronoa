@@ -39,6 +39,7 @@ then renders as the plain text it is: noisy, harmless, and only fixable in
 from __future__ import annotations
 
 import json
+import threading
 import logging
 import tempfile
 from datetime import datetime, timezone
@@ -49,7 +50,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gtk  # noqa: E402
+from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from shani_chronoa import tool_tracking  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
@@ -150,6 +151,61 @@ def _matches(record: dict, needle: str) -> bool:
     return needle.lower() in str(record.get("tool_name", "")).lower()
 
 
+def _origin_text(record: dict) -> str:
+    """Who started this call: a person, or a rule that fired on its own.
+
+    **The log has always known and the panel never showed it.** The record
+    carries the origin, and it is the first question asked of an audit trail:
+    a call a person made and a call an armed rule made are different events,
+    and a panel that cannot tell them apart cannot answer "what did this
+    machine do on its own?".
+    """
+    origin = str(record.get("origin") or "").strip()
+    if not origin or origin == tool_tracking.ORIGIN_USER:
+        return "asked"
+    if origin == tool_tracking.ORIGIN_UNATTENDED:
+        return "by rule"
+    return origin
+
+
+def _run_again(record: dict, widget: Gtk.Widget) -> None:
+    """Re-run a recorded call, through the path the chat uses.
+
+    **This panel used to be a graveyard**: it read 19,000 records of
+    everything the machine had done and offered no way to do any of it
+    again. The fix is not a private copy of the call - it is the *same*
+    dispatch the chat uses, so the consent gate, the sandbox and the
+    verification all still apply, and a call that changed something is
+    verified exactly as it was the first time.
+
+    **Off the drawing thread**, because a skill can take minutes and the
+    window must not freeze while it does.
+    """
+    from shani_chronoa import tools
+
+    name = _flatten(record.get("tool_name", ""))
+    args = record.get("args")
+    if not isinstance(args, dict):
+        args = {}
+
+    def work() -> None:
+        try:
+            outcome = tools.execute_tool_outcome(
+                name, args, origin=tools.ORIGIN_USER)
+            said = (outcome.text or "").strip()
+            verdict = str(getattr(outcome, "verdict", "") or "").strip()
+            if not said:
+                said = f"{name} produced no answer"
+            if verdict:
+                said = f"{said} ({verdict})"
+        except Exception as exc:  # noqa: BLE001 - a worker must still say something
+            said = f"{name} could not be re-run: {type(exc).__name__}: {exc}"
+        GLib.idle_add(lambda: (common.toast(widget, said), False)[1])
+
+    threading.Thread(target=work, daemon=True,
+                     name="chronoa-activity-rerun").start()
+
+
 def _row(record: dict) -> Gtk.Widget:
     when = _parse_timestamp(record.get("timestamp"))
     when_text = when.astimezone().strftime("%Y-%m-%d %H:%M:%S") if when else "time unreadable"
@@ -159,8 +215,11 @@ def _row(record: dict) -> Gtk.Widget:
 
     # `escape=False`: markup is switched off just below, so escaping first
     # printed the entities - measured, arguments read `&quot;import sock…`.
+    origin = _origin_text(record)
     row = common.row(f"{tool} - {status}",
-                     " | ".join(part for part in (when_text, digest and f"args {digest}") if part),
+                     " | ".join(part for part in
+                                (when_text, origin, digest and f"args {digest}")
+                                if part),
                      escape=False)
     # Adw parses title/subtitle as Pango markup; the audit trail is skill
     # prose, so rendering without markup (rather than escaping every string)
@@ -178,6 +237,20 @@ def _row(record: dict) -> Gtk.Widget:
         tooltip_bits.append(f"result: {_clip(result, 120)}")
     if tooltip_bits:
         row.set_tooltip_text(" | ".join(tooltip_bits))
+    # **The workbench's one button.** A panel that reads a log of what the
+    # machine did and offers no way to do any of it again is a graveyard -
+    # and the button is the *same* dispatch the chat uses, so consent, the
+    # sandbox and the verification all still apply.
+    if isinstance(row, Adw.ActionRow):
+        again = Gtk.Button(label="Run again", valign=Gtk.Align.CENTER)
+        again.add_css_class("flat")
+        again.set_tooltip_text(
+            f"Run {tool} again, with the arguments it was called with")
+        again.update_property(
+            [Gtk.AccessibleProperty.LABEL],
+            [f"Run {tool} again"])
+        again.connect("clicked", lambda _b: _run_again(record, row))
+        row.add_suffix(again)
     return row
 
 
