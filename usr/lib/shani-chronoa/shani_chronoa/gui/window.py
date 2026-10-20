@@ -4417,6 +4417,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         entries.extend(self._palette_cloud_entries())
         entries.extend(self._palette_action_entries())
         entries.extend(self._palette_settings_entries())
+        entries.extend(self._palette_setup_entries())
         return entries
 
     def _palette_skill_entries(self) -> list:
@@ -4481,6 +4482,8 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         ("Connect an Android phone", "USB cable or Wi-Fi debugging", "phone-symbolic", "connect-device::android"),
         ("Pair a KDE Connect phone", "same Wi-Fi", "network-wireless-symbolic", "connect-device::kdeconnect"),
         ("Dictate", "speak a long message", "audio-input-microphone-symbolic", "dictate"),
+        ("In-app browser", "open a page beside the conversation", "web-browser-symbolic",
+         "open-browser"),
         ("Transcribe a recording", "an audio or video file, speakers told apart", "audio-x-generic-symbolic", "transcribe-file"),
         ("Find in this conversation", "Ctrl+F", "edit-find-symbolic", "find-in-conversation"),
         ("Choose project folder", "Build mode works in it", "folder-open-symbolic", "choose-project"),
@@ -4524,6 +4527,39 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
                 (lambda p=page_id: common.open_page(getattr(self, "_app", None),
                                                     f"settings:{p}")),
                 group="Settings", weight=0))
+        return out
+
+    def _palette_setup_entries(self) -> list:
+        """Every page of the setup wizard, by the name the page is called.
+
+        **The palette could open the wizard but not a page of it.** The
+        Settings group lists every Settings page the same way, so a
+        person who wanted the hearing model had to open the wizard and
+        walk to it - on the one surface whose whole job is to be the door
+        to everything.
+
+        **The titles come from `setup_wizard._SETUP_PAGES`**, so the
+        palette says "Setup: Hearing" on a page called "Hearing" and not
+        on a page called "Ears" - one table, and the plain words the
+        rename put there.
+
+        **Welcome and Done are left out.** "Set Chronoa up" in the
+        Actions group already opens the wizard at its first page, and
+        the last page is a completion screen rather than a destination
+        anybody would ask for.
+        """
+        from shani_chronoa import setup_wizard
+        from shani_chronoa.gui import palette as palette_module
+        from shani_chronoa.gui.surfaces import common
+        out = []
+        for tag, title in setup_wizard._SETUP_PAGES:
+            if tag in ("welcome", "done"):
+                continue
+            out.append(palette_module.Entry(
+                f"Setup: {title}", "setup page", "system-software-install-symbolic",
+                (lambda t=tag: common.open_setup(getattr(self, "_app", None),
+                                                  None, page=t)),
+                group="Setup", weight=0))
         return out
 
     def _palette_cloud_entries(self):
