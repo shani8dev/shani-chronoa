@@ -85,9 +85,12 @@ def test_the_gate_is_declared_and_the_skill_off_by_default(monkeypatch):
     monkeypatch.setattr(bg, "ChronoaConfig", lambda: _Off(), raising=True)
     monkeypatch.setattr(bg, "paired", lambda: [("AA:BB:CC:DD:EE:FF", "Watch")], raising=True)
     result = bg._run({"action": "services", "device": "watch"})
-    assert bg._CONSENT_KEY in result, (
+    # **The switch by the name the Settings row shows**, not by its key.
+    from shani_chronoa.capabilities import gate_label
+    assert gate_label(bg._CONSENT_KEY) in result, (
         f"the refusal does not name the switch that would open it: {result}"
     )
+    assert bg._CONSENT_KEY not in result, result
 
 
 def test_nothing_is_read_while_the_gate_is_shut(monkeypatch):
@@ -416,7 +419,11 @@ def test_find_is_refused_without_consent(monkeypatch):
     written = []
     monkeypatch.setattr(bg, "_write_command", lambda *a, **k: written.append(a))
     out = bg._run_find({"device": "watch"})
-    assert written == [] and "bluetooth-gatt-enabled" in out and "Nothing was sent" in out, out
+    from shani_chronoa.capabilities import gate_label
+    assert written == [], out
+    assert gate_label(bg._CONSENT_KEY) in out, out
+    assert bg._CONSENT_KEY not in out, out
+    assert "Nothing was sent" in out, out
 
 
 # --- listen's gatttool route subscribes through the real CCCD -----------------

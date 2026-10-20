@@ -47,12 +47,19 @@ class _Bus:
 
 
 def _enable_accessibility(monkeypatch, allowed=True):
+    from shani_chronoa.config import ChronoaConfig as _RealConfig
+
     class _C:
         def sense_allowed(self, name):
             return allowed
 
         def sense_allowed_reason(self, name):
-            return "" if allowed else "the accessibility sense is turned off"
+            # **The real wording, not a hand-written one.** The refusal a
+            # person reads has to name the switch the way the Settings row
+            # spells it, and a stub's own sentence would prove nothing about
+            # that - the stub *was* the reason this test could not see the
+            # real one.
+            return "" if allowed else _RealConfig().sense_allowed_reason(name)
     monkeypatch.setattr(A, "ChronoaConfig", _C)
     monkeypatch.setattr(config_mod, "ChronoaConfig", _C)
 
@@ -108,11 +115,16 @@ class TestWithoutTheSenseItExplainsWhy:
         _enable_accessibility(monkeypatch, allowed=False)
         out = LW._run({})
         assert "turned off" in out
-        assert "accessibility-sense-enabled" in out
+        # **The switch by the name the Settings row shows**, not by its key:
+        # a person who follows a gsettings key is hunting for a spelling no
+        # screen ever shows.
+        from shani_chronoa.capabilities import gate_label
+        assert gate_label("accessibility-sense-enabled") in out, out
 
     def test_it_still_answers_the_question(self, monkeypatch, no_display):
         _enable_accessibility(monkeypatch, allowed=False)
-        assert "accessibility-sense-enabled" in LW._run({})
+        from shani_chronoa.capabilities import gate_label
+        assert gate_label("accessibility-sense-enabled") in LW._run({})
 
 
 class TestUnavailableIsNotEmpty:

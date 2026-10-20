@@ -499,7 +499,10 @@ class TestTheListenActionThroughTheRealDispatcher:
                 return default
         monkeypatch.setattr(bg, "ChronoaConfig", _Off)
         out = bg._run({"action": "listen", "device": "FB", "characteristic": self.HR})
-        assert bg._CONSENT_KEY in out, out
+        # **The switch by the name the Settings row shows**, not by its key.
+        from shani_chronoa.capabilities import gate_label
+        assert gate_label(bg._CONSENT_KEY) in out, out
+        assert bg._CONSENT_KEY not in out, out
 
     def test_a_whole_number_of_seconds_is_the_only_thing_accepted(self, monkeypatch):
         self._device(monkeypatch)

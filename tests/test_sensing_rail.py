@@ -160,7 +160,7 @@ def test_an_unreadable_plan_does_not_take_the_rail_down():
     # that the rail had rendered. A section that is not the failing one is
     # the evidence the test means: the other seven survived.
     text = _text_of(rail)
-    assert "No timers pending" in text, (
+    assert "Nothing outstanding" in text, (
         f"a failing sense read cost the whole rail: {text!r}")
     assert "Could not read what is being watched" in text, text
 

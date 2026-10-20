@@ -1664,6 +1664,11 @@ NEVER_DEFAULTED_ON = frozenset({
     "packet-capture-enabled",
     "wake-word-enabled",
     "landline-enabled",
+    # **The phone keyboard, because it advertises.** It is off by default in
+    # the schema - the characteristic that would ring this computer is
+    # reachable by any nearby device - so the everyday preset has to agree
+    # with the schema, or a fresh install reads as a preset it is not.
+    "phone-remote-enabled",
 })
 
 PRESETS = {

@@ -835,11 +835,11 @@ class TestNobodyToAskSaysNobodyIsThere:
         happened.**
 
         Measured 2026-10-14 over all gated tools with nobody to ask:
-        **92 gated, 5 name the Settings row's label only, 20 name both, 67 name
+        **92 gated, 5 name the Settings row's label only, 20 name both, 61 name
         only the raw key, 0 name neither.** So the sweep above goes green for 87
-        of them while 67 still send a person after a switch no screen spells that
+        of them while 61 still send a person after a switch no screen spells that
         way - the defect `04316cc` fixed for the senses and deliberately did not
-        fix across 67 skill files, which is a change with its own review rather
+        fix across 61 skill files, which is a change with its own review rather
         than a footnote to it.
 
         So this is the standing witness for that work, and **it is a count rather
@@ -878,8 +878,12 @@ class TestNobodyToAskSaysNobodyIsThere:
             "a refusal named neither the key nor the row, so the person is "
             f"told nothing they can turn on: {counts}"
         )
-        assert counts["key_only"] == 67, (
-            f"the raw-key count moved from 67 to {counts['key_only']} - either a "
+        # **A count, and it moves when a conversion lands.** Six of the
+        # refusals now name the Settings row instead of the key - the
+        # phone, android, bluetooth and calendar skills, and the two cloud
+        # voice engines - so the number is 61.
+        assert counts["key_only"] == 61, (
+            f"the raw-key count moved from 61 to {counts['key_only']} - either a "
             "skill now names the Settings row (update this, and the sweep "
             "beside it still holds), or a gate stopped naming anything at all"
         )

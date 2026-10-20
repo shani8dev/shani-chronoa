@@ -171,23 +171,27 @@ def test_the_calendar_consent_gate_offers_the_senses_switch(shown, monkeypatch):
         f"Turn on wrote {app.config.written!r}, not the calendar switch")
 
 
-def test_the_empty_rule_list_offers_the_tool_activity_gate(shown):
-    """`triggers` - "Ask Chronoa to arm one" becomes a route to the gate.
+def test_the_empty_rule_list_offers_the_gate(shown):
+    """`triggers` - the way out of an empty rule list is the gate.
 
     Arming a rule is still a conversation - that sentence stays true and the
-    panel keeps it. What is reachable from here is the switch every armed rule has
-    to pass, so the button says what it opens rather than pretending to arm
-    anything.
+    panel keeps it. What is reachable from here is the switch every armed rule
+    has to pass.
+
+    **Turned on here since the 2026-10-15 redesign**, like every other gate in
+    the app, rather than routed to a Settings page: a person told the switch
+    is off can turn it on where they are told it is off.
     """
-    page = triggers.build(_App(**{"triggers-enabled": False}))
+    app = _App(**{"triggers-enabled": False})
+    page = triggers.build(app)
     # An empty store is the precondition; if this machine has armed rules the
     # panel is not showing its empty state and the button is (correctly) hidden.
     if not page.empty:
         pytest.skip("this machine has armed trigger rules, so the empty state "
                     "the button belongs to is not the one being built")
-    press(page, "Manage triggers", shown)
-    assert shown == ["settings:tool-activity"], (
-        f"the button reached {shown!r}, not the tool-activity page")
+    press(page, "Turn on", shown)
+    assert app.config.written == [("trigger-control-enabled", "true")], (
+        f"Turn on wrote {app.config.written!r}, not the trigger switch")
 
 
 @pytest.mark.parametrize("state", sorted(devices.HEALTH_SUMMARY))

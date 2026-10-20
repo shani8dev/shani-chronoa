@@ -560,10 +560,12 @@ class CloudSTT:
         """
         if not _read_switch(STT_SWITCH, self._config):
             from shani_chronoa.capabilities import gate_label
-            return (f"Cloud speech recognition is off - turn on "
-                    f"\u201c{gate_label(STT_SWITCH)}\u201d in Settings. "
-                    f"It is off by default because it sends your voice to "
-                    f"somebody else's computer.")
+            # **The switch's own name is the sentence's subject**, so the
+            # sentence says what is off and the name says what to turn on -
+            # rather than saying the same two words twice.
+            return (f"Sending your voice to somebody else's computer is off - "
+                    f"turn on \u201c{gate_label(STT_SWITCH)}\u201d in Settings. "
+                    f"It is off by default for that reason.")
         refusal = _privacy_refusal("your recording")
         if refusal:
             return refusal
@@ -667,10 +669,12 @@ class CloudTTS:
     def refusal(self) -> Optional[str]:
         if not _read_switch(TTS_SWITCH, self._config):
             from shani_chronoa.capabilities import gate_label
-            return (f"Cloud speech synthesis is off - turn on "
-                    f"\u201c{gate_label(TTS_SWITCH)}\u201d in Settings. "
-                    f"It is off by default because it sends the reply to "
-                    f"somebody else's computer.")
+            # **The switch's own name is the sentence's subject**, so the
+            # sentence says what is off and the name says what to turn on -
+            # rather than saying the same two words twice.
+            return (f"Sending the reply to somebody else's computer is off - "
+                    f"turn on \u201c{gate_label(TTS_SWITCH)}\u201d in Settings. "
+                    f"It is off by default for that reason.")
         refusal = _privacy_refusal("the reply")
         if refusal:
             return refusal

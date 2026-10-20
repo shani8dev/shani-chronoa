@@ -237,12 +237,14 @@ def test_an_armed_wake_word_says_so_on_the_state_line(window, monkeypatch):
 
 def test_dictation_is_not_drawn_as_ordinary_listening(window, monkeypatch):
     from shani_chronoa.gui.widgets import AssistantState
-    window.set_state(AssistantState.LISTENING)
-    monkeypatch.setattr(window, "_is_dictating", lambda: True)
+    # **The window reads its own state now** - it does not reach into the
+    # app to ask whether this is dictation - so the state is what the test
+    # sets.
+    window.set_state(AssistantState.DICTATING)
     window._sync_from_state()
     assert window._state_label.get_label() == "Dictating…"
     assert window._dictate_button.get_tooltip_text().startswith("Stop dictating")
-    monkeypatch.setattr(window, "_is_dictating", lambda: False)
+    window.set_state(AssistantState.LISTENING)
     window._sync_from_state()
     assert window._state_label.get_label() == AssistantState.LISTENING.label
     window.set_state(AssistantState.IDLE)

@@ -858,9 +858,14 @@ class TestCloudSpeechInput:
         monkeypatch.setattr(cloud_voice, "_read_switch",
                             lambda name, config=None: False)
         problem = hearing.stt_problem(cloud_voice.CloudSTT())
-        assert "cloud-stt-enabled" in problem, (
+        # **The switch by the name the Settings row shows**, not by its key:
+        # a person who follows a gsettings key is hunting for a spelling no
+        # screen ever shows.
+        from shani_chronoa.capabilities import gate_label
+        assert gate_label("cloud-stt-enabled") in problem, (
             f"the reason given is {problem!r}, which does not name the switch "
             "that has to be turned on")
+        assert "cloud-stt-enabled" not in problem, problem
         assert "hissper" not in problem, problem
 
     def test_a_local_engine_is_unchanged(self):
