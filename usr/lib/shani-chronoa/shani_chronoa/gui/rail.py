@@ -355,7 +355,6 @@ class NowRail(Gtk.Box):
 
         self._now = _Section("Now")
         self._context = _Section("Context")
-        self._timers = _Section("Timers")
         # **"Changed recently", and the word is the point.** This card reads
         # the undo ring - the last twenty changes on this machine, which
         # spans sessions - while the card beside it reads the files *this
@@ -372,7 +371,7 @@ class NowRail(Gtk.Box):
         # "Safety", not "Posture": the section says how risky calls are
         # treated and what is switched on, and "posture" is the code's word.
         self._posture = _Section("Safety")
-        for section in (self._now, self._context, self._timers, self._changed,
+        for section in (self._now, self._context, self._changed,
                         self._made, self._events, self._sensing,
                         self._tasks, self._goals, self._posture):
             inner.append(section)
@@ -456,39 +455,12 @@ class NowRail(Gtk.Box):
                     f"{report.dropped_messages} earlier message(s) left out")
             self._context.row(said, "the window was full")
 
-    def _fill_timers(self) -> None:
-        self._timers.clear()
-        try:
-            from shani_chronoa.skills.timer import active_timers
-            pending = active_timers()
-        except Exception as exc:  # noqa: BLE001 - a glance must not take the window down
-            logger.debug("rail: timers unreadable: %s", exc)
-            self._timers.empty("Could not read the timers")
-            return
-        if not pending:
-            self._timers.empty("No timers pending")
-            return
-        # Not a link: there is no timers panel to open. But **Cancel and five
-        # more minutes are buttons on the row** - they used to be "a spoken or
-        # typed request", so stopping a kettle timer meant asking the model to
-        # call a tool. These are the skill's own functions called directly: the
-        # person's click, about their own timer.
-        from shani_chronoa.skills import timer as timer_skill
+    # **The Timers section moved out of the rail.** The rail is deleted below
+    # 1040px - the width the app opens at is 460 - so a timer running was
+    # invisible on the window a person actually uses. The strip above the
+    # composer (`gui/timers.py`) carries them now, at every width, and a
+    # fact in two places is two answers to one question.
 
-        def act(fn):
-            try:
-                fn()
-            except Exception:  # noqa: BLE001 - a click must not take the rail down
-                logger.debug("rail: timer action failed", exc_info=True)
-            self._fill_timers()
-
-        for identifier, label, left in pending:
-            self._timers.controlled(label, f"{_human_seconds(left)} left", [
-                ("list-add-symbolic", "Five more minutes",
-                 lambda i=identifier, l=label: act(lambda: timer_skill.add_to_timer(300, i, l))),
-                ("window-close-symbolic", "Cancel this timer",
-                 lambda i=identifier: act(lambda: timer_skill.cancel_timer(i))),
-            ])
 
     def _fill_changed(self) -> None:
         self._changed.clear()
@@ -824,7 +796,6 @@ class NowRail(Gtk.Box):
         for section, fill in (
                 (self._now, self._fill_now),
                 (self._context, self._fill_context),
-                (self._timers, self._fill_timers),
                 (self._changed, self._fill_changed),
                 (self._made, self._fill_made),
                 (self._events, self._fill_events),
@@ -846,13 +817,3 @@ class NowRail(Gtk.Box):
                 section.empty("Could not read this section")
 
 
-def _human_seconds(seconds: float) -> str:
-    """`3m 12s`, `45s`, `1h 04m` - short enough for a 280px rail."""
-    remaining = max(0, int(seconds))
-    if remaining < 60:
-        return f"{remaining}s"
-    minutes, secs = divmod(remaining, 60)
-    if minutes < 60:
-        return f"{minutes}m {secs:02d}s"
-    hours, minutes = divmod(minutes, 60)
-    return f"{hours}h {minutes:02d}m"

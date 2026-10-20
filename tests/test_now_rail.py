@@ -155,7 +155,7 @@ class TestTheRailShowsRealState:
         widget = _rail(tmp_path, monkeypatch, get_state=lambda: "Ready",
                        get_tool=lambda: "")
         text = "\n".join(_labels(widget))
-        for heading in ("Now", "Timers", "Changed", "Tasks", "Safety"):
+        for heading in ("Now", "Changed", "Tasks", "Safety"):
             assert heading in text, f"the rail has no {heading} section: {text!r}"
         # **The state word is not repeated in the rail.** The window says
         # "Ready" under the orb, and this card said it a second time -
@@ -166,7 +166,11 @@ class TestTheRailShowsRealState:
             f"the rail repeats the state the window already shows: {text!r}")
         # Empty states are sentences, not blanks: a section with nothing must
         # still answer, or the rail looks broken rather than quiet.
-        assert "No timers pending" in text
+        #
+        # **The timers are not one of the sections any more.** They are a
+        # strip above the composer (`gui/timers.py`), because the rail is
+        # deleted below 1040px and the app opens at 460 - so a timer running
+        # was invisible on the window a person actually uses.
         assert "Nothing is running" in text, text
 
     def test_the_context_breakdown_shows_every_segment(self, tmp_path,
@@ -268,37 +272,6 @@ class TestTheRailShowsRealState:
         assert seen >= 6, (
             f"only {seen} quiet sections were rendered, so this test is not "
             f"measuring what it means to")
-
-    def test_a_timer_can_be_extended_and_cancelled_from_the_rail(self, tmp_path, monkeypatch):
-        """Both used to need a chat request; they are buttons on the row now."""
-        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
-        from shani_chronoa.skills import timer
-        monkeypatch.setattr(timer, "_schedule", lambda *a, **k: (True, ""))
-        monkeypatch.setattr(timer, "_unschedule", lambda *a, **k: (True, ""))
-        monkeypatch.setattr(timer, "_systemd_available", lambda: True)
-        timer.set_timer(95, "kettle")
-        widget = _rail(tmp_path, monkeypatch)
-        widget.refresh()
-        tips = {(b.get_tooltip_text() or ""): b for b in _buttons(widget)}
-        assert "Five more minutes" in tips and "Cancel this timer" in tips, list(tips)
-        tips["Five more minutes"].emit("clicked")
-        left = timer.active_timers()[0][2]
-        assert left > 300, f"+5 min did not extend the timer ({left}s left)"
-        tips = {(b.get_tooltip_text() or ""): b for b in _buttons(widget)}
-        tips["Cancel this timer"].emit("clicked")
-        assert timer.active_timers() == [], "Cancel left the timer running"
-        assert "No timers pending" in "\n".join(_labels(widget))
-
-    def test_a_real_timer_is_shown_with_the_time_left(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
-        from shani_chronoa.skills import timer
-        monkeypatch.setattr(timer, "_schedule", lambda *a, **k: (True, ""))
-        monkeypatch.setattr(timer, "_systemd_available", lambda: True)
-        assert "kettle" in timer.set_timer(95, "kettle")
-        widget = _rail(tmp_path, monkeypatch)
-        text = "\n".join(_labels(widget))
-        assert "kettle" in text
-        assert "1m 3" in text or "1m 35" in text, text
 
     def test_a_real_edit_is_listed_as_changed_and_opens_the_diff_panel(
             self, tmp_path, monkeypatch):
@@ -545,14 +518,6 @@ def test_the_organ_lights_are_separated_by_a_gap():
     assert strip.get_column_spacing() < 24, (
         f"column spacing is {strip.get_column_spacing()}px, which is spacing "
         f"for its own sake rather than a gap")
-
-
-def test_human_seconds_reads_as_a_countdown():
-    from shani_chronoa.gui.rail import _human_seconds
-    assert _human_seconds(45) == "45s"
-    assert _human_seconds(192) == "3m 12s"
-    assert _human_seconds(3600 + 240) == "1h 04m"
-    assert _human_seconds(-5) == "0s"
 
 
 class TestTheRailSaysWhetherTheRulesFileIsInForce:

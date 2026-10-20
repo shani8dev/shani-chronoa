@@ -125,6 +125,35 @@ is inserted.
   (9h) carries them in the header at every width, so the fact the rail was
   holding is reachable at 460. The other nine - state, tokens, timers, files
   changed and the rest - are still only in the rail.
+  **Measured 2026-10-20, and the gap is much smaller than "nine facts".**
+  Counting what is reachable at 460 by *some* route rather than by the rail:
+
+  | fact | where it is at 460 |
+  |---|---|
+  | the state word | the label under the orb |
+  | what is running | the status line's progress reading |
+  | tokens and cost | the turn footer |
+  | the rules that fired | the header's activity bell |
+  | the task | the task card above the composer |
+  | the posture | the mode strip |
+  | the files this turn changed | the turn footer, and its new "See the changes" door |
+  | goals, sensing, made files | a panel |
+  | **the running timers** | **the strip above the composer (2026-10-20)** |
+  | **the context meter** | **still only in the rail** |
+  | the session-wide changed list | the Diff panel |
+
+  So of the nine that were "only in the rail", **six were already reachable**
+  and only **three were genuinely lost** - the timers, the context meter and
+  the session-wide changed list - and two of those three are in a panel.
+  **The timers were the one that was both lost and mattering**: a kettle that
+  was boiling was invisible on the window the app opens at, and the only
+  other place a timer appeared was the empty state's home board, which
+  disappears the moment a conversation starts. They are now a strip above
+  the composer, at every width, with the same Cancel and five-more-minutes
+  buttons - and **the rail no longer carries a second copy**, because a fact
+  in two places is two answers to one question.
+  **Still open: the context meter**, which is in no panel and in the rail
+  only. It is the one fact left that is both lost and not elsewhere.
 - [ ] **1b** Decide and record: rail-first at narrow widths (chat becomes the
   sheet) versus a one-line ticker. Allocation-measured at 380/460/760/1024.
 

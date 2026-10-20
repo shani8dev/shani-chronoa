@@ -28889,3 +28889,77 @@ composed four hops away - and even then it would hold for the next round
 only.
 
 The item is retired with the reason kept, and the work order says so.
+
+## The timers were invisible on the window the app opens at (2026-10-20)
+
+1a says the rail is deleted below 1040px and nine of its facts survive
+nowhere. **Measured, nine was wrong, and the difference is the finding.**
+
+### What is reachable at 460 by *some* route
+
+| fact | where it is at 460 |
+|---|---|
+| the state word | the label under the orb |
+| what is running | the status line's progress reading |
+| tokens and cost | the turn footer |
+| the rules that fired | the header's activity bell |
+| the task | the task card above the composer |
+| the posture | the mode strip |
+| the files this turn changed | the turn footer, and its new "See the changes" door |
+| goals, sensing, made files | a panel |
+| **the running timers** | **the strip above the composer (today)** |
+| **the context meter** | **still only in the rail** |
+| the session-wide changed list | the Diff panel |
+
+So six of the nine were already reachable and only **three** were genuinely
+lost - the timers, the context meter and the session-wide changed list -
+and two of those three were in a panel. **The timers were the one that was
+both lost and mattering**: a kettle that was boiling was invisible on the
+window the app opens at, and the only other place a timer appeared was the
+empty state's home board, which disappears the moment a conversation
+starts.
+
+### What changed
+
+**The timers are a strip above the composer**, where the task card already
+lives, at every width - with the same Cancel and five-more-minutes
+buttons, because a person stopping their own timer should not have to ask
+the model to do it.
+
+**The rail no longer carries a second copy.** A fact in two places is two
+answers to one question, and the rail's Timers section and the strip
+would have been the two. The rail is nine sections now.
+
+**The empty state's home board no longer has a "Next timer" tile** - the
+board is built once, so a tile of it was a snapshot of the first second of
+the window, and the strip is live.
+
+**The strip hides itself entirely when there is nothing to show**, so the
+chrome of a quiet window is exactly what it was measured to be, and the
+window's minimum height is a promise it still keeps.
+
+**The tick refreshes it**, and that is the part that would have rotted
+quietly: the rail's refresh and the strip's refresh are two calls in one
+tick, and the rail is hidden on the narrow window where the timers matter
+most - so a tick that only refreshed the rail would leave the timers
+stale exactly where they are the only thing on screen, and nothing would
+say so.
+
+### One witness that could not fail, and the mutation run said so
+
+The first run of the set came back with one survivor: "the strip is on
+screen with no timer running". The mutation removes the `set_visible(False)`
+and the test that should have caught it passed - **because a fresh strip is
+hidden by its constructor**, so a test that only looked at a fresh one
+could not see the refresh's decision at all.
+
+The test now drives the **transition**: a timer is shown, the timer goes
+away underneath it, and the strip must hide. Which is the only shape in
+which the property is observable.
+
+`tests/test_the_timer_strip.py` (7), `tests/test_the_window_carries_the_timers.py` (3),
+`tools/mutations/timer_strip.py` and `timer_strip_wiring.py` (8 mutations, 8 caught).
+Twenty-nine files, one process each: 29 passed.
+
+**Still open: the context meter**, which is in no panel and in the rail
+only - the one fact left that is both lost and not elsewhere.

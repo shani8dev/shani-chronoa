@@ -42,6 +42,7 @@ from .conversations_menu import ConversationsMenuMixin
 from .sidebar import SidebarBreakpoint, SidebarPage
 from . import rail as rail_module
 from . import task_card as task_card
+from . import timers as timers_module
 from .organs import OrganPanel, OrganStrip, ORGAN_IDLE_CSS
 
 logger = logging.getLogger(__name__)
@@ -1862,15 +1863,11 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
 
         # -- today ---------------------------------------------------------
         tiles = []
-        try:
-            from shani_chronoa.skills import timer as timer_skill
-            pending = timer_skill.active_timers()
-        except Exception:  # noqa: BLE001
-            pending = []
-        if pending:
-            _ident, label, left = pending[0]
-            minutes, seconds = divmod(int(left), 60)
-            tiles.append(("Next timer", f"{minutes}:{seconds:02d}", label or "timer"))
+        # **The timer is not a tile here.** It is the strip above the
+        # composer (`gui/timers.py`), which is live - this board is built
+        # once, so a tile of it would be a snapshot of the first second of
+        # the window - and a fact in two places is two answers to one
+        # question.
         try:
             from shani_chronoa.gui.surfaces.machine import _battery
             battery = _battery()
@@ -2770,6 +2767,18 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # tax on attention for no information.
         self._task_card = task_card.TaskCard()
         main_box.append(self._task_card)
+
+        # **The pending timers, above the composer.** The rail's Timers
+        # section held them, and the rail is deleted below 1040px - the app
+        # opens at 460 - so a timer that was running was invisible on the
+        # window a person actually uses. The empty state's home board showed
+        # the next one, and that disappears the moment a conversation
+        # starts.
+        #
+        # **One place.** The rail no longer carries a second copy: a fact in
+        # two places is two answers to one question.
+        self._timer_strip = timers_module.TimerStrip()
+        main_box.append(self._timer_strip)
         # Same reading width as the conversation above it, so the composer lines
         # up with the turns instead of running the full width of the window.
         composer_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
@@ -3279,6 +3288,16 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
                 self._rail.refresh()
             except Exception as exc:  # noqa: BLE001 - the tick must never die
                 logger.warning("The Now rail failed to refresh: %s", exc)
+        # **The timers are refreshed by the same tick**, because they were
+        # the rail's Timers section and moved out of it - and the rail is
+        # hidden on the narrow window where the timers matter most, so a tick
+        # that only refreshed the rail would leave them stale exactly where
+        # they are the only thing on screen.
+        if getattr(self, "_timer_strip", None) is not None:
+            try:
+                self._timer_strip.refresh()
+            except Exception as exc:  # noqa: BLE001 - the tick must never die
+                logger.warning("The timer strip failed to refresh: %s", exc)
         # **The bell is refreshed by the same tick**, because it answers the
         # same question the rail does - and the rail is hidden below 1040px,
         # so on the default window this is the only thing keeping background
