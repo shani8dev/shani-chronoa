@@ -816,7 +816,7 @@ there is no left pinky, because nothing in here has one.
 | Senses | Ears | hearing: the microphone, speech recognition, wake phrase, and what is heard. | built | `ears` | `audio.py`, `stt.py`, `stt_provision.py`, `wakeword.py`, `vad.py`, `senses/hearing.py` |
 | Senses | Eyes | sight: the camera, the screen, OCR, faces, objects, and the vision model. | built | `eyes` | `screengrab.py`, `local_vision.py`, `opencv/`, `photo_library.py`, `senses/vision.py` |
 | Senses | Nose | smell: the machine's own state - power, heat, disks, services, network. | built | `nose` | `senses/`, `senses/power.py`, `senses/thermalgrid.py`, `senses/hwmon.py`, `senses/services.py`, `senses/network.py`, `senses/security.py` |
-| Senses | Fingertips | reaching outward: looking something up beyond this machine. | part | - | `websearch.py`, `webtext.py`, `senses/web.py` | the only sense that leaves the machine by default - it is gated on 'web-sense-enabled' and the egress layer records it, but no organ owned it until now, and it is the one sense a person would assume is covered by eyes or skin
+| Senses | Fingertips | reaching outward: looking something up beyond this machine. | part | - | `websearch.py`, `webtext.py`, `senses/web.py` | the only sense that leaves the machine by default - it is gated on the Web search switch and the egress layer records it, but no organ owned it until now, and it is the one sense a person would assume is covered by eyes or skin
 | Senses | Touch | contact: idle time, and what is plugged into it. | part | `nose` | `senses/idle.py`, `senses/devices.py`, `senses/usb.py`, `senses/bluetooth.py` | no raw input events, on purpose - it watches devices, not you
 | Senses | Tongue | taste: judging whether an action actually worked. | built | - | `verification.py`, `history_repair.py`, `guardrail.py` |
 | Senses | Vestibular sense | balance: what deserves attention now, out of everything that happened. | part | - | `tool_select.py`, `compression.py`, `triggers/events.py` | no salience or priority queue; selection is by tool relevance only
@@ -850,7 +850,7 @@ The two `absent` ones first, because they are the ones worth building:
 And the nine that are part-built, which is a different problem: each one
 works and stops short of something specific.
 
-- **Fingertips** - the only sense that leaves the machine by default - it is gated on 'web-sense-enabled' and the egress layer records it, but no organ owned it until now, and it is the one sense a person would assume is covered by eyes or skin.
+- **Fingertips** - the only sense that leaves the machine by default - it is gated on the Web search switch and the egress layer records it, but no organ owned it until now, and it is the one sense a person would assume is covered by eyes or skin.
 - **Touch** - no raw input events, on purpose - it watches devices, not you.
 - **Vestibular sense** - no salience or priority queue; selection is by tool relevance only.
 - **Diaphragm** - the awake/active/asleep cycle now exists for the *model* (presence.py, on the mode strip, and it reaches SLEEPING), but nothing sleeps the rest of it: the daemon keeps its rules and senses running through every state.

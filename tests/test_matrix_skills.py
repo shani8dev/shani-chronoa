@@ -440,8 +440,14 @@ def test_photo_metadata_keeps_unsupported_apart_from_empty(tmp_path):
 # ── 13. login_history ────────────────────────────────────────────────────────
 
 def test_login_history_refuses_without_the_sessions_switch():
+    """**The switch by the name the Settings row shows**, not by its key: a
+    person who follows a gsettings key is hunting for a spelling no screen
+    ever shows."""
+    from shani_chronoa.capabilities import gate_label
     outcome, text = call("login_history", {})
-    assert "Refusing" in text and "sessions-sense-enabled" in text
+    assert "Refusing" in text, text
+    assert gate_label("sessions-sense-enabled") in text, text
+    assert "sessions-sense-enabled" not in text, text
 
 
 def _utmp(typ, line, user, host, ts):

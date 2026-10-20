@@ -362,9 +362,7 @@ Drive the desktop without the keyboard.
 | `type_text` | Type text | needs `input-control-enabled` |
 | `ui_elements` | Press buttons, fill fields and open menus in other apps, and drive them visible | needs `input-control-enabled` |
 
-## Imagine
-
-Generate images, and change one by description.
+## Pictures
 
 | Skill | What it does | Before it runs |
 |---|---|---|
@@ -416,15 +414,6 @@ Read and write the clipboard.
 | `get_clipboard` | Read the clipboard | — |
 | `set_clipboard` | Copy something | — |
 
-## Eyes
-
-See the screen and a photograph.
-
-| Skill | What it does | Before it runs |
-|---|---|---|
-| `capture_video` | Record a short video from the camera | — |
-| `photo_video` | Find faces and objects in a photo or video, add effects, or go through a video | — |
-
 ## Local models
 
 Choose, measure and rebuild the local models.
@@ -442,6 +431,13 @@ Turn the disclosure switches.
 |---|---|---|
 | `fingerprint_status` | Whether fingerprint login is set up, and which fingers | — |
 | `set_privacy` | Mute the microphone, disable a camera, or blank the screen | — |
+
+## Seeing
+
+| Skill | What it does | Before it runs |
+|---|---|---|
+| `capture_video` | Record a short video from the camera | — |
+| `photo_video` | Find faces and objects in a photo or video, add effects, or go through a video | — |
 
 ## Languages
 
