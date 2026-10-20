@@ -446,11 +446,22 @@ Open, ranked:
 
 Open, by panel (worst first):
 
-- [ ] **10c Same gate, still raw**: Phone (full-width "Open Privacy settings"),
+- [x] **10c Same gate, still raw**: Phone (full-width "Open Privacy settings"),
   Calendar (`'calendar-read-enabled'` x3), Desktop (two "Open Privacy settings"
   on rows), Triggers (`'trigger-control-enabled'`, raw rules.json paths, two
   overlapping off-banners), Goals (full-width "Open Privacy settings" with no
   reason given) -> `gate_banner` / `consent_banner`.
+  **Mostly done 2026-10-20, by photographing each panel.** Phone, Calendar,
+  Desktop and Goals already call `consent_banner` - the work order's list was
+  stale, the same way 2b and 9r were. **The Triggers page was the one that
+  had all three**: two absolute paths across the top, **the raw key** in the
+  sentence, and **two off-messages saying the same thing**. The gate is now a
+  `consent_banner` like every other gate - it names the switch ("Let Chronoa
+  arm automatic rules") and offers **Turn on** - the dim line adds the one
+  fact the banner cannot (that the switch is not the only gate) instead of
+  repeating it, and the paths are `~/...` with the whole path on hover.
+  **11m (paths as `~/...`) is done for this page**, and still open for the
+  rest.
 - [ ] **10d Diagnostics read as UI**: Speaking voice (real-time factors,
   /usr/share paths), Driving (Wayland input injection essay), Learning
   ("bandit", "outcome model", "distilled router"), Machine/Memory (raw command

@@ -286,6 +286,22 @@ def _access(widget: Gtk.Widget, label: str) -> None:
     widget.update_property([Gtk.AccessibleProperty.LABEL], [label])
 
 
+def _switch_name() -> str:
+    """The tool-activity switch's own name, as Settings spells it.
+
+    **`capabilities.gate_label`**, which is the table the Settings rows are
+    built from - so the panel and the row say the same thing. The key
+    (`trigger-control-enabled`) is not a word any screen shows, and a
+    sentence that names it sends the person looking for a switch that is
+    called something else.
+    """
+    from shani_chronoa import capabilities
+    try:
+        return capabilities.gate_label(TRIGGER_CONTROL_KEY) or TRIGGER_CONTROL_KEY
+    except Exception:  # noqa: BLE001 - the fallback is the key, which is honest
+        return TRIGGER_CONTROL_KEY
+
+
 def _note(text: str) -> Gtk.Label:
     """A dim line of plain text, with any filesystem path in it fixed-width.
 
@@ -374,12 +390,17 @@ class _TriggersSurface:
         # Tool activity - so that is the button, and the sentence above it stays
         # true: arming a rule is still a conversation, not a switch.
         #
-        # Shown and hidden with the empty state, so the button appears exactly
-        # when the panel is claiming there is nothing here.
-        self.empty_route: Gtk.Widget = common.banner(
-            "Rules need the tool-activity switch before any of them can act.",
-            "Manage triggers",
-            lambda: common.open_page(self._app, "settings:tool-activity"))
+        # **The gate is a `consent_banner`, like every other gate in the app**
+        # - it names the switch and offers **Turn on**, so a person told the
+        # switch is off can turn it on here instead of going to Settings to
+        # find a switch nobody named. It was a hand-written banner whose
+        # button went to Settings, sitting beside a dim line that named the
+        # raw key: two off-messages, and neither one said the switch's name.
+        self.empty_route: Gtk.Widget = common.consent_banner(
+            self._app, TRIGGER_CONTROL_KEY,
+            "no armed rule can act - not one armed before the switch was "
+            "turned off either. Nothing on this surface fires anything.",
+            on_change=lambda: self._refresh())
         self.empty_route.set_visible(False)
         self.empty_state.set_visible(False)
         # Appended once, here, and only ever shown or hidden afterwards. Built
@@ -574,17 +595,23 @@ class _TriggersSurface:
             self._rules_box.append(group)
 
         self._source_paths = paths
+        # **`~/...`, with the whole path on hover.** The files live under the
+        # user's own data directory, so the long form is the same path for
+        # every machine and says nothing a person needs - and it was two
+        # absolute paths across the top of the page.
         self._source_label.set_text(
-            "From " + ", ".join(paths) if paths else "No rules file could be located."
+            "From " + ", ".join(common.home_paths(p) for p in paths)
+            if paths else "No rules file could be located."
         )
+        self._source_label.set_tooltip_text(", ".join(paths))
         self._gate_label.set_text(self._gate_note())
         nothing = not self._row_widgets and not self._problems
         self.empty_state.set_visible(nothing)
-        # The route follows the empty state, rather than being appended when it
-        # appears: a banner added on demand has to be taken away again, and one
-        # that is only ever appended would stack a second "Manage triggers" under
-        # every refresh.
-        self.empty_route.set_visible(nothing)
+        # **The banner follows the switch, not the list.** It is the gate's
+        # banner, and a gate that is shut is shut whether or not a rule
+        # happens to be armed - saying it only when the list is empty hid it
+        # on exactly the page where somebody is trying to arm one.
+        self.empty_route.set_visible(self._switch_state() == "off")
 
         # The status row is rendered after the rules are read, so it
         # can say how many are armed and how many could not be read.
@@ -666,6 +693,25 @@ class _TriggersSurface:
             logger.warning("could not change rule %r", name, exc_info=True)
         self._refresh()
 
+    def _switch_state(self) -> str:
+        """`"on"`, `"off"`, `"raised"` or `"no-getter"`.
+
+        **Unreadable is its own answer**, and it is not "off": a switch that
+        could not be read has not been shown to be off, and a panel that says
+        "off" for it is making a claim it did not check.
+
+        **The two unreadable cases are kept apart** because they are two
+        different faults - a config that raised, and a config that is not
+        there - and the sentence that reports them says which.
+        """
+        getter = getattr(getattr(self._app, "config", None), "get_bool", None)
+        if not callable(getter):
+            return "no-getter"
+        try:
+            return "on" if bool(getter(TRIGGER_CONTROL_KEY, False)) else "off"
+        except Exception:  # noqa: BLE001 - an unreadable key is unknown, not off
+            return "raised"
+
     def _gate_note(self) -> str:
         """The consent state that decides whether an armed rule could act.
 
@@ -673,31 +719,33 @@ class _TriggersSurface:
         read would be a plausible wrong answer, and this repo's rule is that a
         failure mode which looks like a clean result is worse than a failure.
         """
-        getter = getattr(getattr(self._app, "config", None), "get_bool", None)
-        if not callable(getter):
+        name = _switch_name()
+        state = self._switch_state()
+        if state == "no-getter":
             return (
-                f"An armed rule only acts while '{TRIGGER_CONTROL_KEY}' is on and its "
-                "own sense and actuator gates are permitted; that switch is not "
+                f"An armed rule only acts while \"{name}\" is on and its own "
+                "sense and actuator gates are permitted; that switch is not "
                 "readable from here. Nothing on this surface fires anything."
             )
-        try:
-            on = bool(getter(TRIGGER_CONTROL_KEY, False))
-        except Exception:  # noqa: BLE001 - an unreadable key is unknown, not off
+        if state == "raised":
             return (
-                f"An armed rule only acts while '{TRIGGER_CONTROL_KEY}' is on and its "
-                "own sense and actuator gates are permitted; that switch could not be "
-                "read. Nothing on this surface fires anything."
+                f"An armed rule only acts while \"{name}\" is on and its own "
+                "sense and actuator gates are permitted; that switch could not "
+                "be read. Nothing on this surface fires anything."
+            )
+        if state == "off":
+            # **The banner above says the switch is off** and offers to turn
+            # it on. This line adds the one thing the banner cannot: that the
+            # switch is **not the only gate**. It used to repeat the banner
+            # instead, so the page said "off" twice in two different ways.
+            return (
+                "Each rule also needs its own sense and actuator gates "
+                "permitted."
             )
         return (
-            f"'{TRIGGER_CONTROL_KEY}' is {'on' if on else 'off'}: "
-            + (
-                "even so, an armed rule still needs its own sense and actuator "
-                "gates permitted. "
-                if on
-                else "no armed rule can act, including one armed before it was "
-                "turned off. "
-            )
-            + "Nothing on this surface fires anything."
+            f"\"{name}\" is on, and an armed rule still needs its own sense "
+            "and actuator gates permitted. Nothing on this surface fires "
+            "anything on its own."
         )
 
     # -- for tests, and for any surface that wants the same rules ------------

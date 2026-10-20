@@ -28545,3 +28545,59 @@ the sets rather than to carry its own. Each of the three was confirmed by
 reverting the behaviour and watching the test fail.
 
 6 files, one process each: 221 passed, 0 failed.
+
+## The Triggers page said the raw key, twice, and showed two absolute paths (2026-10-20)
+
+**10c** listed five panels whose gates were still raw. Photographing each
+one showed that **four of them had already been done** - Phone, Calendar,
+Desktop and Goals all call `consent_banner` - and the list was stale the
+same way 2b and 9r were. The **Triggers** page was the one that had all
+three defects it was accused of:
+
+> From /tmp/opencode/trig2/live-window-state/da/shani-chronoa/triggers/rules.json,
+> /tmp/opencode/trig2/live-window-state/da/shani-chronoa/triggers/event_rules.json
+>
+> Rules need the tool-activity switch before any of them can act.  [Manage triggers]
+>
+> 'trigger-control-enabled' is off: no armed rule can act, including one armed
+> before it was turned off. Nothing on this surface fires anything.
+
+### The gate is a `consent_banner`, like every other gate
+
+It named the **raw key** - a word no screen shows - and offered a route to
+Settings rather than the switch itself. It is now the same
+`common.consent_banner` the other nine panels use: **"Let Chronoa arm
+automatic rules" is off**, with a **Turn on** button that turns it on there.
+The name comes from `capabilities.gate_label`, which is the table the
+Settings rows are built from, so the panel and the row say the same thing.
+
+**And the banner follows the switch, not the list.** It was shown only when
+no rule was armed - so it was hidden on exactly the page where somebody is
+trying to arm one.
+
+### Two off-messages became one
+
+The dim line repeated the banner in different words. It now adds the one
+fact the banner cannot: **that the switch is not the only gate** - each
+rule still needs its own sense and actuator gates.
+
+### The paths
+
+`~/...`, with the whole path on hover. The files live under the person's own
+data directory, so the long form is the same path on every machine and says
+nothing they need - and it was two absolute paths across the top of the page.
+
+### The witnesses
+
+`tests/test_the_triggers_gate_names_its_switch.py` - the banner names the
+switch and not its key, in **both** branches of the sentence; the banner
+offers **Turn on**; the page does not say "off" twice; the paths are
+shortened and the whole one is still on hover.
+
+**One of the four mutations was inert on the first run**, and the reason is
+the one this file keeps meeting: the test checked only the *off* branch, and
+the mutation put the key back in the *on* branch - which the fixture never
+reached. **A test aimed at a branch the fixture never reaches is a test
+that cannot fail.** The on-branch now has its own test.
+
+23 files, one process each: 1,077 passed, 0 failed.
