@@ -232,10 +232,23 @@ def _match_text(rule: Any) -> str:
 
 
 def _arguments_text(rule: Any) -> str:
+    """The rule's arguments, or **""** when it has none.
+
+    **The empty case used to render as the string "{}"**, because
+    `json.dumps({})` is `"{}"` and `"{}"` is a true string - so every rule
+    that passed no arguments at all drew a line reading *"arguments: {}"*,
+    which is both noise and JSON on a row a person reads.
+    """
     try:
-        rendered = json.dumps(dict(getattr(rule, "arguments", {}) or {}), sort_keys=True)
+        arguments = dict(getattr(rule, "arguments", {}) or {})
     except (TypeError, ValueError):
-        rendered = repr(getattr(rule, "arguments", {}))
+        arguments = {}
+    if not arguments:
+        return ""
+    try:
+        rendered = json.dumps(arguments, sort_keys=True)
+    except (TypeError, ValueError):
+        rendered = repr(arguments)
     return _clip(rendered)
 
 
@@ -463,10 +476,41 @@ class _TriggersSurface:
         self._form_text = field("reads text containing", Gtk.Entry(placeholder_text="e.g. Discharging"))
         skills = _skill_names()
         self._form_skill = field("run this skill", Gtk.DropDown.new_from_strings(skills or ["(none)"]))
-        self._form_args = field("with arguments (JSON)", Gtk.Entry(text="{}"))
         self._form_cooldown = field("at most every (seconds)",
                                     Gtk.SpinButton.new_with_range(30, 86400, 30))
         self._form_senses, self._form_skills = senses, skills
+
+        # **The arguments are JSON, and JSON is not a thing a person
+        # writes.** Most rules need none at all, and the field sat in the
+        # middle of the form where it read like a required step.
+        #
+        # **So it is behind an "Advanced" toggle** - the same shape the
+        # Diagnostics panel uses for what is missing - and the toggle says
+        # what it is, so a person who does need it can find it.
+        self._form_args = Gtk.Entry(text="{}")
+        self._form_args.set_hexpand(True)
+        self._form_args.update_property(
+            [Gtk.AccessibleProperty.LABEL], ["Arguments, as JSON"])
+        args_line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        args_text = Gtk.Label(label="with arguments", xalign=0.0)
+        args_text.set_size_request(150, -1)
+        args_line.append(args_text)
+        args_line.append(self._form_args)
+        args_inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        args_inner.append(args_line)
+        args_note = Gtk.Label(
+            label="The skill's own options, as JSON. Most rules need none.",
+            xalign=0.0)
+        args_note.add_css_class("dim-label")
+        args_note.add_css_class("caption")
+        args_inner.append(args_note)
+        args_toggle = Gtk.ToggleButton(label="Advanced", halign=Gtk.Align.START)
+        args_toggle.add_css_class("flat")
+        args_revealer = Gtk.Revealer(child=args_inner, reveal_child=False)
+        args_toggle.connect("toggled", lambda b: args_revealer.set_reveal_child(
+            b.get_active()))
+        box.append(args_toggle)
+        box.append(args_revealer)
 
         def on_kind(*_a) -> None:
             event = self._form_kind.get_selected() > 0
@@ -640,9 +684,6 @@ class _TriggersSurface:
         name = getattr(rule, "name", "") or "(unnamed rule)"
         state = _arm_state(rule)
         lines = [_detail(rule)]
-        arguments = _arguments_text(rule)
-        if arguments:
-            lines.append(f"arguments: {arguments}")
 
         suffix = None
         if kind is not None:
@@ -659,6 +700,17 @@ class _TriggersSurface:
             suffix = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
             suffix.append(toggle)
             suffix.append(delete)
+            # **The arguments are the skill's own schema, in JSON, and a
+            # row a person reads is not the place for them.** The row's own
+            # detail already says what it runs and what it matches; the raw
+            # options belong behind a Details button - the same shape the
+            # Diagnostics panel uses - rather than in the body, and rather
+            # than only in a tooltip, which never appears on a touch
+            # screen.
+            arguments = _arguments_text(rule)
+            if arguments:
+                suffix.append(common.details_button(
+                    arguments, "The options this rule passes, as JSON"))
 
         row = common.row(title=_plain(name), subtitle=_plain("\n".join(lines)), suffix=suffix)
         row.add_css_class(ROW_CSS)

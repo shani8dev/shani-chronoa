@@ -565,8 +565,23 @@ Open, ranked:
   source as well as the palette's.
 - [ ] **9l Fold Phone / Phone link / Android / Devices / Wearables** into one
   panel with tabs; "Answering now" into Models (41 rows -> ~30).
-- [ ] **9m Rule builder in plain words** ("When battery low -> notify"), JSON
-  behind Advanced, a Pause switch per rule.
+- [x] **9m Rule builder in plain words** ("When battery low -> notify"), JSON
+  behind Advanced, a Pause switch per rule. **Done 2026-10-20.** The plain
+  words and the per-rule switch were already there - the form says "reads text
+  containing", "run this skill", "at most every (seconds)", and every rule row
+  carries an on/off switch. **What was left was the JSON, in two places, and
+  one of them was a defect nobody had read:** the arming form's "with arguments
+  (JSON)" field sat in the middle where it read like a required step, and
+  `_arguments_text` returned the *string* `"{}"` for a rule with no arguments
+  at all - because `json.dumps({})` is `"{}"` and `"{}"` is truthy - so **every
+  rule row drew a line reading "arguments: {}"**. The empty case is now empty;
+  the field is behind an **Advanced** toggle that says what it is; the
+  arguments that *are* there are behind a **Details** button on the row
+  (`common.details_button`, the Diagnostics pattern) rather than in the body
+  and not only in a tooltip, which never arrives on a touch screen.
+  `tests/test_the_rule_builder_says_what_a_person_would_say.py` (9),
+  `tools/mutations/rule_builder_json.py` (**5 mutations, 5 caught, 0
+  survivors**).
 - [ ] **9n Developer: project folder on the Work chip** (scope Build, Editor,
   Diff, file tools; branch + dirty count), and a Git panel over `git_write` /
   `git_push` behind their consent keys.
