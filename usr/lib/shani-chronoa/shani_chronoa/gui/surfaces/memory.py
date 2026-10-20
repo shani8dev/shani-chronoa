@@ -391,10 +391,25 @@ def _fact_row(percept: Any, now: float, durable_path: str, on_forget: Any) -> Gt
     # condition was escaping a second time - measured, a fact reading
     # `teapot & <b>blue</b>` rendered as `teapot &amp;amp; &amp;lt;b&amp;gt;`,
     # the entity shown to the person.
+    # **The title is the summary, and the rest is one click away.** A
+    # machine-state percept's content is a screen dump - the audio sense
+    # lists every device, the boots sense lists every field it read - and
+    # putting that in a row's title made the Memory panel read as a log
+    # file. The first line is the sense's own summary of itself; the rest
+    # is behind the same Details button the Diagnostics panel uses.
+    lines = content.splitlines()
+    head = lines[0].strip() if lines else ""
+    rest = "\n".join(lines[1:]).strip()
+    suffix = _forget_button(percept, on_forget)
+    if rest:
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        box.append(suffix)
+        box.append(common.details_button(rest, "The whole reading"))
+        suffix = box
     built = common.row(
-        title=content,
+        title=head or content,
         subtitle=_detail(percept, now),
-        suffix=_forget_button(percept, on_forget),
+        suffix=suffix,
     )
     built.add_css_class(FACT_CSS)
     built.update_property(

@@ -1079,6 +1079,24 @@ class TestTheGitSenseDoesNotExecuteTheRepository:
 # --- boots ------------------------------------------------------------------
 
 
+class TestTheBootsReadingLeadsWithASummary:
+    """**The first line is what a panel that shows one line shows**, and the
+    Memory panel showed this percept's content as a row's title - so the row
+    read "this boot's id: 50ba5655-..." and nothing a person could use.
+    """
+
+    def test_the_first_line_says_when_the_machine_booted(self, granted,
+                                                         monkeypatch):
+        content = boots_mod._run({}).content
+        first = content.splitlines()[0]
+        assert "booted" in first, first
+
+    def test_the_identity_is_still_there(self, granted, monkeypatch):
+        """**Moved, not dropped.**"""
+        content = boots_mod._run({}).content
+        assert "this boot's id:" in content, content
+
+
 class TestBoots:
     def test_an_unreadable_wtmp_is_never_never_rebooted(
         self, granted, tmp_path, monkeypatch

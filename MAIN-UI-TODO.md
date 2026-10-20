@@ -438,8 +438,16 @@ Open, by panel (worst first):
   text. Now: one plain sentence and a **Details** disclosure for the missing
   models, and each row's answer is a sentence with the paths and the
   provenance behind its own **Details** button.
-  **Still open: Driving, Learning and Machine/Memory**, which carry the same
-  engineering text in the body of a row.
+  **Driving and Memory are done 2026-10-20**, also from photographs. The
+  Driving panel's alert row carried the four-line portal essay on the panel's
+  own "Needs attention" line - the one thing on the page a person reads
+  because something is wrong - and it is now a sentence with the essay in the
+  tooltip. The Memory panel put a machine-state percept's **whole content** in
+  a row's title, so the audio sense's device list read as a log file; the
+  title is now the sense's own summary and the rest is behind a **Details**
+  button.
+  **Still open: Learning**, whose rows use the internal names ("a distilled
+  router", "the outcome model"), and "Answering now".
 - [ ] **10e Duplicates**: Skills and Workbench both list all 257 skills;
   "What Chronoa can do" (Inventory) speaks the internal metaphor ("Immune
   system", "Scar tissue"); Help, Inventory, Skills, /help are four answers to one

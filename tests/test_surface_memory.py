@@ -147,6 +147,17 @@ def _buttons(row):
     return [w for w in _walk(row) if isinstance(w, Gtk.Button)]
 
 
+def _menu_buttons(row):
+    """Every `Gtk.MenuButton` in the row.
+
+    **A `Gtk.MenuButton` is not a `Gtk.Button`** in GTK4 - it derives from
+    `GtkWidget` and implements the button interface - so a search for
+    `Gtk.Button` finds the *internal* toggle instead, whose label is the
+    button's child and therefore None.
+    """
+    return [w for w in _walk(row) if isinstance(w, Gtk.MenuButton)]
+
+
 def _forget(row):
     found = [b for b in _buttons(row) if b.get_label() == "Forget"]
     assert found, f"no Forget button in {_row_labels(row)!r}"
@@ -282,6 +293,48 @@ class TestFacts:
         text = " ".join(_row_labels(row))
         assert "live only" in text, text
         assert "5 minutes" in text, text
+
+
+class TestALongReadingIsNotTheTitle:
+    """**A machine-state percept's content is a screen dump** - the audio sense
+    lists every device, the boots sense every field it read - and putting that
+    in a row's title made the Memory panel read as a log file.
+
+    The first line is the sense's own summary of itself; the rest is one
+    click away, in the same Details button the Diagnostics panel uses.
+    """
+
+    def test_the_title_is_the_summary(self, store):
+        store.add(_fact("audio", "4 device(s) can play and 2 can record.\n"
+                                   "plays (4):\n"
+                                   "  57. Tiger Lake-LP Smart Sound Technology "
+                                   "Audio Controller HDMI / DisplayPort 3 Output"))
+        row = _marked(surface.build(_app(store)), surface.FACT_CSS)[0]
+        title = _row_labels(row)[0]
+        assert title == "4 device(s) can play and 2 can record.", title
+
+    def test_the_rest_is_one_click_away(self, store):
+        """**Not dropped, and not in the title.** The whole reading is still
+        there; it is one button away."""
+        store.add(_fact("audio", "4 device(s) can play and 2 can record.\n"
+                                   "plays (4):\n"
+                                   "  57. Tiger Lake-LP Smart Sound Technology "
+                                   "Audio Controller HDMI / DisplayPort 3 Output"))
+        row = _marked(surface.build(_app(store)), surface.FACT_CSS)[0]
+        buttons = [b for b in _menu_buttons(row) if b.get_label() == "Details"]
+        assert buttons, [b.get_label() for b in _menu_buttons(row)]
+        popover = buttons[0].get_popover()
+        assert popover is not None, "the Details button opens nothing"
+        said = popover.get_child().get_text()
+        assert "Tiger Lake-LP" in said, said
+
+    def test_a_one_line_fact_has_no_details_button(self, store):
+        """**A button that opens nothing is a dead control**, and a fact
+        somebody typed is one line - so it gets no button."""
+        store.add(_fact("memory", "the meeting is at 4pm in the annex"))
+        row = _marked(surface.build(_app(store)), surface.FACT_CSS)[0]
+        assert not [b for b in _menu_buttons(row) if b.get_label() == "Details"]
+        assert _row_labels(row)[0] == "the meeting is at 4pm in the annex"
 
 
 # -- forget -----------------------------------------------------------------

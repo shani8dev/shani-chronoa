@@ -66,6 +66,21 @@ def status_words(page):
     return [t.get_label() for t in _labels(page)]
 
 
+def tooltips(page):
+    out = []
+    stack = [page]
+    while stack:
+        widget = stack.pop()
+        tip = widget.get_tooltip_text()
+        if tip:
+            out.append(tip)
+        child = widget.get_first_child()
+        while child is not None:
+            stack.append(child)
+            child = child.get_next_sibling()
+    return out
+
+
 def _labels(widget, out=None):
     if out is None:
         out = []
@@ -120,7 +135,8 @@ elif case == "knowable":
     page = driving.build(App())
     say(titles=[t for t, _s in rows(page)],
         subtitles=[s for _t, s in rows(page)],
-        words=status_words(page))
+        words=status_words(page),
+        tooltips=tooltips(page))
 
 elif case == "portal":
     if mode == "unavailable":
@@ -305,6 +321,23 @@ class TestCouldNotAskIsNotNo:
         out = _run(broadway, "knowable", tmp_path, "false")
         assert "Screen: no display answered" in titles(out), titles(out)
         assert "Needs attention" in " ".join(out["words"]), out["words"]
+
+    def test_the_alert_row_answers_in_a_sentence(self, broadway, tmp_path):
+        """**The essay is not the answer.**
+
+        The row is the panel's own alert - the one thing on the page a person
+        reads because something is wrong - and it carried four lines of how
+        the portal works. The sentence says what is true; the how-and-when is
+        one hover away.
+        """
+        out = _run(broadway, "knowable", tmp_path, "false")
+        words = " ".join(out["words"])
+        assert "native Wayland window" in words, words
+        assert "TeamViewer" not in words, (
+            f"the alert row carries the essay again: {words}")
+        tips = " ".join(out.get("tooltips", []))
+        assert "TeamViewer" in tips, (
+            f"the essay was dropped instead of moved: {tips}")
 
     def test_a_display_that_cannot_be_asked_is_unknown_not_false(self, broadway, tmp_path):
         """**Both directions, because either alone is a test that cannot fail.**

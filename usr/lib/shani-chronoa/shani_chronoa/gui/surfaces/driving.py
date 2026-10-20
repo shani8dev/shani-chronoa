@@ -117,9 +117,22 @@ class _DrivingView(Gtk.Box):
                 "so a click can be aimed at a named control, and the pointer "
                 "can be read back afterwards"))
         elif knowable is False:
-            self._status_slot.append(self.status_recorder.row(
+            # **The answer is a sentence; the essay is the tooltip.** The
+            # portal sentence explains what to do about it, and it is four
+            # lines of it - so it was the body's text, on the panel's own
+            # alert row, which is the one place a person reads a page
+            # because something is wrong.
+            row = self.status_recorder.row(
                 common.STATUS_ATTENTION, "No display this driver can measure",
-                ui_driver._portal_sentence()))
+                "this app is a native Wayland window, so nothing on this "
+                "machine can inject input into it")
+            # **Appended, not replaced**: `common.row()` puts the row's full
+            # text in the tooltip for a row that has to wrap it, and that is
+            # worth keeping.
+            hover = row.get_tooltip_text() or ""
+            row.set_tooltip_text(
+                (hover + " - " if hover else "") + ui_driver._portal_sentence())
+            self._status_slot.append(row)
         else:
             self._status_slot.append(self.status_recorder.row(
                 common.STATUS_UNKNOWN, "Could not tell whether a position is "

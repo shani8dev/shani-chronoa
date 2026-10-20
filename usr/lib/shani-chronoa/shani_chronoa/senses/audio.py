@@ -193,7 +193,12 @@ def _run(arguments: dict) -> Union[str, Percept]:
             metadata={"available": True, "sinks": 0, "sources": 0},
         )
 
-    lines = []
+    # **A summary line first**, because the first line is what a panel that
+    # shows one line of a percept shows - and a sense's content is meant to
+    # be a sentence or a screen summary, not a device list with no head.
+    lines = [
+        f"{len(sinks)} device(s) can play and {len(sources)} can record."
+    ]
     for label, entries in (("plays", sinks), ("records", sources)):
         if not entries:
             continue

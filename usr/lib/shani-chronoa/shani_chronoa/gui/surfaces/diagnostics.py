@@ -63,7 +63,7 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import GLib, Gtk  # noqa: E402
+from gi.repository import Gtk  # noqa: E402
 
 from shani_chronoa import markdown_lite  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
@@ -260,31 +260,8 @@ def _row(finding: Finding) -> Gtk.Widget:
 
 
 def _details_button(evidence: str) -> Gtk.Widget:
-    """A button that opens the evidence, rather than a row full of it.
-
-    **A `Gtk.MenuButton`, because `Gtk.Button` has no `set_popover`** - the
-    conversations button in the header is the same shape and the same reason.
-    """
-    button = Gtk.MenuButton(label="Details")
-    button.add_css_class("flat")
-    button.set_valign(Gtk.Align.CENTER)
-    button.set_tooltip_text("Where this was measured")
-    button.update_property(
-        [Gtk.AccessibleProperty.LABEL], ["Details"])
-    popover = Gtk.Popover()
-    # **Plain text, not markup.** A path is a place a person can have put a
-    # `<` in, so it must read as a path - and a `Gtk.Label` handed markup
-    # renders it, which would turn `/home/a & b/<b>x</b>/llm` into a bold
-    # "x" and lose the brackets. (The *row* is the other way round: its
-    # subtitle goes through `set_subtitle`, which is Pango markup, so
-    # `common.row()` escapes it there.)
-    label = Gtk.Label(label=common.home_paths(evidence), xalign=0.0, wrap=True)
-    label.set_use_markup(False)
-    label.set_max_width_chars(64)
-    label.add_css_class("dim-label")
-    popover.set_child(label)
-    button.set_popover(popover)
-    return button
+    """The shared Details button - `common.details_button` does this."""
+    return common.details_button(evidence)
 
 
 def _slug(text: str) -> str:

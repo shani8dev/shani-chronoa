@@ -237,6 +237,28 @@ class TestSinksAreNotSources:
         assert not any("Camera" in name for name in sinks)
 
 
+class TestTheReadingLeadsWithASummary:
+    """**The first line is what a panel that shows one line shows.**
+
+    The Memory panel showed a machine-state percept's content as a row's
+    title, and the audio sense's content is a device list - so the panel
+    read as a log file. The sense now leads with a sentence and the device
+    list follows it.
+    """
+
+    def test_the_first_line_is_a_summary(self, wired, granted):
+        content = audio._run({}).content
+        first = content.splitlines()[0]
+        assert "can play" in first and "can record" in first, first
+
+    def test_the_detail_is_still_there(self, wired, granted):
+        """**Moved, not dropped.** The device list is what a person asks the
+        machine for."""
+        content = audio._run({}).content
+        assert "plays (" in content and "records (" in content, content
+        assert "marked default" in content, content
+
+
 class TestDegradation:
     def test_a_missing_wpctl_is_its_own_fact(self, monkeypatch, granted):
         monkeypatch.setattr(audio.shutil, "which", lambda n: None)

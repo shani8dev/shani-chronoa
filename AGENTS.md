@@ -28375,3 +28375,59 @@ different timestamp.
 **A tree is what a commit is** - two commits with the same tree are the
 same change, however different their metadata. Comparing the trees is the
 check that says "align, do not re-commit", and it is one line.
+
+## Three panels read as log files, and two of them were the panel's own alert (2026-10-20)
+
+**10d** ("Diagnostics read as UI") named six panels. Three are now done, and
+every one of them was found by **photographing the real app** and reading
+the picture - a source scan finds none of them, because every one of these
+is correct code.
+
+### The Memory panel put a device list in a row's title
+
+The Memory panel shows what Chronoa believes the user told it, and a
+machine-state percept's content is a screen dump: the audio sense lists
+every device, the boots sense every field it read. Putting that in a row's
+**title** made the panel read as a log file - a row of numbered devices and
+`/proc` fields, in a panel whose own subtitle says *"what Chronoa believes
+the user told it"*.
+
+**The title is now the sense's own summary and the rest is one click
+away.** The audio sense leads with *"4 device(s) can play and 2 can
+record."* and the boots sense with *"This machine booted 803 second(s)
+ago."* - the detail follows it, in the same **Details** button the
+Diagnostics panel uses. Nothing is dropped: the device list is what a person
+asks the machine for.
+
+### The Driving panel's alert row carried the essay
+
+> Needs attention
+> No display this driver can measure - this app is a native Wayland
+> window, which no client may inject input into, the route that works is
+> the desktop's RemoteDesktop portal (the mechanism TeamViewer and AnyDesk
+> use), which asks the person to allow it. Start the container with
+> display=x11 so its app is an XWayland window instead, and XTEST can drive
+> it without a dialog.
+
+Four lines, on the panel's own alert - the one thing on the page a person
+reads because something is wrong. **The answer is a sentence; the
+how-and-when is the tooltip.** The tooltip *appends* to the hover text
+`common.row()` already puts there, rather than replacing it.
+
+### One Details button, shared
+
+`common.details_button()` now holds it, and the Diagnostics panel's copy
+was deleted. **A `Gtk.MenuButton` is not a `Gtk.Button`** in GTK4 - it
+derives from `GtkWidget` and implements the button interface - so a search
+for `Gtk.Button` finds the *internal* toggle, whose label is the button's
+child and therefore `None`. That cost one test that found the wrong
+widget and called it "no Details button".
+
+### The witnesses
+
+Four, each checked by reverting the behaviour and watching the test fail:
+the Memory row's title, the audio reading's first line, the boots
+reading's first line, and the Driving alert's sentence. The two readings
+also assert that the detail is *still there* - moved, not dropped.
+
+30 files, one process each: 993 passed, 0 failed.

@@ -907,6 +907,35 @@ def with_model_banners_collapsed(app: Any, content: Gtk.Widget, kinds) -> Gtk.Wi
     return box
 
 
+def details_button(text: str, tooltip: str = "Where this was measured") -> Gtk.Widget:
+    """A button that opens a long text, rather than a row full of it.
+
+    **A `Gtk.MenuButton`, because `Gtk.Button` has no `set_popover`** - the
+    conversations button in the header is the same shape and the same reason.
+
+    **The text is plain, not markup.** A path is a place a person can have put
+    a `<` in, so it must read as a path - and a `Gtk.Label` handed markup
+    renders it, which would turn `/home/a & b/<b>x</b>/llm` into a bold "x"
+    and lose the brackets. (The *row* is the other way round: its subtitle
+    goes through `set_subtitle`, which is Pango markup, so `row()` escapes it
+    there.)
+    """
+    button = Gtk.MenuButton(label="Details")
+    button.add_css_class("flat")
+    button.set_valign(Gtk.Align.CENTER)
+    button.set_tooltip_text(tooltip)
+    button.update_property(
+        [Gtk.AccessibleProperty.LABEL], ["Details"])
+    popover = Gtk.Popover()
+    label = Gtk.Label(label=home_paths(text), xalign=0.0, wrap=True)
+    label.set_use_markup(False)
+    label.set_max_width_chars(64)
+    label.add_css_class("dim-label")
+    popover.set_child(label)
+    button.set_popover(popover)
+    return button
+
+
 def _toast_overlay(widget: Gtk.Widget) -> "Adw.ToastOverlay | None":
     """The nearest `Adw.ToastOverlay` above `widget`, or None."""
     node: "Gtk.Widget | None" = widget

@@ -243,11 +243,19 @@ def _run(arguments: dict) -> Union[str, Percept]:
             "missing boot identity."
         )
 
+    # **A summary line first**, because the first line is what a panel that
+    # shows one line of a percept shows - and a uuid is not a summary of
+    # anything. The detail follows it, and a panel that shows one line shows
+    # this one.
     lines = []
+    age = int(max(0.0, time.time() - btime)) if btime else None
+    if age is not None:
+        lines.append(f"This machine booted {age} second(s) ago.")
+    elif boot_id:
+        lines.append("This machine has a boot identity but no readable start time.")
     if boot_id:
         lines.append(f"this boot's id: {boot_id}")
     if btime:
-        age = int(max(0.0, time.time() - btime))
         lines.append(f"booted at: {_fmt(btime)} ({age}s ago)")
     if init_started is not None:
         lines.append(
