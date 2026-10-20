@@ -59,7 +59,11 @@ MUTATIONS = [
     },
     {
         "file": _WIDGETS,
-        "old": "_LIVE_STATES = frozenset({AssistantState.LISTENING, AssistantState.SPEAKING})\n",
+        # Re-anchored 2026-10-20: `DICTATING` joined the live states (a
+        # dictation feeds the level too), so the needle moved and the
+        # mutation drops both of the states that are not listening.
+        "old": "_LIVE_STATES = frozenset({AssistantState.LISTENING, AssistantState.DICTATING,\n"
+               "                           AssistantState.SPEAKING})\n",
         "new": "_LIVE_STATES = frozenset({AssistantState.LISTENING})\n",
         # **The first version of this change**, kept because it is what a
         # plausible reading of "the halo grows while you talk" produces:
