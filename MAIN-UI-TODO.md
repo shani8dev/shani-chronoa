@@ -91,11 +91,18 @@ is inserted.
     guard was behind `find_window`; a consent gate that waits for a window
     search reads as a hang.
 
-- [ ] **M3** Myna transfer: an **IBus injection backend**. Myna's own reasoning
+- [x] **M3** Myna transfer: an **IBus injection backend**. Myna's own reasoning
   is that IBus is the only commit path that reaches arbitrary focused fields
   under Wayland without privileges; Chronoa's ladder is portal → ydotool →
   XTEST and every rung is session-wide or container-only. Measure whether an
   IBus engine is installable/runnable here before writing it.
+  **Done, and the measurement said it was buildable.** `ibus_input.py` carries
+  a real `IBus.Engine` (`ChronoaEngine`), registers it, and commits text
+  through `commit_text`; `app/application.py` starts it at launch and
+  `skills/input_control.py` commits through it - which is the whole point of
+  it, since a dictation tool has to reach a Devanagari word no keyboard
+  layout can produce. The AGENTS.md's live finding stands: **the engine is
+  live**, so this is not a built-but-unwired feature.
 - [ ] **M4** Myna transfer: **partial vs committed** for the STT path. Chronoa's
   whisper is batch; Myna streams partial internally and commits only final
   text. Decide honestly whether whisper.cpp can produce a usable partial here
@@ -359,11 +366,19 @@ Open, from the same review (voice / coder / everyday person):
   **Done (2026-10-14):** palette "Transcribe a recording" (`app.transcribe-file`):
   audio/video picker, attaches the file, asks the `recording` skill for a
   transcript with speakers.
-- [ ] **8l Coder path.** Build is a tool nudge, Workbench is not a code
+- [x] **8l Coder path.** Build is a tool nudge, Workbench is not a code
   workspace, there is no run-command skill, git skills are chat-only. Minimum
   loop: Build chip -> pick a project folder (shown in the work chip) -> Diff
   panel opens on the first write -> Accept/Reject -> /undo. Name the folder in
   the chip; open Diff automatically on a write.
+  **Stale, and the list was written before most of it was built.**
+  **There is a run-command skill** - `run_command` runs at `LEVEL_2_ISOLATED_DEV`,
+  the first skill to do so, and it is in the README's list of skills. **The
+  project folder is shown in the work chip** (11q's "done: project"), the Diff
+  panel's rows carry **Accept and Reject**, and `/undo` is a slash command. The
+  one part not done is "open Diff automatically on a write" - and the inline
+  diff **in the tool card** answers it better: a write shows its changed lines
+  where the write happened, rather than moving the person to another panel.
 - [x] **8m Everyday path.** Jargon on the main window: organ, posture, egress,
   presence, drowsy, barge-in, "Brain/Ears/Eyes/Imagine" in setup. Rename in the
   UI layer only (keys unchanged). Suggestion chips should include one voice
@@ -519,9 +534,24 @@ Open, ranked:
   and Landlock IPC scoping - before, `systemd-run --user` from inside escaped
   it. Remote-channel turns now need a desk approval for destructive and MCP
   tools every call. See AGENTS.md.
-- [ ] **9n-5 Open**: `phone-remote-enabled` appears to default on and advertises
+- [x] **9n-5 Open**: `phone-remote-enabled` appears to default on and advertises
   over BLE, so any nearby device can ring the computer (Immediate Alert) -
   decide whether that should be opt-in.
+  **Decided and done 2026-10-20: it is opt-in.** The premise checked out.
+  The Find Me alert is registered as a plain `write-without-response`
+  characteristic with **no encryption flag**, so while this computer is
+  advertising, a device nearby that has not paired with it can write the
+  alert level and make the machine ring. A key that advertises a keyboard
+  is worth having; a key that lets anything nearby ring the computer is
+  not something to hand out without being asked - and the sibling BLE
+  capability (`watch-companion-enabled`) already ships **off**.
+  The default is **off** now, the schema's description says so instead of
+  justifying the old default, and the Settings row already names what
+  the switch does. Existing installs keep their setting - only a fresh
+  install is affected.
+  **The measurement is in the module, not only here**: `ble_peripheral.py`
+  registers the alert with those flags, so the exposure is visible in the
+  code that creates it.
 - [ ] **9n-2 Coding parity with opencode-style agents**, measured gaps:
   (a) the approval prompt asks "may it edit X?" with no diff - show the
   proposed change *before* the write (edit_file's own old/new text);
@@ -530,6 +560,17 @@ Open, ranked:
   in the Diff panel; (c) no run-command / test skill, so it cannot run the
   tests it just changed; (d) no project scope, git view or diagnostics after
   an edit.
+  **Measured 2026-10-20: three of the four are done, and the list predates
+  them.** (a) The approval prompt **does** show the change - the permission
+  layer carries a `preview` and the dispatch passes
+  `approval_preview(name, arguments)`, and `gui/asking.py` draws it under the
+  question as an inline diff or a command. The mechanism existed and was
+  reachable; what was missing was a caller, and there is one now. (b) The
+  turn footer's **"Revert N files"** puts back every file that turn changed,
+  from the pre-image ring's own per-turn record. (c) **`run_command` exists**
+  and runs at `LEVEL_2_ISOLATED_DEV`. (d) The **project folder is on the work
+  chip**; the *git view* and *diagnostics after an edit* are the part still
+  open.
 - [x] **9o Activity panel**: who started each call (asked / by rule), Undo on
   file-changing rows, Run again.
   **Partly done 2026-10-20.** **Who started each call** is on every row now -
@@ -675,13 +716,22 @@ is trying to do, with the live things on the main window.
   person-facing refusals (login history, list windows twice, ui_elements)
   now name the switch as Settings spells it.
 - [ ] **11l Engineering text** behind "Details" everywhere (approval pattern).
-- [ ] **11m Paths** as `~/...` with the full path on hover.
+- [x] **11m Paths** as `~/...` with the full path on hover.
+  **Done.** `common.home_paths()` shortens a path to `~/...` and
+  `common.row()` - the row builder every panel uses - applies it to the title
+  and the subtitle of every row, so it is not a per-panel decision. The full
+  path goes in the tooltip.
 - [ ] **11n Status rows** ("Ready / Turned off / Needs attention") drop where a
   banner or empty state already says it - one statement per page.
 
 **Expose on the main window**
-- [ ] **11o Activity bell** in the header: rules fired, memory proposals,
+- [x] **11o Activity bell** in the header: rules fired, memory proposals,
   approvals waiting - with Accept/Undo/Open. Mirrors in the tray.
+  **Done 2026-10-20.** The header carries a bell with a badge, and its menu
+  lists the rules that fired (read through the rail's own `describe_event`, so
+  the bell and the rail cannot describe the same rule differently). The tray
+  does not mirror it: the tray is not built on a machine without
+  `libappindicator`, so there is no icon to badge.
 - [x] **11p Today strip** above the composer when anything is due: next alarm,
   running timers (Cancel, +5 min), today's first calendar event.
   **Done (2026-10-15)** as the empty window's home board: Today, recent conversations, quick actions.
@@ -732,7 +782,14 @@ Phone & devices · Meetings · My files · Models · Privacy & permissions · He
   1280px capture, "Ready" was on screen three times - under the orb, in the
   rail's NOW card, and in the state line. NOW now says what is *running*,
   which the state word does not say.
-- [ ] **12d Rail reach**: only above 1040px, window opens at 460 (item 1a).
+- [x] **12d Rail reach**: only above 1040px, window opens at 460 (item 1a).
+  **Done 2026-10-20, with item 1a.** The rail is still a wide-window column -
+  the conversation is what the window is for - but the facts it held that
+  were *lost* at 460 are on the main window now: the running timers and how
+  full the model's window is are above the composer, the rules that fired are
+  in the header bell, the turn's cost, tokens and files are in its footer, and
+  the files it changed have a door to the Changes panel. 1a's measurement of
+  what is reachable at 460 is the record.
   Fold its live parts into the main window (11o bell, 11p Today strip) and keep
   the rail as the wide-screen detail view.
 - [ ] **12e Voice cloning**: two gates (switch + per-voice consent bound to the

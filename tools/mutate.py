@@ -584,10 +584,18 @@ def _apply(path: Path, pairs) -> None:
     # which no per-pair parse can: two edits that are each fine and jointly are
     # not is a class the two-sided check below is the only thing that sees.
     #
-    # *Why unconditional.* Not gated on a `.py` suffix, because
-    # `usr/bin/shani-chronoa` and `usr/bin/shani-chronoa-overlay` are Python with
-    # no extension and four mutations target them - and `ast.parse` does not care
-    # what the file is called.
+    # *Why not gated on a `.py` suffix.* Because `usr/bin/shani-chronoa` and
+    # `usr/bin/shani-chronoa-overlay` are Python with no extension and four
+    # mutations target them - and `ast.parse` does not care what the file is
+    # called.
+    #
+    # *Why gated on the file being Python at all.* Because the check is about
+    # the mutation being the same kind of file as the original, and a file that
+    # was never Python cannot become unparseable by a splice: a gschema XML
+    # read as Python is a syntax error whatever it contains, so **every**
+    # mutation of one was reported UNMEASURABLE and none was ever measured.
+    # The test is whether the *original* parses as Python - which keeps the
+    # extensionless launchers checked and stops the check firing on data.
     #
     # Downstream, `MutationDidNotParse` already refuses to count an unparseable
     # run as caught *or* as a survivor; it reports UNMEASURABLE. That is correct
@@ -598,14 +606,34 @@ def _apply(path: Path, pairs) -> None:
     # exists for is not hypothetical - `goal_edits` and `sink_shape` each carry a
     # comment about an anchor that ended mid-line and left a dangling
     # continuation.
+    if _is_python(path.read_text(encoding="utf-8")):
+        try:
+            ast.parse(text)
+        except SyntaxError as exc:
+            raise MalformedMutation(
+                "the spliced text of %s does not parse (%s at line %s) - this "
+                "mutation is malformed, not uncovered; the file was not written"
+                % (path.name, exc.msg, exc.lineno)) from exc
+    path.write_text(text, encoding="utf-8")
+
+
+def _is_python(text: str) -> bool:
+    """Whether some text is Python.
+
+    **Used to decide whether a mutation has to parse.** A file that was
+    never Python cannot become unparseable by a splice, so demanding that
+    it parses only reports every mutation of a data file as malformed and
+    measures none of them.
+    """
     try:
         ast.parse(text)
-    except SyntaxError as exc:
-        raise MalformedMutation(
-            "the spliced text of %s does not parse (%s at line %s) - this "
-            "mutation is malformed, not uncovered; the file was not written"
-            % (path.name, exc.msg, exc.lineno)) from exc
-    path.write_text(text, encoding="utf-8")
+    except SyntaxError:
+        return False
+    except ValueError:
+        # A source file with a null byte: not Python, and not a file this
+        # check can speak about either.
+        return False
+    return True
 
 
 def run_set(name: str, path: Path, verbose: bool = True) -> dict:

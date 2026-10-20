@@ -664,9 +664,11 @@
       <description>When true, this computer offers its music player over Bluetooth (AVRCP), so the play, pause and skip buttons of a paired headset, speaker, watch or car control what is playing here. Only paired devices can use it.</description>
     </key>
     <key name="phone-remote-enabled" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>Let my phone pair this computer as a Bluetooth keyboard</summary>
-      <description>When true, this computer advertises itself as "Chronoa Remote", a Bluetooth keyboard with media keys. Once the phone pairs it, Chronoa can press the phone's camera shutter, play/pause, next, volume, and type text into the phone. It also offers Find Me (a tag or watch can make this computer ring), its battery level and the time. On by default because it makes this computer discoverable to every phone nearby.</description>
+      <description>When true, this computer advertises itself as "Chronoa Remote", a Bluetooth keyboard with media keys. Once the phone pairs it, Chronoa can press the phone's camera shutter, play/pause, next, volume, and type text into the phone. It also offers Find Me (a tag or watch can make this computer ring), its battery level and the time.
+
+Off by default, and the reason is measured rather than assumed: the Find Me alert is registered as a plain write-without-response characteristic with no encryption, so while this computer is advertising, a device nearby that has not paired with it can write the alert level and make this computer ring. A key that advertises a keyboard is worth having; a key that lets anything nearby ring the machine is not something to hand out without being asked. Turn it on when you want the phone keyboard.</description>
     </key>
     <key name="watch-companion-enabled" type="b">
       <default>true</default>

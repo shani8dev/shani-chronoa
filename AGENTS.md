@@ -29031,3 +29031,75 @@ Thirty-four files, one process each: 34 passed.
 
 **Nothing is left of 1a that is lost.** 1b - rail-first at narrow widths
 versus a one-line ticker - is the open half.
+
+## The phone keyboard advertised by default, and any nearby device could ring the computer (2026-10-20)
+
+9n-5 asked for a decision: `phone-remote-enabled` ships **on**, it
+advertises over BLE, and the Find Me alert is a write - so any nearby
+device can ring the computer. Should it be opt-in?
+
+**The premise checked out.** `ble_peripheral.py` registers the Immediate
+Alert characteristic as a plain `write-without-response` with **no
+encryption flag**:
+
+```python
+ias = self._service(1, "1802")
+self._char(ias, 0, "2a06", ["write-without-response"], write=self._alert)
+```
+
+The HID characteristics beside it carry `encrypt-read` (that is what makes
+the phone bond), and the alert characteristic does not. So while this
+computer is advertising, a device nearby that has not paired with it can
+write the alert level and make the machine ring.
+
+**The decision: opt-in.** A key that advertises a keyboard is worth
+having; a key that lets anything nearby ring the computer is not
+something to hand out without being asked - and the sibling BLE
+capability, `watch-companion-enabled`, already ships **off**. The
+default is off now, and the schema's description says so **instead of
+justifying the old default** ("On by default because it makes this
+computer discoverable to every phone nearby"), because a description that
+argues for a default the schema no longer has is a stale claim.
+
+Existing installs keep their setting; only a fresh install is affected.
+
+### And a guard for the failure mode that has bitten this tree twice
+
+**`usr/share/glib-2.0/schemas/gschemas.compiled` is tracked in git** - it
+is what a package installs - and it is a *compiled* file, so it can be
+stale against the XML beside it with nothing complaining. The failure is
+silent: every setting then takes its Python default instead of the one
+the schema declares.
+
+`tests/test_the_shipped_schema_matches_its_source.py` now reads **both**
+and compares them, key by key. The comparison has to normalise, because
+the two spell the same value differently - the XML writes a string with
+double quotes and the compiled schema with single ones, a double is
+0.59999999999999998 in binary, and an integer written into a
+double-typed key comes back as 2048.0 - and a raw comparison reported
+**five disagreements that were not disagreements**.
+
+Proved by making the compiled file stale against the XML: the guard says
+so on both counts.
+
+### A harness limit, and the fix
+
+The mutation set for this change **could not measure anything**: the
+runner's parse check runs `ast.parse` on the spliced text of **every**
+file it mutates, and a gschema XML read as Python is a syntax error
+whatever it contains - so every mutation of it was reported
+UNMEASURABLE.
+
+The check's own comment says why it is unconditional - "not gated on a
+`.py` suffix, because `usr/bin/shani-chronoa` and
+`usr/bin/shani-chronoa-overlay` are Python with no extension" - and
+that is a reason to gate on **the file being Python**, not on its name.
+The check now asks whether the **original** parses as Python: the
+extensionless launchers stay checked, and a data file stops being
+demanded to be Python.
+
+**No other set targets a non-Python file** - measured across all 101
+sets - so the change is risk-free for the rest of the inventory.
+
+`tools/mutations/phone_remote_opt_in.py` (2 mutations, 2 caught).
+Thirty-nine files, one process each: 39 passed.
