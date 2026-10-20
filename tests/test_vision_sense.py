@@ -549,7 +549,12 @@ class TestCaptureIsBoundedAndRefusesRatherThanHangs:
 
         message = str(raised.value)
         assert "import" in message and "xwd" in message
-        assert "x11-apps" in message  # names the Arch package, as ocr's does
+        # **Names the Arch package, as ocr's does** - and the one it names
+        # is the one that exists: `xorg-xwd`. The old assertion asked for
+        # "x11-apps", which is not an Arch package name at all, so it
+        # pinned a sentence nobody could act on.
+        assert "xorg-xwd" in message, message
+        assert "x11-apps" not in message, message
 
     def test_a_capture_over_the_byte_ceiling_is_refused(self, tmp_path, monkeypatch):
         bindir = tmp_path / "bin"
