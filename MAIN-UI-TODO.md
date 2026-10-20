@@ -728,8 +728,26 @@ Open, by panel (worst first):
   a row's title, so the audio sense's device list read as a log file; the
   title is now the sense's own summary and the rest is behind a **Details**
   button.
-  **Still open: Learning**, whose rows use the internal names ("a distilled
-  router", "the outcome model"), and "Answering now".
+  **The Learning half is done 2026-10-20.** Its six rows were titled in
+  the learning layer's own vocabulary - "A distilled router", "The outcome
+  model", "Which stand-in worked", "Does the bandit beat chance" - and a
+  row title in a panel anyone can open is not the place for a module's
+  name. They are plain words now ("Which tools worked", "What answered
+  what", "Which skill to use", "Whether a call will work", "Is choosing
+  better than random"), and **the internal name is on the hover**, so a
+  developer can still map a row to the function it came from. The plain
+  name and the internal name are **one table** (`learning.ROWS`), not two,
+  so they cannot drift apart.
+  `tests/test_the_learning_rows_are_plain_words.py` (5),
+  `tools/mutations/learning_rows.py` (**4 mutations, 4 caught, 0
+  survivors**).
+  **"Answering now" is measured and kept.** Its engineering text is the
+  engine's own name ("Ollama", "llama.cpp on this computer") and the
+  address of the thing that is not answering
+  ("http://127.0.0.1:11434"). The first is the panel's *answer* - the
+  panel is called "Answering now" and it answers "which engine" - and the
+  second is the address you would start it on. Both are removed from the
+  *evidence*, which is behind the row's own Details button already.
   **A sweep for the rest of this class was run 2026-10-20, and the first
   version of it was a false clean** - it called `surfaces.build(...)`, which
   does not exist, so every panel raised and every panel was skipped, and the

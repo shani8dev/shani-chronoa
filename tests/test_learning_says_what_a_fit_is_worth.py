@@ -504,7 +504,7 @@ class TestTheRemainingOrphansAreReachable:
     @pytest.mark.parametrize("title", [
         "What the log teaches",            # lessons / render_lessons
         "What this machine has seen",      # experience_summary
-        "Does the bandit beat chance",     # evaluate_bandit
+        "Is choosing better than random",  # evaluate_bandit
         "How much is trusted",             # organ_status
     ])
     def test_the_row_is_on_the_panel(self, title):

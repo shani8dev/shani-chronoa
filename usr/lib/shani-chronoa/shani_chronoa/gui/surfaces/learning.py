@@ -9,10 +9,17 @@ repository documents at length, and the reason this file exists.
 | row | read from |
 |---|---|
 | Facts remembered | `learning.read_model_knowledge()`, on the model's own terms |
-| Which stand-in worked | the bandit arms in `~/.local/share/shani-chronoa` |
-| Routing pairs | `distill.harvest_rows()` over this machine's own conversations |
-| A distilled student | `distill.load_router()`, which refuses anything it cannot account for |
-| The outcome model | its provenance, including whether it ever beat the baseline |
+| Which tools worked | the bandit arms in `~/.local/share/shani-chronoa` |
+| What answered what | `distill.harvest_rows()` over this machine's own conversations |
+| Which skill to use | `distill.load_router()`, which refuses anything it cannot account for |
+| Whether a call will work | its provenance, including whether it ever beat the baseline |
+
+**The row titles are plain words and the internal names are on the hover.**
+They used to be the learning layer's own vocabulary - "A distilled router",
+"The outcome model", "Does the bandit beat chance" - and a row title in a
+panel anyone can open is not the place for a module's name. The names are
+still in the code, on each row's tooltip, so a developer can map a row to
+the function it came from.
 
 **Nothing here reports a model as good.** The outcome model is a *flag*: on this
 machine's own log it finds calls that will verify 33x more often than chance on
@@ -59,27 +66,53 @@ SECTION = "Thinking"
 SUBTITLE = ("Facts, which tools actually worked, and the two models fitted from "
             "them - with what each one can and cannot do")
 
-#: The rows, in order. Named because the surface tests assert on them and a
-#: title that changes silently would make those assertions meaningless.
-ROW_TITLES = (
-    "Facts remembered",
-    "Which stand-in worked",
-    "Routing pairs from your conversations",
-    "Finding something you said before",
-    "A distilled router",
-    "The outcome model",
+#: The rows, in order: **the title a person reads, and what the row is
+#: called in the code**.
+#:
+#: **The titles are plain words, and the internal name is on the hover.**
+#: This panel used to be titled in the learning layer's own vocabulary -
+#: "A distilled router", "The outcome model", "Does the bandit beat
+#: chance" - and a person-facing row title in a panel anyone can open is
+#: not the place for a module's internal name. The names are still here,
+#: on the row's tooltip, so a developer can map a row to the function it
+#: came from.
+#:
+#: Named because the surface tests assert on them and a title that changes
+#: silently would make those assertions meaningless.
+ROWS = (
+    ("Facts remembered", "`learning.read_model_knowledge()`"),
+    ("Which tools worked", "the bandit arms in `~/.local/share/shani-chronoa`"),
+    ("What answered what", "`distill.harvest_rows()`"),
+    ("Finding something you said before", "the embedding model"),
+    ("Which skill to use", "`distill.load_router()`"),
+    ("Whether a call will work", "the outcome model"),
 )
 
+#: The titles alone, in order. **Derived**, so the plain name and the
+#: internal name cannot drift apart.
+ROW_TITLES = tuple(title for title, _in_rows in ROWS)
 
-def _add_row(group, title: str, subtitle: str, suffix=None) -> None:
+
+def _add_row(group, title: str, subtitle: str, suffix=None,
+             tooltip: str = "") -> None:
     """Put a row into a group built by `common.group()`.
 
     `Adw.PreferencesGroup` is a `Gtk.ListBox` and takes `add`; the plain `Gtk.Box`
     the no-libadwaita path returns takes `append` on GTK4, where `add` no longer
     exists. Both are handled rather than one, so the panel still builds on a
     machine without libadwaita - which is the whole point of `common` existing.
+
+    **The tooltip carries what the row is called in the code**, because the
+    title is now a plain phrase and a developer reading the panel would
+    otherwise have no way to map a row to the function it came from. It is
+    **appended** to whatever tooltip the row already has, because
+    `common.row()` sets one when it shortens a path - and that one is the
+    fuller answer, so neither replaces the other.
     """
     row = common.row(title, subtitle, suffix=suffix)
+    if tooltip:
+        existing = row.get_tooltip_text() or ""
+        row.set_tooltip_text(f"{existing}\n{tooltip}" if existing else tooltip)
     adder = getattr(group, "add", None)
     if callable(adder):
         adder(row)
@@ -296,16 +329,20 @@ def build(app: Any) -> Gtk.Widget:
         "Read from the machine's own data. Nothing in this panel is a claim about "
         "how well Chronoa works; it is a list of what exists and what it says "
         "about itself.")
-    _add_row(have, ROW_TITLES[0], _facts_sentence())
-    _add_row(have, ROW_TITLES[1], _bandit_sentence())
-    _add_row(have, ROW_TITLES[2], _pairs_sentence())
-    _add_row(have, ROW_TITLES[3], _recall_sentence())
-    _add_row(have, ROW_TITLES[4], _router_sentence())
-    _add_row(have, ROW_TITLES[5], _outcome_sentence())
+    # **One table, so the plain name and the internal name cannot drift
+    # apart** - the title a person reads and the name the row is called in
+    # the code, in the same row of the same table.
+    for (_title, _internal), _sentence in zip(
+            ROWS,
+            (_facts_sentence(), _bandit_sentence(), _pairs_sentence(),
+             _recall_sentence(), _router_sentence(), _outcome_sentence())):
+        _add_row(have, _title, _sentence, tooltip=_internal)
     _add_row(have, "What the log teaches", _lessons_sentence())
     _add_row(have, "What this machine has seen", _experience_sentence())
-    _add_row(have, "Does the bandit beat chance", _bandit_quality_sentence())
-    _add_row(have, "How much is trusted", _organ_status_sentence())
+    _add_row(have, "Is choosing better than random", _bandit_quality_sentence(),
+             tooltip="`learning.evaluate_bandit()`")
+    _add_row(have, "How much is trusted", _organ_status_sentence(),
+             tooltip="`learning.organ_status()`")
     tools_chart = _tools_chart()
     if tools_chart is not None:
         body.append(tools_chart)
@@ -328,15 +365,16 @@ def build(app: Any) -> Gtk.Widget:
                              lambda b: _train_outcome(b, status))
     clean_button = _button("Leave out retired tools",
                            lambda b: _train_outcome(b, status, only_known=True))
-    _add_row(train, "Outcome model",
+    _add_row(train, "Predicting which calls work",
              "Fitted from the recorded verdicts. It is a flag, not a predictor.",
-             suffix=_pair(clean_button, outcome_button))
+             suffix=_pair(clean_button, outcome_button),
+             tooltip="the outcome model")
     _stale_tools_sentence(train)
 
     router_button = _button("Train a router", lambda b: _train_router(b, status))
-    _add_row(train, "Routing router",
+    _add_row(train, "Choosing the right skill",
              f"Fitted from your own conversations. {_teachers_sentence()}",
-             suffix=router_button)
+             suffix=router_button, tooltip="the distilled router")
 
     export_button = _button("Export", lambda b: _export(b, status))
     import_button = _button("Import", lambda b: _import(b, status))

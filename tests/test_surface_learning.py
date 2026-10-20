@@ -119,8 +119,8 @@ def test_no_row_claims_a_model_is_good_when_there_is_none(tmp_path, monkeypatch)
     monkeypatch.setattr("shani_chronoa.distill.load_router", lambda **k: None)
     rows = _rows(learning.build(_App()))
     assert "none" in rows["Facts remembered"].get_subtitle().lower()
-    assert "none" in rows["Routing pairs from your conversations"].get_subtitle().lower()
-    assert "not trained" in rows["The outcome model"].get_subtitle().lower()
+    assert "none" in rows["What answered what"].get_subtitle().lower()
+    assert "not trained" in rows["Whether a call will work"].get_subtitle().lower()
 
 
 def test_the_outcome_row_leads_with_the_detection_not_the_accuracy(tmp_path, monkeypatch):
@@ -138,7 +138,7 @@ def test_the_outcome_row_leads_with_the_detection_not_the_accuracy(tmp_path, mon
     target.write_text(json.dumps(payload), encoding="utf-8")
     from shani_chronoa import learning as core
     monkeypatch.setattr(core, "model_path", lambda name="outcome": target)
-    subtitle = _rows(learning.build(_App()))["The outcome model"].get_subtitle()
+    subtitle = _rows(learning.build(_App()))["Whether a call will work"].get_subtitle()
     assert "verified" in subtitle
     assert "5.9x" in subtitle
     assert "predicts no verdict" in subtitle, (
@@ -154,7 +154,7 @@ def test_a_dishonest_model_is_called_dishonest(tmp_path, monkeypatch):
     target.write_text(json.dumps(payload), encoding="utf-8")
     from shani_chronoa import learning as core
     monkeypatch.setattr(core, "model_path", lambda name="outcome": target)
-    subtitle = _rows(learning.build(_App()))["The outcome model"].get_subtitle()
+    subtitle = _rows(learning.build(_App()))["Whether a call will work"].get_subtitle()
     assert "never beat" in subtitle
 
 
