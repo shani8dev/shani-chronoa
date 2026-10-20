@@ -732,13 +732,23 @@ def _consent(config) -> "tuple[bool, str]":
 
     A named helper rather than only an inline check, so the gate sweep in
     `tests/test_question_presenter.py` can confirm that with nobody to ask the
-    refusal names the key a person would turn on.
+    refusal names the switch a person would turn on, in the wording the
+    Settings page uses.
     """
     if config.sense_allowed("web"):
         return True, ""
     reason = config.sense_allowed_reason("web") or ""
-    if "web-sense-enabled" not in reason:
-        reason = f"{reason} (enable 'web-sense-enabled' in Settings)".strip()
+    # **The switch's own wording, and the check is against *that*.** The
+    # reason already names the row - "Web search" - so the old test for the
+    # raw key always missed, and the raw key was appended every time. A
+    # person following it would be looking for a switch spelled
+    # "web-sense-enabled", and no screen spells it that way.
+    from shani_chronoa import capabilities
+    label = capabilities.gate_label("web-sense-enabled")
+    if not reason:
+        reason = f'switch on "{label}" in Settings to use it'
+    elif label not in reason:
+        reason = f'{reason} (switch on "{label}" in Settings)'
     return False, reason
 
 

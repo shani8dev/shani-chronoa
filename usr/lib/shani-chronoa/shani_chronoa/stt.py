@@ -10,7 +10,6 @@ import re
 import logging
 import subprocess
 import os
-import shutil
 import tempfile
 from typing import TYPE_CHECKING, List, Optional, Union
 
@@ -254,12 +253,16 @@ class WhisperSTT:
 
     def __init__(self, model: str = "base", whisper_path: Optional[str] = None, language: str = "en") -> None:
         self.model = model
-        # Arch's whisper-cpp installs whisper-cli; "whisper.cpp" was never a
-        # binary name there, so speech input could not work on Shanios.
-        # `engines.resolve` asks PATH first and then the copy setup downloaded,
-        # so a machine with no whisper-cpp package can still listen, and a
-        # machine that has the package is not changed by any of this.
-        self.whisper_path = whisper_path or engines.resolve("whisper-cli") or shutil.which("whisper.cpp") \
+        # Arch's whisper-cpp installs **whisper-cli**; "whisper.cpp" was never
+        # a binary name on any distribution, so speech input could not work on
+        # Shanios. This used to look for it anyway, three lines below a
+        # comment saying it did not exist - a lookup that could only ever
+        # fail, and that the package-hint audit then reported as a binary
+        # nothing could resolve. `engines.resolve` asks PATH first and then
+        # the copy setup downloaded, so a machine with no whisper-cpp package
+        # can still listen, and a machine that has the package is not changed
+        # by any of this.
+        self.whisper_path = whisper_path or engines.resolve("whisper-cli") \
             or "/usr/bin/whisper-cli"
         self.model_path = self._get_model_path(model)
         self.language = language

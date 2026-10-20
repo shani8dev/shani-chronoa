@@ -240,7 +240,11 @@ def test_skipping_kokoro_is_announced_with_the_reason(kokoro_installed, only_esp
 
     said = "\n".join(record.getMessage() for record in caplog.records)
     assert "espeak-ng" in said, said
-    assert tts.PiperTTS.KOKORO_KEY in said, said
+    # **The switch's own wording, and the raw key must be gone** - a person
+    # looking for "kokoro-tts-enabled" in Settings finds nothing.
+    from shani_chronoa import capabilities
+    assert capabilities.gate_label(tts.PiperTTS.KOKORO_KEY) in said, said
+    assert tts.PiperTTS.KOKORO_KEY not in said, said
     assert "onnxruntime" not in said, (
         f"with the switch off, the runtime is not the reason and naming it "
         f"sends the user after the wrong package: {said}"

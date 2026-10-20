@@ -27917,3 +27917,92 @@ runner's `tail -1` read a warning line; the new one says `NO SUMMARY
 three failures were in the tree the whole time, and the previous sweep's
 "0 failed" had not seen them, because the file never produced a readable
 verdict at all.
+
+## "Wire all": the population that is not what the lead list says (2026-10-20)
+
+Asked to wire everything the repo offers that nothing reaches. The first
+move was to measure the population with every instrument the repo has,
+because the *shape* of the answer differs per instrument and the AGENTS.md's
+own rule is that a lead list nobody can work through is a lead list nobody
+works.
+
+### The three instruments, and what each one actually means
+
+| instrument | reported | what it is |
+|---|---|---|
+| `tools/audit_missing_tool_hints.py` | 24 | binaries the tree looks for with no package to name - **the real one** |
+| `tools/audit_tool_packages.py` | 75 | commands the three `shani-tools` packages ship that no skill invokes |
+| `tools/audit_description_claims.py` | 127 modules | modules that *name* a command they never invoke |
+
+**The 75 are almost all answered**, and `open_surfaces` measuring calls
+rather than answers is the reason: the archive formats are routed by
+`archives.py` through `7z` (which reads `.rar` and `.arj` - measured on
+`@blue`), `lzop` and `lrzip`, so `7za`, `unar`, `lsar` and `arj` are unused
+*binaries* for capabilities that exist; `system_info`, `disk_usage`,
+`process_cost`, `search_file_contents`, `json_query`, `media_control` and the
+`network` sense answer their commands from `/proc` and the stdlib; and `htop`,
+`btop`, `nvtop`, `inxi`, `micro`, `vi`, `tmux` and `expect` are interactive
+programs an assistant cannot drive at all.
+
+**The 127 are a lead list the audit's own docstring says was "read and
+clean"** - a name in prose explaining *why* the tool is not used is the good
+outcome, and that is what all of them are. The only new ones since that
+reading are in the modules this session's other work added, and they are
+the same shape.
+
+### The 24 were the real population, and the fix is a package name each
+
+A refusal that cannot name a package is the failure the audit exists for:
+*"On Arch it comes from the 'the package that provides it' package."* Twenty-three
+of the twenty-four now name one, and **every name was checked against Arch's
+own file listing** - `https://archlinux.org/packages/<repo>/<arch>/<pkg>/files/`
+- rather than from memory.
+
+**Four of the candidates were wrong, and three of those names do not exist
+in Arch at all:**
+
+| binary | what I would have said | what is true |
+|---|---|---|
+| `gtk-launch` | `gtk2` | **`gtk3`** - `gtk2` is not an Arch package name |
+| `xinput` | `libinput` | **`xorg-xinput`** - `libinput` ships no binary at all |
+| `xset` | `xorg-x11-server-utils` | **`xorg-xset`** - that name does not exist |
+| `xwd` | `x11-apps` | **`xorg-xwd`** - that name does not exist |
+
+**And the same check found a live defect**: `screengrab.py`'s refusal said
+*"on Arch 'xwd' is in the x11-apps package"* - **a package that does not
+exist**, sent to a person who then cannot install it. And `files.py` carried
+a table saying `whisper-cli`, `RHVoice-test`, `xset` and `xwd` were "not in an
+Arch package at all", which was false: `whisper-cpp`, `rhvoice`, `xorg-xset`
+and `xorg-xwd` all ship them, and the table's *decision* - withhold the
+name - was wrong for exactly the entries whose package is known.
+
+**One more, from the same place:** `stt.py` looked for a binary called
+`whisper.cpp` - three lines below a comment saying **"whisper.cpp was never
+a binary name there"**. There is no `usr/bin/whisper.cpp` anywhere in Arch,
+so the lookup could only ever fail; and it was why the audit kept reporting
+a binary nothing could resolve.
+
+### Four refusals named a key no screen spells that way
+
+The senses were converted to name their row in 2026-10-19; the feature
+switches were not, and four sentences a person reads still named the raw
+key: `browse.py`'s web refusal (which *appended* the key to a reason that
+already named the row), `tts.py`'s Kokoro refusal, and the model panel's
+cloud-fallback row. The two feature switches now have their row's wording
+in `capabilities.GATE_NAMES`, and each refusal reads the label from the
+table rather than typing it.
+
+**And three tests were pinning the old wording** - the shape this file has
+recorded before: *"a test suite that pins a defect is a suite that will
+report the fix as a regression."* They now assert the label is present **and
+the key is absent**, because either half alone is satisfied by a sentence
+naming both.
+
+### What is left, and why
+
+`piper-tts` is the one binary still without a package name, and it is
+deliberate: `voices.py` looks for a *system* Piper "if a package ever
+provides it" and otherwise uses the user-local install the wizard sets up.
+There is no Arch package to name - and the repo already knows that `piper`
+on Arch is a **gaming-mouse configurator**, which is why the lookup is for
+a different name at all.

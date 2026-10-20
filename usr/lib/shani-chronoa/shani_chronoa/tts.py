@@ -368,10 +368,16 @@ class PiperTTS:
         name a package rather than the switch they can actually reach.
         """
         if not self._kokoro_enabled():
-            return ("Kokoro is switched off in Settings (kokoro-tts-enabled); it "
-                    "is opt-in because it takes about 6 s to produce 5 s of "
-                    "audio on a four-core laptop, which is 6 s of silence before "
-                    "the reply starts")
+            # **The switch's own wording, read from the table** rather than
+            # typed, for the reason `voice_clone` gives: a refusal that names
+            # the key spells a switch no screen uses, and a person looking for
+            # "kokoro-tts-enabled" in Settings finds nothing.
+            from shani_chronoa import capabilities
+            label = capabilities.gate_label("kokoro-tts-enabled")
+            return (f'The "{label}" switch is off in Settings; it is opt-in '
+                    f"because it takes about 6 s to produce 5 s of audio on a "
+                    f"four-core laptop, which is 6 s of silence before the "
+                    f"reply starts")
 
         reason = self.kokoro_problem()
         if reason or not text:

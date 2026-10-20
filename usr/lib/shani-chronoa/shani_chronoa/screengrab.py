@@ -528,7 +528,7 @@ def _capture_x11(timeout: float, max_capture_bytes: int, max_image_bytes: int) -
     if xwd is None:
         raise ScreenCaptureError(
             "no X11 screen capture tool is installed (looked for import, xwd); on Arch "
-            "'xwd' is in the x11-apps package"
+            "'xwd' is in the xorg-xwd package"
         )
     raw = _run_capture((xwd, "-root", "-silent"), timeout, "xwd", max_capture_bytes)
     width, height, rows = decode_xwd(raw)

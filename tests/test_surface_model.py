@@ -376,7 +376,11 @@ class TestTheEngines:
 
     def test_the_cloud_fallback_names_the_gate_that_is_shut(self):
         detail = " ".join(_row_detail(row) for row in surface.build(_StubApp()).engine_rows())
-        assert "privacy mode is on" in detail and "cloud-fallback-enabled is off" in detail, detail
+        # **The switch's own wording, and the raw key must be gone** - a
+        # person reading this is looking for a switch on the Privacy page.
+        assert "privacy mode is on" in detail, detail
+        assert "Cloud fallback when no local model answers" in detail, detail
+        assert "cloud-fallback-enabled" not in detail, detail
 
     def test_the_cloud_row_is_not_asked(self, monkeypatch):
         """`CloudLLMChain.is_available()` only counts configured providers; a
@@ -519,7 +523,6 @@ class TestExtras:
             if getattr(row, "_extra_state", None) is False and \
                     getattr(row, "_extra_key", "") in surface._SETUP_PAGES:
                 labels = []
-                child = row.get_first_child()
                 stack = [row]
                 while stack:
                     node = stack.pop()

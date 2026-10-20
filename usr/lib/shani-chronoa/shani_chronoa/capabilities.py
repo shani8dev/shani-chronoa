@@ -761,6 +761,13 @@ GATE_NAMES: dict[str, str] = {
     "notification-enabled": "Spoken replies and notifications",
     "vision-sense-enabled": "Take and describe photos",
     "web-sense-enabled": "Web search",
+    # **Two feature switches, and their rows are on the Privacy and Voice
+    # pages.** They are not consent gates for a tool, so they are not in
+    # `GATED` - but a refusal that names one has to name it the way the
+    # switch is spelled on screen, and the row's title is the only spelling
+    # a person can look for.
+    "cloud-fallback-enabled": "Cloud fallback when no local model answers",
+    "kokoro-tts-enabled": "Use the Kokoro neural voice",
     "location-sense-enabled": "Location",
     # `microphone-sense-enabled` was here until 2026-10-11, naming the label
     # "Transcribe speech". **That key is in no schema, in `GATED`, or anywhere

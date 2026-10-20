@@ -57,6 +57,36 @@ TOOL_MISSING_CALLED_WITH = {
     "lp": "cups",
     "gsettings": "glib2",
     "xdotool": "xdotool",
+    # **The twenty-three the package-hint audit found**, each checked against
+    # Arch's own file listing rather than from memory - and four of them are
+    # the *non-obvious* name, which is why they are here at all:
+    # `gtk-launch` ships in **gtk3** (gtk2 is not an Arch package name, and
+    # gtk4 does not ship it), `xinput` in **xorg-xinput** (libinput ships no
+    # binary at all), `xset` in **xorg-xset** and `xwd` in **xorg-xwd**
+    # (`xorg-x11-server-utils` and `x11-apps` are not Arch package names).
+    "glxinfo": "mesa-utils",
+    "gtk-launch": "gtk3",
+    "import": "imagemagick",
+    "logrotate": "logrotate",
+    "lynx": "lynx",
+    "machinectl": "systemd",
+    "mokutil": "mokutil",
+    "patch": "patch",
+    "pidstat": "sysstat",
+    "ps": "procps-ng",
+    "python3": "python",
+    "RHVoice-test": "rhvoice",
+    "shani-chronoa-lab-network": "shani-chronoa",
+    "shani-chronoa-screen-stream": "shani-chronoa",
+    "swtpm": "swtpm",
+    "systemd-run": "systemd",
+    "systemd-vmspawn": "systemd",
+    "wget": "wget",
+    "whisper-cli": "whisper-cpp",
+    "xinput": "xorg-xinput",
+    "xset": "xorg-xset",
+    "xwd": "xorg-xwd",
+    "auditctl": "audit",
     # Infrared is the second place a remote's tools are split across two
     # packages, and it is the split that is easy to get wrong: `ir-ctl` and
     # `ir-keytable` are **v4l-utils**, while `irsend`, `irw`, `mode2` and
@@ -148,6 +178,18 @@ def test_the_hint_table_has_no_value_that_is_its_own_binary():
         # matrix skills (distrobox, virsh, fc-list/fc-match, boltctl).
         "distrobox", "libvirt", "fontconfig", "bolt",
         "libnfc",
+        # Read out of Arch's own file listings on 2026-10-20, for the
+        # twenty-three the package-hint audit found. **Four of them are the
+        # non-obvious name**, which is the whole reason they are here:
+        # `gtk3` (not gtk2, not gtk4), `xorg-xinput` (not libinput),
+        # `xorg-xset` (not xorg-x11-server-utils) and `xorg-xwd` (not
+        # x11-apps) - and three of those four are names that **do not exist
+        # in Arch at all**, so a guess would have sent someone to install a
+        # package that cannot be found.
+        "mesa-utils", "gtk3", "imagemagick", "logrotate", "lynx",
+        "systemd", "mokutil", "patch", "sysstat", "procps-ng", "python",
+        "rhvoice", "shani-chronoa", "swtpm", "wget", "whisper-cpp",
+        "xorg-xinput", "xorg-xset", "xorg-xwd", "audit",
         # Read out of the matrix's `commands[].package` on the GNOME image,
         # which is pacman's own file database rather than a guess: fprintd ships
         # /usr/bin/fprintd-{list,verify,enroll,delete}.

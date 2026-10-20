@@ -855,6 +855,53 @@ _PACKAGE_HINTS = {
     "ydotool": "ydotool",
     "xdotool": "xdotool",
 
+    # **auditctl** -> audit. Arch core, `usr/bin/auditctl` in the file listing.
+    "auditctl": "audit",
+    # **glxinfo** -> mesa-utils. Arch extra, `usr/bin/glxinfo` in the file listing.
+    "glxinfo": "mesa-utils",
+    # **gtk-launch** -> gtk3. Arch extra, `usr/bin/gtk-launch` - **not** gtk2, which is not an Arch package name at all, and not gtk4, which does not ship it.
+    "gtk-launch": "gtk3",
+    # **import** -> imagemagick. Arch extra, `usr/bin/import` in the file listing.
+    "import": "imagemagick",
+    # **logrotate** -> logrotate. Arch core, `usr/bin/logrotate` in the file listing.
+    "logrotate": "logrotate",
+    # **lynx** -> lynx. Arch extra, `usr/bin/lynx` in the file listing.
+    "lynx": "lynx",
+    # **machinectl** -> systemd. Arch core, `usr/bin/machinectl` in the file listing.
+    "machinectl": "systemd",
+    # **mokutil** -> mokutil. Arch extra, `usr/bin/mokutil` in the file listing.
+    "mokutil": "mokutil",
+    # **patch** -> patch. Arch core, `usr/bin/patch` in the file listing.
+    "patch": "patch",
+    # **pidstat** -> sysstat. Arch extra, `usr/bin/pidstat` in the file listing.
+    "pidstat": "sysstat",
+    # **ps** -> procps-ng. Arch core, `usr/bin/ps` in the file listing.
+    "ps": "procps-ng",
+    # **python3** -> python. Arch core, `usr/bin/python3` in the file listing.
+    "python3": "python",
+    # **RHVoice-test** -> rhvoice. Arch extra 1.16.5-1, `usr/bin/RHVoice-test` in the file listing.
+    "RHVoice-test": "rhvoice",
+    # **shani-chronoa-lab-network** -> shani-chronoa. this project's own package.
+    "shani-chronoa-lab-network": "shani-chronoa",
+    # **shani-chronoa-screen-stream** -> shani-chronoa. this project's own package.
+    "shani-chronoa-screen-stream": "shani-chronoa",
+    # **swtpm** -> swtpm. Arch extra, `usr/bin/swtpm` in the file listing.
+    "swtpm": "swtpm",
+    # **systemd-run** -> systemd. Arch core, `usr/bin/systemd-run` in the file listing.
+    "systemd-run": "systemd",
+    # **systemd-vmspawn** -> systemd. Arch core, `usr/bin/systemd-vmspawn` in the file listing.
+    "systemd-vmspawn": "systemd",
+    # **wget** -> wget. Arch extra, `usr/bin/wget` in the file listing.
+    "wget": "wget",
+    # **whisper-cli** -> whisper-cpp. Arch extra - the package ships `usr/bin/whisper-cli`; **there is no `usr/bin/whisper.cpp` anywhere in Arch**, so the refusal named a binary that does not exist.
+    "whisper-cli": "whisper-cpp",
+    # **xinput** -> xorg-xinput. Arch extra, `usr/bin/xinput` - **not** libinput, which ships no binary at all.
+    "xinput": "xorg-xinput",
+    # **xset** -> xorg-xset. Arch extra, `usr/bin/xset` - **not** xorg-x11-server-utils, which is not an Arch package name.
+    "xset": "xorg-xset",
+    # **xwd** -> xorg-xwd. Arch extra, `usr/bin/xwd` - **not** x11-apps, which is not an Arch package name.
+    "xwd": "xorg-xwd",
+
     # **`ydotool` was `dotool` until 2026-10-10, and there is no such
     # binary.** Arch's `ydotool` 1.0.4-2 installs `ydotool` and
     # `ydotoold(8)`; `shutil.which("dotool")` returned None on every machine,
@@ -863,19 +910,21 @@ _PACKAGE_HINTS = {
     # listing a binary nothing can resolve.
     #
     # **Deliberately NOT given a package**, because naming one would be the
-    # confident wrong answer this table exists to avoid - these are not in an
-    # Arch package at all on either image:
+    # confident wrong answer this table exists to avoid - and for these it
+    # still is: **they are not Arch packages at all.** Each was checked
+    # against Arch's own package index, and the ones that turned out to be
+    # packages have been given their names above rather than left here:
     #
     #   `llama-server` `llama-quantize` `llama-perplexity` `llama-imatrix`
     #       - the llama.cpp the setup wizard downloads into the user's home
-    #   `whisper-cli` `whisper-server` `whisper.cpp`
-    #       - ditto; `whisper-cpp` is an `optdepend` no image profile installs
-    #   `piper-tts` `RHVoice-test` `parakeet-cli`
-    #       - voices and ASR models the wizard installs
-    #   `shani-chronoa-lab-network`
-    #       - this project's own launcher, in this very package
-    #   `xset` `xwd`
-    #       - X11-only, absent from both matrices, and Shanios is Wayland
+    #   `piper-tts` `parakeet-cli`
+    #       - a voice and an ASR model the wizard installs
+    #
+    # **The three that used to be on this list were wrong to be here**:
+    # `whisper-cli` and `whisper-server` ship in `whisper-cpp`, `RHVoice-test`
+    # in `rhvoice`, and `xset` and `xwd` in `xorg-xset` and `xorg-xwd` - and
+    # the sentence above claimed they were "not in an Arch package at all",
+    # which was false. They are named now.
 
 }
 

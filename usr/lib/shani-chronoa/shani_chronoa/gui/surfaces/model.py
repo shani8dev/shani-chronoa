@@ -391,7 +391,12 @@ def _cloud_engine(config: Any) -> _Engine:
         if privacy:
             shut.append("privacy mode is on")
         if not enabled:
-            shut.append("cloud-fallback-enabled is off")
+            # **The row's own wording**, for the same reason as the refusal
+            # above: a person reading this is looking for a switch on the
+            # Privacy page, and the key is not how it is spelled there.
+            from shani_chronoa import capabilities
+            shut.append(f'the "{capabilities.gate_label("cloud-fallback-enabled")}" '
+                        f"switch is off")
         gates = shut[0] if len(shut) == 1 else " and ".join([", ".join(shut[:-1]), shut[-1]])
         return _Engine("cloud", "Cloud fallback", False,
                        f"not available - both gates must be open, and {gates}", source)

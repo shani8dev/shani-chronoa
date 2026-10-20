@@ -94,7 +94,11 @@ def test_consent_is_checked_before_either_browser(gsettings_env, no_provider, mo
         if provider:
             browser_bridge.set_provider(lambda: None, available=lambda: True)
         said = browse._run({"action": "navigate", "url": "https://example.com/"})
-        assert "not permitted" in said and "web-sense-enabled" in said, said
+        # **The switch's own wording, and the raw key must be gone.** The
+        # old assertion asked for the key, which is the one spelling no
+        # screen uses.
+        assert "not permitted" in said and "Web search" in said, said
+        assert "web-sense-enabled" not in said, said
     assert touched == [], f"a browser was driven without consent: {touched}"
 
 
