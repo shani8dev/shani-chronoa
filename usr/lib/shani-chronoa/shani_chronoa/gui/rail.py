@@ -84,6 +84,10 @@ class _Section(Gtk.Box):
         self.set_margin_top(10)
         heading = _label(title, "rail-heading")
         heading.add_css_class("heading")
+        #: Kept so the space left for the quiet line can be **measured** -
+        #: the line is right-aligned beside this heading, so it is the
+        #: heading's width that squeezes it, not the rail's.
+        self._heading = heading
         heading.set_wrap(False)
         # **A quiet section is one line, not a card.** Measured on a 1100px
         # window: nine sections, seven of them "Nothing ..."/"No ...", each a
@@ -489,7 +493,11 @@ class NowRail(Gtk.Box):
             self._changed.empty("Could not read what Chronoa changed")
             return
         if not pairs:
-            self._changed.empty("Nothing changed since the last undo point")
+            # **Short enough to be the one line it is promised to be.** The
+            # quiet line is right-aligned beside the heading and does not
+            # wrap, so a sentence that is too long is *clipped* - measured on
+            # a 1280px capture: "Nothing changed since th..." .
+            self._changed.empty("Nothing changed yet")
             return
         # **One row per file, its latest change.** The ring holds one entry
         # per *write*, so a file edited ten times was listed ten times
@@ -540,7 +548,9 @@ class NowRail(Gtk.Box):
         present = [p for p in reversed(paths) if Path(p).exists()]
         gone = len(paths) - len(present)
         if not present:
-            self._made.empty("Nothing made yet in this conversation")
+            # **And the same for this one** - "Nothing made yet in this
+            # conversation" was clipped to "Nothing made yet in this conve...".
+            self._made.empty("Nothing made yet")
             return
         for path in present[:6]:
             p = Path(path)

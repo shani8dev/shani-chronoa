@@ -198,6 +198,58 @@ class TestTheRailShowsRealState:
             assert label in text, (
                 f"the context breakdown dropped the {label!r} segment: {text!r}")
 
+    #: The longest a quiet line may be, in characters.
+    #:
+    #: **Measured on the real app**, not guessed: the rail is 280px and the
+    #: quiet line sits right-aligned beside the heading, so it has roughly
+    #: 200px. "No rule has fired on its own" (28) fits; "Nothing changed
+    #: since the last undo point" (40) does not, and rendered as **"Nothing
+    #: changed since th..."** on a 1280px capture. 32 is between the two.
+    #:
+    #: A character count rather than a pixel one, because **an unlaid-out
+    #: widget reports -1 for its size** - so a pixel assertion in a test
+    #: that never maps the rail would compare -1 against the width and
+    #: **always pass**. That is a check that cannot fail.
+    QUIET_MAX = 32
+
+    def test_a_quiet_section_says_its_line_in_one_line(self, tmp_path,
+                                                        monkeypatch):
+        """**A quiet section is one line, not a card** - so a sentence too
+        long for it is *clipped*, and a clipped sentence reads as a bug.
+
+        Measured on a 1280px capture: "Nothing changed since the last undo
+        point" rendered as "Nothing changed since th...". The line does not
+        wrap, so the wording has to fit - which is a property of the
+        *text*, and the only way to keep it is to measure it.
+        """
+        widget = _rail(tmp_path, monkeypatch)
+        widget.refresh()
+        from shani_chronoa.gui import rail as rail_module
+        # **Every section, found rather than named** - a list of names is a
+        # list that goes stale the next time a section is added, and this
+        # test is about all of them.
+        # **`vars()`, not `dir()`** - `dir()` includes a property that
+        # raises when it is read, and a scan that raises is a scan that
+        # measures nothing.
+        sections = [value for value in vars(widget).values()
+                    if isinstance(value, rail_module._Section)]
+        assert len(sections) >= 8, (
+            f"only {len(sections)} sections were found on the rail, so this "
+            f"test is not measuring what it means to")
+        seen = 0
+        for section in sections:
+            quiet = section._quiet
+            if not quiet.get_visible():
+                continue
+            seen += 1
+            said = quiet.get_text()
+            assert len(said) <= self.QUIET_MAX, (
+                f"the quiet line is {len(said)} characters, and anything past "
+                f"about {self.QUIET_MAX} is clipped in the rail: {said!r}")
+        assert seen >= 6, (
+            f"only {seen} quiet sections were rendered, so this test is not "
+            f"measuring what it means to")
+
     def test_a_timer_can_be_extended_and_cancelled_from_the_rail(self, tmp_path, monkeypatch):
         """Both used to need a chat request; they are buttons on the row now."""
         monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))

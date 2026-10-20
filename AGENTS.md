@@ -28127,6 +28127,20 @@ per kind of message, and a real turn fills six of them - so two were
 dropped *silently*, and a person reading the card could not tell the model
 had been given a whole other slice of its window.
 
+**And the quiet lines were clipped.** The same photograph showed "Nothing
+changed since th..." and "Nothing made yet in this conve..." - the rail's
+empty sections promise **one line** beside their heading, and a sentence
+too long for that line is cut, which reads as a bug rather than as a
+sentence. The wording fits now.
+
+**The witness is a character count, and that is not a shortcut.** A pixel
+assertion would be the obvious instrument and it **cannot work**: an
+unlaid-out widget reports `-1` for its size, so a test that never maps
+the rail compares `-1` against the width and *always passes*. The budget
+is measured on the real app - "No rule has fired on its own" (28) fits,
+"Nothing changed since the last undo point" (40) does not - and the test
+says which end of that it came from.
+
 ### Three tests pinned the defects, and one of them was the evidence
 
 The senses-rail test asserted `"thinking" in rail_text` as proof that the
