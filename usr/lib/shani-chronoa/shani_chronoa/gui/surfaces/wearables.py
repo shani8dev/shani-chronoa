@@ -58,6 +58,8 @@ logger = logging.getLogger(__name__)
 
 from shani_chronoa.skills import bluetooth_gatt as gatt  # noqa: E402
 
+from shani_chronoa.capabilities import gate_label  # noqa: E402
+
 from . import common
 
 TITLE = "Wearables"
@@ -101,9 +103,10 @@ HEALTH = {
 
 BODY = {
     STATE_PERMITTED: "",
+    # **No "Enable the switch in Settings".** The banner above names the
+    # switch and turns it on from here.
     STATE_REFUSED: (
-        "Nothing was read, and nothing on this page came from a device. "
-        "Enable the switch in Settings, under Privacy."),
+        "Nothing was read, and nothing on this page came from a device."),
     STATE_UNREADABLE: (
         "The adapter did not answer, so whether anything is paired is "
         "unknown - which is not the same as nothing being paired."),
@@ -171,6 +174,14 @@ class State:
         sentence.
         """
         generic = BODY.get(self.state, "")
+        # **A reason that names the switch is the banner's sentence.** The
+        # banner above names it, says it is off and turns it on, so the
+        # skill's own refusal - which says the same thing - would be a
+        # second copy of it. A reason that does *not* name it is a
+        # different fact ("this app has no settings to check it in"), and
+        # that one is kept.
+        if self.why and gate_label("bluetooth-gatt-enabled") in self.why:
+            return generic or self.headline
         if not self.why or self.why in generic:
             return generic or self.why or self.headline
         return f"{generic}\n\nThis time: {self.why}" if generic else self.why

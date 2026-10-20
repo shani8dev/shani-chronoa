@@ -40,6 +40,18 @@ from shani_chronoa.skills import Skill
 _CONSENT_KEY = "phone-control-enabled"
 READ_KEY = "phone-messages-read-enabled"
 SEND_KEY = "phone-messages-send-enabled"
+
+
+def _read_label() -> str:
+    """The reading switch by the name the Settings row shows."""
+    from shani_chronoa.capabilities import gate_label
+    return gate_label(READ_KEY)
+
+
+def _send_label() -> str:
+    """The sending switch by the name the Settings row shows."""
+    from shani_chronoa.capabilities import gate_label
+    return gate_label(SEND_KEY)
 _ACTIONS = ("status", "ring", "ping", "share", "messages", "send", "call")
 _OUTGOING = ("send", "call")
 _REPLY_WORDS = ("", "reply", "latest", "last", "them", "back")
@@ -83,7 +95,12 @@ SCHEMA = {
 
 def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
     if not config.get_bool(_CONSENT_KEY, False):
-        return False, f"using your phone is turned off (enable '{_CONSENT_KEY}' in Settings)."
+        # **The switch by the name the Settings row shows**, not by its key.
+        # A person who follows "enable 'phone-control-enabled' in Settings"
+        # is hunting for a switch spelled a way no screen ever spells it.
+        from shani_chronoa.capabilities import gate_label
+        return False, (f"using your phone is turned off - turn on "
+                       f"\u201c{gate_label(_CONSENT_KEY)}\u201d in Settings")
     return True, ""
 
 
@@ -181,7 +198,8 @@ def _resolve(action: str, arguments: dict, config) -> "tuple[Target | None, str]
         if action == "send" and contact.lower() in _REPLY_WORDS:
             if not config.get_bool(READ_KEY, False):
                 return None, (f"Replying to the latest conversation means reading your messages, which is "
-                              f"turned off (enable '{READ_KEY}'). Name the recipient instead.")
+                              f"turned off - turn on \u201c{_read_label()}\u201d in "
+                              f"Settings. Name the recipient instead.")
             latest = ph.conversations(dev)
             incoming = [m for m in latest if m.incoming] or latest
             if not incoming:
@@ -420,10 +438,12 @@ def _run(arguments: dict) -> str:
     if action not in _ACTIONS:
         return f"action must be one of {', '.join(_ACTIONS)}, not {action!r}."
     if action == "messages" and not config.get_bool(READ_KEY, False):
-        return f"Refusing to read your messages: that is turned off (enable '{READ_KEY}' in Settings)."
+        return (f"Refusing to read your messages: that is turned off - turn on "
+                f"\u201c{_read_label()}\u201d in Settings.")
     if action in _OUTGOING and not config.get_bool(SEND_KEY, False):
         what = "send messages" if action == "send" else "make calls"
-        return f"Refusing to {what} from your phone: that is turned off (enable '{SEND_KEY}' in Settings)."
+        return (f"Refusing to {what} from your phone: that is turned off - turn on "
+                f"\u201c{_send_label()}\u201d in Settings.")
     try:
         devs = ph.devices()
     except ph.PhoneUnavailable as exc:

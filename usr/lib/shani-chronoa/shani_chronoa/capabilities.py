@@ -754,6 +754,17 @@ OTHER = "Other"
 # someone who has never opened a terminal.
 GATE_NAMES: dict[str, str] = {
     "input-control-enabled": "Let Chronoa act",
+    # **Five more rows that exist and the table had not named.** Each of
+    # these has a row in the settings window with the title beside it,
+    # so a refusal could have named the switch the way the person sees
+    # it - but the table is what `gate_label()` reads, and a key that is
+    # not in it falls back to the key, which is the spelling no screen
+    # ever shows.
+    "phone-messages-read-enabled": "Let Chronoa read your phone's text messages",
+    "phone-messages-send-enabled": "Let Chronoa send texts and place calls from your phone",
+    "cloud-stt-enabled": "Cloud speech recognition",
+    "cloud-tts-enabled": "Cloud speech synthesis",
+    "global-shortcut-enabled": "Talk to Chronoa with a keyboard shortcut",
     # A gate whose switch lives in the settings window is named here with the
     # label that row actually carries, not a second wording: the Help window
     # tells the user to switch on this exact string, so a label Settings does

@@ -64,6 +64,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk  # noqa: E402
 
 from shani_chronoa import eds_calendar, markdown_lite  # noqa: E402
+from shani_chronoa.capabilities import gate_label  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 from shani_chronoa.skills import calendar_events as skill_calendar  # noqa: E402
 
@@ -112,13 +113,16 @@ STATE_UNREADABLE = "unreadable"
 STATE_CONSENT = "consent-off"
 
 CONSENT_TITLE = "Chronoa is not reading your calendar"
+#: **The switch is not named here.** The banner above names it, says it
+#: is off and turns it on, so naming it again in this sentence - which the
+#: status row's subtitle also carries - would say it three times.
 CONSENT_DETAIL = (
-    f"'{CONSENT_KEY}' is off, so nothing was read here. Who you meet, and "
-    "where, is yours to keep or share; turn the key on in Settings and this "
-    "page fills itself."
+    "Nothing was read here. Who you meet, and where, is yours to keep or "
+    "share; turn it on and this page fills itself."
 )
 CONSENT_UNKNOWN_DETAIL = (
-    f"The '{CONSENT_KEY}' switch could not be read, so nothing was read here. "
+    f"The \u201c{gate_label(CONSENT_KEY)}\u201d switch could not be read, so "
+    "nothing was read here. "
     "That is not the same as it being off - the panel refuses rather than "
     "guessing which it was."
 )
@@ -149,10 +153,13 @@ EMPTY_DETAIL = (
     "as unreadable, never as this."
 )
 
+#: **The switches by the names the Settings rows show**, not by their keys -
+#: except the reading one, which the banner above already names, so this
+#: points at it rather than saying it again.
 FOOTER = (
     f"Read-only. The 'calendar' trigger is a separate permission: a rule that "
-    f"acts on an event starting needs '{TRIGGER_KEY}' as well as "
-    f"'{CONSENT_KEY}'."
+    f"acts on an event starting needs \u201c{gate_label(TRIGGER_KEY)}\u201d as "
+    f"well as the reading switch above."
 )
 
 UNDATED = "Undated"
@@ -483,10 +490,11 @@ class _CalendarSurface:
         if not allowed:
             self._state = STATE_CONSENT
             self._message = detail
+            # **The detail is the state's, and the state carries it below.**
+            # The row says the word and the summary; the reason is said once.
             self._status_slot.append(self.status_recorder.row(
                 common.STATUS_OFF,
-                "Calendar is not granted",
-                detail))
+                "Calendar is not granted"))
             self._show_state(CONSENT_TITLE, detail)
             return
 

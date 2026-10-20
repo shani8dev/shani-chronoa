@@ -83,4 +83,9 @@ def test_gated_off_by_default(monkeypatch):
         def get_bool(self, key, default=False):
             return False
     monkeypatch.setattr(skill, "ChronoaConfig", Off)
-    assert "phone-control-enabled" in skill._run({"action": "status"})
+    said = skill._run({"action": "status"})
+    # **The switch by the name the Settings row shows**, not by its key: a
+    # person who follows a gsettings key is hunting for a spelling no
+    # screen ever shows.
+    assert "Let Chronoa use your paired phone" in said, said
+    assert "phone-control-enabled" not in said, said

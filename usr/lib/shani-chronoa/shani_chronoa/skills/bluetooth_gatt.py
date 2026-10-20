@@ -177,8 +177,11 @@ def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
     function it merely contains.
     """
     if not config.get_bool(_CONSENT_KEY, False):
+        # **The switch by the name the Settings row shows**, not by its key.
+        from shani_chronoa.capabilities import gate_label
         return False, (f"Reading a Bluetooth device is turned off. Nothing was read. "
-                       f"Enable '{_CONSENT_KEY}' in Settings to allow it.")
+                       f"Turn on \u201c{gate_label(_CONSENT_KEY)}\u201d in Settings "
+                       f"to allow it.")
     return True, ""
 
 

@@ -89,6 +89,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk  # noqa: E402
 
 from shani_chronoa import markdown_lite  # noqa: E402
+from shani_chronoa.capabilities import gate_label  # noqa: E402
 from shani_chronoa import phone as ph  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 from shani_chronoa.triggers import desktop_sources  # noqa: E402
@@ -137,7 +138,12 @@ STATES = (
 #: state, so the three messages this panel is judged on cannot drift apart from
 #: each other or from the state names above.
 HEADLINE = {
-    STATE_REFUSED: "Using your phone is turned off",
+    # **The scope, not the state.** The banner above already says the
+    # switch is off, and this panel's own state table said it a third time
+    # in its own words. What the banner cannot say is that the gate is the
+    # *same* one the assistant's phone skills refuse behind - so a shut gate
+    # stops the assistant as well as this page. That is what is left here.
+    STATE_REFUSED: "The same gate as the phone skills",
     STATE_NO_LINK: "No phone link is installed",
     STATE_LINK_DOWN: "The phone link did not answer",
     STATE_NONE_PAIRED: "No device is paired",
@@ -165,7 +171,12 @@ HEALTH = {
 #: full explanation. One clause above, one paragraph below, and the paragraph is
 #: read once.
 HEALTH_SUMMARY = {
-    STATE_REFUSED: f"'{CONSENT_KEY}' is off, so nothing about the phone was asked",
+    # **The refused gate has no clause here.** The banner above names the
+    # switch the way Settings spells it and turns it on from here, so a raw
+    # key in this clause was a second name for the same switch - and the one
+    # a person cannot look up. The banner's sentence is the one statement
+    # about what is not being read, and the row for that state carries
+    # the word alone.
     STATE_NO_LINK: "neither GSConnect nor kdeconnect-cli is installed here",
     STATE_LINK_DOWN: "a backend is installed but would not answer",
     STATE_NONE_PAIRED: "the link answered, with nothing paired to it",
@@ -186,11 +197,13 @@ ROUTES = {
 }
 
 BODY = {
+    # **No key, no skill names, and no "Grant it in Settings".** The banner
+    # above names the switch and turns it on from here, so a raw key and a
+    # route to a page are two more ways to say the same thing - and the
+    # skill names are the registry's, not a person's.
     STATE_REFUSED: (
-        "Nothing on this panel was asked of your phone link, because "
-        f"'{CONSENT_KEY}' is off. That is the same gate the 'phone' and "
-        "'android_device' skills refuse behind, so a shut gate stops this panel "
-        "as well as the assistant. Grant it in Settings, under Privacy."
+        "Turning it on affects what the assistant can do with your phone as "
+        "well as this page."
     ),
     STATE_NO_LINK: (
         "This machine has neither backend phone.py knows about: no GSConnect (the "
@@ -342,21 +355,28 @@ def _permission(config: Any) -> State:
     raises either - this is called once per build, and an exception here would
     take the window down rather than one panel.
     """
+    # **The switch by the name the Settings row shows**, not by its key: a
+    # person who follows a gsettings key is hunting for a spelling no screen
+    # ever shows.
+    name = gate_label(CONSENT_KEY)
     if config is None:
         return State(STATE_REFUSED,
-                     f"there are no settings in this window to check '{CONSENT_KEY}' with")
+                     f"there are no settings in this window to check \u201c{name}\u201d with")
     reader = getattr(config, "get_bool", None)
     if not callable(reader):
         return State(STATE_REFUSED,
-                     f"these settings cannot answer whether '{CONSENT_KEY}' is on")
+                     f"these settings cannot answer whether \u201c{name}\u201d is on")
     try:
         allowed = reader(CONSENT_KEY, False)
     except Exception as exc:  # noqa: BLE001 - an unreadable key is not a granted one
         return State(STATE_REFUSED,
-                     f"'{CONSENT_KEY}' could not be checked "
+                     f"\u201c{name}\u201d could not be checked "
                      f"({type(exc).__name__}: {str(exc)[:MAX_DETAIL]})")
     if not allowed:
-        return State(STATE_REFUSED, f"'{CONSENT_KEY}' is off")
+        # **Nothing.** The banner above says the switch is off, names it and
+        # turns it on from here, so a reason that says it again is a second
+        # copy of the same sentence.
+        return State(STATE_REFUSED, "")
     return State(STATE_PERMITTED)
 
 
@@ -533,8 +553,16 @@ def build(app) -> Gtk.Widget:
         # reading whatever the previous panel said. The summary is the one-clause
         # reason, not the body - see `HEALTH_SUMMARY` for why the two places this
         # panel says the same thing must not say it identically.
-        column.append(recorder.row(state.health, state.headline,
-                                   HEALTH_SUMMARY.get(state.state, "")))
+        # **The refused gate's row is the word alone.** The banner below is
+        # the one statement about it - it names the switch, says it is off
+        # and turns it on from here - so a sentence here would be a second
+        # one, and the empty state's title a third. The word stays, because
+        # the dot in the sidebar reads it.
+        if state.state == STATE_REFUSED:
+            column.append(recorder.row(state.health, "", ""))
+        else:
+            column.append(recorder.row(state.health, state.headline,
+                                       HEALTH_SUMMARY.get(state.state, "")))
         # **A gate that can be opened says so with a button, not a sentence.**
         # The body for the refused gate used to end "Grant it in Settings, under
         # Privacy." - naming the switch and providing no way to reach it, which is

@@ -44,6 +44,7 @@ gi.require_version("Adw", "1")
 from gi.repository import GLib, Gtk  # noqa: E402
 
 from shani_chronoa import eds_calendar  # noqa: E402
+from shani_chronoa.capabilities import gate_label  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 from shani_chronoa.gui.surfaces import calendar as surface  # noqa: E402
 from shani_chronoa.skills import calendar_events as skill_calendar  # noqa: E402
@@ -360,7 +361,9 @@ class TestHonestStates:
         assert calls == [], "the calendar was read with consent off"
         assert _rows(widget) == []
         assert surface.CONSENT_DETAIL.split(".")[0] in _text(widget)
-        assert surface.CONSENT_KEY in _text(widget)
+        # **The switch by the name the Settings row shows**, not by its key.
+        assert gate_label(surface.CONSENT_KEY) in _text(widget)
+        assert surface.CONSENT_KEY not in _text(widget)
 
     def test_no_calendar_backend_says_plasma_has_none(self, monkeypatch):
         """The failure a Plasma install produces, in those words: no backend on

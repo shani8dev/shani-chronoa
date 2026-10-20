@@ -40,6 +40,7 @@ from gi.repository import Adw, GLib, Gtk  # type: ignore  # noqa: E402
 
 from shani_chronoa.gui.surfaces import wearables as w  # type: ignore  # noqa: E402
 from shani_chronoa.skills import bluetooth_gatt as gatt  # type: ignore  # noqa: E402
+from shani_chronoa.capabilities import gate_label  # type: ignore  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -150,7 +151,10 @@ class TestTheGate:
         widget = _run(page)
         text = _labels(widget)
         assert "turned off" in text
-        assert "bluetooth-gatt-enabled" in text or "Privacy" in text
+        # **The switch by the name the Settings row shows**, not by its key:
+        # a person who follows a gsettings key is hunting for a spelling no
+        # screen ever shows.
+        assert gate_label("bluetooth-gatt-enabled") in text or "Privacy" in text
 
     def test_the_permission_is_asked_through_the_modules_own_helper(
             self, monkeypatch):

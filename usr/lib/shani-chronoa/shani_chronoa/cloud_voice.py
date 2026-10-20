@@ -559,7 +559,9 @@ class CloudSTT:
         something the person can act on.
         """
         if not _read_switch(STT_SWITCH, self._config):
-            return (f"Cloud speech recognition is off ({STT_SWITCH} is not set). "
+            from shani_chronoa.capabilities import gate_label
+            return (f"Cloud speech recognition is off - turn on "
+                    f"\u201c{gate_label(STT_SWITCH)}\u201d in Settings. "
                     f"It is off by default because it sends your voice to "
                     f"somebody else's computer.")
         refusal = _privacy_refusal("your recording")
@@ -664,7 +666,9 @@ class CloudTTS:
 
     def refusal(self) -> Optional[str]:
         if not _read_switch(TTS_SWITCH, self._config):
-            return (f"Cloud speech synthesis is off ({TTS_SWITCH} is not set). "
+            from shani_chronoa.capabilities import gate_label
+            return (f"Cloud speech synthesis is off - turn on "
+                    f"\u201c{gate_label(TTS_SWITCH)}\u201d in Settings. "
                     f"It is off by default because it sends the reply to "
                     f"somebody else's computer.")
         refusal = _privacy_refusal("the reply")

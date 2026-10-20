@@ -19,13 +19,26 @@ from __future__ import annotations
 
 import sys
 
-import pytest
-
 sys.path.insert(0, "usr/lib/shani-chronoa")
 
 from shani_chronoa import capabilities  # noqa: E402
 from shani_chronoa.config import ChronoaConfig  # noqa: E402
-from shani_chronoa.skills import list_windows, login_history, ui_elements  # noqa: E402
+from shani_chronoa.skills import (  # noqa: E402
+    android_device,
+    bluetooth_gatt,
+    calendar_events,
+    list_windows,
+    login_history,
+    phone,
+    ui_elements,
+)
+
+
+class _Off:
+    """A config where every switch is off."""
+
+    def get_bool(self, key, default=False):
+        return False
 
 
 def _assert_names_the_switch(said: str, key: str) -> None:
@@ -53,6 +66,43 @@ class TestTheSenses:
 
 
 class TestTheTools:
+    def test_the_phone_skill_names_its_switch(self):
+        """**Using the phone at all** is the switch, and it is called "Let
+        Chronoa use your paired phone".
+
+        **This refusal is read by a person twice over**: the model relays it
+        in chat, and the Devices and Android panels print it as the reason
+        they have nothing to show. A key in it sends both readers hunting
+        for a switch spelled a way no screen ever spells it.
+        """
+        # **A config that says off**, because the phone switch is granted
+        # on this machine - and a test that only works when the machine
+        # happens to have the switch off is a test that cannot run.
+        allowed, why = phone._consent(_Off())
+        assert not allowed, "the stub config said the switch was on"
+        _assert_names_the_switch(why, "phone-control-enabled")
+
+    def test_the_android_skill_names_its_switch(self):
+        """**Using the phone through Android** is the same switch, and it is
+        called "Let Chronoa use your paired phone"."""
+        allowed, why = android_device._consent(_Off())
+        assert not allowed, "the stub config said the switch was on"
+        _assert_names_the_switch(why, "phone-control-enabled")
+
+    def test_the_bluetooth_skill_names_its_switch(self):
+        """**Reading a Bluetooth device** is the switch, and it is called
+        "Let Chronoa read your Bluetooth devices"."""
+        allowed, why = bluetooth_gatt._consent(_Off())
+        assert not allowed, "the stub config said the switch was on"
+        _assert_names_the_switch(why, "bluetooth-gatt-enabled")
+
+    def test_the_calendar_skill_names_its_switch(self):
+        """**Reading the calendar** is the switch, and it is called "Let
+        Chronoa read your calendar"."""
+        allowed, why = calendar_events._consent(_Off())
+        assert not allowed, "the stub config said the switch was on"
+        _assert_names_the_switch(why, "calendar-read-enabled")
+
     def test_ui_elements_names_its_switch(self):
         """**Acting on another app's controls** is the switch, and it is
         called "Let Chronoa act"."""

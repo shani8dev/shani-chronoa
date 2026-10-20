@@ -36,6 +36,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
+#: The one owner of a switch's name, so the anatomy and the Settings row
+#: cannot drift apart. `capabilities` imports nothing heavy.
+from shani_chronoa.capabilities import gate_label  # noqa: E402
+
 #: The three states, borrowed verbatim from ARCHITECTURE-TARGET.md Part 2 so
 #: nothing here has to invent a word. `part` means the honest middle: some of it
 #: works, and the panel says which part.
@@ -118,7 +122,8 @@ INVENTORY: Tuple[Organ, ...] = (
           "reaching outward: looking something up beyond this machine",
           ("websearch.py", "webtext.py", "senses/web.py"), PART,
           missing="the only sense that leaves the machine by default - it is "
-                  "gated on 'web-sense-enabled' and the egress layer records it, "
+                  f"gated on the {gate_label('web-sense-enabled')} switch and "
+                  "the egress layer records it, "
                   "but no organ owned it until now, and it is the one sense a "
                   "person would assume is covered by eyes or skin"),
 

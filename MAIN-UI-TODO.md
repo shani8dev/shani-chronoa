@@ -877,6 +877,30 @@ is trying to do, with the live things on the main window.
   Export panel at first because the banner began the sentence with a capital
   and the two other copies did not - two spellings of one sentence are one
   sentence.
+  **And a label's text is wrapped**, so a phrase a person reads as one line
+  is two lines in the widget - and a substring check over the raw text misses
+  it. The My files panel's empty state slipped past the first version for
+  exactly that reason.
+- [x] **11n2 A raw key on screen**: no person-facing panel may name a
+  gsettings key. **Done 2026-10-20**, from a sweep of all 38 panels:
+  **nine named one**, through five different routes - a panel's own sentence
+  (Devices, Calendar, Desktop), a skill's refusal printed through a panel
+  (Android, Wearables), a module's refusal (the cloud voice engines), the
+  anatomy's note (Inventory), and **five switch names that had a row in
+  Settings but no entry in the one table that holds the wording**
+  (`capabilities.GATE_NAMES`) - so `gate_label()` fell back to the key.
+  All nine now name the switch the way the row in front of the person
+  spells it, and the five labels are in the table.
+  `tests/test_no_panel_names_a_raw_key.py` (38) is the sweep,
+  `tests/test_the_skills_name_the_switch_not_the_key.py` grew four tests
+  (the phone, android, bluetooth and calendar skills), and
+  `tools/mutations/no_raw_key.py` and
+  `tools/mutations/skill_refusal_names.py` carry **7 mutations, 7 caught**.
+  **Two panels are exempt, and the exemption is the point**: the Skills
+  panel and the Workbench show *the model's own registry*, and a
+  description names its key on purpose, because the model needs the exact
+  spelling. The exemption is a **count**, so a third panel cannot be added
+  to it quietly.
 
 **Expose on the main window**
 - [x] **11o Activity bell** in the header: rules fired, memory proposals,

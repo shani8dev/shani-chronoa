@@ -93,6 +93,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk  # noqa: E402
 
 from shani_chronoa import markdown_lite, secret_store  # noqa: E402
+from shani_chronoa.capabilities import gate_label  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -503,7 +504,8 @@ def _shortcut_sentence(config: Any) -> str:
     """The gate's own reading, and the standing admission that it is all we have."""
     value, problem = _gate(config, SHORTCUT_KEY)
     if value is None:
-        return (f"{EVIDENCE_COULD_NOT_ASK} - {SHORTCUT_KEY} could not be read "
+        return (f"{EVIDENCE_COULD_NOT_ASK} - "
+                f"“{gate_label(SHORTCUT_KEY)}” could not be read "
                 f"({problem}); nothing was asked of the desktop, and "
                 f"{UNPROVABLE_NOTE}: app/desktop_integration.py binds it over "
                 "GlobalShortcuts on a thread of its own and logs either the bind "
@@ -513,7 +515,8 @@ def _shortcut_sentence(config: Any) -> str:
             "shows its own dialog the first time"
             if value else
             "Chronoa asks for no shortcut at all, so none is bound")
-    return (f"{EVIDENCE_COULD_NOT_ASK} - the setting {SHORTCUT_KEY} says {said}. "
+    return (f"{EVIDENCE_COULD_NOT_ASK} - the setting "
+            f"“{gate_label(SHORTCUT_KEY)}” says {said}. "
             f"{tail}, and {UNPROVABLE_NOTE}: only Chronoa's own thread can say "
             "whether the desktop accepted it. This panel read a setting and "
             "nothing else; it did not ask a portal for anything.")
@@ -533,10 +536,12 @@ def _document_sentence(config: Any) -> str:
     value, problem = _gate(config, DOCUMENT_KEY)
     tools = _index_tools()
     if value is None:
-        gate = (f"The setting {DOCUMENT_KEY} could not be read ({problem}), so "
+        gate = (f"The setting “{gate_label(DOCUMENT_KEY)}” could not be "
+                f"read ({problem}), so "
                 "this panel does not say whether Chronoa is allowed to ask it.")
     else:
-        gate = (f"The setting {DOCUMENT_KEY} is {'on' if value else 'off'}, so "
+        gate = (f"The setting “{gate_label(DOCUMENT_KEY)}” is "
+                f"{'on' if value else 'off'}, so "
                 f"Chronoa {'may' if value else 'will refuse to'} ask the index.")
     if not tools:
         return (f"{EVIDENCE_NOT_INSTALLED} - neither {' nor '.join(INDEX_TOOLS)} "

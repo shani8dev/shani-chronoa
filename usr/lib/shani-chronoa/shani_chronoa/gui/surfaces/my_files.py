@@ -282,7 +282,17 @@ class _FilesView(Gtk.Box):
         field reads as "nothing here" rather than "nothing indexed yet".
         """
         if not self._consent():
-            self._present(_consent_refusal(self._app))
+            # **The banner is this page's one statement about the gate.**
+            # It names the switch, says it is off, says what that means and
+            # turns it on from here. The refusal below used to say the same
+            # thing a second time - in the switch's words, in a title, and
+            # in a sentence pointing back at the banner - so the reader met
+            # it three times before the controls that are still live.
+            #
+            # **So the content area says nothing**, the way the Phone panel's
+            # does not: the panel's own subtitle says what the page is for,
+            # and the banner says why there is nothing here yet.
+            self._present(_nothing())
             return
         self._present(common.empty_state(
             "edit-find-replace-symbolic", NOTHING_INDEXED, NOTHING_INDEXED_DESC))
@@ -507,6 +517,29 @@ def _has_scroller(widget: Gtk.Widget) -> bool:
             stack.append(child)
             child = child.get_next_sibling()
     return False
+
+
+def _nothing() -> Gtk.Widget:
+    """What to do about it, for a page whose banner is the statement.
+
+    **Not an empty state with words in it.** The banner above already says
+    what is wrong and offers the button; a title here would say it again in
+    a third vocabulary, and a sentence pointing at the banner would say it a
+    fourth time.
+
+    **This says what the person can do**, which the banner does not: the
+    controls above are still live, and this is what they are for.
+    """
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+    box.set_margin_start(24)
+    box.set_margin_end(24)
+    note = Gtk.Label(
+        label="Pick a directory above and index it to search it.",
+        xalign=0.0)
+    note.add_css_class("dim-label")
+    common.wrap_label(note, 48)
+    box.append(note)
+    return box
 
 
 def _consent_refusal(app: Any) -> Gtk.Widget:

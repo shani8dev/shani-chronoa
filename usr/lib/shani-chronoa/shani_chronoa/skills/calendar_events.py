@@ -35,7 +35,12 @@ SCHEMA = {
 
 def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
     if not config.get_bool(_CONSENT_KEY, False):
-        return False, f"reading your calendar is turned off (enable '{_CONSENT_KEY}' in Settings)."
+        # **The switch by the name the Settings row shows**, not by its key:
+        # a person who follows "enable 'calendar-read-enabled' in Settings"
+        # is hunting for a switch spelled a way no screen ever spells it.
+        from shani_chronoa.capabilities import gate_label
+        return False, (f"reading your calendar is turned off - turn on "
+                       f"\u201c{gate_label(_CONSENT_KEY)}\u201d in Settings")
     return True, ""
 
 

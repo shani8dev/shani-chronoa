@@ -42,6 +42,8 @@ gi.require_version("Gtk", "4.0")
 
 from gi.repository import GLib, Gtk  # type: ignore
 
+from shani_chronoa.capabilities import gate_label  # noqa: E402
+
 from . import common
 
 logger = logging.getLogger(__name__)
@@ -83,9 +85,12 @@ HEALTH = {
 
 BODY = {
     STATE_PERMITTED: "",
+    # **No "Enable the switch in Settings".** The banner above names the
+    # switch and turns it on from here, so pointing at a page is a second
+    # way to say the same thing - and the old one sent the person away to
+    # find a switch nobody had named.
     STATE_REFUSED: (
-        "Nothing was read, and nothing on this page came from a phone. "
-        "Enable the switch in Settings, under Privacy."),
+        "Nothing was read, and nothing on this page came from a phone."),
     STATE_NO_ADB: (
         # **The package, because a refusal without a door is a dead end.** Named
         # from `adb(1)`'s own footer - *"Package name: extra/android-tools"* -
@@ -145,6 +150,14 @@ class State:
     def body(self) -> str:
         """The generic explanation, plus what *this* instance was refused for."""
         generic = BODY.get(self.state, "")
+        # **A reason that names the switch is the banner's sentence.** The
+        # banner above names it, says it is off and turns it on, so the
+        # skill's own refusal - which says the same thing - would be a
+        # second copy of it. A reason that does *not* name it is a
+        # different fact ("this app has no settings to check it in"), and
+        # that one is kept.
+        if self.why and gate_label("phone-control-enabled") in self.why:
+            return generic or self.headline
         if not self.why or self.why in generic:
             return generic or self.why or self.headline
         return f"{generic}\n\nThis time: {self.why}" if generic else self.why

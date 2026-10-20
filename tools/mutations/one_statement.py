@@ -14,6 +14,10 @@ TEST_FILE = "tests/test_one_statement_per_page.py"
 _PHONE = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/phone.py"
 _PHONE_LINK = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/phone_link.py"
 _EXPORT = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/export.py"
+_DEVICES = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/devices.py"
+_MY_FILES = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/my_files.py"
+_ANDROID = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/android.py"
+_CALENDAR = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/calendar.py"
 
 MUTATIONS = [
     {
@@ -72,5 +76,36 @@ MUTATIONS = [
         # The group's description is the third copy of the same reason.
         "label": "the Export panel's group repeats the reason",
         "expect": ["test_no_panel_repeats_a_sentence_its_banner_already_said[export]"],
+    },
+    {
+        "file": _ANDROID,
+        "old": '        if self.why and gate_label("phone-control-enabled") in self.why:\n            return generic or self.headline\n',
+        "new": '',
+        # The refused gate's own reason is the banner's sentence, so
+        # printing it again is a second copy of it.
+        "label": "the Android panel repeats the banner's reason",
+        "expect": ["test_no_panel_repeats_a_switch_its_banner_already_named[android]"],
+    },
+    {
+        "file": _MY_FILES,
+        "old": '''        if not self._consent():
+            # **The banner is this page's one statement about the gate.**''',
+        "new": '''        if not self._consent():
+            self._present(_consent_refusal(self._app))
+            return
+        if False:
+            # **The banner is this page's one statement about the gate.**''',
+        # The refusal is back, so the page says the gate three times.
+        "label": "the My files panel's refusal is back",
+        "expect": ["test_no_panel_repeats_a_switch_its_banner_already_named[my_files]"],
+    },
+    {
+        "file": _CALENDAR,
+        "old": 'CONSENT_DETAIL = (\n    "Nothing was read here. Who you meet, and where, is yours to keep or "\n    "share; turn it on and this page fills itself."\n)\n',
+        "new": 'CONSENT_DETAIL = (\n    f"\\u201c{gate_label(CONSENT_KEY)}\\u201d is off, so nothing was read here. "\n    "Who you meet, and where, is yours to keep or share; turn it on and this "\n    "page fills itself."\n)\n',
+        # The switch's name is back in the sentence the banner also
+        # says, so the page says it twice.
+        "label": "the Calendar panel's detail names the switch again",
+        "expect": ["test_no_panel_repeats_a_switch_its_banner_already_named[calendar]"],
     },
 ]

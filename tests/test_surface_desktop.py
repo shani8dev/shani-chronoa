@@ -41,6 +41,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk  # noqa: E402
 
 from shani_chronoa import secret_store  # noqa: E402
+from shani_chronoa.capabilities import gate_label  # noqa: E402
 from shani_chronoa.gui.surfaces import common, desktop  # noqa: E402
 
 REGISTRY_SOURCE = Path(desktop.__file__).parent / "__init__.py"
@@ -543,7 +544,11 @@ class TestTheGlobalShortcut:
             )
             said = "says on" if gates[desktop.SHORTCUT_KEY] else "says off"
             assert said in value, value
-            assert desktop.SHORTCUT_KEY in value, value
+            # **The switch by the name the Settings row shows**, not by its
+            # key: a person who follows a gsettings key is hunting for a
+            # spelling no screen ever shows.
+            assert gate_label(desktop.SHORTCUT_KEY) in value, value
+            assert desktop.SHORTCUT_KEY not in value, value
 
     def test_an_unreadable_gate_is_still_could_not_ask_and_never_a_claim(self):
         value = _row_value(desktop.build(_app(_RaisingConfig())), "Global shortcut")
@@ -618,10 +623,18 @@ class TestDocumentSearch:
         off = _row_value(
             desktop.build(_app(_Config(**{desktop.DOCUMENT_KEY: False}))),
             "Document search")
-        assert f"{desktop.DOCUMENT_KEY} is on" in on, on
+        # **The switch by the name the Settings row shows**, not by its key:
+        # a person who follows a gsettings key is hunting for a spelling no
+        # screen ever shows. The quotes are the row's own, so the label is
+        # checked on its own.
+        label = gate_label(desktop.DOCUMENT_KEY)
+        assert label in on, on
+        assert "is on" in on, on
         assert "Chronoa may ask the index" in on, on
-        assert f"{desktop.DOCUMENT_KEY} is off" in off, off
+        assert label in off, off
+        assert "is off" in off, off
         assert "Chronoa will refuse to" in off, off
+        assert desktop.DOCUMENT_KEY not in on + off
 
     def test_an_unreadable_gate_is_named_rather_than_assumed(self):
         value = _row_value(desktop.build(_app(_RaisingConfig())), "Document search")

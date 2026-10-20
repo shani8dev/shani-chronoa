@@ -46,6 +46,7 @@ from gi.repository import Gtk  # noqa: E402
 import shani_chronoa.gui.surfaces as registry  # noqa: E402
 from shani_chronoa import markdown_lite  # noqa: E402
 from shani_chronoa import phone as real_phone  # noqa: E402
+from shani_chronoa.capabilities import gate_label  # noqa: E402
 from shani_chronoa.gui.surfaces import common, devices  # noqa: E402
 from shani_chronoa.triggers.common import SIGNAL_OK, SIGNAL_UNAVAILABLE  # noqa: E402
 
@@ -350,7 +351,11 @@ class TestTheGate:
         widget = devices.build(_app(_Shut()))
         said = _said(widget)
         assert devices.HEADLINE[devices.STATE_REFUSED] in said, said
-        assert devices.CONSENT_KEY in said, said
+        # **The switch by the name the Settings row shows**, not by its key:
+        # a person who follows a gsettings key is hunting for a spelling no
+        # screen ever shows.
+        assert gate_label(devices.CONSENT_KEY) in said, said
+        assert devices.CONSENT_KEY not in said, said
         assert phone.calls == [], f"the link was asked with the gate shut: {phone.calls}"
         assert sources.calls == [], f"the trigger ran with the gate shut: {sources.calls}"
         assert _device_rows(widget) == [], "a device row appeared with the gate shut"

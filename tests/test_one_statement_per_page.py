@@ -131,6 +131,18 @@ def _walk(widget):
     return labels, banners
 
 
+def _flat(text):
+    """A text with its line breaks turned into spaces.
+
+    **A label's text is wrapped**, so a phrase a person reads as one line
+    is two lines in the widget - and a substring check over the raw text
+    misses it. That is how the My files panel's empty state slipped past
+    the first version of this file: the switch's name was split across a
+    line break, so "the name is in this label" was false.
+    """
+    return " ".join(str(text or "").split())
+
+
 def _banner_text(node):
     """What a banner says."""
     if isinstance(node, Adw.Banner):
@@ -214,11 +226,11 @@ class TestOneStatementPerPage:
         else on the page may say it again."""
         labels, banners = _panel_texts(sid)
         for banner in banners:
-            title = _banner_text(banner)
+            title = _flat(_banner_text(banner))
             for name in SWITCH_NAMES:
                 if name not in title:
                     continue
-                elsewhere = [text for text in labels if name in text]
+                elsewhere = [text for text in labels if name in _flat(text)]
                 assert not elsewhere, (
                     f"{sid}: the banner says {name!r} and so does "
                     f"{elsewhere[0][:120]!r} - one statement per page")
@@ -230,8 +242,8 @@ class TestOneStatementPerPage:
         thing a banner says."""
         labels, banners = _panel_texts(sid)
         for banner in banners:
-            for sentence in _sentences(_banner_text(banner)):
-                elsewhere = [text for text in labels if sentence in text.lower()]
+            for sentence in _sentences(_flat(_banner_text(banner))):
+                elsewhere = [text for text in labels if sentence in _flat(text).lower()]
                 assert not elsewhere, (
                     f"{sid}: the banner says {sentence[:80]!r} and so does "
                     f"{elsewhere[0][:120]!r} - one statement per page")
