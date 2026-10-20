@@ -586,15 +586,33 @@ def _orb_mark():
     return picture
 
 
+#: The wizard's pages, by the name a person would use for them.
+#:
+#: **The keys are the organ names** - `brain`, `ears`, `eyes`, `imagine`,
+#: `memory` - and they stay, because a stored page id has to keep opening
+#: the same page. **The titles are the plain words**: "Brain" and "Ears" are
+#: the inside of this app, and the first thing a new person reads is the
+#: setup wizard.
+#:
+#: **A title carries no article of its own**, because the wizard says
+#: "Open the {title} page" - a title called "The assistant" reads as
+#: "Open the The assistant page".
 _SETUP_PAGES = [
     ("welcome", "Welcome"), ("mode", "Mode"), ("cloud-keys", "Cloud keys"),
-    ("brain", "Brain"), ("model-picker", "Model"), ("ears", "Ears"),
+    ("brain", "Assistant"), ("model-picker", "Model"), ("ears", "Hearing"),
     ("voice", "Voice"), ("review", "Review"), ("extras", "Optional extras"),
-    ("eyes", "Eyes"), ("imagine", "Imagine"), ("memory", "Memory"),
+    ("eyes", "Seeing"), ("imagine", "Pictures"), ("memory", "Search"),
     ("photos", "Photos and videos"), ("sounds", "Sounds"),
     ("speakers", "Who said what"), ("languages", "Languages"),
     ("done", "Done"),
 ]
+
+#: Page title by tag, so the forward button can say where it goes.
+#:
+#: **Derived from `_SETUP_PAGES`**, because a hand-kept second copy of the
+#: page titles is a copy that drifts: the forward button and the page it
+#: goes to were renamed separately, and nothing said so.
+_TITLES: dict = dict(_SETUP_PAGES)
 
 #: Retired ids, kept so a stored one opens whatever absorbed it.
 _SETUP_ALIASES = {"more": "extras", "code": "eyes", "picture": "imagine",
@@ -656,15 +674,6 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
 
     win = Adw.Window(application=application, title="Set up Chronoa", default_width=560, default_height=620)
     win.set_modal(False)
-    #: Page title by tag, so the forward button can say where it goes.
-    _titles = {"welcome": "Welcome", "mode": "Mode", "cloud-keys": "Cloud keys",
-               "brain": "Brain", "model-picker": "Model", "ears": "Ears",
-               "voice": "Voice", "extras": "Optional extras", "review": "Review",
-               "eyes": "Eyes", "imagine": "Imagine", "memory": "Memory",
-               "photos": "Photos and videos", "sounds": "Sounds",
-               "speakers": "Who said what", "languages": "Languages",
-               "done": "Done"}
-
     view = Adw.NavigationView()
     toolbar = Adw.ToolbarView()
     # **A back button, which this had none of.** `Adw.NavigationView` does not
@@ -901,7 +910,7 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         status = wrapping("")
         bar = Gtk.ProgressBar(show_text=True, visible=False)
         go = Gtk.Button(label=button_label, css_classes=["suggested-action", "pill"], halign=Gtk.Align.CENTER)
-        nxt = Gtk.Button(label=f"Next: {_titles.get(next_tag, next_tag)}",
+        nxt = Gtk.Button(label=f"Next: {_TITLES.get(next_tag, next_tag)}",
                          css_classes=["suggested-action", "pill"], halign=Gtk.Align.CENTER,
                          visible=False)
         # A download button stays insensitive until the page's consent switch is
@@ -1036,16 +1045,17 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         """
         row = Adw.ActionRow(title=title, subtitle=subtitle, activatable=True)
         row.add_suffix(Gtk.Image.new_from_icon_name("go-next-symbolic"))
-        row.set_tooltip_text(f"Open the {_titles.get(tag, tag)} page")
+        row.set_tooltip_text(f"Open the {_TITLES.get(tag, tag)} page")
         row.update_property([Gtk.AccessibleProperty.LABEL],
                              [f"{title}: open the "
-                              f"{_titles.get(tag, tag)} page"])
+                              f"{_TITLES.get(tag, tag)} page"])
         row.connect("activated", lambda _r, t=tag: goto(t))
         return row
 
     for name, tag, ready, ok_text, missing_text in (
-            ("Brain", "brain", s["brain"]["ready"], "ready", "needs a language model"),
-            ("Ears", "ears", s["ears"]["ready"], "ready",
+            ("Assistant", "brain", s["brain"]["ready"], "ready",
+             "needs a language model"),
+            ("Hearing", "ears", s["ears"]["ready"], "ready",
              "needs a speech-recognition model"),
             ("Voice", "voice", s["voice"]["ready"], "natural voice ready",
              "using the basic voice")):
@@ -1056,12 +1066,12 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         title="Optional, each on its own page",
         description="None of these is needed to finish, and each is chosen later.")
     for title, tag, size_bytes in (
-            ("Eyes", "eyes", local_vision.TIERS and
+            ("Seeing", "eyes", local_vision.TIERS and
              local_vision.MODELS.get(s["eyes"]["active"],
                                     list(local_vision.MODELS.values())[0]).size_bytes),
-            ("Imagine - pictures from a description", "imagine",
+            ("Pictures - make a picture from a description", "imagine",
              imagegen.MODEL.size_bytes + imagegen.engine_for(s["imagine"]["gpu"]).size_bytes),
-            ("Memory - find earlier conversations by meaning", "memory",
+            ("Search - find earlier conversations by meaning", "memory",
              local_embed.MODEL.size_bytes),
             ("Photos and videos", "photos", cv_runtime.DOWNLOAD_BYTES),
             ("Sounds - what a sound is", "sounds", sounds_mod.MODEL.size_bytes),
@@ -1097,7 +1107,7 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         comes back for that choice.
         """
         box.append(wrapping(done_label + (" " + reason if reason else "")))
-        n = Gtk.Button(label=f"Next: {_titles.get(next_tag, next_tag)}",
+        n = Gtk.Button(label=f"Next: {_TITLES.get(next_tag, next_tag)}",
                        css_classes=["suggested-action", "pill"],
                        halign=Gtk.Align.CENTER)
         n.connect("clicked", lambda *_: goto(next_tag))
@@ -1419,7 +1429,7 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
 
         def retitle(button: "Gtk.Button") -> None:
             tag = resolve()
-            button.set_label(f"Next: {_titles.get(tag, tag)}")
+            button.set_label(f"Next: {_TITLES.get(tag, tag)}")
 
         # **The button says where it goes.** Every page's forward button was
         # "Next", so on a page with a stack of visited-but-alive pages behind it
@@ -1532,7 +1542,7 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         def _on_toggled(_button):
             pick_mode(chosen_mode())
             _dest = after_mode_picked()
-            mode_next.set_label(f"Next: {_titles.get(_dest, _dest)}")
+            mode_next.set_label(f"Next: {_TITLES.get(_dest, _dest)}")
         _check.connect("toggled", _on_toggled)
     view.add(mode_page)
 
@@ -2126,7 +2136,7 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         page_footer(box).append(started)
     else:
         box.append(wrapping("Nothing is set up to answer yet."))
-    n = Gtk.Button(label=f"Next: {_titles.get('ears', 'Ears')}",
+    n = Gtk.Button(label=f"Next: {_TITLES.get('ears', 'Hearing')}",
                    css_classes=["suggested-action", "pill"],
                    halign=Gtk.Align.CENTER)
     n.connect("clicked", lambda *_: goto("ears"))
@@ -2403,7 +2413,7 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
     # then see the whole list and its total. An extras page in the middle of
     # that is a gate the person did not ask for - and the review page can offer
     # them without hiding them.
-    to_review = Gtk.Button(label=f"Next: {_titles.get('review', 'Review')}",
+    to_review = Gtk.Button(label=f"Next: {_TITLES.get('review', 'Review')}",
                            css_classes=["suggested-action", "pill"],
                            halign=Gtk.Align.CENTER)
     to_review.connect("clicked", lambda *_: goto("review"))
@@ -2456,7 +2466,7 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         # someone browsing them in order. The last extra has no "next".
         goto_back_to_list(body)
         if next_tag not in ("done", "review"):
-            on = Gtk.Button(label=f"Next: {_titles.get(next_tag, next_tag)}",
+            on = Gtk.Button(label=f"Next: {_TITLES.get(next_tag, next_tag)}",
                             css_classes=["flat"], halign=Gtk.Align.CENTER)
             on.connect("clicked", lambda *_: goto(next_tag))
             page_footer(body).append(on)
@@ -2465,7 +2475,7 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         return body, p
 
     body, body_page = extras_page(
-        "Eyes", "eyes",
+        "Seeing", "eyes",
         "Describe what is on the screen or in a photo. "
         + ("Reading text in pictures already works, without this." if ey["ocr"] else ""),
         "imagine")
@@ -2494,7 +2504,7 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
     im = s["imagine"]
     size = (imagegen.MODEL.size_bytes + imagegen.engine_for(im["gpu"]).size_bytes) / 1e9
     body, body_page = extras_page(
-        "Imagine", "imagine",
+        "Pictures", "imagine",
         f"Make pictures from a description (SD-Turbo, {size:.1f} GB). "
         + ("Uses the graphics card." if im["gpu"]
            else "On the processor a picture takes tens of seconds."),

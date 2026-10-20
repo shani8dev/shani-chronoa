@@ -497,7 +497,7 @@ class TestExtras:
         on_disk.eye()
         row = [r for r in surface.build(_StubApp()).extras() if r._extra_key == "eyes"][0]
         assert row._extra_state is True
-        assert _row_title(row) == "Eyes - installed"
+        assert _row_title(row) == "Seeing - installed"
 
     def test_a_probe_that_raises_is_unknown_not_absent(self, monkeypatch):
         """The same rule as the engines: an extra whose state could not be read
@@ -507,7 +507,7 @@ class TestExtras:
         assert widget.unknown_keys() == ["eyes"]
         row = [r for r in widget.extras() if r._extra_key == "eyes"][0]
         assert row._extra_state is None
-        assert _row_title(row) == "Eyes - unknown"
+        assert _row_title(row) == "Seeing - unknown"
         assert "EIO" in _row_detail(row)
         # And the other seven are unaffected: one unreadable extra does not
         # hide the rest of the page.
@@ -668,7 +668,7 @@ def test_a_present_extra_that_reports_absent_reads_not_installed(on_disk):
         ctx.setattr(local_vision, "installed", lambda: [])
         row = [r for r in surface.build(_StubApp()).extras() if r._extra_key == "eyes"][0]
     assert row._extra_state is False
-    assert row is not None and _row_title(row) == "Eyes - not installed"
+    assert row is not None and _row_title(row) == "Seeing - not installed"
 
 class TestTwoEnginesCannotBothClaimToAnswer:
     """**Availability and selection are different questions here, unlike in Voice.**

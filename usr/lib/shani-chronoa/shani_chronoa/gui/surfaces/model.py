@@ -621,10 +621,13 @@ def _math(config: Any) -> Tuple[Optional[bool], str]:
 #: the wizard's More page offers them, with maths last because it is not one of
 #: that page's downloads.
 _EXTRAS: Tuple[Tuple[str, str, str, Probe, Any], ...] = (
-    ("eyes", "Eyes", "describe what is on the screen or in a photo", _eyes, local_vision),
-    ("imagine", "Imagine", "make a picture from a description, or change a photo by one",
+    # **The plain words, not the organ names.** The keys stay - a stored
+    # page id has to keep opening the same thing - and the labels are what
+    # a person reads.
+    ("eyes", "Seeing", "describe what is on the screen or in a photo", _eyes, local_vision),
+    ("imagine", "Pictures", "make a picture from a description, or change a photo by one",
      _imagine, imagegen),
-    ("memory", "Memory", "find earlier conversations by meaning, not only by their words",
+    ("memory", "Search", "find earlier conversations by meaning, not only by their words",
      _memory, local_embed),
     ("languages", "Languages", "read, speak and listen in more languages", _languages, languages),
     ("photos", "Photos and videos", "find faces and objects, blur faces or a background, "
