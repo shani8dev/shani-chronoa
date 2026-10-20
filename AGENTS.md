@@ -28258,3 +28258,70 @@ rules, the tooltip naming them, and the once-a-minute cache. The two
 properties that are *not* there - "accept is not offered" and "the tray does
 not mirror it" - are recorded in the work order rather than asserted, because
 the first is a decision and the second is a platform fact.
+
+## The Diagnostics panel opened with nine banners and three rows of paths (2026-10-20)
+
+**10d** ("Diagnostics read as UI") was found by **photographing the real
+app** - `tools/live_panels.sh` - and reading the picture, not by reading the
+source. Two things were on the page that no source scan would have found.
+
+### Nine identical banners before the first row of the diagnostic
+
+On a machine with nothing installed the page opened with **nine peach
+"not downloaded - Download" banners**, one per model kind, and the
+diagnostic was the fourth thing on screen. Each banner's sentence is good -
+it names a consequence ("so Chronoa cannot hear you and transcribe
+recordings") - and together they answer a question the reader did not ask in
+that order.
+
+**One plain sentence, and the per-kind rows behind a disclosure.** The
+sentence counts them ("9 of the models Chronoa can use are not on this
+machine yet"); the disclosure holds the rows, each with its own Download.
+
+### The rows were walls of absolute paths
+
+The three rows under "The brain and speech" put the measurement in the
+body of the answer:
+
+> not working - llama-server is at /usr/bin/llama-server, but no model file
+> is in /tmp/opencode/panels10d2/live-window-state/da/shani-chronoa/llm
+
+and one of them leaked a Python source name into the sentence -
+`PiperTTS.engine()'s own 5-way chain` - which the repository's own rule
+about the Voice panel says is *in the wrong place, not wrong*: naming the
+code that produced a claim belongs in the tooltip, never in the body.
+
+**So a finding now carries two halves: the answer and the evidence.** A
+probe may return `(status, detail)` as it always did, or
+`(status, detail, evidence)` - and the row shows the answer and puts the
+evidence behind its own **Details** button, a `Gtk.MenuButton` with a
+popover. The paths are still there, one click away, and the answer is a
+sentence.
+
+**A `Gtk.Button` has no `set_popover`** - only `Gtk.MenuButton` does, which
+is what the conversations button in the same header is for the same reason.
+
+### Two things the change found
+
+**The evidence label was rendering markup.** `Gtk.Label`'s `use-markup`
+defaults to **False**, so a path with a `<` in it must be handed the
+characters themselves - and the row's own subtitle is the opposite case,
+because `set_subtitle` *is* Pango markup and `common.row()` escapes it.
+The two are different surfaces and needed opposite treatment.
+
+**Seven tests were pinning the old shape**, which is the file's own rule
+("a test that pins a defect reports the fix as a regression"). Five were
+updated to read the evidence where it now lives; two were rewritten because
+the *shape* they described is the defect - a path in the body of the answer.
+
+### The witnesses
+
+`TestTheAnswerIsASentence` - the answer says what is wrong in a sentence
+and carries no path; the paths are one click away. The markup test follows
+the path into the popover and asserts it is plain text. Both were checked by
+reverting the behaviour and watching the test fail, and **two of the first
+four mutations were vacuous** - one aimed at a branch the fixture never
+reached and one at a `use-markup` call that is the default anyway - so both
+were re-aimed at the lines that carry the property.
+
+25 files, one process each: 906 passed, 0 failed.

@@ -828,12 +828,13 @@ def model_banner(app: Any, kind: str, needed_for: str = "") -> "Optional[Gtk.Wid
                   "Opens Setup on its page, where the download size is shown")
 
 
-def with_model_banners(app: Any, content: Gtk.Widget, kinds) -> Gtk.Widget:
-    """`content` with a Download banner above it for each missing model.
+def _model_banners(app: Any, kinds) -> list:
+    """The Download banner for each missing model in `kinds`.
 
-    `kinds` is a list of kind keys, or of `(kind, needed_for)` pairs naming
-    what *this* page cannot do without it. Nothing missing returns `content`
-    unchanged, so a machine with everything sees no extra chrome.
+    **One implementation, two arrangements** - the banners themselves are the
+    same either way, so a page that shows them and a page that hides them
+    behind a disclosure cannot end up describing the same missing model
+    differently.
     """
     banners = []
     for item in kinds:
@@ -841,12 +842,66 @@ def with_model_banners(app: Any, content: Gtk.Widget, kinds) -> Gtk.Widget:
         widget = model_banner(app, kind, needed_for)
         if widget is not None:
             banners.append(widget)
+    return banners
+
+
+def with_model_banners(app: Any, content: Gtk.Widget, kinds) -> Gtk.Widget:
+    """`content` with a Download banner above it for each missing model.
+
+    `kinds` is a list of kind keys, or of `(kind, needed_for)` pairs naming
+    what *this* page cannot do without it. Nothing missing returns `content`
+    unchanged, so a machine with everything sees no extra chrome.
+    """
+    banners = _model_banners(app, kinds)
     if not banners:
         return content
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
     for widget in banners:
         widget.set_margin_top(6)
         box.append(widget)
+    content.set_vexpand(True)
+    box.append(content)
+    return box
+
+
+def with_model_banners_collapsed(app: Any, content: Gtk.Widget, kinds) -> Gtk.Widget:
+    """`content` with the missing models behind a **Details** disclosure.
+
+    **Nine banners at the top of a panel is a wall**, and the panel's own
+    answer is below it. Each banner's sentence is good - it names a
+    consequence ("so Chronoa cannot hear you and transcribe recordings") -
+    and together, on a machine with nothing installed, they answer a question
+    the reader did not ask in that order. So the page opens with one plain
+    sentence saying how many are missing, and the per-kind rows are behind a
+    disclosure.
+
+    **For the page whose subject is "what is not working"**, where the missing
+    models are one finding among many rather than the finding.
+    """
+    banners = _model_banners(app, kinds)
+    if not banners:
+        return content
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+    summary = Gtk.Label(xalign=0.0, wrap=True)
+    summary.add_css_class("dim-label")
+    summary.set_text(
+        f"{len(banners)} of the models Chronoa can use are not on this machine "
+        "yet. Setup installs them.")
+    box.append(summary)
+    toggle = Gtk.ToggleButton(
+        label=f"Show details - what is missing ({len(banners)})",
+        halign=Gtk.Align.START)
+    toggle.add_css_class("flat")
+    inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+    for widget in banners:
+        widget.set_margin_top(6)
+        inner.append(widget)
+    details = Gtk.Revealer(child=inner, reveal_child=False)
+    toggle.connect("toggled", lambda b: (details.set_reveal_child(b.get_active()),
+                                         b.set_label(("Hide" if b.get_active() else "Show")
+                                                     + f" details - what is missing ({len(banners)})")))
+    box.append(toggle)
+    box.append(details)
     content.set_vexpand(True)
     box.append(content)
     return box

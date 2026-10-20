@@ -63,7 +63,7 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gtk  # noqa: E402
+from gi.repository import GLib, Gtk  # noqa: E402
 
 from shani_chronoa import markdown_lite  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
@@ -129,9 +129,26 @@ _BUS_NAME = re.compile(r"^(?::[0-9]+(?:\.[0-9]+)*"
 #: One probe's answer: `status` is one of `STATUS_WORDS`, `detail` says the
 #: evidence. A probe returns `(status, detail)`; it never returns a widget and
 #: never raises on purpose.
-Finding = NamedTuple("Finding", [("title", str), ("status", str), ("detail", str)])
+class Finding(NamedTuple):
+    """One row's answer.
 
-Probe = Callable[[], Tuple[str, str]]
+    `detail` is what a person reads; `evidence` is where it was measured.
+    **They were the same string, and that is what put a wall of absolute paths
+    in the body of every answer** - a row's subtitle is what someone reads
+    while deciding whether to worry, and on a machine with nothing installed
+    the Diagnostics panel opened with three rows of `/tmp/...` and
+    `/usr/bin/whisper-cli` in the answer itself.
+    """
+
+    title: str
+    status: str
+    detail: str
+    evidence: str = ""
+
+
+#: A probe answers `(status, detail)` and may add a third element: the
+#: evidence for the detail - where it was measured, which file, which path.
+Probe = Callable[[], Tuple[Any, ...]]
 
 
 def _fallback_status(exc: BaseException) -> str:
@@ -157,15 +174,17 @@ def _measure(title: str, probe: Probe) -> Finding:
     rendered, so a future row cannot introduce a fourth state by accident.
     """
     try:
-        status, detail = probe()
+        answered = probe()
     except Exception as exc:  # noqa: BLE001 - the panel shows the failure, it does not raise it
         reason = f"{type(exc).__name__}: {exc}".strip().rstrip(":").strip() or type(exc).__name__
         return Finding(title, _fallback_status(exc), f"the probe did not finish ({reason[:180]})")
+    status, detail = answered[0], answered[1]
+    evidence = answered[2] if len(answered) > 2 else ""
     if status not in STATUS_WORDS:
         return Finding(title, STATUS_UNKNOWN,
                        f"the probe answered with a word this panel does not use ({status!r}), "
                        "so it is not reported as an answer")
-    return Finding(title, status, detail)
+    return Finding(title, status, detail, evidence)
 
 
 # -- rendering helpers -------------------------------------------------------
@@ -225,7 +244,12 @@ def _row(finding: Finding) -> Gtk.Widget:
     fallback.
     """
     status = finding.status
-    widget = common.row(finding.title, f"{status} - {finding.detail}")
+    # **The evidence is behind a button, not in the answer.** A row's subtitle
+    # is what a person reads while deciding whether to worry; the paths and the
+    # commands are what someone reads when they have decided to look. Both are
+    # still here - one is just not in the way.
+    suffix = _details_button(finding.evidence) if finding.evidence else None
+    widget = common.row(finding.title, f"{status} - {finding.detail}", suffix=suffix)
     widget.add_css_class(ROW_CSS)
     label = _value_label(widget)
     if label is not None:
@@ -233,6 +257,34 @@ def _row(finding: Finding) -> Gtk.Widget:
         # three-way split at a glance rather than re-reading sixteen sentences.
         label.add_css_class(f"{ROW_CSS}-{_slug(status)}")
     return widget
+
+
+def _details_button(evidence: str) -> Gtk.Widget:
+    """A button that opens the evidence, rather than a row full of it.
+
+    **A `Gtk.MenuButton`, because `Gtk.Button` has no `set_popover`** - the
+    conversations button in the header is the same shape and the same reason.
+    """
+    button = Gtk.MenuButton(label="Details")
+    button.add_css_class("flat")
+    button.set_valign(Gtk.Align.CENTER)
+    button.set_tooltip_text("Where this was measured")
+    button.update_property(
+        [Gtk.AccessibleProperty.LABEL], ["Details"])
+    popover = Gtk.Popover()
+    # **Plain text, not markup.** A path is a place a person can have put a
+    # `<` in, so it must read as a path - and a `Gtk.Label` handed markup
+    # renders it, which would turn `/home/a & b/<b>x</b>/llm` into a bold
+    # "x" and lose the brackets. (The *row* is the other way round: its
+    # subtitle goes through `set_subtitle`, which is Pango markup, so
+    # `common.row()` escapes it there.)
+    label = Gtk.Label(label=common.home_paths(evidence), xalign=0.0, wrap=True)
+    label.set_use_markup(False)
+    label.set_max_width_chars(64)
+    label.add_css_class("dim-label")
+    popover.set_child(label)
+    button.set_popover(popover)
+    return button
 
 
 def _slug(text: str) -> str:
@@ -360,8 +412,10 @@ def _brain() -> Tuple[str, str]:
     if not binary:
         return STATUS_NOT_WORKING, (
             "llama-server is not on PATH, so there is no local model server on "
-            f"127.0.0.1:{port} at all (the llama-cpp package provides it; "
-            "setup downloads the model separately)"
+            "this machine; the llama-cpp package provides it, and setup "
+            "downloads the model separately"
+        ), (
+            f"the server would listen on 127.0.0.1:{port}"
         )
     model_dir = local_llm.model_dir()
     key = local_llm.active()
@@ -369,22 +423,30 @@ def _brain() -> Tuple[str, str]:
         on_disk = local_llm.installed()
         if on_disk:
             return STATUS_NOT_WORKING, (
-                f"llama-server is at {binary} and {len(on_disk)} model file(s) are in "
-                f"{model_dir}, but none of them is the one current.gguf points at, so "
-                "the unit has no model to load"
+                "no model is selected, so the server has nothing to load"
+            ), (
+                f"llama-server is at {binary}; {len(on_disk)} model file(s) are "
+                f"in {model_dir}, and none of them is the one current.gguf "
+                "points at"
             )
         return STATUS_NOT_WORKING, (
-            f"llama-server is at {binary}, but no model file is in {model_dir}; "
+            "no model is downloaded yet, so the server has nothing to load; "
             "setup downloads one and links it as current.gguf"
+        ), (
+            f"llama-server is at {binary}; no model file is in {model_dir}"
         )
     spec = local_llm.SPECS[key]
     if not local_llm.is_up():
         return STATUS_NOT_WORKING, (
-            f"llama-server is at {binary} with {key} ({spec.filename}) selected, but "
-            f"http://127.0.0.1:{port}/health did not answer, so nothing is serving "
-            f"replies - the user unit {local_llm.UNIT} is what to look at"
+            "the server did not answer, so nothing is serving replies; the "
+            f"user unit {local_llm.UNIT} is what to look at"
+        ), (
+            f"llama-server is at {binary} with {key} ({spec.filename}) selected; "
+            f"http://127.0.0.1:{port}/health did not answer"
         )
     return STATUS_WORKING, (
+        "the local model is serving replies"
+    ), (
         f"llama-server is at {binary}, serving {key} ({spec.filename}) on "
         f"127.0.0.1:{port}, whose /health answered"
     )
@@ -425,25 +487,28 @@ def _speech_in() -> Tuple[str, str]:
     model = engine.model
     if engine.is_available():
         return STATUS_WORKING, (
+            "transcribing is possible"
+        ), (
             f"whisper.cpp is at {engine.whisper_path} with the {model} model at "
-            f"{engine.model_path}, so transcribing is possible"
+            f"{engine.model_path}"
         )
     if not has_binary and not has_model:
+        plain = ("local speech input is off whatever the settings say; setup's "
+                 "Ears page installs the program and the model")
         local = (f"neither the whisper.cpp binary ({engine.whisper_path}) nor a "
-                 f"model file ({engine.model_path}) is on this machine, so local "
-                 "speech input is off whatever the settings say; setup's Ears page "
-                 "installs both")
+                 f"model file ({engine.model_path}) is on this machine")
     elif not has_binary:
-        local = (f"the {model} model is on disk at {engine.model_path} but the "
-                 f"whisper.cpp binary is not: {engine.whisper_path} does not exist, "
-                 "so nothing can run it")
+        plain = "the model is on disk but nothing can run it"
+        local = (f"the {model} model is at {engine.model_path}; the whisper.cpp "
+                 f"binary is not: {engine.whisper_path} does not exist")
     else:
-        local = (f"whisper.cpp is at {engine.whisper_path} but no model file is on "
+        plain = "the program is installed but there is no model for it"
+        local = (f"whisper.cpp is at {engine.whisper_path}; no model file is on "
                  f"disk at {engine.model_path} (tried the {model} names, then the "
                  "smaller quantised ones)")
     if cloud_note:
-        return STATUS_WORKING, f"{cloud_note} Locally: {local}"
-    return STATUS_NOT_WORKING, local
+        return STATUS_WORKING, cloud_note, f"Locally: {local}"
+    return STATUS_NOT_WORKING, plain, local
 
 
 def _cloud_speech_in() -> str:
@@ -482,7 +547,12 @@ def _speech_out() -> Tuple[str, str]:
     reason = tts._kokoro_reason("")
     kokoro = ""
     if reason:
-        kokoro = f"; Kokoro was not used because {reason}"
+        # **The reason is a sentence of its own**, so it is folded into this
+        # one in lower case: "because The "use the Kokoro neural voice"
+        # switch is off" reads as a mistake, and the row is the only place
+        # this is said.
+        folded = reason[0].lower() + reason[1:] if reason[:1].isalpha() else reason
+        kokoro = f"; Kokoro was not used because {folded}"
     # **The chain is read, not retyped.** This said "four-way" in a hardcoded
     # string and listed four engines by hand. `gui/surfaces/voice.py` grew a
     # fifth link (cloud) and this row went on calling the cascade four-way while
@@ -500,8 +570,9 @@ def _speech_out() -> Tuple[str, str]:
     pretty = ", ".join(_prettify_engine(e) for e in chain) or "no engines known"
     if chosen is None:
         return STATUS_NOT_WORKING, (
-            f"no engine in the tts.py chain can speak here: {pretty} were all "
-            f"unavailable{kokoro}"
+            "no engine in the tts.py chain can speak here"
+        ), (
+            f"the chain was {pretty}, and all of them were unavailable{kokoro}"
         )
     if chosen == "cloud":
         # **The disclosure belongs here, and this row is where somebody looks.**
@@ -510,13 +581,15 @@ def _speech_out() -> Tuple[str, str]:
         # which is the least useful sentence in a panel whose job is "what is
         # wrong here".
         return STATUS_WORKING, (
-            f"speech out would use a cloud provider, resolved from "
-            f"PiperTTS.engine()'s own {shape} chain - the reply text is sent to "
-            f"that provider to be turned into audio{kokoro}"
+            "a reply would be spoken by a cloud provider, and the reply text "
+            "is sent to that provider to be turned into audio"
+        ), (
+            f"resolved from PiperTTS.engine()'s own {shape} chain{kokoro}"
         )
     return STATUS_WORKING, (
-        f"speech out would use {chosen}, resolved from PiperTTS.engine()'s own "
-        f"{shape} chain{kokoro}"
+        f"a reply would be spoken by {_prettify_engine(chosen)}"
+    ), (
+        f"resolved from PiperTTS.engine()'s own {shape} chain{kokoro}"
     )
 
 
@@ -1339,8 +1412,20 @@ def build(app: Any = None) -> Gtk.Widget:
 
     # Every missing model, each with its Download - this page is where
     # "why can't it do X" is asked, and it used to answer only in prose.
+    #
+    # **But nine of them at the top is a wall**, and the panel's own answer
+    # is below it. Measured on a real capture of a machine with nothing
+    # installed: the page opened with nine identical peach boxes, each with
+    # its own Download, before the first row of the diagnostic - so the
+    # question the page exists to answer was the fourth thing on screen.
+    #
+    # Each of those sentences is good - it names a consequence ("so Chronoa
+    # cannot hear you and transcribe recordings") - and together they answer
+    # a question the reader did not ask in that order. So: one plain sentence,
+    # and the per-kind rows behind a disclosure.
     from shani_chronoa import model_status
-    set_content(common.with_model_banners(app, common.scrolled(body), model_status.missing()))
+    set_content(common.with_model_banners_collapsed(
+        app, common.scrolled(body), model_status.missing()))
     # What this panel says about itself, for the sidebar's health dot. The same
     # recorder that built the row at the top of the panel, so the dot and the
     # row are one statement about one reading.

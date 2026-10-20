@@ -40,7 +40,10 @@ class TestTheCountIsReadNotTyped:
 
     def test_the_sentence_counts_the_links_that_exist(self, monkeypatch):
         from shani_chronoa.gui.surfaces import diagnostics as surface
-        said = surface._speech_out()[1]
+        # **The count is in the evidence**, which is where "which chain" belongs
+        # now: the answer says what would speak, and the measurement says how
+        # the cascade was resolved.
+        said = surface._speech_out()[2]
         assert "four-way" not in said, (
             f"the row still calls the cascade four-way: {said!r}")
         # And the number it does say is the real one.
@@ -66,7 +69,7 @@ class TestTheCloudWinnerIsDisclosed:
         from shani_chronoa.gui.surfaces import diagnostics as surface
         _no_local_voices(monkeypatch)
         _cloud_on(monkeypatch)
-        status, detail = surface._speech_out()
+        status, detail = surface._speech_out()[:2]
         assert status == surface.STATUS_WORKING, detail
         assert "cloud" in detail.lower(), detail
         assert "sent" in detail.lower() or "leaves" in detail.lower(), (
@@ -80,10 +83,12 @@ class TestTheCloudWinnerIsDisclosed:
         _cloud_on(monkeypatch)
         from shani_chronoa import cloud_voice
         monkeypatch.setattr(cloud_voice.CloudTTS, "is_available", lambda self: False)
-        status, detail = surface._speech_out()
+        status, detail, evidence = surface._speech_out()
         assert status != surface.STATUS_WORKING, detail
+        # **The list of what was tried is the evidence** - the answer says that
+        # nothing can speak, and the measurement says which ones were tried.
         for named in ("Kokoro", "Piper", "RHVoice", "espeak-ng", "cloud"):
-            assert named in detail, (
-                f"{named!r} is missing from the list of what was tried: {detail!r} - "
+            assert named in evidence, (
+                f"{named!r} is missing from the list of what was tried: {evidence!r} - "
                 "so on a machine relying on the cloud, the reason it is not "
                 "working is invisible")

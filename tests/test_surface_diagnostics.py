@@ -337,14 +337,100 @@ class TestMarkup:
         monkeypatch.setattr(local_llm, "server_binary", lambda: nasty)
         monkeypatch.setattr(local_llm, "is_up", lambda *a, **k: True)
         widget = diagnostics.build(types.SimpleNamespace())
-        value = _row(widget, "Local model server (llama.cpp)")
-        assert nasty in value, f"the path was not shown at all: {value!r}"
+        # **The path is the evidence now**, so it is in the popover the row's
+        # Details button opens. It is still shown - a path nobody can reach is
+        # a path nobody has - and it is still escaped.
+        evidence = _evidence(widget, "Local model server (llama.cpp)")
+        assert evidence is not None, "the row has no Details to open"
+        # **Plain text, so the path reads as a path.** A label that parsed the
+        # markup would have lost the brackets and rendered a bold "x"; the
+        # text is the literal characters, which is the whole assertion.
+        assert nasty in evidence.get_text(), (
+            f"the path did not survive: {evidence.get_text()!r}")
+        assert "&amp;" not in evidence.get_text(), (
+            f"the path was escaped and shown as entities: {evidence.get_text()!r}")
 
-        raw = _raw_markup(widget, "Local model server (llama.cpp)")
-        assert "&amp;" in raw and "&lt;b&gt;" in raw, (
-            f"the raw markup was not escaped: {raw!r}"
-        )
-        assert "<b>injected</b>" not in raw, f"a tag reached the label: {raw!r}"
+
+class TestTheAnswerIsASentence:
+    """**A row's subtitle is what a person reads while deciding whether to
+    worry**, and on a machine with nothing installed the Diagnostics panel
+    opened with three rows of absolute paths - `/tmp/.../llm`,
+    `/usr/bin/whisper-cli` - in the body of the answer.
+
+    Measured on a real capture of the real app: the paths were the first
+    thing on the page, in the place the diagnostic should have been.
+    """
+
+    def test_the_answer_says_what_is_wrong_in_a_sentence(self, monkeypatch):
+        from shani_chronoa import local_llm
+
+        monkeypatch.setattr(local_llm, "server_binary", lambda: "")
+        widget = diagnostics.build(types.SimpleNamespace())
+        value = _row(widget, "Local model server (llama.cpp)")
+        assert "not on PATH" in value, value
+        assert "/" not in value, (
+            f"the answer still carries a path: {value!r}")
+
+    def test_the_paths_are_one_click_away(self, monkeypatch):
+        from shani_chronoa import local_llm
+
+        monkeypatch.setattr(local_llm, "server_binary", lambda: "/usr/bin/llama-server")
+        monkeypatch.setattr(local_llm, "active", lambda: "")
+        widget = diagnostics.build(types.SimpleNamespace())
+        evidence = _evidence(widget, "Local model server (llama.cpp)")
+        assert evidence is not None, (
+            "the row offers no way to see where this was measured")
+        assert "/usr/bin/llama-server" in evidence.get_text(), (
+            f"the evidence does not carry the path: {evidence.get_text()!r}")
+
+
+def _evidence(widget, title):
+    """The label the row titled `title` opens in its Details popover.
+
+    **The evidence is behind a button**, so it is not in the row's own widget
+    tree: the popover is a separate surface, and the test has to go and open
+    it the way a person does.
+    """
+    found = []
+
+    def walk(node):
+        if diagnostics.ROW_CSS in node.get_css_classes():
+            heading = ""
+            for label in _labels(node):
+                if diagnostics.VALUE_CSS not in label.get_css_classes():
+                    heading = label.get_text()
+                    break
+            for child in _descendants(node):
+                if isinstance(child, Gtk.MenuButton) and child.get_label() == "Details":
+                    found.append((heading, child))
+        child = node.get_first_child()
+        while child is not None:
+            walk(child)
+            child = child.get_next_sibling()
+
+    walk(widget)
+    for heading, button in found:
+        if heading != title:
+            continue
+        popover = button.get_popover()
+        if popover is None:
+            return None
+        # **The popover's child is the label itself**, not a box of them - so
+        # it is read directly, because `_labels` walks a node's children.
+        child = popover.get_child()
+        return child if isinstance(child, Gtk.Label) else None
+    return None
+
+
+def _descendants(node):
+    """Every widget under `node`, at any depth."""
+    out = []
+    child = node.get_first_child()
+    while child is not None:
+        out.append(child)
+        out.extend(_descendants(child))
+        child = child.get_next_sibling()
+    return out
 
 
 def _raw_markup(widget, title):

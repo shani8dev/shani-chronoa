@@ -430,6 +430,16 @@ Open, by panel (worst first):
   ("bandit", "outcome model", "distilled router"), Machine/Memory (raw command
   output), Diagnostics (absolute paths in red/green walls), Answering now.
   Pattern: one plain sentence + a "Details" expander, as the approval got.
+  **The Diagnostics half is done 2026-10-20**, from a photograph of the real
+  app rather than from the source. On a machine with nothing installed the
+  page opened with **nine identical "not downloaded" banners**, and then with
+  **three rows of absolute paths** - `/tmp/.../llm`, `/usr/bin/whisper-cli` -
+  in the body of the answer, and one row leaked `PiperTTS.engine()` into the
+  text. Now: one plain sentence and a **Details** disclosure for the missing
+  models, and each row's answer is a sentence with the paths and the
+  provenance behind its own **Details** button.
+  **Still open: Driving, Learning and Machine/Memory**, which carry the same
+  engineering text in the body of a row.
 - [ ] **10e Duplicates**: Skills and Workbench both list all 257 skills;
   "What Chronoa can do" (Inventory) speaks the internal metaphor ("Immune
   system", "Scar tissue"); Help, Inventory, Skills, /help are four answers to one

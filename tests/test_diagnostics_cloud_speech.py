@@ -31,7 +31,7 @@ class TestSpeechInAsksTheEngineThatIsActuallyTranscribing:
         from shani_chronoa.gui.surfaces import diagnostics as surface
         monkeypatch.setattr(cloud_voice, "_read_switch",
                             lambda name, config=None: False)
-        status, detail = surface._speech_in()
+        status, detail, evidence = surface._speech_in()
         assert status != surface.STATUS_WORKING, detail
         assert "hissper" in detail or "model" in detail, detail
         assert "cloud" not in detail.lower(), (
@@ -45,14 +45,16 @@ class TestSpeechInAsksTheEngineThatIsActuallyTranscribing:
         monkeypatch.setattr(cloud_voice, "_provider_key",
                             lambda pid, api_keys=None, config=None: "sk-test")
         monkeypatch.setattr(cloud_voice.egress, "privacy_mode_enabled", lambda: False)
-        status, detail = surface._speech_in()
+        status, detail, evidence = surface._speech_in()
         assert status == surface.STATUS_WORKING, (
             f"cloud recognition is on and the panel still calls speech input "
             f"broken: {detail!r}")
         assert "cloud" in detail.lower(), detail
         # And the local half is still there, because someone may want it.
-        assert "Locally:" in detail, (
-            f"the local truth was dropped along with the alarm: {detail!r}")
+        # **It is the evidence now** - the answer says what is happening, and
+        # the measurement says what is on disk beside it.
+        assert "Locally:" in evidence, (
+            f"the local truth was dropped along with the alarm: {evidence!r}")
 
     def test_the_cloud_half_can_never_invent_a_working_engine(self, monkeypatch):
         """A diagnostic that raises must under-report, never over-report."""
