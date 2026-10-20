@@ -253,9 +253,16 @@ class _PhoneLinkView(Gtk.Box):
     def _devices_list(self) -> Gtk.Widget:
         if not self._devices:
             if not _consent(self._app):
+                # **The banner above is this page's one statement about the
+                # switch** - it names it and offers to turn it on. This line
+                # used to name it a second time and point back at the banner,
+                # so the page said "off" twice in two different words.
+                #
+                # **What is left is the list's own fact**: nothing has been
+                # looked for. That is true, and it is what the list knows.
                 return nothing_state(
-                    "phone-symbolic", "Talking to phones is turned off",
-                    f"Turn on “{common.consent_name(CONSENT_KEY)}” above first.")
+                    "phone-symbolic", "No phone found yet",
+                    "Nothing has been looked for yet.")
             return nothing_state(
                 "phone-symbolic", "No phone found yet",
                 "Nothing has been looked for, or nothing answered. Press Look "

@@ -730,6 +730,25 @@ Open, by panel (worst first):
   button.
   **Still open: Learning**, whose rows use the internal names ("a distilled
   router", "the outcome model"), and "Answering now".
+  **A sweep for the rest of this class was run 2026-10-20, and the first
+  version of it was a false clean** - it called `surfaces.build(...)`, which
+  does not exist, so every panel raised and every panel was skipped, and the
+  sweep reported "0 of 38" having measured nothing. The right call is
+  `surfaces.all_surfaces()`, which hands back each panel's `build`.
+  **The real measurement: 10 of 38 panels carry an engineering token in a
+  row body.** Most are legitimate - a skill's own description (the words the
+  model is handed), an engine's name beside its state ("Aegis (Piper)"), a
+  path under `~/` that `common.home_paths` has already shortened. The ones
+  that are not legitimate: **Learning's** row titles ("A distilled router",
+  "The outcome model", "Does the bandit beat chance"), **Answering now**'s
+  engine rows ("llama.cpp on this computer", "nothing is listening at
+  http://127.0.0.1:11434"), **Diagnostics**' "llama-server is at
+  /usr/bin/llama-server", and **Voice**'s whisper model path.
+  **Also measured, and the reason the sweep has to be a sweep: a word may
+  appear twice on a page for good reasons.** The Skills panel lists 165 rows
+  whose gate label is the same sentence, and a "no sentence appears twice"
+  rule would fail it - so the rule is about *a banner repeating itself*, not
+  about repetition in general.
 - [ ] **10e Duplicates**: Skills and Workbench both list all 257 skills;
   "What Chronoa can do" (Inventory) speaks the internal metaphor ("Immune
   system", "Scar tissue"); Help, Inventory, Skills, /help are four answers to one
@@ -807,8 +826,31 @@ is trying to do, with the live things on the main window.
   `common.row()` - the row builder every panel uses - applies it to the title
   and the subtitle of every row, so it is not a per-panel decision. The full
   path goes in the tooltip.
-- [ ] **11n Status rows** ("Ready / Turned off / Needs attention") drop where a
+- [x] **11n Status rows** ("Ready / Turned off / Needs attention") drop where a
   banner or empty state already says it - one statement per page.
+  **Done 2026-10-20**, and the population was measured rather than guessed:
+  with every consent key off - the state a fresh install is in - **two
+  panels** said the same thing twice. The **Phone** panel's status row named
+  the switch its banner had already named, and repeated the banner's sentence
+  word for word ("Nothing was asked of your phone."); the **Phone link**
+  panel's empty state pointed back at a banner that was already on screen
+  ("Turn on "…" above first"). The Phone panel's row is **gone** - the
+  recorder still holds the word, because the sidebar dot reads it - and the
+  Phone link panel's empty state now says only what the list knows.
+  **The gate is a sweep, not a per-panel test**, because the failure is a
+  shape: `tests/test_one_statement_per_page.py` builds **all 38 panels** and
+  asserts that no visible banner is repeated elsewhere on its page - by the
+  switch's name, and by its sentences. 78 tests.
+  `tools/mutations/one_statement.py` (**3 mutations, 3 caught, 0
+  survivors**).
+  **Two measurement traps, both recorded because both looked like a clean
+  result.** A banner that carries a button is **not an `Adw.Banner`** -
+  `Adw.Banner` has no signal to connect one to - so it is a plain box with
+  the `surface-banner` class, and looking for `Adw.Banner` alone misses
+  every consent banner, which is every banner that offers a "Turn on". And
+  `get_visible()` is **per-widget**: a label inside a hidden banner still
+  answers True, so a sweep that counts labels without walking *into* the
+  visible ones measures pages nobody sees.
 
 **Expose on the main window**
 - [x] **11o Activity bell** in the header: rules fired, memory proposals,

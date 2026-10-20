@@ -292,9 +292,15 @@ stackswitcher button {
             # the gate is shut - which is the default - this panel had *no*
             # interactive widget on it at all. Measured: a walk of the built
             # panel found `[]`.
-            self.set_status(common.STATUS_OFF, "Using your phone is turned off",
-                            "Nothing was asked of your phone. In Settings, under "
-                            f"Privacy: \"{GATE_NAMES[CONTROL_KEY]}\".")
+            #
+            # **The banner below is this page's one statement about the
+            # switch** - it names it, says what it means, and offers to turn
+            # it on. A status row beside it repeated both the name and the
+            # sentence, so the page said "off" twice in two different words.
+            #
+            # **The word is still recorded**, because the dot in the sidebar
+            # reads it: `StatusRecorder.set` records without building a row.
+            self.status_recorder.set(common.STATUS_OFF)
             # The switch by name, turned on here, and the panel rebuilds.
             body.append(common.consent_banner(
                 self.app, CONTROL_KEY, "Nothing was asked of your phone.",
