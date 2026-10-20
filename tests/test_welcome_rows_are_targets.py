@@ -216,7 +216,11 @@ def test_the_wizard_actually_built(wizard):
 def test_the_welcome_page_names_everything_it_offers(wizard):
     """All ten rows, with the download size or the state - the page's whole job."""
     titles = [r.get_title() for r in _activatable_rows(wizard)]
-    for expected in ("Brain", "Ears", "Voice", "Eyes", "Memory",
+    # **The plain page names, not the organ names.** The wizard's rows were
+    # renamed - "Brain" is "Assistant", "Ears" is "Hearing", "Eyes" is
+    # "Seeing", "Memory" is "Search" - because a person who has not read the
+    # anatomy should not have to know it to set the assistant up.
+    for expected in ("Assistant", "Hearing", "Voice", "Seeing", "Search",
                      "Photos and videos", "Sounds", "Languages"):
         assert any(expected in (t or "") for t in titles), (
             f"the welcome page does not mention {expected!r}. It has: {titles}")
@@ -249,11 +253,11 @@ def test_every_welcome_row_is_a_target(wizard):
 #: tooltip or out of the wizard's own table - a test that derives its
 #: expectation from the code it is checking agrees with every bug in that code.
 EXPECTED_DESTINATIONS = {
-    "Brain": "brain",
-    "Ears": "ears",
+    "Assistant": "brain",
+    "Hearing": "ears",
     "Voice": "voice",
-    "Eyes": "eyes",
-    "Memory - find earlier conversations by meaning": "memory",
+    "Seeing": "eyes",
+    "Search - find earlier conversations by meaning": "memory",
     "Photos and videos": "photos",
     "Sounds - what a sound is": "sounds",
     "Who said what - split a recording by speaker": "speakers",
