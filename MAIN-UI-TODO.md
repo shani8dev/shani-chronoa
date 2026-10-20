@@ -264,10 +264,21 @@ composer). Done:
 
 Open, from the same review (voice / coder / everyday person):
 
-- [ ] **8i Voice state is invisible while it matters.** Wake word armed shows
+- [x] **8i Voice state is invisible while it matters.** Wake word armed shows
   only the "ears" light; barge-in has no indicator; dictation looks identical
   to listening. Give the orb distinct states/captions for armed-for-wake,
   dictating, and talk-over-enabled.
+  **Dictation is done 2026-10-20; the other two are stale.** Dictation ran
+  for five minutes instead of twenty seconds and the orb showed the same
+  green microphone either way - so a person glancing at it could not tell
+  which kind of listening was open. It is a **state of its own** now: its own
+  colour, **its own icon** (a microphone with waves, because the icon is the
+  signal that survives greyscale), its own word, and a CSS rule of its own.
+  **The window no longer reaches into the app's own `_dictating` flag** to
+  say so - the state carries the word. **Wake word armed and talk-over are
+  already covered**: the caption says "Ready - say "hey chronoa"" when the
+  wake word is armed, and the mode strip's hands-free chip says when talk-over
+  is on.
 - [x] **8j Two speed controls** in Settings > Voice ("Speaking speed" and
   Rate/Tempo) and no voice dropdown (Piper is a free-text entry in Models,
   Kokoro only in the wizard). One "Voice" page: voice picker with preview,

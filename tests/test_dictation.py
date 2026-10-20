@@ -117,6 +117,10 @@ class _Host:
     # the two real methods, so the test drives the product's code
     _begin_listening = voice.VoiceMixin._begin_listening
     _start_listening = voice.VoiceMixin._start_listening
+    # **The state the orb shows while the microphone is open.** A fake
+    # missing a method the real object has is a fake that cannot catch
+    # this - the same shape the `set_progress` note below describes.
+    _listening_state = voice.VoiceMixin._listening_state
     _toggle_listening = voice.VoiceMixin._toggle_listening
     dictate = voice.VoiceMixin.dictate
     _dictation_note = voice.VoiceMixin._dictation_note
@@ -162,6 +166,33 @@ def test_the_ceiling_is_restored_afterwards(monkeypatch):
     assert host._listen_silence_seconds is None, (
         "the silence must fall back to the person's own end-of-speech-pause "
         "setting, not to a constant that would override it for every later turn")
+
+
+def test_the_orb_is_told_it_is_dictating(monkeypatch):
+    """**The orb shows a different state while dictating.**
+
+    Dictation runs for five minutes instead of twenty seconds, and the orb
+    is the only thing on screen that says which kind of listening is open -
+    the state line said "Dictating" and the orb did not.
+    """
+    from shani_chronoa.gui import AssistantState
+    _cues(monkeypatch)
+    host = _Host()
+    host.window.set_status = lambda text: None
+    host.dictate()
+    assert AssistantState.DICTATING in host.window.states, host.window.states
+
+
+def test_an_ordinary_question_is_not_dictating(monkeypatch):
+    """**Both directions**, because either alone is a test that cannot fail."""
+    from shani_chronoa.gui import AssistantState
+    _cues(monkeypatch)
+    host = _Host()
+    host.window.set_status = lambda text: None
+    host._dictating = False
+    host._begin_listening()
+    assert AssistantState.LISTENING in host.window.states, host.window.states
+    assert AssistantState.DICTATING not in host.window.states, host.window.states
 
 
 def test_dictation_presses_twice_and_the_second_press_stops_it(monkeypatch):

@@ -38,6 +38,11 @@ class AssistantState(enum.Enum):
     #: orb between listening and thinking, which is indistinguishable from the
     #: microphone having stopped working.
     QUEUED = "queued"
+    #: **Dictation is not "listening for longer".** It runs for five minutes
+    #: instead of twenty seconds and ends on a longer silence, and a person
+    #: glancing at the orb could not tell the two apart any other way. The
+    #: state line already said "Dictating"; the orb did not.
+    DICTATING = "dictating"
     THINKING = "thinking"
     SPEAKING = "speaking"
     INTERRUPTING = "interrupting"
@@ -62,6 +67,11 @@ _STATE_STYLE = {
     # the nearest distinct hue that still sits between listening (green) and
     # thinking (amber), which is where this state actually sits.
     AssistantState.QUEUED: ("#14b8a6", "content-loading-symbolic"),
+    # Magenta, the one hue the palette had not used, and a microphone with
+    # waves rather than a plain microphone: the icon is the signal that
+    # survives greyscale and colour blindness, and "the mic is picking up
+    # more than usual" is what dictating looks like.
+    AssistantState.DICTATING: ("#ec4899", "microphone-sensitivity-high-symbolic"),
     AssistantState.THINKING: ("#f59e0b", "content-loading-symbolic"),
     AssistantState.SPEAKING: ("#3b82f6", "audio-volume-high-symbolic"),
     AssistantState.INTERRUPTING: ("#a855f7", "media-playback-stop-symbolic"),
@@ -72,6 +82,7 @@ _STATE_LABELS = {
     AssistantState.IDLE: "Ready",
     AssistantState.LISTENING: "Listening…",
     AssistantState.QUEUED: "Heard you — waiting for the model…",
+    AssistantState.DICTATING: "Dictating…",
     AssistantState.THINKING: "Thinking…",
     AssistantState.SPEAKING: "Speaking…",
     AssistantState.INTERRUPTING: "Interrupting…",
@@ -158,7 +169,8 @@ _ORB_LIVE_PX = 124
 # not from a guess about which state "feels" big. The first version of this said
 # LISTENING alone and would have clipped the halo for the whole length of every
 # spoken reply.
-_LIVE_STATES = frozenset({AssistantState.LISTENING, AssistantState.SPEAKING})
+_LIVE_STATES = frozenset({AssistantState.LISTENING, AssistantState.DICTATING,
+                           AssistantState.SPEAKING})
 
 
 def _orb_size(state: AssistantState) -> int:

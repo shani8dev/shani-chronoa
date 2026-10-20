@@ -3087,7 +3087,8 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._orb.set_state(self._state)
         # The halo pulses only while the mic is hot or the reply is being heard;
         # the last level must not freeze on a thinking/idle halo.
-        if self._state not in (AssistantState.LISTENING, AssistantState.SPEAKING, AssistantState.INTERRUPTING):
+        if self._state not in (AssistantState.LISTENING, AssistantState.DICTATING,
+                               AssistantState.SPEAKING, AssistantState.INTERRUPTING):
             self._orb.set_level(0.0)
         # `set_can_answer` wins over the state machine's own label, because "no
         # model" is true of every state at once while "Ready" is only true of
@@ -3099,7 +3100,9 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         else:
             self._state_label.set_label(self._voice_aware_label())
             self._state_label.remove_css_class("dim-label")
-        dictating = self._is_dictating()
+        # **The state says it**, so the window no longer reaches into the
+        # app's own `_dictating` flag to answer a question about itself.
+        dictating = self._state is AssistantState.DICTATING
         # Built later than the first sync, which runs during construction.
         dictate = getattr(self, "_dictate_button", None)
         if dictate is not None:
@@ -3108,7 +3111,8 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
                 "Dictate: speak a long message, it ends when you stop talking "
                 "(Ctrl+Shift+D)")
         # The mic is genuinely hot in exactly two states.
-        hot = self._state in (AssistantState.LISTENING, AssistantState.INTERRUPTING)
+        hot = self._state in (AssistantState.LISTENING, AssistantState.DICTATING,
+                               AssistantState.INTERRUPTING)
         self._mic_icon.set_visible(True)
         self._mic_icon.set_from_icon_name(
             "audio-input-microphone-symbolic" if hot else "microphone-disabled-symbolic"
@@ -3124,9 +3128,6 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._stop_button.set_tooltip_text("Stop speaking (Esc)" if self._state is AssistantState.SPEAKING
                                            else "Stop thinking about this (Esc)")
 
-    def _is_dictating(self) -> bool:
-        return bool(getattr(self._app, "_dictating", False))
-
     def _voice_aware_label(self) -> str:
         """The state word, plus what the voice setting means right now.
 
@@ -3137,9 +3138,12 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         about both; it just cannot say which kind of listening or which kind of
         ready, so the label adds it.
         """
+        # **The state carries the word now.** This used to reach into the
+        # app's own `_dictating` flag to say "Dictating..." for a state that
+        # could not tell dictation from a question - which is a private
+        # attribute of another object, read from a window, to answer a
+        # question the state machine should have answered itself.
         label = self._state.label
-        if self._state is AssistantState.LISTENING and self._is_dictating():
-            return "Dictating…"
         if self._state is AssistantState.IDLE:
             strip = getattr(self, "_mode_strip", None)
             try:
@@ -3161,7 +3165,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         Ignored unless listening, so a level that arrives after the turn ended
         cannot make the halo pulse at nothing.
         """
-        if self._state is AssistantState.LISTENING:
+        if self._state in (AssistantState.LISTENING, AssistantState.DICTATING):
             self._orb.set_level(level)
 
     def set_playback_level(self, level: float) -> None:

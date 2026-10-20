@@ -158,7 +158,7 @@ class VoiceMixin:
                 self.window.set_state(AssistantState.INTERRUPTING)
                 GLib.timeout_add(180, self._settle_into_listening)
             else:
-                self.window.set_state(AssistantState.LISTENING)
+                self.window.set_state(self._listening_state())
             self.window.set_progress("")
         cues.play("listening", self.config)
         self._start_listening()
@@ -220,8 +220,19 @@ class VoiceMixin:
     def _settle_into_listening(self) -> bool:
         """Finish the interrupt handover, unless something else took over."""
         if self.window and self._listening and self.window.get_state() is AssistantState.INTERRUPTING:
-            self.window.set_state(AssistantState.LISTENING)
+            self.window.set_state(self._listening_state())
         return GLib.SOURCE_REMOVE
+
+    def _listening_state(self) -> AssistantState:
+        """The state the orb shows while the microphone is open.
+
+        **Dictation is its own state, not "listening for longer"** - it runs
+        for five minutes instead of twenty seconds and ends on a longer
+        silence, and the orb is the only thing on screen that says which
+        kind of listening this is.
+        """
+        return (AssistantState.DICTATING if getattr(self, "_dictating", False)
+                else AssistantState.LISTENING)
 
     def _on_speak_replies(self, action: Gio.SimpleAction, value: GLib.Variant) -> None:
         """Write the toggle, read it back, and hush a reply being said now."""

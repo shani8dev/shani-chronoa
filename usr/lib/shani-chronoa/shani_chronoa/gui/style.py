@@ -229,6 +229,14 @@ class StyleMixin:
             box-shadow: 0 0 18px rgba(20,184,166,0.4);
             animation: chronoa-listen 2.6s ease-in-out infinite;
         }
+        /* Dictation: the microphone is open for minutes rather than seconds,
+           and it is a different thing from a question. The slower pulse is
+           its own, because a long capture has a long rhythm. */
+        .chronoa-orb.state-dictating {
+            background-color: #ec4899;
+            box-shadow: 0 0 22px rgba(236,72,153,0.5);
+            animation: chronoa-listen 2.2s ease-in-out infinite;
+        }
         .chronoa-orb.state-thinking {
             background-color: #f59e0b;
             box-shadow: 0 0 18px rgba(245,158,11,0.5);
@@ -278,6 +286,9 @@ class StyleMixin:
         .reduce-motion .chronoa-orb.state-listening {
             animation: none;
             box-shadow: 0 0 20px rgba(34,197,94,0.6);
+        }
+        .reduce-motion .chronoa-orb.state-dictating {
+            animation: none;
         }
         .reduce-motion .chronoa-orb.state-queued {
             animation: none;

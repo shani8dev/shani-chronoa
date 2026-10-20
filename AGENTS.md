@@ -28601,3 +28601,66 @@ reached. **A test aimed at a branch the fixture never reaches is a test
 that cannot fail.** The on-branch now has its own test.
 
 23 files, one process each: 1,077 passed, 0 failed.
+
+## The orb could not tell dictation from a question (2026-10-20)
+
+**8i** asked for distinct states for armed-for-wake, dictating and
+talk-over. Two of the three were already covered - the caption says
+*"Ready - say "hey chronoa""* when the wake word is armed, and the mode
+strip's hands-free chip says when talk-over is on - and **dictation was the
+real one**.
+
+### Five minutes of the same green microphone
+
+Dictation runs for five minutes instead of twenty seconds and ends on a
+longer silence, and the orb showed the same green microphone either way. A
+person glancing at it could not tell which kind of listening was open.
+
+It is a **state of its own** now:
+
+- its own colour - magenta, the one hue the palette had not used;
+- **its own icon**: a microphone with waves rather than a plain microphone,
+  because *the icon is the signal that survives greyscale and colour
+  blindness*, and "the mic is picking up more than usual" is what dictating
+  looks like;
+- its own word, its own CSS rule, and its own reduced-motion rule (it
+  pulses, so it needs one);
+- and it is a **live state**, so the halo follows the microphone's level
+  while it runs.
+
+### The window no longer reaches into the app to ask
+
+The window read `self._app._dictating` - **a private attribute of another
+object, read from a window** - to decide whether to say "Dictating…" for a
+state that could not tell dictation from a question. The state carries the
+word now, so the reach is gone, and the check for its absence walks the
+**AST** rather than the source text: a string check for `"_app._dictating"`
+is satisfied by `getattr(self._app, "_dictating", False)`, which is the
+same reach written differently.
+
+### The fake that could not catch it
+
+The dictation test's `_Host` binds the voice mixin's real methods, and it
+did not bind the new one - so three tests failed with *"'_Host' object has
+no attribute '_listening_state'"*. **A fake missing a method the real
+object has is a fake that cannot catch this**, the same shape the file's own
+`set_progress` note describes. The fake has the method now, and two new
+tests drive the product's own path: dictating opens the dictating state,
+and an ordinary question opens the listening one - **both directions,
+because either alone is a test that cannot fail**.
+
+### The witnesses
+
+`tests/test_the_orb_tells_dictation_from_a_question.py` - the state, its
+colour, its icon, its word, its CSS rule, its reduced-motion rule, that the
+level can reach it, that the voice path opens it, and that the window does
+not reach into the app.
+
+**Two of the first four mutations were inert**, and both were the file's own
+lessons: one was a *no-op* (a comment was added where a line should have
+gone), and one dodged a string check - so the check became an AST walk.
+Then three more mutations - the voice path opening plain listening, the
+window reaching into the app again, and the dictating state borrowing
+listening's colour - each failed a test.
+
+12 files, one process each: 201 passed, 0 failed.
