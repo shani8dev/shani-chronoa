@@ -672,7 +672,12 @@ def test_dpkg_deb_accepts_the_control_file(tmp_path):
     this repository while all of them passed (2026-10-15)."""
     import shutil
     import subprocess
+
+    import pytest
     if shutil.which("dpkg-deb") is None:
+        # **`pytest` was never imported in this file**, so the skip raised
+        # `NameError` on any machine without dpkg-deb - which is every
+        # machine that is not Debian-family, which is the point of the skip.
         pytest.skip("dpkg-deb is not installed")
     stage = tmp_path / "stage"
     (stage / "DEBIAN").mkdir(parents=True)

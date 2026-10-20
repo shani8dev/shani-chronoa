@@ -21,7 +21,10 @@ def test_mix_sum_saturates_rather_than_averaging():
     # Two identical peaks sum to the ceiling, then stay there - never divide by
     # the count of participants, which would make a quiet speaker quieter.
     full = 32767
-    one = mix if False else media.mix_sum([_frame(full), _frame(full)])
+    # **The `mix if False else` was a leftover**, and `mix` is not a name in
+    # this module: the branch was never taken, so the undefined name sat
+    # there unnoticed. The call is the whole of it.
+    one = media.mix_sum([_frame(full), _frame(full)])
     assert len(one) == media.FRAME_BYTES
     vals = struct.unpack(f"<{media.FRAME_BYTES // 2}h", one)
     assert all(v == 32767 for v in vals), "saturating ceiling, not averaging"

@@ -28019,3 +28019,48 @@ recording: a flag that passes when the population is empty measures nothing,
 so the test also asserts the audit *ran* (it printed how many references it
 resolved, from how many files) ✓ - which is the control that makes the other
 assertion mean anything.
+
+## The test directory had never been linted, and two of its findings were real (2026-10-20)
+
+Every pyflakes run in this repository's history covered `usr/lib`, `usr/bin`
+and `tools` - **and never `tests/`**. Run over the tests for the first
+time, it reports **~160 findings**, almost all unused imports and dead
+locals. Two are not hygiene:
+
+- **`tests/test_landline_conference.py`**: `one = mix if False else
+  media.mix_sum(...)` - `mix` **is not a name in that module**. The branch
+  was never taken, so the undefined name sat there unnoticed, and a reader
+  would have had to work out why a conditional expression evaluated to
+  `False`.
+- **`tests/test_packaging.py`**: `pytest.skip("dpkg-deb is not installed")`
+  in a file that **never imports pytest** - so the skip raised `NameError`
+  on any machine without `dpkg-deb`, which is every machine that is not
+  Debian-family, which is the point of the skip.
+
+Both are fixed ✓.
+
+### And an automated pass over that population broke four files, three ways
+
+Removing the unused imports mechanically is the obvious next step, and it
+was attempted - **and it broke four files, in three different ways, each
+found by running it** rather than by reading the diff:
+
+1. **A rewritten statement lost its indentation.** A local import rewritten
+   as a single line came out at column zero, and the next line's
+   indentation became "unexpected indent".
+2. **The same import node was edited once per unused name.** A from-import
+   with three unused names is reported three times, and editing the same
+   line range three times shifts the file under the second edit.
+3. **A "redefinition of unused X" is the *local* import that shadows the
+   unused one** - so deleting the reported line removes the only
+   definition in scope, and the file that used to parse stops parsing.
+
+A fourth hazard needed a guard rather than a fix: **removing the only
+statement of a block** leaves the block empty.
+
+**The safe subset is module-level imports** - a module-level statement is
+never a block header and never a chain - and that part is mechanical. The
+local ones are not, and a pass that ships a broken test suite is worse than
+the lint findings it was cleaning up. **Left as measured work, with the
+mechanism written down**, rather than shipped as a script that silently
+corrupts files.
