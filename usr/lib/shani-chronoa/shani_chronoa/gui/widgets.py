@@ -1314,6 +1314,32 @@ class TranscriptView(Gtk.ScrolledWindow):
             button.connect("clicked", self._revert_turn_clicked, turn, handler)
             row.append(button)
 
+        # **And a door to the changes themselves.** The footer says how
+        # many files the turn wrote and offers to put them back; looking at
+        # them was a card away - a tool card carries "Show full diff", so
+        # the door exists - but the *summary* a person reads after the
+        # turn had no door of its own, and at the width the app opens at
+        # the sidebar that holds the panel is collapsed.
+        #
+        # **The same handler the tool card uses** (`on_show_diff`), so
+        # there is one way to open the panel and not two.
+        #
+        # **The label says what the person gets, not which panel carries
+        # it** - so the sentence cannot go stale when the panel is
+        # renamed, and it is true of the panel whatever it is called.
+        show_diff = getattr(self, "_on_show_diff", None)
+        if changed and callable(show_diff):
+            button = Gtk.Button(label="See the changes")
+            button.add_css_class("flat")
+            button.add_css_class("caption")
+            button.set_halign(Gtk.Align.START)
+            button.set_margin_start(28)
+            button.set_tooltip_text(
+                "Open the panel that lists the files this turn changed, with "
+                "the changed lines in each one.")
+            button.connect("clicked", lambda *_: show_diff())
+            row.append(button)
+
     @staticmethod
     def _revert_turn_clicked(button, turn: str, handler) -> None:
         try:

@@ -627,8 +627,18 @@ is trying to do, with the live things on the main window.
   was the missing part - which is 9k, and is done with it. The palette
   reaches the Settings pages, the Setup pages, Find, the body register
   and the routines.
-- [ ] **11s Turn footer** already carries cost/changed/Revert; add "Open in
+- [x] **11s Turn footer** already carries cost/changed/Revert; add "Open in
   Changes" when files changed.
+  **Done 2026-10-20.** The footer says how many files the turn wrote and
+  offers to put them back, and there was no way to *look* at them from
+  there - the door exists, but it is on a tool card ("Show full diff"),
+  and the footer is the line a person reads after the turn, with the
+  sidebar that holds the panel collapsed at the width the app opens at.
+  The button uses **the same handler the tool card uses**
+  (`on_show_diff`), so there is one way to open that panel and not two,
+  and its label says what the person gets ("See the changes") rather
+  than which panel carries it - so the sentence cannot go stale when
+  11f renames the panel.
 
 **Sidebar after**: Conversation · What Chronoa can do · Automation · Changes ·
 Phone & devices · Meetings · My files · Models · Privacy & permissions · Health

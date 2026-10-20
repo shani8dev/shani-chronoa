@@ -28798,3 +28798,39 @@ assertion 'application->priv->is_registered' failed` - the action
 silently does nothing. The test replaces the application's own
 `activate_action` with a recorder and watches the palette's path above
 it, which is the product's code and not the test's.
+
+## The turn footer listed the files and had no way to see them (2026-10-20)
+
+11s asks for a door from the turn footer to the files the turn changed.
+
+**The footer said how many files a turn wrote and offered to put them
+back, and there was no way to look at them from there.** The door
+existed - a tool card carries "Show full diff" - but it was on a
+*card*, and the footer is the line a person reads *after* the turn, with
+the sidebar that holds the panel collapsed at the width the app opens at.
+
+**The button uses the same handler the tool card uses**
+(`on_show_diff`), so there is one way to open that panel and not two -
+and the window already passes it, so nothing changed there.
+
+**The label says what the person gets ("See the changes") rather than
+which panel carries it**, so the sentence cannot go stale when 11f
+renames the panel, and it is true of the panel whatever it is called.
+
+### One witness that could not fail, and the mutation run said so
+
+The first run of the mutation set came back with **one survivor**: "the
+button is drawn on a turn that changed nothing". The mutation drops the
+`changed` half of the condition, and the test that should have caught
+it passed - because **that test's fixture passed no handler**, so the
+`changed` half was never the deciding one and the handler's absence
+decided it either way.
+
+**A fixture that does not contain the thing the test operates on is
+describing a different machine** - the `GSETTINGS_BACKEND` and
+`fake_bin` lessons in a new costume. The fixture now passes a handler,
+so the condition under test is the one that decides.
+
+`tests/test_the_turn_footer_has_a_door_to_the_changes.py` (5),
+`tools/mutations/turn_footer_changes.py` (4 mutations, 4 caught).
+Twenty-six files, one process each: 26 passed.
