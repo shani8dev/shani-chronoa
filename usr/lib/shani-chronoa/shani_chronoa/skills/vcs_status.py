@@ -161,6 +161,30 @@ def _git(target: Path) -> "tuple[list, str]":
     return rows, ""
 
 
+def git_state(target: Path) -> "tuple[str, int]":
+    """The branch and the number of changed files, in one subprocess.
+
+    `(branch, changed files)` - and `("", 0)` for anything that is not a
+    git checkout, or for a git that failed, because a chip that cannot read
+    the repository says nothing rather than saying zero.
+
+    **One subprocess.** `git status --short --branch` gives both, and the
+    rows this reads are the same rows the skill reads - so this is a
+    reader over `_git`'s output and not a second `git` call.
+    """
+    rows, error = _git(Path(target))
+    if error:
+        return "", 0
+    branch = ""
+    changed = 0
+    for key, value in rows:
+        if key == "branch" and not branch:
+            branch = value.split("...")[0].strip()
+        elif key == "changed":
+            changed += 1
+    return branch, changed
+
+
 def _run_skill(arguments: dict) -> str:
     raw = str(arguments.get("path") or "").strip()
     if not raw:

@@ -807,8 +807,21 @@ is trying to do, with the live things on the main window.
   running timers (Cancel, +5 min), today's first calendar event.
   **Done (2026-10-15)** as the empty window's home board: Today, recent conversations, quick actions.
 
-- [ ] **11q Project + branch** on the Work chip (done: project) and a git
+- [x] **11q Project + branch** on the Work chip (done: project) and a git
   status count, linking to Changes.
+  **Done 2026-10-20.** The chip already named the project's **folder**;
+  the branch and the count of changed files were the rest of it, and
+  neither had an answer anywhere on the screen. Both are in the chip's
+  **tooltip**, read in **one** subprocess - `git status --short --branch`
+  gives both, and running it twice for two numbers is twice the wait.
+  **The Diff panel became an addressable page**, so the chip's menu has a
+  **"See what changed"** row with a real target: the panel was reachable
+  only by holding the mouse, from a sidebar that is collapsed at the width
+  the app opens at.
+  **Nothing is said when there is nothing to say.** A folder that is not
+  a checkout, a git that failed, and no project at all answer the same
+  way - silence - because "0 files changed" for a folder that is not a
+  repository is a confident wrong answer.
 - [x] **11r Search** button in the header (Ctrl+K palette is invisible today),
   and the palette gains every Settings page, Setup, Find, Body, routines.
   **Done 2026-10-20.** The header **has had a search button** for a while

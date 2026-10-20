@@ -29269,3 +29269,51 @@ Both are deleted ✓ - the guards and the suites are green ✓.
 **A sweep that reads the verdicts properly finds what a sweep that does
 not** - and the file that "failed" for a cap reason was the one file
 holding a real failure ✓.
+
+## The work chip named its project but not its state (2026-10-20)
+
+11q asked for the branch and a git status count on the Work chip, linking
+to Changes.
+
+**The chip already named the project's folder** - the folder name rides
+on it in Build mode, so "which code is it changing" was answered without
+opening anything. **The branch and the count were the rest of it**, and
+neither had an answer anywhere on the screen.
+
+### What is on screen now
+
+**The chip's tooltip carries both**, read in **one** subprocess -
+`git status --short --branch` gives the branch *and* the changed rows,
+and running git twice for two numbers is twice the wait.
+
+**The Diff panel became an addressable page**, so the chip's menu has a
+**"See what changed"** row with a real target. The panel was reachable
+only by holding the mouse, from a sidebar that is collapsed at the width
+the app opens at - so a `main:diff` page and a `show_page` branch are
+what the row needed.
+
+**Nothing is said when there is nothing to say.** A folder that is not a
+checkout, a git that failed, and no project at all answer the same way:
+silence. **"0 files changed" for a folder that is not a repository is a
+confident wrong answer**, and the reader returns `("", 0)` for all three.
+
+### Three things the build taught
+
+- **The reader belongs on the strip that owns the chip.** It was written
+  on the window first and the mode strip's refresh called it - so every
+  strip test failed with *"'_ModeStrip' object has no attribute
+  '_project_state_sentence'"*. **A method is called by the class that
+  calls it**, and the chip is the strip's ✓.
+- **A section's rows are not readable from the menu model.** The door was
+  first a section of its own, and the test could not find the row inside
+  it - `get_n_items()` counts the *sections*, and a section's own items
+  are not reachable. So it is **a row of its own**, and the row's label
+  and target are read out of the model ✓. **A control nobody can check
+  is a control nothing can see.**
+- **The menu's labels come back as `GLib.Variant`s**, not strings - so
+  the first version of the test compared a variant to a string and
+  failed on a menu that was right.
+
+`tests/test_the_work_chip_says_which_project_it_is_on.py` (7),
+`tools/mutations/work_chip_project.py` (5 mutations, 5 caught).
+Forty-nine files, one process each: 49 passed.

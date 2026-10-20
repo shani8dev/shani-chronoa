@@ -337,6 +337,15 @@ class _ModeStrip(Gtk.Box):
         project.append("Choose project folder…", "app.choose-project")
         project.append("No project", "app.clear-project")
         menu.append_section("Project", project)
+        # **And the door to what it has changed.** The chip says which
+        # project it is on; the panel that lists the changes was a sidebar
+        # row away, and the sidebar is collapsed at the width the app
+        # opens at.
+        #
+        # **A row of its own, not a section**: a section's rows are not
+        # readable from the menu model, so a row inside one is a control
+        # nothing can check.
+        menu.append("See what changed", "app.show-page::diff")
         button.set_menu_model(menu)
         button.update_property(
             [Gtk.AccessibleProperty.LABEL],
@@ -1152,7 +1161,8 @@ class _ModeStrip(Gtk.Box):
             self._work_chip.set_tooltip_text(
                 f"{self._answer_tooltip('Works on', capability, self._CAPABILITY)}. "
                 f"{self._answer_tooltip('Before acting', plan, self._PLAN)}."
-                + (f" Project: {folder}." if folder else ""))
+                + (f" Project: {folder}." if folder else "")
+                + self._project_state_sentence(folder))
             ambient = self._read_ambient()
             auto = self._read_auto()
             self._draw(self._permissions_chip, self._permissions_label, auto,
@@ -1290,6 +1300,40 @@ class _ModeStrip(Gtk.Box):
             f"{self._answer_chip.get_tooltip_text() or 'Where it may go'}. "
             f"{message}")
         logger.warning("mode strip: %s", message)
+
+    def _project_state_sentence(self, folder: str) -> str:
+        """What the project looks like right now, for the work chip's tooltip.
+
+        **The branch and the count of changed files**, read in one
+        subprocess - `git status --short --branch` gives both, and running
+        it twice for two numbers is twice the wait.
+
+        **Silent when there is nothing to say.** A folder that is not a
+        checkout, a git that failed, or no project at all all answer the
+        same way: nothing. A chip that said "0 files changed" for a folder
+        that is not a repository would be a confident wrong answer.
+
+        **Never raises.** The tooltip is set on every refresh of the
+        strip, and a refresh that dies takes the window with it.
+        """
+        if not folder:
+            return ""
+        try:
+            from pathlib import Path
+
+            from shani_chronoa.skills import vcs_status
+
+            branch, changed = vcs_status.git_state(Path(folder))
+        except Exception:  # noqa: BLE001 - a glance must not take the window down
+            logger.debug("the project state could not be read", exc_info=True)
+            return ""
+        if not branch:
+            return ""
+        said = f" Branch: {branch}."
+        if changed:
+            said += (f" {changed} file" + ("" if changed == 1 else "s")
+                     + " changed.")
+        return said
 
     def _answer_tooltip(self, what: str, current: str, table) -> str:
         """`"Whether it plans first: Plan"` - from the table, not by hand.
@@ -3755,6 +3799,10 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         if page_id == "conversation":
             self.present()
             return True
+        if page_id == "diff":
+            # The panel of changes, addressable like every other page.
+            self._show_surface("diff")
+            return True
         if page_id == "quick-ask":
             # **Unprefixed, and measured.** `Gio.Application.lookup_action`
             # strips nothing: on a registered `status` action, `lookup_action
@@ -5698,6 +5746,11 @@ def _register_main_pages() -> None:
         "main",
         [("conversation", "Conversation"), ("quick-ask", "Quick ask"),
          ("conversations", "Saved conversations"), ("panels", "Panels"),
+         # The panel of changes, so a notification, a keybinding or the
+         # work chip's menu can name it. It was reachable only by holding
+         # the mouse - and the work chip's "See what changed" row needs a
+         # target that is an action.
+         ("diff", "Changes"),
          # Registered here and not only in SURFACE_IDS: the button beside
          # Dictate calls pages.show("listening"), and it returned False -
          # found by pressing it, not by reading it. A surface nobody
