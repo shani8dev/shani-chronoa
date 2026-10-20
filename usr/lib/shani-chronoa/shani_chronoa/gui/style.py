@@ -271,6 +271,7 @@ class StyleMixin:
         }
         .chronoa-halo.halo-idle { border-color: alpha(@theme_fg_color, 0.18); }
         .chronoa-halo.halo-listening { border-color: rgba(34,197,94,0.65); }
+        .chronoa-halo.halo-dictating { border-color: rgba(236,72,153,0.6); }
         .chronoa-halo.halo-queued { border-color: #14b8a6; }
         .chronoa-halo.halo-thinking { border-color: rgba(245,158,11,0.6); }
         .chronoa-halo.halo-speaking { border-color: rgba(59,130,246,0.6); }
