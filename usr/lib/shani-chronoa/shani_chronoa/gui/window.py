@@ -608,7 +608,11 @@ class _ModeStrip(Gtk.Box):
     _PRESENCE = (
         ("active", "Here",
          "Awake and answering", "user-busy-symbolic"),
-        ("drowsy", "Drowsy",
+        # **"Loaded", not "Drowsy".** A word a person has to look up is
+        # not a word for a chip, and this one sat on the main window beside
+        # "Here" and "Asleep" - the only chip whose word needed explaining.
+        # The tooltip has said "Loaded, but idle" all along.
+        ("drowsy", "Loaded",
          "Loaded, but idle - it will let go of the model", "user-idle-symbolic"),
         ("sleeping", "Asleep",
          "It has let go of the model and will not answer until woken",

@@ -270,10 +270,21 @@ Open, from the same review (voice / coder / everyday person):
   loop: Build chip -> pick a project folder (shown in the work chip) -> Diff
   panel opens on the first write -> Accept/Reject -> /undo. Name the folder in
   the chip; open Diff automatically on a write.
-- [ ] **8m Everyday path.** Jargon on the main window: organ, posture, egress,
+- [x] **8m Everyday path.** Jargon on the main window: organ, posture, egress,
   presence, drowsy, barge-in, "Brain/Ears/Eyes/Imagine" in setup. Rename in the
   UI layer only (keys unchanged). Suggestion chips should include one voice
   and one routine example.
+  **The main window and the chips are done 2026-10-20.** Most of the
+  jargon was already gone (the strip was redesigned); what was left was the
+  presence chip's **"Drowsy"**, one word with no room for an explanation,
+  beside "Here" and "Asleep" - while its own tooltip had said "Loaded, but
+  idle" all along. It says **"Loaded"** now, and a guard holds the word
+  list down. The empty state offers **a voice and a routine** as well as the
+  battery and the clock ("Listen", "My routines"), measured in a real
+  460x640 capture: all eight chips sit above the organ strip, in three rows.
+  **Still open: "Brain/Ears/Eyes/Imagine" in setup**, and the jargon in
+  the Learning panel's rows ("a distilled router", "the outcome model"),
+  which 10d also names.
 - [x] **8n Status line duplicates the state word**: "Ready" then
   "Ready (this computer: local)" (`brain._llm_status_text`), and "local" is a
   placeholder model name.

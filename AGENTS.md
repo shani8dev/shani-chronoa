@@ -28431,3 +28431,57 @@ reading's first line, and the Driving alert's sentence. The two readings
 also assert that the detail is *still there* - moved, not dropped.
 
 30 files, one process each: 993 passed, 0 failed.
+
+## One chip said "Drowsy", and the empty state had no voice in it (2026-10-20)
+
+**8m** ("Everyday path") asked for two things: no jargon on the main
+window, and a voice and a routine among the suggestion chips. Most of the
+jargon was already gone - the mode strip was redesigned and says "Here",
+"Nothing leaves", "Ask first" - and what was left was one word.
+
+### "Drowsy"
+
+The presence chip is one word, with no room for an explanation, and it sat
+between **"Here"** and **"Asleep"** saying **"Drowsy"** - a word a person
+has to look up. Its own tooltip had said *"Loaded, but idle - it will let
+go of the model"* all along, so the tooltip was right and the chip was
+not. It says **"Loaded"** now.
+
+**The guard found its own blind spot, twice, and both times by mutation.**
+The first version read the *strip's* labels and passed with "Drowsy" back
+on the chip - because the presence chip is **built, not appended**: it
+moved to the palette, where the model picker lives, so the strip never
+draws it. The second version read the strip's labels *and* had a positive
+control, and the control failed instead - the control was looking for a
+word that is not on the strip.
+
+So the guard now checks **the word tables themselves** (the words *are* the
+claim) *and* the drawn strip, and it names each table's owner - the
+model picker's presence words live on the window, not on the strip. The
+control proves the labels searched are the chips' own.
+
+### The empty state taught six things and not the two that matter
+
+The chips were the battery, the clock, a timer, the model, the web and a
+screenshot. **Nothing about speaking and nothing about a saved request** -
+the two things the assistant does that no other tool does. Both are in now:
+**"Listen"** and **"My routines"**, gated on the live registry like every
+other chip, because a chip that offers something the machine cannot do is a
+broken promise.
+
+**The fit was measured, because the file records it as measured.** The
+suggestion bar's height at the real column width: **92px with six chips,
+138px with eight** - and a real 460x640 capture of the empty window shows
+all eight chips in three rows above the organ strip. (The "149px in a
+162px viewport" figure in this file is *stale*: the chrome shrank by 76px
+in an earlier pass, so the transcript is taller than it was.)
+
+### The witnesses
+
+`tests/test_no_jargon_on_the_main_window.py` - the tables, the drawn
+strip, and the control that proves it looked. And
+`tests/test_the_empty_state_offers_a_voice_and_a_routine.py` - the two
+prompts, their short names, and that a build without the skill does not
+offer them.
+
+10 files, one process each: 136 passed, 0 failed.

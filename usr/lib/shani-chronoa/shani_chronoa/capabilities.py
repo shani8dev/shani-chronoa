@@ -1063,6 +1063,11 @@ _EXAMPLES: dict[str, str] = {
     "bluetooth_devices": "Connect my headphones",
     "cleanup_report": "What can I clean up to free space?",
     "do_not_disturb": "Turn on Do Not Disturb",
+    # **A voice and a routine**, which the empty state did not offer at all:
+    # six chips about the battery, the clock and the screen, and nothing
+    # about the two things the assistant does that no other tool does.
+    "recording": "What can be heard around the computer right now?",
+    "routines": "What routines have I saved?",
     "media_control": "Pause the music",
     "recommend_model": "Which model would fit this machine?",
     "speak": "Read that back to me",
@@ -1082,6 +1087,8 @@ _SUGGESTION_ORDER: tuple[str, ...] = (
     "Which model would fit this machine?",
     "Search the web for the Arch wiki",
     "Take a screenshot",
+    "What can be heard around the computer right now?",
+    "What routines have I saved?",
 )
 
 #: The **name** of each prompt above, for a chip too narrow to hold the
@@ -1114,6 +1121,8 @@ SUGGESTION_WORDS: dict[str, str] = {
     "Which model would fit this machine?": "Which model?",
     "Search the web for the Arch wiki": "Search the web",
     "Take a screenshot": "Screenshot",
+    "What can be heard around the computer right now?": "Listen",
+    "What routines have I saved?": "My routines",
 }
 
 _HELP_SUGGESTION = "What can you do?"

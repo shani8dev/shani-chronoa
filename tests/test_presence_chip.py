@@ -89,7 +89,12 @@ def test_the_chip_shows_the_reconciled_state(gapp, monkeypatch, chosen, is_up):
         expected = presence.reconcile(
             chosen if chosen is not None else presence.detect(lambda: is_up),
             lambda: is_up)
-        assert _word(strip) == WORDS[expected.value], (
+        # **The word comes from the strip's own table**, not from a second
+        # copy of it here. A hand-kept copy is a list that rots - and this
+        # one had already rotted into a test that pinned a word nobody can
+        # read ("Drowsy"), which is what the wording is for.
+        words = {row[0]: row[1] for row in _ModeStrip._PRESENCE}
+        assert _word(strip) == words[expected.value], (
             f"chosen={chosen} is_up={is_up}: the chip says {_word(strip)!r} and "
             f"reconcile says {expected.value!r}")
     finally:
