@@ -28325,3 +28325,53 @@ reached and one at a `use-markup` call that is the default anyway - so both
 were re-aimed at the lines that carry the property.
 
 25 files, one process each: 906 passed, 0 failed.
+
+## An interrupted commit left a null-byte ref and a corrupt index (2026-10-20)
+
+A `git commit` was killed part-way through by a server restart, and it left
+**two** things broken rather than one:
+
+- `refs/heads/master` was **forty NUL bytes and a newline** - a
+  half-written ref, so `git` reported *"your current branch appears to be
+  broken"* and `git update-ref` refused with *"reference broken"*;
+- **`.git/index` was corrupt** ("bad signature 0x00000000"), so every
+  command that read it failed;
+- and **sixteen zero-length loose objects** were left in `.git/objects` -
+  the tree and the blobs of the commit that never finished.
+
+**The working tree was never touched**, because a commit does not touch it -
+so every change was still on disk and `git diff` was the only thing that
+could not run.
+
+### The recovery, and what each step was for
+
+1. **Copy the broken state aside first** (`.git/index`, the ref,
+   `COMMIT_EDITMSG`) - so there was something to go back to.
+2. **Find the last good commit in the reflog** - `1918f0a` - and check the
+   object exists before trusting it (`git cat-file -t`).
+3. **`git update-ref` cannot repair a broken ref** - it has to *resolve* the
+   old value first, and the old value is not a sha. So the ref file was
+   removed and written afresh, and `update-ref` then created it properly
+   (with a reflog entry ✓).
+4. **`git read-tree <commit>` rebuilds the index** without touching the
+   working tree - which is what `git reset` would have done to the index
+   while *also* moving HEAD, and the point of the exercise was to change
+   nothing but the index.
+5. **`git fsck --connectivity-only` told the two things apart**: nothing
+   *reachable* was missing, and all sixteen empty objects were referenced by
+   **zero** commits - so they were the interrupted commit's garbage and
+   could go.
+
+### The part that was surprising
+
+**The commit had reached the remote before the local ref was broken.** The
+push had completed, so `origin/master` already carried the change and only
+the *local* branch pointer was lost - which is why the recovery ended with a
+`git reset --soft` onto the remote's commit rather than a re-commit: the two
+commits had **identical trees** (`git rev-parse HEAD^{tree} origin/master^{tree}`
+was the same sha), so the second was a duplicate of the first with a
+different timestamp.
+
+**A tree is what a commit is** - two commits with the same tree are the
+same change, however different their metadata. Comparing the trees is the
+check that says "align, do not re-commit", and it is one line.
