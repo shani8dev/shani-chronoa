@@ -41,6 +41,7 @@ from .attaching import AttachingMixin
 from .conversations_menu import ConversationsMenuMixin
 from .sidebar import SidebarBreakpoint, SidebarPage
 from . import rail as rail_module
+from . import context_bar as context_bar_module
 from . import task_card as task_card
 from . import timers as timers_module
 from .organs import OrganPanel, OrganStrip, ORGAN_IDLE_CSS
@@ -2779,6 +2780,18 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # two places is two answers to one question.
         self._timer_strip = timers_module.TimerStrip()
         main_box.append(self._timer_strip)
+
+        # **How full the model's window is.** The rail's Context card drew
+        # it, and the rail is deleted below 1040px - so "it forgot what I
+        # said" was indistinguishable from "the window is full" on the
+        # window the app opens at, which is the rail's own card saying it
+        # is the most alarming thing that can happen to a local assistant.
+        #
+        # **It appears only when it has something to say** - a window at 15%
+        # is a window working normally, and a bar for it would be chrome on
+        # every window.
+        self._context_bar = context_bar_module.ContextBar()
+        main_box.append(self._context_bar)
         # Same reading width as the conversation above it, so the composer lines
         # up with the turns instead of running the full width of the window.
         composer_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
@@ -3298,6 +3311,14 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
                 self._timer_strip.refresh()
             except Exception as exc:  # noqa: BLE001 - the tick must never die
                 logger.warning("The timer strip failed to refresh: %s", exc)
+        # **And the context bar**, on the same tick and **the same report**
+        # the rail reads - one answer to one question, and the rail's card
+        # and this bar cannot disagree about how full the window is.
+        if getattr(self, "_context_bar", None) is not None:
+            try:
+                self._context_bar.set_report(self._rail_context())
+            except Exception as exc:  # noqa: BLE001 - the tick must never die
+                logger.warning("The context bar failed to refresh: %s", exc)
         # **The bell is refreshed by the same tick**, because it answers the
         # same question the rail does - and the rail is hidden below 1040px,
         # so on the default window this is the only thing keeping background

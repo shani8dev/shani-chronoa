@@ -28963,3 +28963,71 @@ Twenty-nine files, one process each: 29 passed.
 
 **Still open: the context meter**, which is in no panel and in the rail
 only - the one fact left that is both lost and not elsewhere.
+
+## The context meter was drawn on a column the app deletes (2026-10-20)
+
+1a's measurement (yesterday's entry) left **one** fact that was both lost
+and not elsewhere: **how full the model's window is**.
+
+### What the rail's own card said about it
+
+The rail's Context card exists to draw that, and its docstring says why
+in its own words:
+
+> which made "it forgot what I said" indistinguishable from "the window
+> is full" - the single most alarming thing that can happen to a local
+> assistant, and the one nobody can see coming.
+
+**That card was drawn on a column the app deletes below 1040px, and the
+app opens at 460.** So the distinction it drew was unavailable exactly
+where a person would need it.
+
+### What is on screen now
+
+**A bar above the composer, at every width** - and it appears **only when
+it has something to say**. The rail's own meter says where "it forgot
+what I said" starts: **75% of what can still be sent**, which is the
+threshold its level bar already uses for its colours. A window below that
+is a window working normally, and a bar for it would be chrome on every
+window for a reading nobody needs - and the window's minimum height is a
+promise.
+
+**It shows the *usable* share, not the raw one**, for the reason the rail
+already gave: a window that is 80% full of input while 1,024 tokens are
+held back for the reply is 91% used, and the number that answers "can
+another question still fit" is the second one. The raw share and the
+reserve are in the tooltip, so nothing is lost.
+
+**The tooltip carries the breakdown** - what is filling the window - and
+says when part of the conversation was already dropped to make the request
+fit.
+
+**The bar reads the same report the rail reads** (`_rail_context`), so
+the rail's card and the bar cannot disagree about how full the window
+is.
+
+### A GTK4 fact, found by running it
+
+**`Gtk.LevelBar` has no text in GTK4.** `set_text` was GTK3, and GTK4's
+`Gtk.LevelBar` has neither it nor a label child - so the number goes in
+the tooltip and in the accessible name, and the bar itself is the
+reading. Which is the rail's own bar, and the shape the code's comment
+gives: *"a share of something is read faster as a length than as a
+number"*.
+
+### One mutation that was malformed, and the runner that refused it
+
+The set's "the tooltip loses the breakdown" mutation replaced the loop
+body with a `pass` at the wrong indentation, and the runner **refused to
+write it** - `MalformedMutation: the spliced text does not parse` -
+and reported it as **unmeasurable rather than as a survivor**. That is
+the harness's own rule working: a mutation that cannot parse is a
+mutation that was never applied, and counting it as "not caught" would be
+a false clean.
+
+`tests/test_the_context_bar.py` (9), `tests/test_the_window_carries_the_context_bar.py` (3),
+`tools/mutations/context_bar.py` and `context_bar_wiring.py` (7 mutations, 7 caught).
+Thirty-four files, one process each: 34 passed.
+
+**Nothing is left of 1a that is lost.** 1b - rail-first at narrow widths
+versus a one-line ticker - is the open half.

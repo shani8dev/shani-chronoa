@@ -309,6 +309,15 @@ class StyleMixin:
         /* The composer card: the field, the model it goes to and Send as one
            bordered unit. The field inside it loses its own border - one
            outline, lit when anything in the card has focus. */
+        /* The context bar: a slim level bar above the composer, shown
+           only when the model's window is filling. */
+        .context-bar {
+            margin-top: 2px;
+            margin-bottom: 2px;
+        }
+        .context-bar levelbar {
+            min-height: 8px;
+        }
         .composer-card {
             background-color: @theme_base_color;
             border: 1px solid alpha(@theme_fg_color, 0.16);

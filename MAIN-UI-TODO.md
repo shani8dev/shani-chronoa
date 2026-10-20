@@ -139,7 +139,7 @@ is inserted.
   | the files this turn changed | the turn footer, and its new "See the changes" door |
   | goals, sensing, made files | a panel |
   | **the running timers** | **the strip above the composer (2026-10-20)** |
-  | **the context meter** | **still only in the rail** |
+  | **the context meter** | **the bar above the composer (2026-10-20)** |
   | the session-wide changed list | the Diff panel |
 
   So of the nine that were "only in the rail", **six were already reachable**
@@ -152,8 +152,16 @@ is inserted.
   the composer, at every width, with the same Cancel and five-more-minutes
   buttons - and **the rail no longer carries a second copy**, because a fact
   in two places is two answers to one question.
-  **Still open: the context meter**, which is in no panel and in the rail
-  only. It is the one fact left that is both lost and not elsewhere.
+  **The context meter is the last one, and it is now a bar above the
+  composer too** (2026-10-20). The rail's Context card said it was the
+  thing that made "it forgot what I said" distinguishable from "the window
+  is full" - "the single most alarming thing that can happen to a local
+  assistant" - and it was drawn on a column the app deletes at its own
+  width. The bar appears **only when it has something to say**, at the
+  rail's own threshold of 75% of what can still be sent, so a quiet
+  conversation costs no chrome.
+  **So nothing is left of 1a that is lost**, and 1b - rail-first at
+  narrow widths versus a one-line ticker - is the open half.
 - [ ] **1b** Decide and record: rail-first at narrow widths (chat becomes the
   sheet) versus a one-line ticker. Allocation-measured at 380/460/760/1024.
 
