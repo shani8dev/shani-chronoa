@@ -29,7 +29,10 @@ GUI = pathlib.Path("usr/lib/shani-chronoa/shani_chronoa/gui/style.py")
 # that has to update this list, rather than a colour quietly slipping through.
 # #14b8a6 is `queued` - the microphone is open and has heard something, but the
 # model is still busy, so it sits between listening (green) and thinking (amber).
-STATE_PALETTE = {"#22c55e", "#14b8a6", "#f59e0b", "#3b82f6", "#a855f7", "#ef4444"}
+# #ec4899 is `dictating` - the microphone is open for minutes rather than
+# seconds, so it is a different thing from a question and says so.
+STATE_PALETTE = {"#22c55e", "#14b8a6", "#ec4899", "#f59e0b", "#3b82f6",
+                 "#a855f7", "#ef4444"}
 
 
 def _css() -> str:

@@ -101,8 +101,8 @@ def control_backend():
     if isinstance(backend, AtspiBackend):
         from shani_chronoa.config import ChronoaConfig
         if not ChronoaConfig().sense_allowed("accessibility"):
-            return None, ("the accessibility bus is the route for windows here, and it is "
-                          "turned off. Enable the 'accessibility-sense-enabled' sense"
+            return None, ("the accessibility bus is the route for windows here. "
+                          + ChronoaConfig().sense_allowed_reason("accessibility")
                           + (f". {backend.note}" if backend.note else ""))
     return backend, why
 
@@ -267,8 +267,8 @@ def _via_accessibility(arguments: dict | None = None) -> str:
     if not config.sense_allowed("accessibility"):
         return (
             "xdotool cannot see this session, and the accessibility bus that "
-            "could is turned off. Enable the 'accessibility-sense-enabled' "
-            "sense to list windows this way instead."
+            "could is the route instead. "
+            + config.sense_allowed_reason("accessibility")
         )
     try:
         windows, _ = accessibility._bounded(accessibility.read_window_titles)

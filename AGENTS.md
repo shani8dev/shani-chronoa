@@ -28664,3 +28664,55 @@ window reaching into the app again, and the dictating state borrowing
 listening's colour - each failed a test.
 
 12 files, one process each: 201 passed, 0 failed.
+
+## Four refusals told a person to enable a key no screen shows (2026-10-20)
+
+**11k** said every gate should be a `consent_banner` - the switch's name
+and a **Turn on** button - and listed the panels that were left. Measured,
+the panels had all been done (Phone, Calendar, Desktop, Goals and the rest
+already call `consent_banner`), and the Triggers page was the one left -
+which is the previous entry.
+
+**The same class, in the skills' refusals, was not.** A person who was
+*declined* by a skill was told:
+
+> using other apps' controls is turned off (enable 'input-control-enabled'
+> in Settings)
+
+**A key is not a word any screen shows.** Settings calls that switch
+*"Let Chronoa act"*, and the accessibility one *"Screen text
+(accessibility)"* - so the instruction pointed at a spelling nobody would
+find by looking for it.
+
+Four sites, in three files, and they now say what Settings says:
+
+- `login_history` - the switch is *"Who is on this machine"*;
+- `list_windows` (twice) - *"Screen text (accessibility)"*;
+- `ui_elements` - *"Let Chronoa act"*.
+
+**The shared helpers are the ones that know the wording** -
+`config.sense_allowed_reason()` for a sense and
+`capabilities.gate_label()` for a tool's consent key - so the refusal
+and the Settings row cannot disagree about what the switch is called.
+
+### What the measurement did *not* include
+
+**The schema descriptions still name their keys, and that is right.** They
+are read by the *model*, which needs the exact spelling - and a search of
+the skills found **86 files** carrying a key, against **4** person-facing
+refusals. The two populations are different things, and the fix that
+mattered was four sentences rather than eighty-six.
+
+### The witnesses
+
+`tests/test_the_skills_name_the_switch_not_the_key.py` - each refusal
+names the switch as Settings spells it, and not the key. Three mutations
+put the key back and each failed a test.
+
+**One test had to be rewritten** because the switch it exercises **is
+granted on this machine** (`input-control-enabled` defaults on), so the
+refusal was never produced. A test that only works when the machine
+happens to have the switch off is a test that cannot run - so the config
+is stubbed to say otherwise.
+
+19 files, one process each: 628 passed, 0 failed.

@@ -555,8 +555,18 @@ is trying to do, with the live things on the main window.
   "Developer" switch with Driving and the raw logs.
 
 **Show differently**
-- [ ] **11k Every gate** as `consent_banner` (switch name + Turn on) - done for
+- [x] **11k Every gate** as `consent_banner` (switch name + Turn on) - done for
   9 panels, Phone/Desktop/Triggers left.
+  **Done 2026-10-20.** The panels were already done - Phone, Calendar,
+  Desktop, Goals and the rest all call `consent_banner`, and the Desktop's
+  gate button was changed from "Open Privacy settings" to "Turn on" in an
+  earlier pass. Triggers was the one left, and it now names its switch and
+  offers **Turn on** too.
+  **The same class, in the skills' refusals, was also done:** a person
+  declined by a skill was told to "enable
+  'accessibility-sense-enabled' in Settings" - a key no screen shows. Four
+  person-facing refusals (login history, list windows twice, ui_elements)
+  now name the switch as Settings spells it.
 - [ ] **11l Engineering text** behind "Details" everywhere (approval pattern).
 - [ ] **11m Paths** as `~/...` with the full path on hover.
 - [ ] **11n Status rows** ("Ready / Turned off / Needs attention") drop where a

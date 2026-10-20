@@ -62,9 +62,12 @@ SCHEMA = {
 def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
     if config.sense_allowed(_SENSE):
         return True, ""
-    return False, (f"reading login history is turned off ({config.sense_allowed_reason(_SENSE)}; "
-                   f"enable 'sessions-sense-enabled' in Settings). It reports other "
-                   f"people's presence on this machine, so it is off unless you choose it.")
+    # **The shared helper names the switch** - "Switch on "Who is on this
+    # machine" in Settings to use it" - so this sentence does not name the
+    # key as well. The key is not a word any screen shows.
+    return False, (f"{config.sense_allowed_reason(_SENSE)} It reports other "
+                   f"people's presence on this machine, so it is off unless you "
+                   f"choose it.")
 
 
 def _limit(arguments: dict) -> int:

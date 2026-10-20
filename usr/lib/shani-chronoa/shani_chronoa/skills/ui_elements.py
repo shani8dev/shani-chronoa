@@ -84,7 +84,12 @@ class UIError(Exception):
 
 def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
     if not config.input_control_enabled:
-        return False, "using other apps' controls is turned off (enable 'input-control-enabled' in Settings)"
+        # **The switch's own name**, which is what Settings calls it - not
+        # the key, which is not a word any screen shows.
+        from shani_chronoa import capabilities
+        return False, (
+            "using other apps' controls is turned off - turn on "
+            f"\"{capabilities.gate_label('input-control-enabled')}\" in Settings")
     return True, ""
 
 
