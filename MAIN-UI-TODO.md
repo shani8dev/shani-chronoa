@@ -206,18 +206,49 @@ action.** It reads a 19,111-record log of everything this machine did.
 
 ### 5 — Consent is per-call in a 40-call turn, with no forecast
 
-- [ ] **5a** A forecast, not a broader grant: prompt *n* of about N, and on the
+- [x] **5a** A forecast, not a broader grant: prompt *n* of about N, and on the
   first prompt of a turn one line naming the whole shape (writes 2 files, 1
   network request). The person stays the authoriser of every call; they stop
   being ambushed by the count.
+  **Retired 2026-10-20: the number is not available to compute.**
+  Measured, the prompt is composed of three stages - what is about to happen
+  and where, which permission it needs, what "allow once" means, and that
+  Escape means no - and it already says *"the next one asks again"*. What it
+  does not carry is a count, and **a count of "about N" cannot be computed
+  at the first prompt**: the offer of tools is **re-made every round**
+  (`build_messages()` runs the selection per round), so the set of things
+  that could need asking is redrawn as the turn goes on; and a model may
+  call a tool it was never offered (the correction path, measured
+  2026-10-08), so even a per-round bound can be exceeded by one.
+  **Any N would be a guess**, and this repository's own rule is that a
+  number nobody measured is the confident wrong answer - a forecast that
+  says "3" and is asked 5 times is worse than no forecast, because the
+  person has been told a shape that did not happen.
+  **What is sound, and what would take it:** the number of prompts *already
+  asked this turn* (a fact - the permission layer is the one asking, and it
+  already keys turn-scoped grants by the turn label), and the **steps of a
+  stored plan**, which is exact. The first is a counter and a line in the
+  prompt's first stage; the second needs the plan where the prompt is
+  composed. Neither is a forecast of the *unasked* part, and the item
+  asked for one.
+  **A forecast of what is coming would need the offer at the permission
+  layer** - the assistant holds the selection, the dispatch asks, and the
+  prompt is composed four hops away - and even then it would hold for the
+  next round only.
 
 ### 6 — Nothing shows what the model was offered, or why it picked
 
 35% of the tools actually sent share no word with the request; `ranked()`
 reorders by a dict lookup plus a learned multiplier, all in silence.
 
-- [ ] **6a** A "why that tool" inspector on a tool card: request → offered
+- [x] **6a** A "why that tool" inspector on a tool card: request → offered
   tools with scores → learned multiplier → winner.
+  **Already done**, and the list was stale rather than the work: the
+  record exists (`tool_select.explain()` builds a `Selection` with the
+  request, the score, the learned multiplier and the winner; the
+  assistant fires it on the sink as `on_selection`; the conversation
+  keeps it; the card renders `Selection.why(name)` as a "Why this tool"
+  block). `tests/test_why_this_tool.py` passes 41.
 
 ### 7 — Small measured ones
 

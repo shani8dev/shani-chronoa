@@ -28834,3 +28834,58 @@ so the condition under test is the one that decides.
 `tests/test_the_turn_footer_has_a_door_to_the_changes.py` (5),
 `tools/mutations/turn_footer_changes.py` (4 mutations, 4 caught).
 Twenty-six files, one process each: 26 passed.
+
+## Two work-order items measured: one was already built, one cannot be computed (2026-10-20)
+
+The work order's checkboxes are claims, and two of them turned out to be
+claims about a tree that had moved.
+
+### 6a was already built
+
+**A "why that tool" inspector on a tool card** - request, offered tools
+with scores, the learned multiplier, the winner - is **already there**:
+`tool_select.explain()` builds a `Selection` carrying exactly that, the
+assistant fires it on the sink as `on_selection`, the conversation keeps
+the record in force, and the card renders `Selection.why(name)` as a
+"Why this tool" block.
+
+`tests/test_why_this_tool.py` passes 41, and `tools/mutations/why_this_tool.py`
+has been a set of 25 mutations since 2026-10-16. The list was stale, not
+the work - the shape of 2a, 2b and 8o.
+
+### 5a asks for a number the app does not have
+
+**"Prompt *n* of about N", and on the first prompt of a turn one line
+naming the whole shape.** The prompt is composed of three stages - what
+is about to happen and where, which permission it needs, what "allow
+once" means, and that Escape means no - and it already says *"the next
+one asks again"*. What it does not carry is a count.
+
+**A count of "about N" cannot be computed at the first prompt**, and the
+reason is measured rather than argued:
+
+- **The offer of tools is re-made every round.** `build_messages()` runs
+  the selection per round, so the set of things that could need asking is
+  redrawn as the turn goes on. A number taken at the first prompt does
+  not bound the turn.
+- **A model may call a tool it was never offered** - the correction
+  path, measured 2026-10-08 - so even a per-round bound can be exceeded
+  by one.
+
+**Any N would be a guess**, and this file's own rule is that a number
+nobody measured is the confident wrong answer. A forecast that says "3"
+and is asked 5 times is worse than no forecast, because the person has
+been told a shape that did not happen.
+
+**What is sound**: the number of prompts *already asked this turn* - a
+fact, since the permission layer is the one asking, and it already keys
+turn-scoped grants by the turn label - and the **steps of a stored
+plan**, which is exact. Neither forecasts the unasked part, and the item
+asked for exactly that.
+
+**A forecast would need the offer where the prompt is composed** - the
+assistant holds the selection, the dispatch asks, and the prompt is
+composed four hops away - and even then it would hold for the next round
+only.
+
+The item is retired with the reason kept, and the work order says so.
