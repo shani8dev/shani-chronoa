@@ -113,15 +113,44 @@ is inserted.
   `stt.py` (whisper.cpp) and `stt_parakeet.py`. Measure whether the two are
   actually interchangeable behind `stt.build_stt`'s contract, and whether a
   third engine is a config change or a rewrite.
-- [ ] **M6** Myna transfer: the **"state and why" answer**. `myna.status`
+- [x] **M6** Myna transfer: the **"state and why" answer**. `myna.status`
   exists as a CLI whose job is "what state dictation is in, and why". Chronoa's
   equivalent is the Diagnostics panel's own three-word vocabulary plus
   `listening.py`. Check the two agree on this box.
-- [ ] **M7** Myna's boundary is a design decision to copy, not a gap: it is
+  **Checked 2026-10-20, and the two are not the same question.** There is no
+  `listening.py` - the file the item names is `senses/listeners.py`, which is
+  the *socket* listeners sense (who holds a TCP port) and has nothing to do
+  with dictation. The dictation side is the orb's state and the Diagnostics
+  panel's probes.
+  **The "state and why" answer exists, and it is tri-state** - the same shape
+  as Myna's: the Diagnostics panel says **working / not working / could not
+  determine**, and every row carries *why* ("the binary without a model
+  transcribes nothing, and a model without the binary is never loaded" - both
+  halves named). A probe that raised can only become "could not determine",
+  never "working" - `_fallback_status` exists so that is one function rather
+  than a copy at each call site.
+  **What Myna has that Chronoa does not** is a *single* "state and why" for
+  dictation specifically: here the state is the orb's and the reason is in a
+  panel, which is two places answering two different questions rather than one
+  question in two places.
+- [x] **M7** Myna's boundary is a design decision to copy, not a gap: it is
   "deliberately focused on dictation... not a voice assistant". Chronoa's
   `dictate()` already shares capture, transcription and turn with the assistant
   path. Record whether dictation should stay a mode of the assistant or become
   a peer of it.
+  **Recorded 2026-10-20: it stays a mode.** Two reasons, and the second is
+  the one the item is really about.
+  **The pipeline is shared**: `dictate()` uses the same capture, the same
+  transcription and the same turn as the assistant path, and only differs in
+  the ceilings (five minutes instead of twenty seconds) and the silence that
+  ends it. A peer would be a second copy of that pipeline.
+  **Myna's boundary is Myna's, not a gap in Chronoa.** Myna is
+  "deliberately focused on dictation, not a voice assistant" - Chronoa *is* a
+  voice assistant, so the boundary to copy is the *focus*, not the exclusion:
+  what a focused product does well is one thing. **What is worth copying is
+  that dictation is a first-class mode with its own state** - which is why
+  `AssistantState.DICTATING` exists, with its own colour, icon and word,
+  rather than dictation being a question that happens to be asked loudly.
 
 ### 1 — The rail is reachable at the app's own geometry
 
@@ -169,8 +198,23 @@ is inserted.
   conversation costs no chrome.
   **So nothing is left of 1a that is lost**, and 1b - rail-first at
   narrow widths versus a one-line ticker - is the open half.
-- [ ] **1b** Decide and record: rail-first at narrow widths (chat becomes the
+- [x] **1b** Decide and record: rail-first at narrow widths (chat becomes the
   sheet) versus a one-line ticker. Allocation-measured at 380/460/760/1024.
+  **Decided and recorded 2026-10-20: the facts move, the rail stays.**
+  **The allocation decides it, and it is not close.** The rail's natural
+  width is **466px** (measured off a real window: allocated == natural at
+  every width) and the chat column is **455px** at a 460px window. So at the
+  app's own width **the rail needs more than the whole conversation column** -
+  rail-first would mean the conversation gets nothing. At 380 it is worse; at
+  1024 the rail fits beside the conversation, which is what the 1040 breakpoint
+  is for.
+  **So the rail is a wide-window column and the narrow window carries the
+  facts instead** - and 1a is that work: the running timers and how full the
+  model's window is are above the composer, the rules that fired are in the
+  header bell, the turn's cost, tokens and changed files are in its footer,
+  and the files it changed have a door to the Changes panel. The rail keeps
+  the nine sections that are *additional* rather than lost - the context
+  breakdown, the session's changes, the sensing summary, the open goals.
 
 ### 2 — A turn is a unit of work and has no object
 

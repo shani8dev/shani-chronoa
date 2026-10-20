@@ -29103,3 +29103,78 @@ sets - so the change is risk-free for the rest of the inventory.
 
 `tools/mutations/phone_remote_opt_in.py` (2 mutations, 2 caught).
 Thirty-nine files, one process each: 39 passed.
+
+## Three decisions the work order asked for, and the measurements behind them (2026-10-20)
+
+**1b, M6 and M7** were all "decide and record" items, and all three are now
+decided with a measurement behind them rather than a preference.
+
+### 1b: the rail stays a wide-window column, and the facts move
+
+**The allocation decides it, and it is not close.** The rail's natural width
+is **466px** (measured off a real window: allocated == natural at every
+width) and the chat column is **455px** at a 460px window. So at the app's
+own width **the rail needs more than the whole conversation column** -
+rail-first would mean the conversation gets nothing. At 380 it is worse; at
+1024 the rail fits beside the conversation, which is what the 1040 breakpoint
+is for.
+
+So the rail is a wide-window column and the narrow window carries the facts
+instead - which is what 1a's work did: the running timers and how full the
+model's window are above the composer, the rules that fired are in the header
+bell, the turn's cost, tokens and changed files are in its footer, and the
+files it changed have a door to the Changes panel.
+
+### M6: the "state and why" answer exists, and it is tri-state
+
+**There is no `listening.py`** - the file the item names is
+`senses/listeners.py`, which is the *socket* listeners sense (who holds a
+TCP port) and has nothing to do with dictation. The dictation side is the
+orb's state and the Diagnostics panel's probes.
+
+**The answer exists and it has Myna's shape**: the Diagnostics panel says
+**working / not working / could not determine**, and every row carries *why*
+- "the binary without a model transcribes nothing, and a model without the
+binary is never loaded", with both halves named. A probe that raised can
+only become "could not determine", never "working", and `_fallback_status`
+is one function rather than a copy at each call site.
+
+**What Myna has that Chronoa does not** is a *single* "state and why" for
+dictation specifically: here the state is the orb's and the reason is in a
+panel - two places answering two different questions, rather than one
+question in two places.
+
+### M7: dictation stays a mode of the assistant
+
+Two reasons, and the second is the one the item is really about.
+
+**The pipeline is shared**: `dictate()` uses the same capture, the same
+transcription and the same turn as the assistant path, and differs only in
+the ceilings (five minutes instead of twenty seconds) and the silence that
+ends it. A peer would be a second copy of that pipeline.
+
+**Myna's boundary is Myna's, not a gap in Chronoa.** Myna is
+"deliberately focused on dictation, not a voice assistant" - Chronoa *is* a
+voice assistant, so the boundary to copy is the **focus**, not the
+exclusion: what a focused product does well is one thing. **What is worth
+copying is that dictation is a first-class mode with its own state** - which
+is why `AssistantState.DICTATING` exists, with its own colour, icon and
+word, rather than dictation being a question that happens to be asked
+loudly.
+
+### And the staleness sweep that came with them
+
+Six items were measured and found already done, and marking them is the
+work: **M3** (the IBus engine is real and started at launch), **8l**
+(there *is* a run-command skill, the project folder *is* on the work chip,
+the Diff rows *do* carry Accept and Reject, `/undo` exists - and the inline
+diff in the tool card answers "open Diff on a write" better than moving the
+person to another panel), **9n-2** (the approval prompt *does* show the
+change - the permission layer carries a `preview` and the dispatch passes
+`approval_preview(name, arguments)`; "revert this turn" is the footer's
+button), **11m** (`common.row` shortens every title and subtitle, so it is
+not a per-panel decision), **11o** (the header bell) and **12d** (= 1a).
+
+**A stale open item sends the next person to do work that is done**, which
+is the same failure this file records for a stale "dead" label - and the
+cheapest fix for it is to measure and say so.
