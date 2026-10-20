@@ -29178,3 +29178,55 @@ not a per-panel decision), **11o** (the header bell) and **12d** (= 1a).
 **A stale open item sends the next person to do work that is done**, which
 is the same failure this file records for a stale "dead" label - and the
 cheapest fix for it is to measure and say so.
+
+## The two speech engines are interchangeable, and neither of them streams (2026-10-20)
+
+M4 and M5 asked for measurements, and both are answerable from this box -
+`whisper-cli` is installed here, so the question about whisper.cpp's
+streaming was not a question about a document.
+
+### M5: they are interchangeable, and a third engine is a config change
+
+**The two classes have identical public surfaces** - the same three methods
+(`is_available`, `transcribe`, `transcribe_stream`), no difference at all -
+so every caller that asks either of them the same three questions needs no
+branch. That is what makes the backend a *selection* rather than a switch
+in every caller.
+
+**And the backend name is a table.** `stt.BACKENDS` is a tuple,
+`build_stt` branches on it, and the settings row and the model cards read
+the same table - so adding an engine is a class with those three methods, a
+name in the tuple, and a card. **Not a rewrite.**
+
+### M4: not with whisper.cpp, and Parakeet's blocker is a licence
+
+**whisper.cpp cannot produce a usable partial here.** The installed
+`whisper-cli` has **no streaming flag** - the closest are `--vad`, which
+*segments* the audio, and `--split-on-word`, which is a formatting option.
+A partial would mean chunking the audio and stabilising the hypothesis
+between chunks, which is exactly the work Myna's own thread describes.
+
+**Parakeet could, and the reason it does not is a licence**: upstream
+publishes a streaming variant
+(`parakeet-tdt-0.6b-v3-streaming`), but under a licence nobody has
+resolved - so no streaming path, flag or documentation of one exists here.
+
+### And the finding under both: `transcribe_stream` does not stream
+
+The name is the shared contract's, but the bytes are written to a WAV and
+the file is transcribed - **one final answer**. The Parakeet engine's
+docstring said exactly that; **the whisper.cpp one called itself
+"streaming mode"**, which is a name promising something the program does
+not do.
+
+**The test measures the behaviour rather than reading the prose**: the call
+reaches `transcribe` with a **path**, not with the bytes - so a caller
+passing a growing buffer gets a longer file transcribed each time, not a
+running hypothesis. And the docstring check reads the **summary line**,
+not the whole text - the body is allowed to *name* the old wording to say
+it was wrong, and a substring test over the whole text read that
+quotation as the claim. **That is the shape this file records: a check that
+cannot tell a quotation from a statement.**
+
+`tests/test_the_two_speech_engines_are_interchangeable.py` (7),
+`tools/mutations/speech_engines.py` (3 mutations, 3 caught).

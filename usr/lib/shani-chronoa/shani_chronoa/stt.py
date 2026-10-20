@@ -361,7 +361,25 @@ class WhisperSTT:
             return ""
 
     def transcribe_stream(self, audio_data: bytes) -> str:
-        """Transcribe audio bytes to text (streaming mode).
+        """Transcribe audio bytes to text.
+
+        **Not streaming recognition.** The name is the shared interface's -
+        `stt.build_stt` hands the caller one of two interchangeable engines,
+        and the surface is `is_available` / `transcribe` /
+        `transcribe_stream` - but the bytes are written to a WAV and
+        transcribed as a file, which is one final answer and not a series
+        of partials.
+
+        **And whisper.cpp cannot do the partial version.** Measured on the
+        installed `whisper-cli`: it has no streaming flag - the closest
+        are `--vad`, which *segments* the audio, and `--split-on-word`,
+        which is a formatting option - so a partial would mean chunking
+        the audio and stabilising the hypothesis between chunks, which is
+        the work Myna's own thread describes.
+
+        The Parakeet engine does the same thing and says so; this one
+        called itself a streaming mode, which is a name promising
+        something the program does not do.
 
         Args:
             audio_data: Raw audio bytes
