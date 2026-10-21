@@ -739,7 +739,8 @@ class TestOpenWith:
         monkeypatch.setattr(desktop, "DESKTOP_ENTRY", str(entry))
         value = _row_value(desktop.build(_app()), "Open with Chronoa")
         assert value.startswith("installed"), value
-        assert "2 MIME type(s)" in value, value
+        assert "2 MIME types" in value, value
+        assert "type(s)" not in value, value
         assert "application/pdf" in value, value
         assert "passes the file on" in value, value
 
@@ -757,7 +758,8 @@ class TestOpenWith:
         monkeypatch.setattr(desktop, "DESKTOP_ENTRY", str(entry))
         value = _row_value(desktop.build(_app()), "Open with Chronoa")
         assert value.startswith("installed"), value
-        assert "0 type(s)" in value, value
+        assert "0 types" in value, value
+        assert "type(s)" not in value, value
         assert "no reason" in value, value
 
     def test_an_entry_with_no_mime_line_at_all_is_not_reported_as_working(
@@ -807,7 +809,8 @@ class TestOpenWith:
         )
         monkeypatch.setattr(desktop, "DESKTOP_ENTRY", str(entry))
         value = _row_value(desktop.build(_app()), "Open with Chronoa")
-        assert "5 MIME type(s)" in value, value
+        assert "5 MIME types" in value, value
+        assert "type(s)" not in value, value
 
     def test_the_reported_entry_is_the_path_the_package_ships(
         self, tmp_path, monkeypatch
@@ -826,7 +829,8 @@ class TestOpenWith:
         monkeypatch.setattr(desktop, "DESKTOP_ENTRY", str(packaged))
         value = _row_value(desktop.build(_app()), "Open with Chronoa")
         assert value.startswith("installed"), value
-        assert f"{count} MIME type(s)" in value, value
+        assert f"{count} MIME types" in value, value
+        assert "type(s)" not in value, value
         assert wanted.split(";")[0] in value, value
         assert "passes the file on" in value, (
             "the shipped entry's Exec= carries %U, which is what makes "

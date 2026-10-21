@@ -885,8 +885,9 @@ class TestTheCheckpointRow:
         self._saved(tmp_path / "sessions", checkpoint=True)
         status, detail = diagnostics._checkpoint_count(tmp_path / "sessions")
         assert status == diagnostics.STATUS_WORKING
-        assert "1 checkpoint file(s)" in detail
-        assert "in 1 conversation(s)" in detail
+        assert "1 checkpoint file, in 1 conversation" in detail
+        assert "file(s)" not in detail
+        assert "conversation(s)" not in detail
         assert "numbers 1" in detail
 
     def test_an_empty_store_is_nothing_to_rewind_not_a_fault(self, tmp_path):
@@ -974,10 +975,11 @@ class TestTheCheckpointRow:
 
         status, detail = diagnostics._checkpoint_count(root)
         assert status == diagnostics.STATUS_WORKING
-        assert "2 checkpoint file(s)" in detail, (
+        assert "2 checkpoint files, in 2 conversations" in detail, (
             "two conversations each holding a checkpoint is two checkpoint "
             f"files, not one per conversation: {detail!r}")
-        assert "in 2 conversation(s)" in detail
+        assert "in 2 conversations" in detail
+        assert "conversation(s)" not in detail
         # Both sessions named, so "only the first" cannot satisfy this.
         assert first in detail and second in detail
 
@@ -998,9 +1000,10 @@ class TestTheCheckpointRow:
 
         status, detail = diagnostics._checkpoint_count(root)
         assert status == diagnostics.STATUS_WORKING
-        assert "3 checkpoint file(s)" in detail, (
+        assert "3 checkpoint files, in 1 conversation" in detail, (
             f"three checkpoints is three files: {detail!r}")
-        assert "in 1 conversation(s)" in detail
+        assert "in 1 conversation" in detail
+        assert "conversation(s)" not in detail
 
     def test_the_two_answers_really_are_different(self, tmp_path):
         """The control that makes the two assertions above mean something.

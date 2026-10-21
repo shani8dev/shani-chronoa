@@ -720,7 +720,8 @@ class TestMarkup:
         page = surface.build(_app(store))
         described = " ".join(_labels(page))
         assert self.HOSTILE in described, described
-        assert "message(s)" in described, described
+        assert "messages" in described, described
+        assert "message(s)" not in described, described
 
     @pytest.mark.skipif(not common.adw_ready(), reason="no libadwaita: no markup is parsed")
     def test_with_adw_the_description_round_trips_to_the_characters(self, root, hostile, store):
@@ -756,7 +757,7 @@ class TestMarkup:
         descriptions = [g.get_description() for g in groups]
         assert descriptions, "no group descriptions to check"
 
-        described = [d for d in descriptions if "message(s)" in d]
+        described = [d for d in descriptions if "messages" in d]
         assert described, f"the open conversation's description is missing: {descriptions}"
 
         # The control for this assertion. Without it, a test that only checked

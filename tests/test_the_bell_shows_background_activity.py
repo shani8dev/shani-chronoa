@@ -126,7 +126,8 @@ class TestTheBell:
         window._proposal_count = lambda: 0
         window._refresh_activity_bell()
         tip = window._bell_button.get_tooltip_text()
-        assert "2 rule(s) fired" in tip, tip
+        assert "2 rules fired" in tip, tip
+        assert "rule(s)" not in tip, tip
 
     def test_the_badge_counts_what_is_waiting(self, window):
         """**A rule that fired is history; a proposal is a decision somebody

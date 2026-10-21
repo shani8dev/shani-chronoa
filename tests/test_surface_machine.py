@@ -662,7 +662,8 @@ class TestAFailingSenseIsNotACleanReading:
         )
         _registry(monkeypatch, {"devices": _sense("devices", lambda _a: long_reading)})
         text = _row_text(_row(machine.build(_app(_Open())), "devices"))
-        assert f"{60 - machine.MAX_READING_LINES} more line(s) not shown" in text, text
+        assert f"{60 - machine.MAX_READING_LINES} more lines not shown" in text, text
+        assert "line(s)" not in text, text
         assert "shani-chronoa-sense run devices" in text, text
 
 
