@@ -181,6 +181,61 @@ class TestEmptyState:
         assert "traceback" not in joined and "error" not in joined
 
 
+class TestOneStatementPerPage:
+    """**Nothing armed is said once.**
+
+    The page used to say it four times: in the status row, in a note for
+    each kind of rule, and in the empty state's own title. A reader met
+    the same fact four times before the form they came for, and the two
+    notes named a kind of rule in the engine's word ("percept"), which is
+    a word nobody outside this tree knows.
+    """
+
+    def test_the_page_does_not_say_which_kind_is_empty_when_nothing_is(self, tmp_path):
+        """**Which kind is empty is a note, and a note needs something to
+        tell it apart from.** With nothing armed at all there is no
+        second kind on the page, so the note has nothing to disambiguate
+        and the empty state does the saying."""
+        surface = triggers.build(
+            _StubApp(_percept_store(tmp_path), _event_store(tmp_path)))
+        texts = _texts(surface)
+        assert "No sense rules armed." not in texts, texts
+        assert "No event rules armed." not in texts, texts
+
+    def test_the_status_row_says_it_once(self, tmp_path):
+        """**The count is said once.** The status row's summary is the
+        page's one statement about it, and it carries no detail - the
+        detail repeated the empty state's own sentence, which is how the
+        Export panel settled the same question."""
+        surface = triggers.build(
+            _StubApp(_percept_store(tmp_path), _event_store(tmp_path)))
+        texts = _texts(surface)
+        assert texts.count("No rules armed") == 1, texts
+        # The detail it used to carry, as a label of its own: the empty
+        # state's description says it, so a second copy is a second
+        # statement. (The description is one label with more words, so this
+        # is an exact match and not a substring one.)
+        assert "nothing here can act on its own" not in texts, texts
+
+    def test_the_empty_kind_is_named_the_way_the_page_names_it(self, tmp_path):
+        """**The note names the kind the way the group heading does** -
+        and the group heading is a word a person knows.
+
+        The engine calls it a percept rule; the page's own arming form
+        calls the thing being watched "a sense", so that is the name the
+        page uses. The engine's own modules keep their word.
+        """
+        app = _StubApp(
+            _percept_store(tmp_path, [_percept_rule("pizza")]),
+            _event_store(tmp_path),
+        )
+        surface = triggers.build(app)
+        texts = _texts(surface)
+        assert "No event rules armed." in texts, texts
+        assert "Sense rules" in texts, texts
+        assert not [t for t in texts if "percept" in t.lower()], texts
+
+
 class TestRows:
     def test_one_row_per_rule_across_both_stores(self, tmp_path):
         app = _StubApp(

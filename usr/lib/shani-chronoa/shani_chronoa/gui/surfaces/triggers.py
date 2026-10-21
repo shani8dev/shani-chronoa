@@ -105,8 +105,13 @@ ROW_CSS = "trigger-rule-row"
 #: file only costs its own kind. The constructor is held rather than an
 #: instance: a caller that handed a store in must not also have the per-user
 #: data directory resolved behind its back.
+#:
+#: **"Sense rules", not "percept rules".** A percept is what a sense
+#: *perceived* - the engine's own word, and the one its modules use. The page
+#: a person reads already calls the thing being watched "a sense" (the arming
+#: form's own dropdown says "a sense"), and this is that page.
 _KINDS = (
-    ("Percept rules", "trigger_rule_store", RuleStore),
+    ("Sense rules", "trigger_rule_store", RuleStore),
     ("Event rules", "event_rule_store", EventRuleStore),
 )
 
@@ -607,6 +612,7 @@ class _TriggersSurface:
         self._problems = []
         self._source_paths = []
         paths: List[str] = []
+        empty_kinds: List[str] = []
 
         # The panel's own health, before the rules: how many
         # are armed, how many could not be read, or could it
@@ -632,12 +638,20 @@ class _TriggersSurface:
             if path:
                 paths.append(path)
             if not rules:
-                self._rules_box.append(_note(f"No {kind.lower()} armed."))
+                # **Which kind is empty is a note, and a note is only worth
+                # saying when there is something else on the page to tell it
+                # apart from.** With nothing armed at all, the empty state
+                # says so once - the page used to say it four times, here and
+                # in the status row and in the empty state's own title.
+                empty_kinds.append(kind)
                 continue
             group = common.group(kind)
             for rule in rules:
                 self._add_row(group, rule, (kind, attribute, constructor))
             self._rules_box.append(group)
+        if self._row_widgets or self._problems:
+            for kind in empty_kinds:
+                self._rules_box.append(_note(f"No {kind.lower()} armed."))
 
         self._source_paths = paths
         # **`~/...`, with the whole path on hover.** The files live under the
@@ -672,10 +686,16 @@ class _TriggersSurface:
                 f"{plural(total, 'rule')} armed",
                 f"from {plural(len(paths), 'file')}"))
         else:
+            # **The word and the summary, and no detail.** The detail used to
+            # be "nothing here can act on its own", which repeated the empty
+            # state's own sentence - and the Export panel settled the same
+            # question the same way. The empty state's *title* says the same
+            # thing again, and that is a separate fault: its words are not on
+            # screen (the box is squeezed to a band and only the icon's edge
+            # shows), so the page would say it twice once that is fixed.
             self._status_slot.append(self.status_recorder.row(
                 common.STATUS_OK,
-                "No rules armed",
-                "nothing here can act on its own"))
+                "No rules armed"))
 
     def _add_problem(self, text: str) -> None:
         self._problems.append(text)

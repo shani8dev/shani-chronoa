@@ -995,6 +995,34 @@ is trying to do, with the live things on the main window.
   is two lines in the widget - and a substring check over the raw text misses
   it. The My files panel's empty state slipped past the first version for
   exactly that reason.
+  **The Triggers page was an instance the sweep could not see**, because the
+  repetition it had was not against a *banner* but between a status row, two
+  notes and an empty state. It said **"no rules armed" four times** - "No
+  rules armed - nothing here can act on its own", "No percept rules armed.",
+  "No event rules armed." and "No trigger rules armed" - and a reader met
+  all four before the form they came for. Now: the notes appear only when
+  the page has two kinds of rule on it to tell apart, the status row carries
+  the word and the count and no detail (the Export panel's shape), and the
+  kind is named **"Sense rules"** rather than the engine's "percept rules" -
+  the page's own arming form already calls the thing being watched "a
+  sense". `tests/test_surface_triggers.py` (3) and
+  `tools/mutations/triggers_one_statement.py` (**4 mutations, 4 caught, 0
+  survivors**).
+  **Still open, and it is the same panel: the empty state's words are not
+  on screen.** The empty state is built inline between the consent banner
+  and the arming form, and its box is given about sixty pixels, so the
+  photo shows **a clipped arc of the icon and neither the title nor the
+  description** - the page says nothing about what is absent, and the
+  empty state's own title is the fourth copy that never reaches the
+  reader. AGENTS.md records the `inline=True` box as the fix for the
+  `Adw.StatusPage`'s 301px floor, and it *is* the fix for that - but the
+  box is inside a scroller of its own, and **a scroller that expands is
+  handed the space that is left over after the banner, the note and the
+  form, which is none**; the box is then centred in it and only a band
+  shows. **Not fixed here**: making the empty state's scroller not expand
+  was measured and changed nothing (the photograph is identical), so the
+  cause is still to be found - and the fix has to land with the
+  de-duplication above, or the page says it twice again.
 - [x] **11n2 A raw key on screen**: no person-facing panel may name a
   gsettings key. **Done 2026-10-20**, from a sweep of all 38 panels:
   **nine named one**, through five different routes - a panel's own sentence
