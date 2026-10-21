@@ -549,7 +549,7 @@ def _device_detail(mac: str, name: str) -> Gtk.Widget:
             # **Say how many were not shown.** A truncated list with no count
             # reads as the whole list.
             column.append(_row(
-                f"{plural(len(chars) - len(shown), 'more characteristic')}",
+                f"{plural(len(chars) - len(shown), 'characteristic', prefix='more')}",
                 f"This panel shows the first {MAX_ROWS}. Ask the assistant for a "
                 f"specific one by name."))
 

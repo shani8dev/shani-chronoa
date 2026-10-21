@@ -358,7 +358,7 @@ def _clip(text: Any, name: str) -> str:
     hidden = len(lines) - MAX_READING_LINES
     kept = lines[:MAX_READING_LINES]
     kept.append(
-        f"... {plural(hidden, 'more line')} not shown; shani-chronoa-sense run {name} "
+        f"... {plural(hidden, 'line', prefix='more')} not shown; shani-chronoa-sense run {name} "
         f"--no-store prints the whole reading"
     )
     return "\n".join(kept)

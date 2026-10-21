@@ -801,7 +801,7 @@ class InlineDiff(Gtk.Box):
             lines.append(label)
         if len(changed) > INLINE_DIFF_LINES:
             more = Gtk.Label(xalign=0.0,
-                             label=f"{plural(len(changed) - INLINE_DIFF_LINES, 'more changed line')}")
+                             label=f"{plural(len(changed) - INLINE_DIFF_LINES, 'changed line', prefix='more')}")
             more.add_css_class("dim-label")
             lines.append(more)
         if not changed:

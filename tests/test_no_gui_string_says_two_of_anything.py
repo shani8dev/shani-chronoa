@@ -87,7 +87,8 @@ def test_the_gui_says_how_many_things_rather_than_two_of_anything():
 def test_the_helper_says_one_and_many_correctly():
     """**The helper is the one answer, so it is worth a witness of its
     own** - and it has to be right about the awkward cases: one, none,
-    a word ending in a y, and a word that already ends in an s."""
+    a word ending in a y, a word that already ends in an s, and a word
+    whose plural is not a rule."""
     from shani_chronoa.words import plural
 
     assert plural(1, "fact") == "1 fact"
@@ -100,3 +101,48 @@ def test_the_helper_says_one_and_many_correctly():
     assert plural(2, "day") == "2 days"
     assert plural(2, "file", prefix="more") == "2 more files"
     assert plural(1, "file", prefix="more") == "1 more file"
+
+
+def test_the_helper_says_an_irregular_noun_correctly():
+    """**An irregular noun is spelled with both of its forms**, because
+    the helper is the one answer and it cannot guess a rule that is not
+    a rule.
+
+    "entrys" is the shape the rules would produce, and it is the reason
+    the caller is given a way to say both forms. The prefix goes with
+    it, so the phrase's *last* word is the one pluralised.
+    """
+    from shani_chronoa.words import plural
+
+    assert plural(1, "entry/entries") == "1 entry"
+    assert plural(2, "entry/entries") == "2 entries"
+    assert plural(0, "entry/entries") == "0 entries"
+    assert plural(2, "entry/entries", prefix="more changed") == "2 more changed entries"
+
+
+def test_more_is_a_prefix_and_never_part_of_the_noun():
+    """**"more" is said one way: as the prefix.**
+
+    Spelling it into the noun - `plural(n, "more file")` - is a second
+    way to say the same thing, and it pluralises the whole phrase, so
+    "more changed entry" would come out as "more changed entrys". The
+    prefix keeps the noun the noun.
+    """
+    offenders = []
+    for path in sorted(pathlib.Path(_PACKAGE).rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+            if name != "plural" or len(node.args) < 2:
+                continue
+            word = node.args[1]
+            if isinstance(word, ast.Constant) and isinstance(word.value, str) \
+                    and word.value.startswith("more "):
+                offenders.append(
+                    f"{path.relative_to(_PACKAGE)}:{node.lineno}: {word.value!r}")
+    assert not offenders, (
+        "'more' is spelled into the noun at "
+        f"{len(offenders)} place(s):\n  " + "\n  ".join(offenders))

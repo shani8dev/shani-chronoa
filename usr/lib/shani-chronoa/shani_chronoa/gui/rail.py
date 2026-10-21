@@ -498,7 +498,7 @@ class NowRail(Gtk.Box):
             self._changed.link(path.name or str(path), f"+{added} -{removed}",
                                "diff", self.on_open)
         if len(files) > 6:
-            self._changed.empty(f"and {plural(len(files) - 6, 'more file')}")
+            self._changed.empty(f"and {plural(len(files) - 6, 'file', prefix='more')}")
 
     def _fill_made(self) -> None:
         """The files this session's skills declared they made.

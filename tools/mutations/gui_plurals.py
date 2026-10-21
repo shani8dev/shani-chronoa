@@ -33,8 +33,8 @@ MUTATIONS = [
     },
     {
         "file": _WORDS,
-        "old": "    if count == 1:\n        shown = word\n",
-        "new": "    if count == 1:\n        shown = word + \"s\"\n",
+        "old": "    if count == 1:\n        shown = singular if many else word\n",
+        "new": "    if count == 1:\n        shown = singular if many else word + \"s\"\n",
         # The helper stops agreeing with itself about one.
         "label": "the helper says '1 facts'",
         "expect": ["test_the_helper_says_one_and_many_correctly"],
@@ -47,5 +47,35 @@ MUTATIONS = [
         # An irregular plural becomes a wrong one: "entrys".
         "label": "the helper says '2 entrys'",
         "expect": ["test_the_helper_says_one_and_many_correctly"],
+    },
+    {
+        "file": _WORDS,
+        "old": "    if count == 1:\n"
+               "        shown = singular if many else word\n"
+               "    elif many:\n"
+               "        shown = many\n",
+        "new": "    if count == 1:\n        shown = word\n",
+        # The way an irregular noun is said is gone, and the sentence
+        # falls back on a rule that is not a rule: "entry/entrieses".
+        "label": "the helper cannot say an irregular noun",
+        "expect": ["test_the_helper_says_an_irregular_noun_correctly"],
+    },
+    {
+        "file": _WORDS,
+        "old": "    if prefix:\n        return f\"{count} {prefix} {shown}\"\n",
+        "new": "",
+        # "3 more files" becomes "3 files" - the sentence loses the word
+        # that says there are more.
+        "label": "the helper drops the prefix",
+        "expect": ["test_the_helper_says_one_and_many_correctly"],
+    },
+    {
+        "file": f"{_GUI}/rail.py",
+        "old": "plural(len(files) - 6, 'file', prefix='more')",
+        "new": "plural(len(files) - 6, 'more file')",
+        # "more" is spelled into the noun again, so the phrase is
+        # pluralised whole - and the sentence has two ways to say it.
+        "label": "'more' is spelled into the noun again",
+        "expect": ["test_more_is_a_prefix_and_never_part_of_the_noun"],
     },
 ]

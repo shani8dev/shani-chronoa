@@ -20,16 +20,22 @@ __all__ = ["plural"]
 def plural(count: int, word: str, prefix: str = "") -> str:
     """The counted phrase: "1 fact", "2 facts".
 
-    `prefix` puts a word in front of the count - "3 more files" - which
-    is the shape a few sentences need ("more changed lines").
+    `prefix` puts a word in front of the count - "3 more files" - and
+    it is how a sentence says "more": the noun being counted stays the
+    noun, so "more changed lines" pluralises the *line* rather than the
+    whole phrase.
 
-    **Only regular plurals are guessed at.** Every word this is called
-    with in this tree is one of them; an irregular noun is spelled with
-    both of its forms by the caller, so nothing here has to know a
-    list of exceptions.
+    **An irregular noun is spelled with both of its forms** -
+    `plural(2, "entry/entries")` - because a list of exceptions here
+    would be a second table to keep in step, and the tree has had
+    enough of those. Every other word is regular, and the rules below
+    cover them.
     """
+    singular, _, many = word.partition("/")
     if count == 1:
-        shown = word
+        shown = singular if many else word
+    elif many:
+        shown = many
     elif word.endswith("y") and not word.endswith(("ay", "ey", "iy", "oy", "uy")):
         shown = word[:-1] + "ies"
     elif word.endswith(("s", "x", "z", "ch", "sh")):
