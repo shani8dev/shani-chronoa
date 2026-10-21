@@ -392,3 +392,51 @@ class TestNoGateLabelNamesAKeyThatDoesNotExist:
                 f"GATE_NAMES carries {key!r} -> {GATE_NAMES[key]!r}, but that "
                 f"key is in no gated tool, in no schema, and in no settings "
                 f"row - so the Help window would name a switch nobody can set")
+
+
+class TestTheGateHasOneOwner:
+    """**A switch is named by the name the Settings row shows.**
+
+    `capabilities.gate_label()` is where that wording lives - the
+    Settings row's, then the sense panel's title, then the key itself -
+    and the `Capability` method beside it used to be a *second, narrower
+    copy* of the rule: the tool table alone. So a capability gated by a
+    **sense's** key fell back to the raw key while every other reader of
+    the same question got the sense's title - and one of those readers
+    is the `list_capabilities` skill, which a person reads.
+    """
+
+    def test_a_capability_names_its_gate_by_the_switch_not_the_key(self):
+        """**Thirty-six of the sense keys are answered by the sense
+        branch** - the tool table does not have them - and a capability
+        gated by one of those is where the narrower copy showed."""
+        from shani_chronoa.capabilities import GATE_NAMES, SENSE_TITLES
+
+        keys = [f"{name}-sense-enabled" for name in SENSE_TITLES
+                if f"{name}-sense-enabled" not in GATE_NAMES]
+        assert keys, (
+            "no sense key is answered by the sense branch, so this test "
+            "cannot see the second implementation")
+        for key in keys:
+            capability = capabilities.Capability(
+                tool="x", group="g", label="l", description="d",
+                consent_key=key,
+            )
+            said = capability.gate_label()
+            assert said != key, (
+                f"the capability names its gate by the key, so a person "
+                f"reading it is hunting for a switch spelled a way no screen "
+                f"shows: {key}")
+            assert key not in said, (
+                f"the capability's gate name contains the key: {said!r}")
+
+    def test_the_method_agrees_with_the_module(self):
+        """**One owner, so the two cannot disagree.** A second
+        implementation of a rule is how a table rots."""
+        for key in ("web-sense-enabled", "boots-sense-enabled"):
+            capability = capabilities.Capability(
+                tool="x", group="g", label="l", description="d",
+                consent_key=key,
+            )
+            assert capability.gate_label() == capabilities.gate_label(key), (
+                f"{key}: the method and the module answer differently")

@@ -51,7 +51,17 @@ KEY = re.compile(r"\b[a-z][a-z0-9]*(?:-[a-z0-9]+)+-enabled\b")
 #: **The exemption is a count, not a convenience**: a third panel added
 #: here would be a panel that hides a raw key behind a name nobody
 #: checked, so the count is asserted as well.
-MODEL_FACING = ("skills", "workbench")
+#:
+#: **And it was two until 2026-10-21.** The Skills panel was exempt
+#: because its rows carried the skill's own description - prose written
+#: for a model with the tool schema in front of it, which names the
+#: switch's key on purpose. **Its rows now say what the thing touches**
+#: and keep the description in the tooltip, so it shows no description
+#: at all and the exemption had become a loophole rather than a
+#: distinction. The Workbench still shows the registry's own text - it
+#: is the page for making a skill of your own, and that is what it is
+#: for - so it keeps the exemption.
+MODEL_FACING = ("workbench",)
 
 
 class _Config:
@@ -115,7 +125,7 @@ def _panel_texts(sid):
 
 def test_the_exemption_is_the_size_it_claims():
     """**A count, so a third panel cannot be added here quietly.**"""
-    assert len(MODEL_FACING) == 2, MODEL_FACING
+    assert len(MODEL_FACING) == 1, MODEL_FACING
     for sid in MODEL_FACING:
         assert sid in surfaces.SURFACE_IDS, sid
 

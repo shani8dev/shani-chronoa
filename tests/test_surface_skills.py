@@ -392,7 +392,13 @@ def test_every_interactive_control_has_a_tooltip_that_names_what_it_does(chronoa
     switches = [row for row in surface.rows() if row.switch is not None]
     assert switches
     for row in switches:
-        spoken = f"Allow {row.name}: {capabilities.GATE_NAMES.get(row.gate_key, row.gate_key)}"
+        # **The wording is the one owner's.** `capabilities.gate_label()`
+        # is where a switch's name to a person lives - the Settings row's
+        # wording, then the sense panel's title, then the key itself - and
+        # recomputing it here from the tool table alone was a second,
+        # narrower answer that said "network-sense-enabled" where the
+        # product says "Network".
+        spoken = f"Allow {row.name}: {capabilities.gate_label(row.gate_key)}"
         tooltip = row.switch.get_tooltip_text()
         assert tooltip, f"the gate switch for {row.name} has no tooltip"
         assert spoken in tooltip, f"{row.name}: the tooltip does not name the control"

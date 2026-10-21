@@ -966,11 +966,30 @@ is trying to do, with the live things on the main window.
   (the phone, android, bluetooth and calendar skills), and
   `tools/mutations/no_raw_key.py` and
   `tools/mutations/skill_refusal_names.py` carry **7 mutations, 7 caught**.
-  **Two panels are exempt, and the exemption is the point**: the Skills
+  **Two panels were exempt, and the exemption is the point**: the Skills
   panel and the Workbench show *the model's own registry*, and a
   description names its key on purpose, because the model needs the exact
   spelling. The exemption is a **count**, so a third panel cannot be added
   to it quietly.
+  **One of the two exemptions was hiding a real defect 2026-10-21.** The
+  Skills panel's rows carried the skill's own description - prose written
+  for a model - and the exemption covered them. **They now say what the
+  thing touches and keep the description in the tooltip**, so the panel
+  shows no description at all and the exemption had become a loophole
+  rather than a distinction: the test that checks the exemption is not a
+  loophole ("the two panels it names must actually be showing
+  descriptions") failed and said so. **With the exemption removed, the
+  gate found the defect it had been hiding** - the panel's own gate line
+  named a sense's switch by its key ("memory-sense-enabled") for the
+  twenty skills a *sense* gates, because the panel read the tool table
+  directly instead of asking the one owner. `capabilities.gate_label()`
+  is that owner (the Settings row's wording, then the sense panel's
+  title, then the key) and the panel asks it now. **The `Capability`
+  method beside it was a second, narrower copy of the same rule** - the
+  tool table alone - so `list_capabilities` (a skill a person reads) had
+  the same defect; it delegates now. **One exemption remains** (the
+  Workbench, which is the page for making a skill of your own and shows
+  the registry's own text on purpose).
 
 **Expose on the main window**
 - [x] **11o Activity bell** in the header: rules fired, memory proposals,

@@ -452,7 +452,13 @@ class _SkillsSurface:
 
     def _add_row(self, name: str, description: str, prompt: str = "") -> Row:
         gate_key = _gate_key(name, description)
-        gate_name = capabilities.GATE_NAMES.get(gate_key, gate_key) if gate_key else ""
+        # **The switch by the name the Settings row shows.** `gate_label()`
+        # is the one owner of that wording - the Settings row's, then the
+        # sense panel's title, then the key itself - and the tool table
+        # alone was a second, narrower answer: a skill gated by a *sense*'s
+        # key ("memory-sense-enabled") fell back to the raw key here while
+        # every other reader of the same question got the sense's title.
+        gate_name = capabilities.gate_label(gate_key) if gate_key else ""
         state_text, switchable = self._gate_reading(gate_key)
 
         # **The effect, not the model's prose.** The description is written to

@@ -45,4 +45,16 @@ MUTATIONS = [
         "label": "a switch name is dropped from the one table that holds them",
         "expect": ["test_no_panel_names_a_raw_key"],
     },
+    {
+        "file": f"{_SURFACES}/skills.py",
+        "old": "        gate_name = capabilities.gate_label(gate_key) if gate_key else \"\"\n",
+        "new": "        gate_name = capabilities.GATE_NAMES.get(gate_key, gate_key) if gate_key else \"\"\n",
+        # **The tool table alone is a second, narrower answer.** A skill
+        # gated by a *sense*'s key then fell back to the raw key, and the
+        # panel was exempt from this gate while it showed the model's own
+        # description - so the exemption was hiding a real defect rather
+        # than a distinction.
+        "label": "the Skills panel names a sense's switch by its key",
+        "expect": ["test_no_panel_names_a_raw_key[skills]"],
+    },
 ]

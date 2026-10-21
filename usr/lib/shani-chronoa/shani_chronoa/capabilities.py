@@ -999,10 +999,17 @@ class Capability:
     """A prompt that exercises it, or '' for skills needing a free argument."""
 
     def gate_label(self) -> str:
-        """What the gate is called to a person, or '' if ungated."""
+        """What the gate is called to a person, or '' if ungated.
+
+        **The module's own `gate_label()` is the answer**, and this used to
+        be a second, narrower copy of it - the tool table only, so a
+        capability gated by a *sense*'s key fell back to the raw key while
+        every other reader of the same question got the sense's title.
+        Two implementations of one rule is how a table rots.
+        """
         if self.consent_key is None:
             return ""
-        return GATE_NAMES.get(self.consent_key, self.consent_key)
+        return gate_label(self.consent_key)
 
     def gate_help(self, allowed: bool) -> str:
         """One line explaining the gate, in whichever state it is in.
