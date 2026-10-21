@@ -64,7 +64,7 @@ def _tree(win, widget, depth=0, out=None):
                f"x={x} w={widget.get_width()} h={widget.get_height()} "
                f"vis={widget.get_visible()}")
     child = widget.get_first_child()
-    while child is not None and depth < 4:
+    while child is not None and depth < 12:
         _tree(win, child, depth + 1, out)
         child = child.get_next_sibling()
     return out
@@ -78,7 +78,22 @@ def _probe(win, tag):
           "content_w", win._chat_page.get_width(), flush=True)
     for expr in filter(None, os.environ.get("TREE", "").split(",")):
         print("TREE", expr, flush=True)
-        for line in _tree(win, eval(expr, {"win": win})):  # noqa: S307 - our own probe
+        # **A probe that raises destroys what it is measuring.** The tree is
+        # printed twice - once when the window maps and once when the shot
+        # is taken - and a panel is only pushed onto the window after the
+        # first of those, so an expression that names a panel is *expected*
+        # to fail at map time. The exception used to abort the app: no
+        # picture, no second probe, and a log that only showed the first
+        # one.
+        try:
+            widget = eval(expr, {"win": win})  # noqa: S307 - our own probe
+        except Exception as exc:  # noqa: BLE001 - a probe must not kill the app
+            print("   (unavailable: %s)" % (exc,), flush=True)
+            continue
+        if not isinstance(widget, Gtk.Widget):
+            print("   (not a widget: %r)" % (widget,), flush=True)
+            continue
+        for line in _tree(win, widget):
             print("   ", line, flush=True)
     return False
 

@@ -1010,19 +1010,26 @@ is trying to do, with the live things on the main window.
   survivors**).
   **Still open, and it is the same panel: the empty state's words are not
   on screen.** The empty state is built inline between the consent banner
-  and the arming form, and its box is given about sixty pixels, so the
-  photo shows **a clipped arc of the icon and neither the title nor the
-  description** - the page says nothing about what is absent, and the
-  empty state's own title is the fourth copy that never reaches the
-  reader. AGENTS.md records the `inline=True` box as the fix for the
-  `Adw.StatusPage`'s 301px floor, and it *is* the fix for that - but the
-  box is inside a scroller of its own, and **a scroller that expands is
-  handed the space that is left over after the banner, the note and the
-  form, which is none**; the box is then centred in it and only a band
-  shows. **Not fixed here**: making the empty state's scroller not expand
-  was measured and changed nothing (the photograph is identical), so the
-  cause is still to be found - and the fix has to land with the
-  de-duplication above, or the page says it twice again.
+  and the arming form, and the photo shows **a clipped arc of the icon and
+  neither the title nor the description** - the page says nothing about
+  what is absent, and the empty state's own title is the fourth copy that
+  never reaches the reader. AGENTS.md records the `inline=True` box as the
+  fix for the `Adw.StatusPage`'s 301px floor, and it *is* the fix for
+  that - but the box is inside a scroller of its own, and that scroller
+  is the page's **only child that can shrink**.
+  **Measured, from the widget tree of the real app** (`tools/live_window.sh
+  -t`): the page's content box is **657px** and its children want **~800**
+  (the arming form alone is 439) - so the shortfall lands on the empty
+  state's scroller, which is given **58px** for content that measures
+  **154px** (a 64px icon, a 21px heading, a 53px description, plus the
+  box's own 36px margins). The box is taller than the viewport, so only
+  the top of the icon shows. **Making that scroller not expand was
+  measured and changed nothing**, because the expander was never the
+  cause: a `Gtk.ScrolledWindow` reports a small minimum height (it can
+  scroll), so the *page's* box shrinks it below its own content's
+  minimum. The fix has to stop the scroller from being the child that
+  absorbs the shortfall, and it has to land with the de-duplication
+  above or the page says it twice again.
 - [x] **11n2 A raw key on screen**: no person-facing panel may name a
   gsettings key. **Done 2026-10-20**, from a sweep of all 38 panels:
   **nine named one**, through five different routes - a panel's own sentence
