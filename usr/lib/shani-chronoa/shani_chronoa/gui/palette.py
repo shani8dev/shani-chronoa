@@ -20,7 +20,7 @@ nobody any time.
 
 from __future__ import annotations
 
-from typing import Callable, List, NamedTuple, Optional
+from typing import Callable, Dict, List, NamedTuple, Optional
 
 import gi
 
@@ -90,6 +90,23 @@ def filter_entries(entries: List[Entry], needle: str) -> List[Entry]:
     Matching is on title, subtitle and group, case-folded. A non-matching query
     returns nothing rather than a fallback, so a typo shows an empty palette
     instead of silently showing something else.
+
+    **The rows of one group stay together, and the groups are ordered by how
+    well their best entry matched.** The palette draws a caption naming the kind
+    of thing a row is, and a caption is only true of the rows under it - so
+    "Skills" must not have "Panels" rows in the middle of it. Two things
+    follow, and both are needed:
+
+    * the group is **primary**, so its rows are contiguous (a caption that
+      appeared twice, because a group was split across two match tiers, would
+      read as a bug);
+    * the group's order is by its **best** entry, not by the order the caller
+      happened to build the groups in - otherwise searching "privacy" lists
+      every skill whose prompt mentions privacy above the Privacy page itself,
+      because the Skills group comes earlier in the caller's list.
+
+    Within a group the order is the ordinary one: a title match first, then a
+    prefix match, then the rest, stable so the caller's ordering survives.
     """
     needle = (needle or "").strip().lower()
     if not needle:
@@ -97,15 +114,35 @@ def filter_entries(entries: List[Entry], needle: str) -> List[Entry]:
     hits = [e for e in entries
             if needle in e.title.lower() or needle in e.subtitle.lower()
             or needle in e.group.lower()]
-    # Title matches first, then prefix matches, then the rest - stable within
-    # each so the caller's ordering survives.
-    def rank(entry: Entry):
+
+    def match_rank(entry: Entry) -> int:
         title = entry.title.lower()
         if title.startswith(needle):
-            return (0, entry.weight)
+            return 0
         if needle in title:
-            return (1, entry.weight)
-        return (2, entry.weight)
+            return 1
+        return 2
+
+    # The order the groups were given in - the order they first appear in the
+    # caller's list, which is the order the caller built them in. It breaks
+    # ties between groups that matched equally well.
+    group_order: Dict[str, int] = {}
+    for entry in entries:
+        if entry.group not in group_order:
+            group_order[entry.group] = len(group_order)
+    # How well each group matched, at its best.
+    group_rank: Dict[str, int] = {}
+    for entry in hits:
+        rank = match_rank(entry)
+        best = group_rank.get(entry.group)
+        if best is None or rank < best:
+            group_rank[entry.group] = rank
+
+    def rank(entry: Entry):
+        return (group_rank.get(entry.group, 2),
+                group_order.get(entry.group, 0),
+                match_rank(entry),
+                entry.weight)
     return sorted(hits, key=rank)
 
 
@@ -123,6 +160,13 @@ class CommandPalette(Gtk.Box):
         self._on_close = on_close or (lambda: None)
         self._entries: List[Entry] = []
         self._visible: List[Entry] = []
+        #: The list's rows that are **entries**, in the same order as
+        #: `self._visible`. The list also holds the group captions, which are
+        #: not entries, so the row at index *n* is not the entry at index *n*.
+        self._entry_rows: List[Gtk.ListBoxRow] = []
+        #: How many rows the list holds. **`Gtk.ListBox` has no `get_n_rows`**
+        #: - that is `Gtk.ListView`'s API - so the count is kept here.
+        self._row_count = 0
 
         self._search = Gtk.SearchEntry()
         self._search.set_placeholder_text("Go to a panel, a command, a skill...")
@@ -207,16 +251,53 @@ class CommandPalette(Gtk.Box):
             self._list.remove(child)
             child = following
         self._visible = filter_entries(self._entries, text)
+        self._entry_rows = []
+        self._row_count = 0
+        group = None
         for entry in self._visible:
-            self._list.append(self._row(entry))
-        if self._visible:
-            # **`get_row_at_index`, not the child widget.** `ListBox.append`
-            # wraps each child in a `ListBoxRow`, and `select_row` takes *that* -
-            # passing the child raises `TypeError: argument row: Expected
-            # Gtk.ListBoxRow, but got gi.repository.Gtk.Box`. Measured while
-            # building the window, before any test existed.
-            self._list.select_row(self._list.get_row_at_index(0))
+            if entry.group and entry.group != group:
+                group = entry.group
+                self._append_group_header(group)
+            self._entry_rows.append(self._append_row(self._row(entry)))
+        if self._entry_rows:
+            self._list.select_row(self._entry_rows[0])
         self._empty.set_visible(not self._visible)
+
+    def _append_row(self, widget: Gtk.Widget) -> Gtk.ListBoxRow:
+        """Append a widget and return the row GTK wrapped it in.
+
+        `ListBox.append` wraps each child in a `GtkListBoxRow`, and the row is
+        what `select_row` takes - passing the child raises `TypeError:
+        argument row: Expected Gtk.ListBoxRow, but got gi.repository.Gtk.Box`.
+        Measured while building the window, before any test existed.
+        """
+        index = self._row_count
+        self._list.append(widget)
+        self._row_count += 1
+        return self._list.get_row_at_index(index)
+
+    def _append_group_header(self, group: str) -> None:
+        """A caption naming what kind of thing the rows under it are.
+
+        **The palette's groups were never drawn.** `Entry.group` was used for
+        the dedup key and for the search, and for nothing else - so opening the
+        palette showed 260 rows in one flat list, with no indication of which
+        was a panel, which a skill and which a command. The caption is what
+        makes a grouped list a grouped list, and the group field was already
+        there, filled in by every caller.
+
+        The caption's row is **not selectable**: it is a heading, not a
+        destination, and a heading that can be highlighted - and then activated
+        by Enter - is a control that does nothing.
+        """
+        label = Gtk.Label(label=group)
+        label.add_css_class("dim-label")
+        label.set_xalign(0.0)
+        label.set_margin_top(8)
+        label.set_margin_bottom(2)
+        row = self._append_row(label)
+        row.set_selectable(False)
+        row.set_activatable(False)
 
     def _row(self, entry: Entry) -> Gtk.Widget:
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
@@ -289,27 +370,37 @@ class CommandPalette(Gtk.Box):
     def _selected_index(self) -> int:
         """Which entry is highlighted, or -1.
 
-        **Walked by index against `get_row_at_index`, not by walking children
-        and comparing parents.** In GTK 4 the child's parent is *not* the
-        `ListBoxRow` that `get_selected_row()` returns - the row is an internal
-        wrapper - so the parent comparison never matched, `_selected_index()`
-        answered -1 for a visibly selected row, and Enter did nothing at all.
-        Measured with `first_child.get_parent() is get_selected_row()`: False.
+        **Walked against `_entry_rows`, not against the list's own row
+        numbers.** The list holds the group captions as well as the entries,
+        so the row at index *n* is not the entry at index *n* - and the earlier
+        version, which compared `get_row_at_index(index)` with the selected
+        row, answered -1 for every caption and could no longer find the
+        selected entry at all.
+
+        It is `self._entry_rows` rather than a walk of children because in GTK 4
+        the child's parent is *not* the `ListBoxRow` that
+        `get_selected_row()` returns - the row is an internal wrapper - so a
+        parent comparison never matched, `_selected_index()` answered -1 for a
+        visibly selected row, and Enter did nothing at all. Measured with
+        `first_child.get_parent() is get_selected_row()`: False.
         """
         row = self._list.get_selected_row()
         if row is None:
             return -1
-        for index in range(len(self._visible)):
-            if self._list.get_row_at_index(index) is row:
+        for index, candidate in enumerate(self._entry_rows):
+            if candidate is row:
                 return index
         return -1
 
     def _select(self, index: int) -> None:
-        if not 0 <= index < len(self._visible):
+        if not 0 <= index < len(self._entry_rows):
             return
-        row = self._list.get_row_at_index(index)
-        if row is None:
-            return
+        # **`select_row` takes a `Gtk.ListBoxRow`, not the child widget.**
+        # `ListBox.append` wraps each child in a `ListBoxRow`, and passing the
+        # child raises `TypeError: argument row: Expected Gtk.ListBoxRow, but
+        # got gi.repository.Gtk.Box`. Measured while building the window,
+        # before any test existed.
+        row = self._entry_rows[index]
         self._list.select_row(row)
         # **`Gtk.Widget.scroll_to`, not `ListBox.scroll_to_child`** - the latter
         # does not exist on GTK 4's ListBox (`AttributeError: 'ListBox' object

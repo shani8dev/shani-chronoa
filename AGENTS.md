@@ -29356,3 +29356,40 @@ the first one. It says so and continues now, and the tree's depth limit
 went from four to twelve - four levels reached the page and stopped, which
 is why the first attempt to measure the empty state could not find it.
 
+
+## The palette's groups were never drawn, and a caption is a row (2026-10-21)
+
+`Entry.group` was used for the dedup key and for the search, and for nothing
+else - so the palette showed 260 rows in one flat list, with nothing to say
+which was a panel, which a skill and which a command. Measured on a real
+capture (`tools/live_window.sh -P`): "Conversation / the main window", "Quick
+ask / one question, no conversation", "Conversations / Remembering",
+"Compare / Remembering" - four kinds of thing, one list, no headings.
+
+**A caption is a row, and that changes what the row at index *n* is.** The
+captions live in the same `Gtk.ListBox` as the entries, so the navigation
+cannot count the list's rows: it walks the entry rows explicitly now
+(`self._entry_rows`). The shape this file's own comment recommends -
+comparing `get_row_at_index(index)` with the selected row - would answer
+-1 for every caption and could no longer find the selected entry at all,
+which is the "Enter did nothing" defect this file records twice.
+
+**`Gtk.ListBox` has no `get_n_rows`** - that is `Gtk.ListView`'s API - so the
+row count is kept in the widget rather than asked for. Measured, not
+remembered: `hasattr(Gtk.ListBox, "get_n_rows")` is False, and
+`row.get_index()` is what there is.
+
+**A search orders the groups by how well their best entry matched**, so a
+page is not buried under every skill whose prompt merely mentions it, and
+the rows of one group stay together - a caption is only true of the rows
+under it. Ordering the groups by the caller's list instead buries the exact
+title match, because the caller's list puts Skills before Settings.
+
+**A caption is not selectable.** A heading that can be highlighted and then
+activated by Enter is a control that does nothing - and a non-selectable row
+cannot take the selection, so asking the list to select one leaves the
+selection where it was.
+
+`tests/test_the_palette_shows_its_groups.py` (5),
+`tools/mutations/palette_groups.py` (8 mutations, 8 caught, 0 survivors), run
+on a snapshot rather than the shared tree.

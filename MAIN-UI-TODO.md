@@ -302,6 +302,34 @@ skills**. AGENTS.md calls it "everywhere you can go".
   **Not covered: "leaves the machine."** No set in this tree says which tools
   send data outward, and writing one here would be the second hand-kept list
   the item warns against.
+- [x] **3c** The palette's groups were never drawn.
+  **Done 2026-10-21.** `Entry.group` was used for the dedup key and for the
+  search, and for nothing else - so opening the palette showed 260 rows in
+  one flat list, with nothing to say which was a panel, which a skill and
+  which a command. Measured on a real capture (`tools/live_window.sh -P`):
+  "Conversation / the main window", "Quick ask / one question, no
+  conversation", "Conversations / Remembering", "Compare / Remembering" -
+  four kinds of thing, one list, no headings.
+  Each group now draws a caption naming it, and the caption is **not
+  selectable**: a heading that can be highlighted and then activated by Enter
+  is a control that does nothing.
+  **The captions are rows in the same list the entries are in**, so the row at
+  index *n* is not the entry at index *n* - the navigation walks the entry
+  rows explicitly now. The earlier version, which compared
+  `get_row_at_index(index)` with the selected row, would answer -1 for every
+  caption and could no longer find the selected entry at all.
+  **A search orders the groups by how well their best entry matched**, so a
+  page is not buried under every skill whose prompt merely mentions it, and
+  the rows of one group stay together - a caption is only true of the rows
+  under it. Measured with a real search ("privacy"): the "Privacy" panel
+  first under "Panels", "Settings: Privacy" below it under "Settings".
+  `tests/test_the_palette_shows_its_groups.py` (5),
+  `tools/mutations/palette_groups.py` (8 mutations, 8 caught).
+  **Left as it is:** a panel's subtitle is the *sidebar section* it lives in
+  ("Remembering"), not the panel's own description. The section is what makes
+  "remembering" find those panels in a search, and the descriptions are
+  written to be read by a model with the schema in front of them, so they are
+  long and ellipsise to nothing in a row this narrow.
 
 ### 4 — The Activity panel is a graveyard
 
