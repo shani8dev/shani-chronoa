@@ -29317,3 +29317,42 @@ confident wrong answer**, and the reader returns `("", 0)` for all three.
 `tests/test_the_work_chip_says_which_project_it_is_on.py` (7),
 `tools/mutations/work_chip_project.py` (5 mutations, 5 caught).
 Forty-nine files, one process each: 49 passed.
+
+## A fixed bus name is a test that can be blocked forever (2026-10-21)
+
+**A name of its own is not enough: it has to be a name nobody else can
+be holding.** `tests/test_both_indicator_sheets_reach_the_display.py`
+registered `dev.shani.chronoa.SheetsReach` - a *fixed* name, and one in
+**the product's own namespace**, where a name belongs to the app and not
+to a test. The app has to be on the bus for `activate()` to build a
+window, so the name is not optional.
+
+Measured on this box, with a name a crashed run had left behind:
+
+    dev.shani.chronoa.SheetsReach  - -  -  -  -  -  -
+    Failed to get credentials: No such process
+
+The bus still lists it and the owner is gone, so `app.register(None)`
+waited for a name that was never coming: **2 errors, 25.5 seconds, every
+run**. The name is now the test's own and unique to the process
+(`test.chronoa.sheetsreach<pid>`, the shape
+`tests/test_ask_for_text.py` already used): **2 passed in 6.5s**, and the
+same file twice in a row.
+
+**And the runner that found it reported the count and not the names.**
+`tools/run_suite_in_chunks.sh` used `-rf`, which reports *failures* only -
+a raising fixture becomes an ERROR and `-rf` prints none of them - so the
+chunk's summary said "2 errors" and named neither, and the only trace in
+the log was the "EE" in the progress dots. `-rE` names them. This is the
+second time this file has recorded the fix and the first time it was
+applied to this runner.
+
+**A probe that raises is a probe that can destroy what it is measuring.**
+`tools/live_window.py`'s tree probe ran twice - at map and at shot - and a
+panel is only pushed onto the window after the first of those, so an
+expression naming a panel is *expected* to fail at map time. The exception
+aborted the app: no picture, no second probe, and a log that showed only
+the first one. It says so and continues now, and the tree's depth limit
+went from four to twelve - four levels reached the page and stopped, which
+is why the first attempt to measure the empty state could not find it.
+
