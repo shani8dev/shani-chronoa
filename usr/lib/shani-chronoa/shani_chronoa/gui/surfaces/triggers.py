@@ -395,11 +395,15 @@ class _TriggersSurface:
         # banner and the "Arm a rule" form, not on a page of its own, and an
         # `Adw.StatusPage` there is clipped to a slice of its icon. See
         # `common.empty_state`.
+        # **The title is the consequence, not the count.** The count is
+        # the status row's ("No rules armed"), and saying it twice is the
+        # same fact twice - so the empty state says what follows from it,
+        # and the description says what to do about that.
         self.empty_state: Gtk.Widget = common.empty_state(
             ICON,
-            "No trigger rules armed",
-            "Nothing here can act on its own yet. Arm one with the form below, "
-            "or ask Chronoa - \u201cwhen my battery is low, tell me\u201d.",
+            "Nothing here acts on its own yet",
+            "Arm one with the form below, or ask Chronoa - "
+            "\u201cwhen my battery is low, tell me\u201d.",
             inline=True,
         )
         # **"Ask Chronoa to arm one" now has a way to be asked.** That sentence
@@ -686,14 +690,16 @@ class _TriggersSurface:
                 f"{plural(total, 'rule')} armed",
                 f"from {plural(len(paths), 'file')}"))
         else:
-            # **The row is not built: the empty state says it.**
-            #
-            # With nothing armed, the empty state's own title is the page's
-            # statement - "No trigger rules armed" - and a status row
-            # saying "No rules armed" would be the same fact twice. The
-            # recorder still holds the word, because the sidebar dot reads
-            # it: the Phone panel's shape, for the same reason.
-            self.status_recorder.set(common.STATUS_OK)
+            # **The word and the count, and no detail.** The detail used to
+            # be "nothing here can act on its own", which repeated the empty
+            # state's own sentence; the Export panel settled the same
+            # question the same way. **The row stays even though the empty
+            # state is showing**, because the sidebar dot reads the word the
+            # recorder holds, and a recorder that holds a word nothing was
+            # drawn for is what the health gate calls out.
+            self._status_slot.append(self.status_recorder.row(
+                common.STATUS_OK,
+                "No rules armed"))
 
     def _add_problem(self, text: str) -> None:
         self._problems.append(text)

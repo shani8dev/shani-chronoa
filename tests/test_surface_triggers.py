@@ -177,7 +177,7 @@ class TestEmptyState:
     def test_an_empty_state_is_not_an_error(self, tmp_path):
         surface = triggers.build(_StubApp(_percept_store(tmp_path), _event_store(tmp_path)))
         joined = " ".join(_texts(surface)).lower()
-        assert "no trigger rules armed" in joined
+        assert "nothing here acts on its own yet" in joined
         assert "traceback" not in joined and "error" not in joined
 
 
@@ -203,22 +203,21 @@ class TestOneStatementPerPage:
         assert "No event rules armed." not in texts, texts
 
     def test_the_page_says_it_once(self, tmp_path):
-        """**Nothing armed is said once, by the empty state.**
+        """**Nothing armed is said once.**
 
-        The empty state's own title is the page's statement about it, so
-        a status row saying the same thing would be the fact twice - and
-        the row's detail used to be a third copy of the empty state's
-        first sentence. The recorder still holds the word, because the
-        sidebar dot reads it.
+        The count is the status row's summary - "No rules armed" - and
+        the empty state's headline is what *follows* from it, not the
+        same fact in other words. The row's detail used to be a third
+        copy of the empty state's own sentence.
         """
         surface = triggers.build(
             _StubApp(_percept_store(tmp_path), _event_store(tmp_path)))
         texts = _texts(surface)
         said = [t for t in texts if "rules armed" in t.lower()]
         assert len(said) == 1, said
-        assert said[0] == "No trigger rules armed", said
+        assert said[0] == "No rules armed", said
         # The detail the row used to carry: the empty state's description
-        # says it, so a second copy is a second statement.
+        # says what to do, so a second copy is a second statement.
         assert "nothing here can act on its own" not in texts, texts
 
     def test_the_empty_kind_is_named_the_way_the_page_names_it(self, tmp_path):

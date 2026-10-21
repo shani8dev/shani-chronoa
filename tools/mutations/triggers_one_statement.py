@@ -30,12 +30,10 @@ MUTATIONS = [
     },
     {
         "file": _PANEL,
-        "old": "            self.status_recorder.set(common.STATUS_OK)\n",
-        "new": "            self._status_slot.append(self.status_recorder.row(\n"
-               "                common.STATUS_OK,\n"
-               "                \"No rules armed\"))\n",
-        # The status row is back, so the page says "no rules armed" twice:
-        # once in the row and once in the empty state's own title.
+        "old": "            \"Nothing here acts on its own yet\",\n",
+        "new": "            \"No trigger rules armed\",\n",
+        # The headline is the count again, so the page says it twice: once
+        # in the status row and once in the empty state.
         "label": "the page says 'no rules armed' twice again",
         "expect": ["test_the_page_says_it_once"],
     },
