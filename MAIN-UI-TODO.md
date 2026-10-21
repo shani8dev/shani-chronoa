@@ -844,6 +844,19 @@ is trying to do, with the live things on the main window.
   Bluetooth / USB. One permission banner at the top for whichever tab is shut.
 - [ ] **11c "Models"** = Models + Answering now: what answers now, on top; the
   catalogue under it. Model choice keeps its home on the composer button.
+  **Measured, so the next pass does not re-derive it.** The two panels are
+  `gui/surfaces/models.py` (TITLE **"Models"**, the catalogue, with a search
+  bar over a stack) and `gui/surfaces/model.py` (TITLE **"Answering
+  now"**, the local state). **They are in different sidebar sections** -
+  "models" is under **This machine** and "model" under **Desktop and
+  system** - so the merge moves one of them. Neither is a *page*: both are
+  panels, and the palette lists them because it walks
+  `surfaces.available_surfaces()` rather than a hand-kept list, so the
+  palette needs no edit for the entry to disappear with the panel.
+  `model.build()` returns a page whose content is a scrolled
+  `_ModelSurface`, and `models.build()` returns a page of its own - so
+  "what answers now, on top" means building the first one's *content* into
+  the second one's page, not nesting two pages.
 - [ ] **11d "Automation"** = Routines + Triggers + Goals + Background mode:
   tabs Routines (say a phrase) / Rules (when X then Y, plain-language builder) /
   Goals (plans) - and the background-mode switch as this page's header, since
