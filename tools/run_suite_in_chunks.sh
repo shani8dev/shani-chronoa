@@ -119,15 +119,21 @@ for manifest in /tmp/opencode/chunk_*; do
     # This was added once already and then **lost to a working-tree restore from
     # HEAD** - the edit was uncommitted when the tree was destroyed, so the very
     # trap it closes reopened. Landing it as a commit is what makes it durable.
+    # **`-rfE`, not `-rf`.** `-rf` reports *failures* only, and a raising
+    # fixture turns every test that uses it into an ERROR - so the summary
+    # counted "2 errors" and named none of them. Measured on this tree: two
+    # errors in a chunk whose log said "3 failed, 1309 passed, 2 errors", and
+    # the only trace of them was the "EE" in the progress dots. `-rE` prints
+    # the ERROR lines, so a chunk's errors are readable without re-running it.
     setsid env XDG_STATE_HOME="$state" XDG_CONFIG_HOME="$state/config" \
         XDG_DATA_HOME="$state/data" PYTHONDONTWRITEBYTECODE=1 \
-        python3 -m pytest $files -q --tb=no -rf > "$log" 2>&1 < /dev/null &
+        python3 -m pytest $files -q --tb=no -rfE > "$log" 2>&1 < /dev/null &
     echo "launched $name ($(wc -w < "$manifest") files) -> $log"
 done
 
 echo
 echo "to read the whole run:"
-echo "  grep -hE '^FAILED' $LOGS/*.log | sed 's/FAILED //; s/ - .*//' | sort -u"
+echo "  grep -hE '^(FAILED|ERROR)' $LOGS/*.log | sed -E 's/^(FAILED|ERROR) //; s/ - .*//' | sort -u"
 echo "  grep -hoE '[0-9]+ passed[^|]*(\\\\| [0-9]+ failed)?[^|]*' $LOGS/*.log"
 echo
 echo "**Parallel shards make the GUI and live-audio tests flaky** - AGENTS.md"

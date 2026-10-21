@@ -165,7 +165,15 @@ def mapped_window():
         Adw.init()
         from shani_chronoa.gui.window import ChronoaWindow
 
-        app = Gtk.Application(application_id="dev.shani.chronoa.SheetsReach")
+        # A name of its own, in the test namespace and **unique to this
+        # process**: the app has to be on the bus for `activate()` to build
+        # the window, and a name another run still holds - or a name a
+        # crashed run left behind - makes `register(None)` wait for a name
+        # that is never coming. Measured: with a fixed name this file failed
+        # every run for 25 seconds each, on a name whose owner was a process
+        # that no longer existed.
+        app = Gtk.Application(
+            application_id=f"test.chronoa.sheetsreach{os.getpid()}")
         holder: dict = {}
 
         def activate(application):
