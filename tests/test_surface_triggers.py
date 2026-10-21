@@ -202,19 +202,23 @@ class TestOneStatementPerPage:
         assert "No sense rules armed." not in texts, texts
         assert "No event rules armed." not in texts, texts
 
-    def test_the_status_row_says_it_once(self, tmp_path):
-        """**The count is said once.** The status row's summary is the
-        page's one statement about it, and it carries no detail - the
-        detail repeated the empty state's own sentence, which is how the
-        Export panel settled the same question."""
+    def test_the_page_says_it_once(self, tmp_path):
+        """**Nothing armed is said once, by the empty state.**
+
+        The empty state's own title is the page's statement about it, so
+        a status row saying the same thing would be the fact twice - and
+        the row's detail used to be a third copy of the empty state's
+        first sentence. The recorder still holds the word, because the
+        sidebar dot reads it.
+        """
         surface = triggers.build(
             _StubApp(_percept_store(tmp_path), _event_store(tmp_path)))
         texts = _texts(surface)
-        assert texts.count("No rules armed") == 1, texts
-        # The detail it used to carry, as a label of its own: the empty
-        # state's description says it, so a second copy is a second
-        # statement. (The description is one label with more words, so this
-        # is an exact match and not a substring one.)
+        said = [t for t in texts if "rules armed" in t.lower()]
+        assert len(said) == 1, said
+        assert said[0] == "No trigger rules armed", said
+        # The detail the row used to carry: the empty state's description
+        # says it, so a second copy is a second statement.
         assert "nothing here can act on its own" not in texts, texts
 
     def test_the_empty_kind_is_named_the_way_the_page_names_it(self, tmp_path):

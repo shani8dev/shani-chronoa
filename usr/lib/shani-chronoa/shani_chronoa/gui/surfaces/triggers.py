@@ -686,16 +686,14 @@ class _TriggersSurface:
                 f"{plural(total, 'rule')} armed",
                 f"from {plural(len(paths), 'file')}"))
         else:
-            # **The word and the summary, and no detail.** The detail used to
-            # be "nothing here can act on its own", which repeated the empty
-            # state's own sentence - and the Export panel settled the same
-            # question the same way. The empty state's *title* says the same
-            # thing again, and that is a separate fault: its words are not on
-            # screen (the box is squeezed to a band and only the icon's edge
-            # shows), so the page would say it twice once that is fixed.
-            self._status_slot.append(self.status_recorder.row(
-                common.STATUS_OK,
-                "No rules armed"))
+            # **The row is not built: the empty state says it.**
+            #
+            # With nothing armed, the empty state's own title is the page's
+            # statement - "No trigger rules armed" - and a status row
+            # saying "No rules armed" would be the same fact twice. The
+            # recorder still holds the word, because the sidebar dot reads
+            # it: the Phone panel's shape, for the same reason.
+            self.status_recorder.set(common.STATUS_OK)
 
     def _add_problem(self, text: str) -> None:
         self._problems.append(text)

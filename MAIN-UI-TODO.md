@@ -1008,28 +1008,30 @@ is trying to do, with the live things on the main window.
   sense". `tests/test_surface_triggers.py` (3) and
   `tools/mutations/triggers_one_statement.py` (**4 mutations, 4 caught, 0
   survivors**).
-  **Still open, and it is the same panel: the empty state's words are not
-  on screen.** The empty state is built inline between the consent banner
-  and the arming form, and the photo shows **a clipped arc of the icon and
-  neither the title nor the description** - the page says nothing about
-  what is absent, and the empty state's own title is the fourth copy that
-  never reaches the reader. AGENTS.md records the `inline=True` box as the
-  fix for the `Adw.StatusPage`'s 301px floor, and it *is* the fix for
-  that - but the box is inside a scroller of its own, and that scroller
-  is the page's **only child that can shrink**.
-  **Measured, from the widget tree of the real app** (`tools/live_window.sh
-  -t`): the page's content box is **657px** and its children want **~800**
-  (the arming form alone is 439) - so the shortfall lands on the empty
-  state's scroller, which is given **58px** for content that measures
-  **154px** (a 64px icon, a 21px heading, a 53px description, plus the
-  box's own 36px margins). The box is taller than the viewport, so only
-  the top of the icon shows. **Making that scroller not expand was
-  measured and changed nothing**, because the expander was never the
-  cause: a `Gtk.ScrolledWindow` reports a small minimum height (it can
-  scroll), so the *page's* box shrinks it below its own content's
-  minimum. The fix has to stop the scroller from being the child that
-  absorbs the shortfall, and it has to land with the de-duplication
-  above or the page says it twice again.
+  **Fixed, and the cause was in the page's own layout.** The empty
+  state's words were not on screen: the picture showed **a clipped arc
+  of the icon and neither the title nor the description**, so the page
+  said nothing about what was absent - and the empty state's own title
+  was the fourth copy that never reached the reader. Measured from the
+  real app's widget tree (`tools/live_window.sh -t`), on the Triggers
+  page: the page's content box is **657px** and its children want
+  **~800** (the arming form alone is 439), so the shortfall lands on
+  **the only child that can shrink** - and the empty state's scroller
+  was given **58px** for content that measures **154px**. A
+  `Gtk.ScrolledWindow` reports a small minimum height, because it can
+  scroll, so the page's box shrank it below its own content's minimum
+  and the box inside was taller than the viewport. **A scroller of its
+  own looked harmless - it is what the layout contract wants - and it is
+  exactly what a crowded page shrinks first.** The inline empty state
+  does not have one now: the page's own scroller scrolls the page, and
+  the memory panel (whose page is short and whose tree would otherwise
+  have no scroller at all) puts one there itself. With the words on
+  screen, the status row is **not built** - the empty state's title is
+  the page's one statement about it, and the recorder still holds the
+  word because the sidebar dot reads it (the Phone panel's shape).
+  `tests/test_the_empty_state_says_its_words.py` (1) and
+  `tools/mutations/triggers_one_statement.py` (**4 mutations, 4 caught,
+  0 survivors**).
 - [x] **11n2 A raw key on screen**: no person-facing panel may name a
   gsettings key. **Done 2026-10-20**, from a sweep of all 38 panels:
   **nine named one**, through five different routes - a panel's own sentence
@@ -1209,4 +1211,24 @@ Phone & devices · Meetings · My files · Models · Privacy & permissions · He
   `tools/fake_adb.py`, `tools/fake_kdeconnect.py`.
 - [ ] **13b** Live capture of the window with `tools/live_window.sh` against the
   fakes (DBUS_SYSTEM_BUS_ADDRESS to fake_bluez), for the screenshot record.
+  **The record is behind the app, and it is the README's first image.**
+  `docs/screenshots/main.png` was taken on 2026-10-15 and shows **six**
+  suggestion chips where the app now has **eight** ("Listen" and "My
+  routines" were added), a rail card **"TIMERS"** that the rail no longer
+  carries (the timers are a strip above the composer now), and a row
+  called **"Memory"** where the page is now called **"What it
+  remembers"**. A reader of the README is shown an app that does not
+  look like this one.
+  **Not replaced here, and the reason is measured rather than a
+  preference.** A fresh capture of the same window at the same size
+  shows the app as it is now - and it says **"Answering from the
+  cloud"**, because the harness's app runs against a scratch data
+  directory with no model in it and no compiled schema, so the local
+  engine is unavailable and the cloud fallback is on by default. The
+  old picture says "Answering on this computer", which is the better
+  picture for a local-first product and the wrong one for a machine
+  with no model. **The capture has to show a local engine answering**
+  before it replaces the old one, and pointing the harness at the
+  machine's real model directory is not free: AGENTS.md records that a
+  capture which did that started real services from inside a capture.
 - [ ] **13c** Dialer redesign, car-infotainment style (asked 2026-10-14).

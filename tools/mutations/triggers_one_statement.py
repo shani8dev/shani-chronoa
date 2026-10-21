@@ -30,16 +30,14 @@ MUTATIONS = [
     },
     {
         "file": _PANEL,
-        "old": "            self._status_slot.append(self.status_recorder.row(\n"
-               "                common.STATUS_OK,\n"
-               "                \"No rules armed\"))\n",
+        "old": "            self.status_recorder.set(common.STATUS_OK)\n",
         "new": "            self._status_slot.append(self.status_recorder.row(\n"
                "                common.STATUS_OK,\n"
-               "                \"No rules armed\",\n"
-               "                \"nothing here can act on its own\"))\n",
-        # The detail is back, and it repeats the empty state's own sentence.
-        "label": "the status row carries the empty state's sentence again",
-        "expect": ["test_the_status_row_says_it_once"],
+               "                \"No rules armed\"))\n",
+        # The status row is back, so the page says "no rules armed" twice:
+        # once in the row and once in the empty state's own title.
+        "label": "the page says 'no rules armed' twice again",
+        "expect": ["test_the_page_says_it_once"],
     },
     {
         "file": _PANEL,

@@ -716,7 +716,13 @@ class _MemorySurface(Adw.NavigationPage):
         widget = common.empty_state(icon, title, detail, inline=True)
         widget.add_css_class(EMPTY_CSS)
         widget.set_vexpand(True)
-        return widget
+        # **A scroller of its own, and the reason is the layout contract**
+        # (`test_every_surface_can_scroll`): this page's own content is not
+        # in a scroller, so without this the page has none and a tall
+        # window cannot reach the bottom. The page is short - the status
+        # row, the "remember a fact" bar and this - so the scroller is
+        # never the child that gets squeezed.
+        return common.scrolled(widget)
 
     # -- the one write ------------------------------------------------------
 

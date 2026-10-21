@@ -725,12 +725,22 @@ def empty_state(icon: str, title: str, description: str = "",
         box.append(note)
     if child is not None:
         box.append(child)
-    # **Its own scroller, for the same reason.** `test_every_surface_can_scroll`
-    # requires every surface to have one, and `memory` was passing only because
-    # the `Adw.StatusPage` it no longer uses *contains* one internally. An
-    # inline empty state is now a real thing in two panels, so it carries its
-    # own rather than depending on a widget class for it.
-    return scrolled(box)
+    # **No scroller of its own, and that is the fix.**
+    #
+    # `test_every_surface_can_scroll` wants a scroller in the surface's own
+    # tree, and one used to be added here for that reason - but a
+    # `Gtk.ScrolledWindow` reports a small minimum height (it can scroll),
+    # so when the page is taller than the window, **the only child that can
+    # be shrunk absorbs the shortfall**, and what gets clipped is the empty
+    # state's own words. Measured on the Triggers page, whose arming form is
+    # 439px of a 657px body: the scroller was given **58px** for content
+    # that measures **154px**, so the page showed a sliver of the icon and
+    # neither the title nor the description.
+    #
+    # The page's own scroller does the scrolling - every page has one -
+    # and a caller that needs a scroller *in its own tree* puts one there
+    # (the memory panel, whose page is short and has no other).
+    return box
 
 
 def setup_route(app: Any, widget: "Gtk.Widget | None" = None) -> str:
