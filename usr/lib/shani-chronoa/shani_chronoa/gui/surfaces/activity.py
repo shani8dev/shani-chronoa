@@ -54,6 +54,7 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from shani_chronoa import tool_tracking  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
+from shani_chronoa.words import plural
 
 logger = logging.getLogger(__name__)
 
@@ -595,7 +596,7 @@ def build_refusals() -> Gtk.Widget:
         return None
     group = common.group(
         "Declined",
-        f"{len(notices)} request(s) Chronoa did not carry out, and why. "
+        f"{plural(len(notices), 'request')} Chronoa did not carry out, and why. "
         "The most recent is last.")
     for said in notices:
         group.add(common.row("Declined", said))

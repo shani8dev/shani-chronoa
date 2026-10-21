@@ -42,6 +42,7 @@ from gi.repository import GLib
 
 from shani_chronoa import browser_bridge, egress, webtext
 from shani_chronoa.gui import browser as _browser
+from shani_chronoa.words import plural
 
 logger = logging.getLogger(__name__)
 
@@ -1034,9 +1035,9 @@ def _act(action: str, arguments: dict, timeout: float) -> str:
             if not value or value.get("error"):
                 return (f"Error: could not type into '{selector}': "
                         f"{(value or {}).get('error', 'no answer from the page')}."
-                        + (f" {i} of {len(text)} character(s) went in first." if i else ""))
+                        + (f" {i} of {plural(len(text), 'character')} went in first." if i else ""))
             _pause(0.04)
-        return f"Typed {len(text)} character(s) into '{selector}'."
+        return f"Typed {plural(len(text), 'character')} into '{selector}'."
 
     if action == "select":
         value_arg = arguments.get("value")

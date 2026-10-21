@@ -332,7 +332,7 @@ class TestWhatItDoesNotShowWhole:
                _consent=lambda c: (True, ""))
         page = w.build(App(Config()))
         text = _labels(_run(page))
-        assert "7 more characteristic(s)" in text
+        assert "7 more characteristics" in text
 
     def test_a_notify_only_characteristic_offers_a_listen_and_not_a_read(
             self, monkeypatch):

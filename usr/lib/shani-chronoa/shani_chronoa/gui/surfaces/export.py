@@ -75,6 +75,7 @@ from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
 
 from shani_chronoa import conversation_store, markdown_lite  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
+from shani_chronoa.words import plural
 
 logger = logging.getLogger(__name__)
 
@@ -570,8 +571,8 @@ class _ExportView(Gtk.Box):
                 count = 0
             self._body.append(self.status_recorder.row(
                 common.STATUS_OK,
-                f"A conversation is open - {count} message(s)",
-                f"{sid}: {count} message(s) you and Chronoa exchanged"))
+                f"A conversation is open - {plural(count, 'message')}",
+                f"{sid}: {plural(count, 'message')} you and Chronoa exchanged"))
         else:
             self._body.append(self.status_recorder.row(
                 common.STATUS_UNKNOWN,
@@ -601,7 +602,7 @@ class _ExportView(Gtk.Box):
         # reader meets three times.
         group = common.group(
             "The open conversation",
-            _adw_text(f"{title} - {said} message(s) you and Chronoa exchanged."
+            _adw_text(f"{title} - {plural(said, 'message')} you and Chronoa exchanged."
                       if not reason else ""),
         )
         for kind, label, fields in (
@@ -630,7 +631,7 @@ class _ExportView(Gtk.Box):
                 held = [p for p in store.active(time.time())
                         if getattr(p, "ttl_seconds", None) is None
                         and str(getattr(p, "sense", "")) == FACTS_SENSE]
-                count = f"{len(held)} fact(s) you asked Chronoa to remember, as they stand now."
+                count = f"{plural(len(held), 'fact')} you asked Chronoa to remember, as they stand now."
             except Exception as exc:  # noqa: BLE001
                 facts_reason = f"{type(exc).__name__}: {exc}"
         facts_group = common.group("What Chronoa believes", count or facts_reason)

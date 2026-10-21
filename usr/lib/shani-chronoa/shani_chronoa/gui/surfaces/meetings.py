@@ -43,6 +43,7 @@ from gi.repository import GLib, Gtk
 
 from shani_chronoa import markdown_lite, meeting
 from shani_chronoa.gui.surfaces import common
+from shani_chronoa.words import plural
 
 logger = logging.getLogger(__name__)
 
@@ -181,7 +182,7 @@ class _MeetingsView(Gtk.Box):
         newest = found[0]
         self._status_slot.append(self.status_recorder.row(
             common.STATUS_OK,
-            f"{len(found)} meeting(s) kept",
+            f"{plural(len(found), 'meeting')} kept",
             f"newest: {newest['name']} ({newest['bytes'] // 1024} kB), in "
             f"{meeting.recordings_dir()}"))
 
@@ -487,7 +488,7 @@ class _MeetingsView(Gtk.Box):
             prefix = f"[{_clock(start)}] "
             lines.append(f"{prefix}{speaker + ': ' if speaker else ''}"
                          f"{getattr(segment, 'text', '')}")
-        title = f"{item.get('name')}: {len(segments)} segment(s)"
+        title = f"{item.get('name')}: {plural(len(segments), 'segment')}"
         self._show_markdown(title, "\n".join(lines))
 
     def _show_text(self, text: str) -> None:

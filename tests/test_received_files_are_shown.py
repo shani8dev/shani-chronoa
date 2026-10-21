@@ -151,7 +151,7 @@ class TestWhatArrived:
         view._received_done(view._received_work())
         note = view.received_note.get_label()
         assert str(folder) in note, note
-        assert "1 file(s)" in note, note
+        assert "1 file" in note, note
 
     def test_a_file_that_vanish_between_the_read_does_not_crash(self, _isolated_downloads):
         """`stat` on a file somebody deleted while the panel was building is an

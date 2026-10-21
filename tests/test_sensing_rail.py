@@ -118,7 +118,7 @@ def test_a_refused_sense_is_counted_not_hidden():
     senses = [_entry("location"), _entry("calendar", allowed=False,
                                          denial="you turned this off")]
     said = _sensing_text([], senses)
-    assert "1 sense(s) refused" in said, said
+    assert "1 sense refused" in said, said
     assert "you turned this off" in said, said
 
 
@@ -131,7 +131,7 @@ def test_a_refusal_with_no_reason_still_counts():
     """A bare count is better than silence, which is indistinguishable from a
     section that never refreshed."""
     said = _sensing_text([], [_entry("camera", allowed=False)])
-    assert "1 sense(s) refused" in said, said
+    assert "1 sense refused" in said, said
 
 
 # -- when there is nothing --------------------------------------------------

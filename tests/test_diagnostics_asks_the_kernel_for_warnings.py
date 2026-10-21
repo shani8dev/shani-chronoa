@@ -75,7 +75,7 @@ def test_errors_are_reported_without_asking_about_warnings(monkeypatch):
     status, detail = D._kernel()
 
     assert status == D.STATUS_NOT_WORKING, status
-    assert "1 message(s) at error level or worse" in detail, detail
+    assert "1 message at error level or worse" in detail, detail
     assert "usb 1-2" in detail, f"the newest message is not shown: {detail!r}"
     assert asked == [3], (
         f"asked {asked}; once errors are known the warning level adds nothing and "

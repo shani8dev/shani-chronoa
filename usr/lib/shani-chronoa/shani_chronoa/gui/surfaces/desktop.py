@@ -95,6 +95,7 @@ from gi.repository import Gtk  # noqa: E402
 from shani_chronoa import markdown_lite, secret_store  # noqa: E402
 from shani_chronoa.capabilities import gate_label  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
+from shani_chronoa.words import plural
 
 logger = logging.getLogger(__name__)
 
@@ -662,7 +663,7 @@ def _desktop_sentence() -> str:
     takes_file = any(code in exec_line for code in ("%U", "%u", "%F", "%f"))
     if not mimes:
         return (f"{EVIDENCE_INSTALLED} - {DESKTOP_ENTRY} is there, but its "
-                "MimeType list is empty (0 type(s)), so the desktop has no reason "
+                "MimeType list is empty (0 types), so the desktop has no reason "
                 "to offer it for any file.")
     shown = ", ".join(part.strip() for part in mimes[:4])
     more = f", and {len(mimes) - 4} more" if len(mimes) > 4 else ""
@@ -671,7 +672,7 @@ def _desktop_sentence() -> str:
             "but its Exec= line takes no field code, so a chosen file would not "
             "reach Chronoa")
     return (f"{EVIDENCE_INSTALLED} - {DESKTOP_ENTRY} is there with "
-            f"{len(mimes)} MIME type(s) in its MimeType list ({shown}{more}), "
+            f"{plural(len(mimes), 'MIME type')} in its MimeType list ({shown}{more}), "
             f"{tail}.")
 
 

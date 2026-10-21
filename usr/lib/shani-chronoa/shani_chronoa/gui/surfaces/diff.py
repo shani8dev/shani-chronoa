@@ -38,6 +38,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Gdk, Gtk  # noqa: E402
 
 from shani_chronoa.gui.surfaces import common  # noqa: E402
+from shani_chronoa.words import plural
 
 logger = logging.getLogger(__name__)
 
@@ -818,7 +819,7 @@ class _DiffView(Gtk.Box):
         total_removed = sum(sum(1 for h in f.hunks for l in h.lines if l.tag == "-")
                             for f in changed)
         self._count_label.set_text(
-            f"{len(changed)} file(s) changed - {total_added}+ {total_removed}-")
+            f"{plural(len(changed), 'file')} changed - {total_added}+ {total_removed}-")
         # With nothing changed the toolbar said "0 file(s) changed - 0+ 0-" under
         # a status row saying the same, over a label saying "No changes." -
         # three statements of one fact. The status row keeps it; the empty
@@ -865,19 +866,19 @@ class _DiffView(Gtk.Box):
         elif not changed:
             self._status_row_box.append(self.status_recorder.row(
                 common.STATUS_OK, "Nothing changed since the last pre-image",
-                f"{len(self._files)} file(s) in the undo ring, every one back "
+                f"{plural(len(self._files), 'file')} in the undo ring, every one back "
                 "where it started"))
         elif self._applied:
             self._status_row_box.append(self.status_recorder.row(
                 common.STATUS_OK,
-                f"{len(changed)} file(s) Chronoa changed (already written)",
-                f"{added} line(s) added. To put one back, ask Chronoa to "
+                f"{plural(len(changed), 'file')} Chronoa changed (already written)",
+                f"{plural(added, 'line')} added. To put one back, ask Chronoa to "
                 "undo the last change - this panel does not decide that."))
         else:
             self._status_row_box.append(self.status_recorder.row(
                 common.STATUS_ATTENTION,
-                f"{len(changed)} file(s) awaiting your decision",
-                f"{added} line(s) added; nothing is written until you accept"))
+                f"{plural(len(changed), 'file')} awaiting your decision",
+                f"{plural(added, 'line')} added; nothing is written until you accept"))
 
     def _revert_file(self, file: DiffFile) -> None:
         """Restore the "before" side this panel is showing for `file`."""

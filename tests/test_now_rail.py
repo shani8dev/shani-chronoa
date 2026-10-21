@@ -559,7 +559,7 @@ class TestTheRailSaysWhetherTheRulesFileIsInForce:
         rules.write_text("Answer in British English.\nMy laptop is called atlas.")
         text = self._posture(tmp_path, monkeypatch)
         assert "apply to every answer" in text
-        assert "2 line(s)" in text, text
+        assert "2 lines" in text, text
         assert "refused" not in text.lower()
 
     def test_the_rail_and_the_assistant_read_one_verdict(self, tmp_path, monkeypatch):

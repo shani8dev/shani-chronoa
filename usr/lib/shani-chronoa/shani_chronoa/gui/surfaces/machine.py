@@ -75,6 +75,7 @@ from gi.repository import Gtk  # noqa: E402
 
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 from shani_chronoa.senses import Percept, discover_senses  # noqa: E402
+from shani_chronoa.words import plural
 
 logger = logging.getLogger(__name__)
 
@@ -357,7 +358,7 @@ def _clip(text: Any, name: str) -> str:
     hidden = len(lines) - MAX_READING_LINES
     kept = lines[:MAX_READING_LINES]
     kept.append(
-        f"... {hidden} more line(s) not shown; shani-chronoa-sense run {name} "
+        f"... {plural(hidden, 'more line')} not shown; shani-chronoa-sense run {name} "
         f"--no-store prints the whole reading"
     )
     return "\n".join(kept)

@@ -67,6 +67,7 @@ from gi.repository import Gtk  # noqa: E402
 
 from shani_chronoa import markdown_lite  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
+from shani_chronoa.words import plural
 
 logger = logging.getLogger(__name__)
 
@@ -402,7 +403,7 @@ def _brain() -> Tuple[str, str]:
             return STATUS_NOT_WORKING, (
                 "no model is selected, so the server has nothing to load"
             ), (
-                f"llama-server is at {binary}; {len(on_disk)} model file(s) are "
+                f"llama-server is at {binary}; {plural(len(on_disk), 'model file')} are "
                 f"in {model_dir}, and none of them is the one current.gguf "
                 "points at"
             )
@@ -770,7 +771,7 @@ def _microphone() -> Tuple[str, str]:
     shown = ", ".join(device.label for device in inputs[:3])
     more = f", and {len(inputs) - 3} more" if len(inputs) > 3 else ""
     return STATUS_WORKING, (
-        f"{len(inputs)} microphone(s) on the live graph: {shown}{more}"
+        f"{plural(len(inputs), 'microphone')} on the live graph: {shown}{more}"
     )
 
 
@@ -1056,7 +1057,7 @@ def _checkpoint_count(root: Optional[Path] = None) -> Tuple[str, str]:
     if total == 0:
         if sessions:
             return STATUS_NOT_WORKING, (
-                f"{len(sessions)} conversation(s) are saved but no checkpoint "
+                f"{plural(len(sessions), 'conversation')} are saved but no checkpoint "
                 f"files were found - rewinding them would silently do nothing"
             )
         return STATUS_WORKING, (
@@ -1064,7 +1065,7 @@ def _checkpoint_count(root: Optional[Path] = None) -> Tuple[str, str]:
             "to rewind yet"
         )
 
-    lines = [f"{total} checkpoint file(s), in {len(by_session)} conversation(s)"]
+    lines = [f"{plural(total, 'checkpoint file')}, in {plural(len(by_session), 'conversation')}"]
     for sid, nums in sorted(by_session.items()):
         lines.append(f"  {sid}: numbers {', '.join(str(n) for n in nums)}")
     return STATUS_WORKING, "\n".join(lines)
@@ -1092,7 +1093,7 @@ def _model_server(instance: str) -> Probe:
             setup = (f"{env} is absent, so setup has never configured this server and "
                      f"{unit} has no program to run")
         else:
-            setup = f"{env} names {binary} with {len(args)} argument(s)"
+            setup = f"{env} names {binary} with {plural(len(args), 'argument')}"
         if model_service.is_up(instance):
             return STATUS_WORKING, (
                 f"{unit} is answering on 127.0.0.1:{port} (its /health returned 200); "
@@ -1161,7 +1162,7 @@ def _kernel() -> Tuple[str, str]:
     if errors:
         newest = errors[-1].strip()[:150]
         return STATUS_NOT_WORKING, (
-            f"{len(errors)} message(s) at error level or worse. Most recent: "
+            f"{plural(len(errors), 'message')} at error level or worse. Most recent: "
             f"{newest}")
 
     # **Readable and empty at error level.** That is the only state in which the

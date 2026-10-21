@@ -12,6 +12,7 @@ gi.require_version('GLib', '2.0')
 from gi.repository import Gtk, Gdk, GLib, Pango, GObject
 
 from shani_chronoa import capabilities
+from shani_chronoa.words import plural
 
 from . import blocks as reply_blocks
 
@@ -1017,11 +1018,11 @@ class TranscriptView(Gtk.ScrolledWindow):
         for item in seen_artifacts:
             if item not in unique:
                 unique.append(item)
-        parts = [f"{len(self._turns) - index} turn(s)"]
+        parts = [f"{plural(len(self._turns) - index, 'turn')}"]
         if tool_calls:
-            parts.append(f"{tool_calls} tool call(s)")
+            parts.append(f"{plural(tool_calls, 'tool call')}")
         if unique:
-            parts.append(f"{len(unique)} file(s) it made")
+            parts.append(f"{plural(len(unique), 'file')} it made")
         return {"ok": True, "turns": len(self._turns) - index,
                 "tool_calls": tool_calls, "artifacts": len(unique),
                 "sentence": " and ".join(parts)}

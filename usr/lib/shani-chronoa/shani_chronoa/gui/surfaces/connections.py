@@ -30,6 +30,7 @@ gi.require_version("Pango", "1.0")
 from gi.repository import Gtk, Pango  # noqa: E402
 
 from shani_chronoa.gui.surfaces import common  # noqa: E402
+from shani_chronoa.words import plural
 
 logger = logging.getLogger(__name__)
 
@@ -253,7 +254,7 @@ def build(app: Any) -> Gtk.Widget:
     if mcp_ok and mcp_bin:
         body.append(recorder.row(
             common.STATUS_OK, "Other apps can connect over MCP",
-            f"{len(bridges)} chat bridge(s) running, gateways: "
+            f"{plural(len(bridges), 'chat bridge')} running, gateways: "
             f"{', '.join(gateways) or 'none'}"))
     else:
         body.append(recorder.row(

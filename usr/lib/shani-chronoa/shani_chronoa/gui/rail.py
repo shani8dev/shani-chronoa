@@ -55,6 +55,7 @@ from pathlib import Path  # noqa: E402 - used by the Made section
 
 from shani_chronoa import config as config_mod  # noqa: E402
 from shani_chronoa import files  # noqa: E402
+from shani_chronoa.words import plural
 
 logger = logging.getLogger(__name__)
 
@@ -450,9 +451,9 @@ class NowRail(Gtk.Box):
         if report.elided:
             # The one line that has to be here: what was cut, so that a change
             # in behaviour has a reason attached to it.
-            said = (f"{report.elided_messages} tool result(s) shortened" if
+            said = (f"{plural(report.elided_messages, 'tool result')} shortened" if
                     report.elided_messages else
-                    f"{report.dropped_messages} earlier message(s) left out")
+                    f"{plural(report.dropped_messages, 'earlier message')} left out")
             self._context.row(said, "the window was full")
 
     # **The Timers section moved out of the rail.** The rail is deleted below
@@ -497,7 +498,7 @@ class NowRail(Gtk.Box):
             self._changed.link(path.name or str(path), f"+{added} -{removed}",
                                "diff", self.on_open)
         if len(files) > 6:
-            self._changed.empty(f"and {len(files) - 6} more file(s)")
+            self._changed.empty(f"and {plural(len(files) - 6, 'more file')}")
 
     def _fill_made(self) -> None:
         """The files this session's skills declared they made.
@@ -652,7 +653,7 @@ class NowRail(Gtk.Box):
             detail = ", ".join(names[:4])
             if len(names) > 4:
                 detail += f" and {len(names) - 4} more"
-            self._sensing.link(f"{len(polling)} sense(s) polling", detail,
+            self._sensing.link(f"{plural(len(polling), 'sense')} polling", detail,
                                "senses", self.on_open,
                                icon="preferences-system-privacy-symbolic")
         if refused:
@@ -661,7 +662,7 @@ class NowRail(Gtk.Box):
             reasons = [getattr(e, "denial", "") or getattr(e, "refusal", "")
                        for e in refused]
             stated = next((r for r in reasons if r), "")
-            summary = f"{len(refused)} sense(s) refused"
+            summary = f"{plural(len(refused), 'sense')} refused"
             if stated:
                 summary += f" - {stated}"
             self._sensing.empty(summary)
@@ -781,7 +782,7 @@ class NowRail(Gtk.Box):
         elif rules:
             lines = len([ln for ln in rules.splitlines() if ln.strip()])
             self._posture.row("Your rules apply to every answer",
-                              f"{lines} line(s) from rules.md")
+                              f"{plural(lines, 'line')} from rules.md")
 
     # -- refresh ----------------------------------------------------------
 

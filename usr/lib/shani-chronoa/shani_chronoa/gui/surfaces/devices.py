@@ -94,6 +94,7 @@ from shani_chronoa import phone as ph  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 from shani_chronoa.triggers import desktop_sources  # noqa: E402
 from shani_chronoa.triggers.common import SIGNAL_OK  # noqa: E402
+from shani_chronoa.words import plural
 
 logger = logging.getLogger(__name__)
 
@@ -626,7 +627,7 @@ def build(app) -> Gtk.Widget:
     body.set_margin_bottom(12)
     body.append(recorder.row(
         common.STATUS_OK,
-        f"{len(devices)} device(s) paired",
+        f"{plural(len(devices), 'device')} paired",
         f"read once at {time.strftime('%H:%M:%S', time.localtime(read_at))}"))
     body.append(_revealed(common.banner(
         f"{len(devices)} paired device{'' if len(devices) == 1 else 's'}, read once "

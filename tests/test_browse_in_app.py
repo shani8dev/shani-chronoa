@@ -287,7 +287,7 @@ def test_browse_drives_the_real_in_app_window(tmp_path, broadway, compiled_schem
     assert "exception" not in out, out
     assert out["local"] is True
     assert out["navigate"].startswith("Opened http://127.0.0.1:"), out["navigate"]
-    assert "Typed 4 character(s)" in out["type"], out["type"]
+    assert "Typed 4 characters" in out["type"], out["type"]
     assert "Clicked 'Greet'" in out["click"], out["click"]
     assert "Hi Pune" in out["text"] and "Untrusted third-party content" in out["text"], out["text"]
     cue = out["cue"]

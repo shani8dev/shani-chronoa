@@ -103,6 +103,7 @@ from shani_chronoa import (  # noqa: E402
 )
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 from shani_chronoa.opencv import runtime as opencv_runtime  # noqa: E402
+from shani_chronoa.words import plural
 
 logger = logging.getLogger(__name__)
 
@@ -278,7 +279,7 @@ def _model_file_detail() -> Tuple[str, str]:
             return "Model file", f"not installed - no model file in {directory}"
         active = local_llm.active()
         if not active:
-            return ("Model file", f"not installed - {len(installed)} model file(s) are in {directory}, "
+            return ("Model file", f"not installed - {plural(len(installed), 'model file')} are in {directory}, "
                                  "but none of them is the one the service would load")
         return "Model file", f"{active} - {local_llm.current_link()}"
     except Exception as exc:  # noqa: BLE001 - a model file that cannot be read is unknown
@@ -519,7 +520,7 @@ Probe = Callable[[Any], Tuple[Optional[bool], str]]
 def _eyes(config: Any) -> Tuple[Optional[bool], str]:
     found = local_vision.installed()
     if found:
-        return True, f"{len(found)} vision model(s) downloaded"
+        return True, f"{plural(len(found), 'vision model')} downloaded"
     return False, "no vision model and its projector are downloaded together, so neither is here"
 
 

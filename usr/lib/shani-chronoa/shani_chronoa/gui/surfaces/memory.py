@@ -64,19 +64,27 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk  # noqa: E402
 
+from shani_chronoa import capabilities  # noqa: E402
 from shani_chronoa import egress  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
+from shani_chronoa.words import plural
 
 logger = logging.getLogger(__name__)
 
-TITLE = "Memory"
+#: **What it remembers** - the question the page is opened for, and the
+#: name it was filed under ("Memory", a word that names a store rather
+#: than an answer). The page holds two kinds of thing - the facts a
+#: person told Chronoa, and the readings its senses took - so the
+#: subtitle says both, because it used to claim only the first while
+#: showing mostly the second.
+TITLE = "What it remembers"
 # A bookmark - facts it was asked to keep - rather than a generic page, which
 # in Adwaita is near-identical to the Artifacts glyph two rows away.
 ICON = "user-bookmarks-symbolic"
 
 SUBTITLE = (
-    "What Chronoa believes it was told, read from the running assistant's own "
-    "percept store. Nothing here reaches a model by being displayed."
+    "What Chronoa has remembered: the facts you told it, and the readings "
+    "its senses took. Nothing here reaches a model by being displayed."
 )
 
 #: Markers a test can find in the built tree, so no assertion has to read a
@@ -644,8 +652,8 @@ class _MemorySurface(Adw.NavigationPage):
             else:
                 self._content.append(self.status_recorder.row(
                     common.STATUS_OK,
-                    f"{len(percepts)} fact(s) remembered",
-                    f"held by {len(_by_sense(percepts))} sense(s)"))
+                    f"{plural(len(percepts), 'thing')} remembered",
+                    f"held by {plural(len(_by_sense(percepts)), 'sense')}"))
 
         # What needs answering comes before what is already answered. This is the
         # only row on the page a person has to *act* on, so it is placed above
@@ -688,7 +696,12 @@ class _MemorySurface(Adw.NavigationPage):
         path = _durable_path(self._store)
         body = common.page_body(18)
         for sense, held in _by_sense(percepts).items():
-            group = common.group(sense, f"{len(held)} fact(s) this sense has recorded")
+            # **The sense's own name, the way the Senses panel calls it.**
+            # The heading was the registry's id - "audio", "boots",
+            # "coredumps" - which is the code's word, and a person who has
+            # never met the registry cannot tell what "coredumps" is.
+            group = common.group(capabilities.sense_title(sense),
+                                 f"{plural(len(held), 'thing')} recorded")
             group.add_css_class(GROUP_CSS)
             for percept in held:
                 _add(group, _fact_row(percept, now, path, self._forget))

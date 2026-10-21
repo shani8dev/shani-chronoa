@@ -44,6 +44,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk, Pango  # noqa: E402
 
 from shani_chronoa.gui.surfaces import common  # noqa: E402
+from shani_chronoa.words import plural
 
 logger = logging.getLogger(__name__)
 
@@ -955,7 +956,7 @@ def _other_files_in_the_model_folder() -> List[Gtk.Widget]:
             names += f", and {len(usable) - 4} more"
         rows.append(common.status_row(
             common.STATUS_OK,
-            f"{len(usable)} other model file(s) in this folder",
+            f"{plural(len(usable), 'other model file')} in this folder",
             f"{names} load, but they are not among the models this panel offers "
             f"and nothing here has checked them - they did not come from this "
             f"build. Point `current.gguf` at one to run it."))
@@ -963,7 +964,7 @@ def _other_files_in_the_model_folder() -> List[Gtk.Widget]:
         why = unusable[0].get("reason") or unusable[0].get("note") or ""
         rows.append(recorder_row_status(
             common.STATUS_ATTENTION,
-            f"{len(unusable)} file(s) in this folder cannot be run as a model",
+            f"{plural(len(unusable), 'file')} in this folder cannot be run as a model",
             f"{unusable[0]['filename']}: {why}"
             + (f" (and {len(unusable) - 1} more)" if len(unusable) > 1 else "")))
     return rows

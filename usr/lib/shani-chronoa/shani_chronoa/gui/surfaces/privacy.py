@@ -292,12 +292,15 @@ def build(app) -> Gtk.Widget:
     for name in _sense_names():
         key = _SENSE_CONSENT_KEYS.get(name)
         granted = bool(key) and config.sense_allowed(name)
-        # The person-facing title, with the sense's id as the subtitle - it was
+        # The person-facing title, with the sense's id in the tooltip - it was
         # the bare module id ("cgroup", "rfsense") over a "granted" / "not
         # granted" line that repeated what the switch beside it already shows.
-        row = _switch_row(sense_title(name), name if key else
+        # **The id is the registry's word**, and the Senses panel - which
+        # shows the same switch - puts it in the tooltip too.
+        row = _switch_row(sense_title(name), "" if key else
                           f"{name} - no consent key, so it cannot be granted here",
                           granted)
+        row.set_tooltip_text(f"{name} ({key})" if key else f"{name}")
         switch = _switch_of(row)
 
         def _make_toggle(sense_name, sense_key, switch_row, sense_switch):

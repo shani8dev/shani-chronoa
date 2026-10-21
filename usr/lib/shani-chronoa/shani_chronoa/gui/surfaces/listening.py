@@ -40,6 +40,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
+from shani_chronoa.words import plural
 
 SURFACE_ID = "listening"
 #: Listening was the only panel with no section, so it landed in the catch-all -
@@ -326,7 +327,7 @@ def build(app: Any = None) -> Gtk.Widget:
             row.add_prefix(radio)
             stream_list.append(row)
         mic_note.set_text(
-            f"{len(mics)} app(s) using the microphone - an app's own microphone "
+            f"{plural(len(mics), 'app')} using the microphone - an app's own microphone "
             f"cannot be captured, only audio leaving it." if mics else "")
         mic_note.set_visible(bool(mics))
         update_go()

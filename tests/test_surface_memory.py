@@ -181,7 +181,11 @@ def _privacy(monkeypatch, value):
 
 class TestModuleContract:
     def test_it_exports_the_three_names_the_registry_reads(self):
-        assert surface.TITLE == "Memory"
+        # **"What it remembers"** - the question the page is opened for.
+        # The name it was filed under ("Memory") named a store rather than
+        # an answer, and the page holds two kinds of thing: the facts a
+        # person told Chronoa and the readings its senses took.
+        assert surface.TITLE == "What it remembers"
         assert isinstance(surface.ICON, str) and surface.ICON
         assert callable(surface.build)
 
@@ -279,6 +283,29 @@ class TestFacts:
         ]
         assert order == ["switch the lights off", "the meeting is at 4pm"], order
         assert len(_marked(widget, surface.FACT_CSS)) == 3
+
+    def test_a_group_is_headed_by_the_sense_the_person_knows(self, store):
+        """**The heading was the registry's id** - "audio", "boots",
+        "coredumps" - and a person who has never met the registry cannot
+        tell what "coredumps" is. The Senses panel calls each of them
+        something, and the same table is used here."""
+        from shani_chronoa import capabilities
+
+        store.add(_fact("coredumps", "a crash was recorded"))
+        widget = surface.build(_app(store))
+        headings = " ".join(_labels(widget))
+        assert capabilities.sense_title("coredumps") in headings, headings
+        assert "coredumps" not in headings, (
+            "the heading is the registry's id, not the sense's name")
+
+    def test_the_count_says_how_many_things_are_remembered(self, store):
+        """**The page holds readings as well as facts** - the audio sense's
+        reading of the devices is not a fact anybody told Chronoa - so
+        the count does not call them all facts."""
+        store.add(_fact("memory", "the meeting is at 4pm"))
+        widget = surface.build(_app(store))
+        said = " ".join(_labels(widget))
+        assert "1 thing remembered" in said, said
 
     def test_a_row_says_where_its_answer_came_from(self, store):
         store.add(_fact("memory", "prefers dark roast", source="memory sense"))

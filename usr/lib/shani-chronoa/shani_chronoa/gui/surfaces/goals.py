@@ -26,6 +26,7 @@ from gi.repository import GLib, Gtk  # noqa: E402
 
 from shani_chronoa import goals  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
+from shani_chronoa.words import plural
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ TITLE = "Goals"
 ICON = "view-list-ordered-symbolic"
 SECTION = "Acting"
 SUBTITLE = ("Plans Chronoa saved for later, one step at a time. Each step runs "
-            "exactly as a chat request would, asking where chat would ask.")
+            "exactly as a chat request would, asking for the same things.")
 
 _PHASE_WORD = {
     goals.Phase.PENDING: "not started",
@@ -61,8 +62,8 @@ def _when(at: float) -> str:
     if seconds < 3600:
         return "in the last hour"
     if seconds < 86400:
-        return f"{int(seconds // 3600)} hour(s) ago"
-    return f"{int(seconds // 86400)} day(s) ago"
+        return f"{plural(int(seconds // 3600), 'hour')} ago"
+    return f"{plural(int(seconds // 86400), 'day')} ago"
 
 
 def _phase_sentence(run: goals.GoalRun) -> str:
@@ -229,7 +230,7 @@ class _GoalsSurface:
             return
         self._body.append(self.status_recorder.row(
             common.STATUS_ATTENTION if waiting else common.STATUS_OK,
-            f"{len(live)} open goal(s)" + (f", {len(waiting)} waiting for you" if waiting else ""),
+            f"{plural(len(live), 'open goal')}" + (f", {len(waiting)} waiting for you" if waiting else ""),
             f"{len(runs)} saved in {self.store.root}"))
         for run in runs:
             self._body.append(self._card(run))

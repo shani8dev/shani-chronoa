@@ -81,6 +81,7 @@ from shani_chronoa.triggers import (  # noqa: E402
     EventRuleStore,
     RuleStore,
 )
+from shani_chronoa.words import plural  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -203,7 +204,7 @@ def _backoff_wait(rule: Any) -> str:
         return ""
     if seconds <= 0:
         return ""
-    return f"{seconds:.0f}s after {attempt} failure(s)"
+    return f"{seconds:.0f}s after {plural(attempt, 'failure')}"
 
 
 def _source_event(rule: Any) -> str:
@@ -663,13 +664,13 @@ class _TriggersSurface:
         if self._problems:
             self._status_slot.append(self.status_recorder.row(
                 common.STATUS_ATTENTION,
-                f"{total} rule(s) armed, {len(self._problems)} could not be read",
+                f"{plural(total, 'rule')} armed, {len(self._problems)} could not be read",
                 "; ".join(self._problems)))
         elif total:
             self._status_slot.append(self.status_recorder.row(
                 common.STATUS_OK,
-                f"{total} rule(s) armed",
-                f"from {len(paths)} file(s)"))
+                f"{plural(total, 'rule')} armed",
+                f"from {plural(len(paths), 'file')}"))
         else:
             self._status_slot.append(self.status_recorder.row(
                 common.STATUS_OK,

@@ -59,6 +59,7 @@ logger = logging.getLogger(__name__)
 from shani_chronoa.skills import bluetooth_gatt as gatt  # noqa: E402
 
 from shani_chronoa.capabilities import gate_label  # noqa: E402
+from shani_chronoa.words import plural
 
 from . import common
 
@@ -548,7 +549,7 @@ def _device_detail(mac: str, name: str) -> Gtk.Widget:
             # **Say how many were not shown.** A truncated list with no count
             # reads as the whole list.
             column.append(_row(
-                f"{len(chars) - len(shown)} more characteristic(s)",
+                f"{plural(len(chars) - len(shown), 'more characteristic')}",
                 f"This panel shows the first {MAX_ROWS}. Ask the assistant for a "
                 f"specific one by name."))
 

@@ -54,6 +54,7 @@ gi.require_version("Pango", "1.0")
 from gi.repository import GLib, Gtk, Pango  # noqa: E402
 
 from shani_chronoa.gui.surfaces import common  # noqa: E402
+from shani_chronoa.words import plural
 
 TITLE = "What it has learned"
 #: `brain` is not in the icon theme - measured: `Gtk.IconTheme.has_icon("brain")`
@@ -646,7 +647,7 @@ def _import_sentence(result: Dict[str, Any]) -> str:
         bits.append(f"{adopted} model{'s' if adopted != 1 else ''} fitted on "
                     "this machine's own tools")
     elif usable:
-        bits.append(f"{usable} model(s) refused - they were fitted where tools "
+        bits.append(f"{plural(usable, 'model')} refused - they were fitted where tools "
                     "this machine does not have exist")
     else:
         bits.append("no trained model in the bundle")
@@ -792,7 +793,7 @@ def _bandit_quality_sentence() -> str:
     ranked = int(verdict.get("tools_ranked") or 0)
     if not ranked:
         return "no scored calls yet, so there is nothing to rank"
-    parts = [f"{ranked} tool(s) scored",
+    parts = [f"{plural(ranked, 'tool')} scored",
              f"top-5 precision {float(verdict.get('precision_at_5') or 0.0):.0%}"]
     if verdict.get("beats_chance"):
         parts.append("and it ranks them better than chance")
@@ -822,7 +823,7 @@ def _organ_status_sentence() -> str:
     if not total:
         return ("none - no tool has been scored enough to carry a learned "
                 "weight, so nothing here is trusted or doubted yet")
-    return (f"{total} tool(s) with history: "
+    return (f"{plural(total, 'tool')} with history: "
             f"{int(found.get('trusted') or 0)} trusted, "
             f"{int(found.get('doubted') or 0)} doubted")
 

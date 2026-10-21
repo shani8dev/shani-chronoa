@@ -859,6 +859,18 @@ is trying to do, with the live things on the main window.
 **Split / separate**
 - [ ] **11h Memory** -> "What it remembers" (facts you told it, Forget) vs the
   sense readings (raw percepts: belongs under Health > Details).
+  **Half done 2026-10-21.** The page is called **"What it remembers"** -
+  "Memory" named a store rather than an answer - and it says what it holds:
+  **the facts you told it, and the readings its senses took**, which is
+  what it actually shows. **Its subtitle used to claim only the first**
+  ("What Chronoa believes it was told") while the rows were mostly the
+  second, and the count called the readings "facts". The group headings
+  are the sense panel's names now, not the registry's ids ("Audio
+  devices", "Boot history", "Crashed programs"), and the id is in the
+  tooltip.
+  **Still open**: the split. The raw percepts belong under Health >
+  Details, and Health is item 11g's merge - which has not been built -
+  so the readings still sit on the page that says "what it remembers".
 - [ ] **11i Speaking voice** -> the choice (voice picker with preview, speed,
   pitch - Settings > Voice) vs the engine report (Health > Details).
 - [ ] **11j Learning** stays, but as a developer page: hidden behind a
@@ -909,6 +921,29 @@ is trying to do, with the live things on the main window.
   "llama.cpp on this computer" is the engine's own name, which is
   legitimate), and the *paths* - which 11m already shortens to `~/...`
   with the full one on hover.
+  **Two more classes done 2026-10-21.**
+  **"2 thing(s)" is a placeholder, not English** - it is what code writes
+  when it cannot decide between one and many, and **seventy-five
+  sentences** across the GUI were written that way ("24 fact(s)
+  remembered", "2 file(s) changed", "1 turn(s)"). One helper
+  (`shani_chronoa.words.plural`) says it now, and the seventy-five
+  places read from it. **The gate walks the AST**, so a comment cannot be
+  counted and a panel that only shows its sentence when it has data (the
+  Memory panel with a live store, the Calendar with events) is still
+  counted - which a sweep that builds every panel on an empty machine
+  cannot do. **The senses' and the skills' own wording is deliberately
+  not in scope**: a sense's summary and a skill's answer are written for
+  the *model*, and bending them for the person would change the model's
+  own contract for the sake of a screen they only pass through.
+  **A sense's registry id is not a name a person reads.** The Senses
+  panel calls them "Audio devices", "Boot history" and "Crashed
+  programs" - the same switch, two spellings - and three panels showed
+  the raw id ("audio", "boots", "coredumps") where a person reads it:
+  the Memory panel's group headings and the Privacy panel's row
+  subtitles. The id is in the tooltip now, which is where the Senses
+  panel already put it. **The gate reads two precise slots** - a group
+  heading and a row subtitle - because a free-text search would be
+  hopeless here ("audio", "capture" and "boot" are ordinary English).
 - [x] **11m Paths** as `~/...` with the full path on hover.
   **Done.** `common.home_paths()` shortens a path to `~/...` and
   `common.row()` - the row builder every panel uses - applies it to the title

@@ -78,9 +78,9 @@ MUTATIONS = [
         # colour.** A saved conversation with no checkpoint cannot be rewound -
         # rewinding it would silently do nothing - and that is an alarm.
         "old": "            return STATUS_NOT_WORKING, (\n"
-               "                f\"{len(sessions)} conversation(s) are saved but no checkpoint \"",
+               "                f\"{plural(len(sessions), 'conversation')} are saved but no checkpoint \"",
         "new": "            return STATUS_WORKING, (\n"
-               "                f\"{len(sessions)} conversation(s) are saved but no checkpoint \"",
+               "                f\"{plural(len(sessions), 'conversation')} are saved but no checkpoint \"",
         "label": "a conversation with no checkpoint is fine too",
         "expect": [
             "test_a_conversation_with_no_checkpoint_is_still_a_fault",

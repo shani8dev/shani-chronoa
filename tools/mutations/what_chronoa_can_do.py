@@ -1,13 +1,14 @@
 """Mutation set for the page that answers "what can this thing do?".
 
-**The panel that lists the 260 capabilities was called "Skills"**, and the
-panel that shows the body's organs was called "What Chronoa can do" - so
-the name promised an answer the page did not give, and the answer itself
-had no name.
+**The panel that lists the 260 capabilities was called "Skills"**, and
+the panel that shows the body's organs was called "What Chronoa can do" -
+so the name promised an answer the page did not give, and the answer
+itself had no name.
 
 **And its rows stopped quoting the model**: a row used to carry the
 skill's own description - prose written for a model with the tool schema
-in front of it - where a person needs to know *what it touches*.
+in front of it - where a person needs to know *what it touches*, which
+is the one thing a list cannot say.
 
 **And a row with a question offers it** - the browsable page needs the
 same door the palette has.

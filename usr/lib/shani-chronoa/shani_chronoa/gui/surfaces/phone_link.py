@@ -36,6 +36,7 @@ from gi.repository import GLib, Gtk
 
 from shani_chronoa import lan_link
 from shani_chronoa.gui.surfaces import common
+from shani_chronoa.words import plural
 
 logger = logging.getLogger(__name__)
 
@@ -223,7 +224,7 @@ class _PhoneLinkView(Gtk.Box):
                 "drops broadcast — corporate and university Wi-Fi often do.")
         else:
             self.find_note.set_label(
-                f"{len(self._devices)} device(s) answered. Remembering the "
+                f"{plural(len(self._devices), 'device')} answered. Remembering the "
                 f"first one so the phone has somewhere to go.")
             _remember(self._devices[0].get("address", ""))
         self._refresh_list()

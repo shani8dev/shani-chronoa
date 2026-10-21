@@ -28,6 +28,7 @@ from gi.repository import Gtk  # noqa: E402
 
 from shani_chronoa import conversation_diff as diff_module  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
+from shani_chronoa.words import plural
 
 logger = logging.getLogger(__name__)
 
@@ -316,7 +317,7 @@ class _CompareView(Gtk.Box):
             return
         self._status_slot.append(self.status_recorder.row(
             common.STATUS_OK,
-            f"{len(self._rows)} conversation(s) to compare between"))
+            f"{plural(len(self._rows), 'conversation')} to compare between"))
         if len(self._rows) < 2:
             # One conversation is not a comparison, and saying "pick two" when
             # there is one to pick is an instruction nobody can follow.
@@ -354,7 +355,7 @@ class _CompareView(Gtk.Box):
         result = diff_module.diff_conversations(old_messages, new_messages)
 
         self._result_box.append(_row(
-            f"Earlier asked {result.old_count} question(s); "
+            f"Earlier asked {plural(result.old_count, 'question')}; "
             f"later asked {result.new_count}. "
             f"{len(result.shared)} in both."))
         # **Either side, not both.** The sentence says "One of these asked

@@ -39,6 +39,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, Gtk, Pango  # noqa: E402
 
 from shani_chronoa.gui.surfaces import common  # noqa: E402
+from shani_chronoa.words import plural
 
 logger = logging.getLogger(__name__)
 
@@ -674,7 +675,7 @@ class _ArtifactStoreView(Gtk.Box):
                 common.STATUS_OK,
                 ("Nothing in the home directory looks like an artifact" if not self._artifacts
                  else "No artifact matches the current filter"),
-                f"{len(self._artifacts)} artifact(s) found before filtering")
+                f"{plural(len(self._artifacts), 'artifact')} found before filtering")
             return
 
         # Render artifacts
@@ -684,7 +685,7 @@ class _ArtifactStoreView(Gtk.Box):
         self._status_label.set_text(f"{len(self._filtered)} of {len(self._artifacts)} artifacts")
         self._set_status(
             common.STATUS_OK,
-            f"{len(self._filtered)} of {len(self._artifacts)} artifact(s) shown",
+            f"{len(self._filtered)} of {plural(len(self._artifacts), 'artifact')} shown",
             "the filter above narrows what the list holds")
 
     def _set_status(self, status: str, summary: str, detail: str = "") -> None:

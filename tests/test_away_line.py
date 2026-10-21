@@ -104,7 +104,7 @@ def test_a_file_made_while_away_is_announced():
 
     said = _lookup(window)
     assert said, "two files made while away were not announced"
-    assert "2 file(s)" in said[0], said[0]
+    assert "2 files" in said[0], said[0]
     assert "1h away" in said[0], said[0]
 
 
@@ -121,7 +121,7 @@ def test_a_rule_firing_while_away_is_announced():
     window._note_what_happened_while_away()
 
     said = _lookup(window)
-    assert said and "3 rule(s) fired" in said[0], said
+    assert said and "3 rules fired" in said[0], said
     assert "2h away" in said[0], said[0]
 
 
@@ -140,7 +140,7 @@ def test_both_kinds_are_reported_together():
 
     said = _lookup(window)
     assert said, "nothing said about either change"
-    assert "1 file(s) made" in said[0] and "1 rule(s) fired" in said[0], said[0]
+    assert "1 file made" in said[0] and "1 rule fired" in said[0], said[0]
 
 
 def test_nothing_happened_means_nothing_is_said():
@@ -186,7 +186,7 @@ def test_the_count_is_a_delta_not_a_total():
     window._note_what_happened_while_away()
 
     said = _lookup(window)
-    assert said and "1 file(s) made" in said[0], (
+    assert said and "1 file made" in said[0], (
         f"reported the total rather than the change: {said}")
 
 
@@ -237,5 +237,5 @@ def test_the_away_notice_gets_its_own_icon():
     # of this test asserted the opposite, failing on a transcript that had
     # nothing to anchor to.
     empty = W.TranscriptView()
-    empty.add_notice_row("While you were 1m away: 1 rule(s) fired.", kind="away")
+    empty.add_notice_row("While you were 1m away: 1 rule fired.", kind="away")
     assert empty.visible_turns() == [("assistant", "")], empty.visible_turns()

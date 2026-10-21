@@ -50,6 +50,7 @@ from gi.repository import Adw, GLib, Gtk
 
 from shani_chronoa import file_index
 from shani_chronoa.gui.surfaces import common
+from shani_chronoa.words import plural
 
 logger = logging.getLogger(__name__)
 
@@ -231,10 +232,10 @@ class _FilesView(Gtk.Box):
 
         where = state["root"] or "several directories"
         if state["embedded"]:
-            how = (f"{state['indexed']} file(s) under {where}, "
+            how = (f"{plural(state['indexed'], 'file')} under {where}, "
                    f"{state['embedded']} of them searchable by meaning.")
         else:
-            how = (f"{state['indexed']} file(s) under {where}, none with an "
+            how = (f"{plural(state['indexed'], 'file')} under {where}, none with an "
                    "embedding — this searches by keyword only, so it will not "
                    "find a file that says \"the wifi box\" when you ask about "
                    "routers.")
@@ -301,7 +302,7 @@ class _FilesView(Gtk.Box):
         group = common.group()
         for hit in hits:
             group.add(self._hit_row(hit, query))
-        header = Gtk.Label(label=f"{len(hits)} file(s) match “{query}” — {how}")
+        header = Gtk.Label(label=f"{plural(len(hits), 'file')} match “{query}” — {how}")
         header.set_xalign(0.0)
         header.add_css_class("dim-label")
         common.wrap_label(header, 60)
@@ -363,7 +364,7 @@ class _FilesView(Gtk.Box):
         self._present(common.empty_state(
             "edit-find-symbolic",
             f"Nothing in the index matches “{query}”",
-            f"Searched by {how}. The index holds {state['indexed']} file(s) "
+            f"Searched by {how}. The index holds {plural(state['indexed'], 'file')} "
             "under " + (state["root"] or "several directories") + "."))
 
     # -- the actions ---------------------------------------------------------
@@ -441,7 +442,7 @@ class _FilesView(Gtk.Box):
             # nothing for a file that is really there, and has no way to know.
             self._present(common.empty_state(
                 "dialog-warning-symbolic",
-                f"Indexed the first {report.get('examined', 0)} file(s) and stopped",
+                f"Indexed the first {plural(report.get('examined', 0), 'file')} and stopped",
                 "That is more files than one run examines, so this index is "
                 "partial. Name a smaller directory, or a subdirectory of this "
                 "one, to get all of it."))

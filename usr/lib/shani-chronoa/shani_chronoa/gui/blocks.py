@@ -52,6 +52,7 @@ from gi.repository import Gdk, Gio, GLib, Gtk, Pango  # type: ignore
 
 from shani_chronoa import markdown_lite
 from shani_chronoa.gui import code_hl
+from shani_chronoa.words import plural
 
 logger = logging.getLogger(__name__)
 
@@ -800,7 +801,7 @@ class InlineDiff(Gtk.Box):
             lines.append(label)
         if len(changed) > INLINE_DIFF_LINES:
             more = Gtk.Label(xalign=0.0,
-                             label=f"{len(changed) - INLINE_DIFF_LINES} more changed line(s)")
+                             label=f"{plural(len(changed) - INLINE_DIFF_LINES, 'more changed line')}")
             more.add_css_class("dim-label")
             lines.append(more)
         if not changed:

@@ -25,6 +25,7 @@ Adw.init()
 from shani_chronoa import capabilities
 from shani_chronoa import local_llm
 from shani_chronoa import planmode
+from shani_chronoa.words import plural
 
 from .minimap import TurnMinimap
 from .widgets import (  # noqa: F401
@@ -3103,9 +3104,9 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             return
         parts = []
         if new_files:
-            parts.append(f"{new_files} file(s) made")
+            parts.append(f"{plural(new_files, 'file')} made")
         if new_rules:
-            parts.append(f"{new_rules} rule(s) fired")
+            parts.append(f"{plural(new_rules, 'rule')} fired")
         away = int(now - left_at)
         if away >= 3600:
             span = f"{away // 3600}h away"
@@ -3458,9 +3459,9 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._bell_badge.set_label(str(proposals) if proposals else "")
         said = []
         if results:
-            said.append(f"{len(results)} rule(s) fired")
+            said.append(f"{plural(len(results), 'rule')} fired")
         if proposals:
-            said.append(f"{proposals} proposal(s) waiting")
+            said.append(f"{plural(proposals, 'proposal')} waiting")
         self._bell_button.set_tooltip_text(
             "Background activity: " + ", ".join(said))
         self._fill_activity_bell(results, proposals)
@@ -3509,7 +3510,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
                 box.append(row)
         if proposals:
             row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-            title = Gtk.Label(label=f"{proposals} proposal(s) waiting for you")
+            title = Gtk.Label(label=f"{plural(proposals, 'proposal')} waiting for you")
             title.set_halign(Gtk.Align.START)
             row.append(title)
             sub = Gtk.Label(label="Open Memory to read them")
@@ -4365,7 +4366,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         from shani_chronoa.skills.undo_last_change import revert_turn
         restored, skipped = revert_turn(turn)
         if restored:
-            self.set_status(f"Reverted {len(restored)} file(s) to before that turn. "
+            self.set_status(f"Reverted {plural(len(restored), 'file')} to before that turn. "
                             "Undo puts them back.")
         refresh = getattr(self, "_refresh_undo_button", None)
         if callable(refresh):

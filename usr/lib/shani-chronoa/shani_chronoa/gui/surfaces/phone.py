@@ -51,6 +51,7 @@ from gi.repository import Adw, Gdk, GLib, Gtk, Pango  # noqa: E402
 from shani_chronoa import markdown_lite  # noqa: E402
 from shani_chronoa import phone as ph  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
+from shani_chronoa.words import plural
 
 logger = logging.getLogger(__name__)
 
@@ -1394,7 +1395,7 @@ stackswitcher button {
         if not found:
             self.notice(self.received, "Nothing has arrived yet.")
             return
-        self.received_note.set_text(f"{len(found)} file(s) in {folder}, newest first.")
+        self.received_note.set_text(f"{plural(len(found), 'file')} in {folder}, newest first.")
         for path in found:
             self.received.append(common.row(path.name, _human_size(path)))
 

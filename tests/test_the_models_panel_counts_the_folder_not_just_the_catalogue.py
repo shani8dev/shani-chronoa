@@ -155,7 +155,7 @@ def test_unoffered_but_loadable_is_named(tmp_path, monkeypatch):
 
     said = _panel(tmp_path, monkeypatch)
 
-    assert "1 other model file(s) in this folder" in said, said[:500]
+    assert "1 other model file in this folder" in said, said[:500]
     assert "toolcall-q5_k_m.gguf" in said, said[:500]
     # named as loadable, and as unchecked - it did not come from this build
     assert "nothing here has checked them" in said, said[:500]
@@ -171,7 +171,7 @@ def test_an_adapter_is_reported_as_unrunnable_not_as_a_model(tmp_path, monkeypat
 
     said = _panel(tmp_path, monkeypatch)
 
-    assert "1 file(s) in this folder cannot be run as a model" in said, said[:500]
+    assert "1 file in this folder cannot be run as a model" in said, said[:500]
     assert "lumen-cortex-lora.gguf" in said, said[:500]
     assert "other model file" not in said, (
         "an adapter is being counted among the loadable ones: " + said[:500])
@@ -187,8 +187,8 @@ def test_both_halves_appear_at_once_and_are_not_merged(tmp_path, monkeypatch):
 
     said = _panel(tmp_path, monkeypatch)
 
-    assert "1 other model file(s) in this folder" in said, said[:600]
-    assert "1 file(s) in this folder cannot be run as a model" in said, said[:600]
+    assert "1 other model file in this folder" in said, said[:600]
+    assert "1 file in this folder cannot be run as a model" in said, said[:600]
     assert "lumen-cortex-lora.gguf" not in said.split("other model file")[0][-160:], (
         "the adapter is named in the loadable row")
 

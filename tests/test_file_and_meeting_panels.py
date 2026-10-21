@@ -374,7 +374,7 @@ class TestTheSearchPanel:
     def test_it_says_how_many_files_are_indexed_and_where(self, broadway, tmp_path):
         out = _run(broadway, "my_files_indexed", tmp_path)
         assert "error" not in out, out.get("error")
-        assert "2 file(s)" in shown(out), shown(out)
+        assert "2 files" in shown(out), shown(out)
         assert "none with an embedding" in shown(out), (
             "the panel must say the search is keyword-only, because a box of "
             "results with no such line reads as though it searched by meaning")
@@ -413,7 +413,7 @@ class TestTheSearchPanel:
         assert "Nothing is indexed" not in shown(out), (
             "an indexed directory with no match must not be reported as empty - "
             "that sends the person to reindex over a query that was too specific")
-        assert "1 file(s)" in shown(out), (
+        assert "1 file" in shown(out), (
             "the sentence should carry how much was actually searched")
 
     def test_an_unindexed_directory_says_so_and_offers_the_button(self, broadway, tmp_path):
@@ -443,7 +443,7 @@ class TestTheSearchPanel:
 class TestTheMeetingsPanel:
     def test_it_lists_the_meetings_that_are_kept(self, broadway, tmp_path):
         out = _run(broadway, "meetings_listed", tmp_path)
-        assert "2 meeting(s) kept" in shown(out), shown(out)
+        assert "2 meetings kept" in shown(out), shown(out)
         assert "meeting-20261011-090000" in shown(out), shown(out)
 
     def test_each_meeting_offers_the_two_things_worth_doing(self, broadway, tmp_path):
@@ -492,7 +492,7 @@ class TestTheCountAndTheResultsAgree:
     other.
 
     Measured before the fix, with two directories indexed: the status row read
-    `2 file(s) under <the shared parent>` over a search that returned one file
+    `2 files under <the shared parent>` over a search that returned one file
     from `notes` - including the file in `work`, which was never asked about.
     """
 
@@ -500,7 +500,7 @@ class TestTheCountAndTheResultsAgree:
         out = _run(broadway, "my_files_two_directories", tmp_path)
         assert "error" not in out, out.get("error")
         joined = squashed_text(out)
-        assert "1file(s)under" in joined, joined
+        assert "1fileunder" in joined, joined
         assert "/notes" in joined, joined
         # **and the results are the same directory's**
         assert out["paths"] == ["notes/note.txt"], out["paths"]

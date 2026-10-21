@@ -67,6 +67,7 @@ from shani_chronoa import eds_calendar, markdown_lite  # noqa: E402
 from shani_chronoa.capabilities import gate_label  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 from shani_chronoa.skills import calendar_events as skill_calendar  # noqa: E402
+from shani_chronoa.words import plural
 
 logger = logging.getLogger(__name__)
 
@@ -536,7 +537,7 @@ class _CalendarSurface:
         self._events = list(events or [])
         self._status_slot.append(self.status_recorder.row(
             common.STATUS_OK,
-            f"{len(self._events)} event(s) in range",
+            f"{plural(len(self._events), 'event')} in range",
             detail))
         self._show_events(self._events, now)
 
@@ -592,7 +593,7 @@ class _CalendarSurface:
     def _show_events(self, events: List[Any], now: float) -> None:
         body = _margined(common.page_body())
         for label, day_events in _grouped(events, now):
-            group = common.group(label, f"{len(day_events)} event(s)")
+            group = common.group(label, f"{plural(len(day_events), 'event')}")
             group.add_css_class(GROUP_CSS)
             for event in day_events:
                 row = self._event_row(event, now)
