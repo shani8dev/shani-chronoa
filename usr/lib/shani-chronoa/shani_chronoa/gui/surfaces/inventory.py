@@ -22,6 +22,8 @@ the organ whose light covers what does work.
 
 from __future__ import annotations
 
+from typing import List
+
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -32,13 +34,20 @@ from gi.repository import Gtk  # type: ignore
 from ... import organism
 from . import common
 
-#: **"What Chronoa can do", not "Inventory".** The panel's own first line says
-#: *"what Chronoa is, function by function"* - which is the answer to the
-#: question a newcomer arrives with, and **this panel is that answer.** So it was
-#: filed under the one word nobody outside a warehouse would use to describe it,
-#: in a sidebar of thirty-four, and the discovery surface stayed undiscovered.
-#: The row on the empty state asks "what can I ask?"; this is where it leads.
-TITLE = "What Chronoa can do"
+#: **The anatomy, and it says so.** This panel was called "What Chronoa can
+#: do" while showing the body's organs - Skin, Immune system, Scar tissue -
+#: and the name promised an answer the page did not give. A newcomer who
+#: clicked it looking for "what can this thing do?" got the *how* instead.
+#:
+#: **So the answer moved to the page that gives it.** The capabilities
+#: panel is now "What Chronoa can do" - plain names, what each thing
+#: touches, and the switch that gates it - and this one is the map.
+#:
+#: The metaphor stays, because it is the code's own vocabulary
+#: (`organism.py` calls these organs, and `organ.anatomy` holds their
+#: names) and a panel that renames them would be a page about nothing.
+#: It is a page for whoever wants the map, and it now says that.
+TITLE = "The anatomy"
 ICON = "applications-utilities-symbolic"
 SECTION = "Health and trust"
 
@@ -101,15 +110,40 @@ def _static_icon(icon_name: str) -> Gtk.Widget:
     return icon
 
 
+def _join(parts: List[str]) -> str:
+    """The parts as sentences, with a stop between them and one at the end.
+
+    **The organ's own text does not end in a period** - "the outside
+    edge: everything that leaves this machine, and the log of it" - so
+    joining with a space ran the two sentences together and the row read
+    *"the log of it Visible as the skin light while it happens"*. A row
+    whose subtitle ends without a stop reads as a sentence somebody
+    stopped typing halfway through.
+    """
+    out = ""
+    for part in parts:
+        part = str(part or "").strip()
+        if not part:
+            continue
+        if out and not out.endswith((".", "!", "?")):
+            out += "."
+        if out:
+            out += " "
+        out += part
+    if out and not out.endswith((".", "!", "?")):
+        out += "."
+    return out
+
+
 def _subtitle(organ: "organism.Organ") -> str:
     parts = [organ.function]
     if organ.state == organism.BUILT:
         covered = _COVER.get(organ.key)
         if covered:
             parts.append(f"Visible as {covered} while it happens.")
-        return " ".join(parts)
+        return _join(parts)
     # The honest sentence: what it is, then exactly what is missing.
-    return " ".join([organ.function, organ.missing])
+    return _join([organ.function, organ.missing])
 
 
 def _organ_row(organ: "organism.Organ") -> Gtk.Widget:

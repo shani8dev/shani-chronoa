@@ -1,9 +1,18 @@
-"""The skill whitelist as one filterable list.
+"""**What Chronoa can do**, as one filterable list.
 
-Every row is one action the assistant can be asked to perform: the registry
-name verbatim, the description its own schema carries (the same words the model
-is handed), and its gate. The gate is a switch for a skill whose permission is a
-real settings key, and an honest "always available" for a skill with none.
+Every row is one action the assistant can be asked to perform: the plain
+name a person would use for it, what it touches, its gate, and - where
+there is a question that exercises it - a way to try it. The gate is a
+switch for a skill whose permission is a real settings key, and an honest
+"always available" for a skill with none.
+
+**The whitelist is the code's word, not the person's.** The rows used to
+be titled with the registry name and to carry the description the model
+is handed - wordy prose written for a model with the schema in front of
+it - and the page said "What Chronoa can do" while doing none of that.
+The plain name, the effect and the question are the answer; the registry
+name and the full description are in the tooltip, where the person who
+wants them can find them.
 
 **A switch appears only where the permission is a genuine toggle.**
 `capabilities.gated_by()` names the key a skill declares; the running settings
@@ -74,12 +83,19 @@ from shani_chronoa.skills import discover_skills, is_valid_schema  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
-TITLE = "Skills"
+#: **The plain answer to "what can this thing do?"** - which is what the
+#: page is for, and what the panel claimed to be while showing something else.
+#: The Inventory panel was called "What Chronoa can do" and showed the
+#: anatomy; this one showed the 260 capabilities under the name "Skills".
+#: One page, one name, one answer.
+TITLE = "What Chronoa can do"
 ICON = "system-run-symbolic"
 
 SUBTITLE = (
-    "Everything Chronoa is allowed to be asked to do, read from the same live "
-    "registry the model is handed. A gate here writes the same key Settings does."
+    "Everything Chronoa can be asked to do, read from the same live registry "
+    "the model is handed. Each row says what it touches, a gate here writes "
+    "the same key Settings does, and a row with a question offers it in the "
+    "composer."
 )
 
 #: Markers a test can find in the built tree, so no assertion has to read a
@@ -316,6 +332,10 @@ class _SkillsSurface:
 
     def __init__(self, app: Any, set_content: Any) -> None:
         self._config = getattr(app, "config", None)
+        #: The application, for the one thing a panel cannot do alone: put a
+        #: question in the composer's box. `getattr(app, "window", None)` is
+        #: the same way `common.open_setup` reaches the window.
+        self._app = app
         self._rows: List[Row] = []
         self._updating = False
         self.registry_error: Optional[str] = None
@@ -354,7 +374,7 @@ class _SkillsSurface:
         self.summary = _dim("")
         body.append(self.summary)
 
-        self._group = common.group("Skills", "One row per skill in the whitelist.")
+        self._group = common.group("Skills", "One row for each thing it can do.")
         body.append(self._group)
 
         self.no_matches = _dim("No skill matches this filter.")
@@ -373,12 +393,19 @@ class _SkillsSurface:
     # -- building ---------------------------------------------------------
     def _load(self) -> None:
         schemas, self.registry_error = _registry_schemas()
+        # **One source for the questions.** `capabilities` already knows the
+        # prompt that exercises each skill, and the palette's skill rows read
+        # it from there - so this page reads the same table rather than
+        # keeping a second one.
+        prompts = {c.tool: c.example
+                   for c in capabilities.find_capabilities(schemas)}
         for schema in schemas:
             fields = _schema_fields(schema)
             if fields is None:
                 continue
             name, description = fields
-            self._rows.append(self._add_row(name, description))
+            self._rows.append(
+                self._add_row(name, description, prompts.get(name, "")))
 
         # The panel's own health, rendered once the registry has been
         # read: how many skills the whitelist holds, and whether the
@@ -394,7 +421,7 @@ class _SkillsSurface:
             gated = sum(1 for row in self._rows if row.gate_key is not None)
             self._status_slot.append(self.status_recorder.row(
                 common.STATUS_OK,
-                f"{len(self._rows)} skills in the whitelist",
+                f"{len(self._rows)} things it can do",
                 f"{gated} of them need a setting switched on first"))
         else:
             self._status_slot.append(self.status_recorder.row(
@@ -423,39 +450,74 @@ class _SkillsSurface:
 
         self.apply_filter(self.search.get_text())
 
-    def _add_row(self, name: str, description: str) -> Row:
+    def _add_row(self, name: str, description: str, prompt: str = "") -> Row:
         gate_key = _gate_key(name, description)
         gate_name = capabilities.GATE_NAMES.get(gate_key, gate_key) if gate_key else ""
         state_text, switchable = self._gate_reading(gate_key)
 
-        # The description is the first line of the subtitle and the gate state
-        # the second: an Adw row has one subtitle, and the state is the part that
-        # decides whether the row is one a person can act on.
-        lines = [description or "(no description)"]
-        # The person-facing title, from the same table the Help window uses;
-        # the tool's id leads the subtitle so it can still be told apart and
-        # searched for. Every row was titled with the id - `airplane_mode`,
-        # `analyze_table` - over a description written for the model.
-        # A drop-in skill with no entry keeps its name as its title.
+        # **The effect, not the model's prose.** The description is written to
+        # be read by a model with the tool schema in front of it - wordy, full
+        # of qualifiers - and a row of them told a person nothing the name did
+        # not already say. What a list cannot say is *what this touches*, and
+        # `capabilities.effect_of()` is the one answer to that: the palette's
+        # skill rows already read it, and a second wording would be two
+        # answers to one question.
+        effect = capabilities.effect_of(name, description)
+        lines = [effect]
+        # The person-facing title, from the same table the Help window uses.
+        #
+        # **The tool's id used to lead the subtitle**, so it could be told
+        # apart and searched for. It is in the tooltip now, with the
+        # description it belongs to: an id on its own is the registry's word,
+        # and the row's job is to be read by a person. The search still
+        # finds it - the haystack is unchanged.
         title = capabilities.tool_title(name)
-        if title != name:
-            lines[0] = f"{name} - {lines[0]}"
         switch = None
+        suffix = None
         if gate_key is None:
             # No switch for a skill that declares no gate: there is nothing to
             # switch, and offering one would be a permission that does not exist.
             lines.append(ALWAYS_AVAILABLE)
-            # `common.row()` escapes both fields; `_plain()` escaping again
-            # rendered a skill name's `&` as `&amp;` on screen.
-            widget = common.row(title=title, subtitle="\n".join(lines))
         else:
             lines.append(f"{gate_name} - {state_text}")
-            widget = common.switch_row(
-                title=_plain(title),
-                subtitle=_plain("\n".join(lines)),
-                on_changed=lambda active, k=gate_key: self._on_toggled(active, k),
-            )
-            switch = _switch_in(widget)
+            switch = Gtk.Switch(valign=Gtk.Align.CENTER)
+            switch.connect(
+                "notify::active",
+                lambda _s, _p, k=gate_key: self._on_toggled(switch.get_active(), k))
+            suffix = switch
+        # **A question to try, where there is one.** The palette's skill rows
+        # fill the composer; this page is the browsable one, and a person who
+        # has found a thing they want should not have to guess the wording of
+        # it. Only the skills with a prompt get the button - a button that put
+        # a *label* in the box would be a worse affordance than no button.
+        if prompt:
+            try_button = Gtk.Button(label="Try it", valign=Gtk.Align.CENTER)
+            try_button.set_tooltip_text(f"Put this in the composer: {prompt}")
+            try_button.connect("clicked", lambda _b, p=prompt: self._try_it(p))
+            try_button.update_property([Gtk.AccessibleProperty.LABEL],
+                                       [f"Try {title}"])
+            if suffix is None:
+                suffix = try_button
+            else:
+                box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+                box.append(suffix)
+                box.append(try_button)
+                suffix = box
+        # `escape=False` with `_plain()` on both fields: `common.row()`
+        # escapes them itself, and escaping twice rendered a skill name's `&`
+        # as `&amp;` on screen. The gated branch went through
+        # `common.switch_row()`, which escapes and could not be told not to.
+        widget = common.row(title=_plain(title),
+                             subtitle=_plain("\n".join(lines)),
+                             suffix=suffix,
+                             escape=False)
+        if switch is not None and hasattr(widget, "set_activatable_widget"):
+            # The row's own click is the switch's, as it was. **The check is
+            # the method, not the class**: this module does not import
+            # `Adw` on purpose - `common.adw_ready()` is how it asks - and
+            # the plain-GTK row is a `Gtk.Box` with no such method.
+            widget.set_activatable_widget(switch)
+        widget.update_property([Gtk.AccessibleProperty.LABEL], [title])
 
         widget.add_css_class(ROW_CSS)
         widget.set_tooltip_text(f"{name}\n{description or '(no description)'}")
@@ -476,6 +538,26 @@ class _SkillsSurface:
         return Row(widget=widget, title=_title_label(widget), name=name,
                    description=description, gate_key=gate_key, switch=switch,
                    haystack=f"{name} {title} {description}")
+
+    def _try_it(self, prompt: str) -> None:
+        """Put the question in the composer, and let the person send it.
+
+        **The composer, not the model.** A skill that writes files or
+        leaves the machine should be *asked for*, and the question belongs
+        to the person - the same reason the palette's skill rows fill the
+        box rather than firing the skill.
+
+        **The window's own `set_input_text`**, which is the "show this in
+        the box" half of "send this": a panel that sent the question
+        itself would be a panel taking an action on the person's behalf
+        from a keystroke.
+        """
+        window = getattr(self._app, "window", None)
+        setter = getattr(window, "set_input_text", None)
+        if callable(setter):
+            setter(prompt)
+            return
+        logger.info("no window to put the question in")
 
     def _gate_reading(self, key: Optional[str]) -> Tuple[str, bool]:
         """What this row says about its gate, and whether a switch may move.

@@ -133,7 +133,12 @@ def test_the_registry_hands_the_sidebar_this_module_title_icon_and_build():
     assert all_surfaces()["skills"] == (skills.TITLE, skills.ICON, skills.build)
     # The attributes the registry reads are the ones this module defines, and
     # the module a registry entry names is the file the entry sits in.
-    assert skills.TITLE == "Skills"
+    #
+    # **The title is the plain answer to "what can this thing do?"** - which
+    # is what the page is for. The Inventory panel was called the same thing
+    # while showing the anatomy, so one of the two names was a lie; this one
+    # is the page that lists the capabilities, so it keeps the name.
+    assert skills.TITLE == "What Chronoa can do"
     assert callable(skills.build)
     assert skills.__name__.endswith("skills")
 

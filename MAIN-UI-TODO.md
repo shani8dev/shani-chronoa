@@ -545,6 +545,11 @@ Open, ranked:
 - [ ] **9j One "What Chronoa can do"**: Help window, Inventory, Skills and /help
   are four answers. One searchable view with plain names and "Try it" that
   fills the composer.
+  **The searchable view is done 2026-10-21** - the capabilities page,
+  which is now called "What Chronoa can do" and is the one that answers
+  it (see 11a). **What is left is the other three answers**: the Help
+  window's capability list, `/help`, and the Inventory - which is now
+  "The anatomy" and is honest about being the map rather than the list.
 - [x] **9k Palette as the universal door**: Settings sections (`show-page`),
   Setup, Find (Ctrl+F only), Body (Ctrl+Shift+B only), Browser, routines.
   **Done 2026-10-20, and the item was two-thirds stale.** Measured, the
@@ -771,6 +776,26 @@ Open, by panel (worst first):
   "What Chronoa can do" (Inventory) speaks the internal metaphor ("Immune
   system", "Scar tissue"); Help, Inventory, Skills, /help are four answers to one
   question. One searchable "What Chronoa can do" with Try it.
+  **Two of the three done 2026-10-21.** The Inventory was called "What
+  Chronoa can do" while showing the body's organs - the name promised an
+  answer the page did not give, and the answer itself had no name. **So
+  the capabilities page took the name** (it is the page that actually
+  lists them) and **the anatomy page says what it is**: "The anatomy". The
+  metaphor stays, because it is the code's own vocabulary
+  (`organism.py` calls these organs) - what was wrong was the *name*,
+  not the metaphor.
+  **And the capability rows stopped quoting the model.** A row used to
+  carry the skill's own description - prose written for a model with the
+  tool schema in front of it - where a person needs to know *what it
+  touches*. Each row now says that, in the same four words the
+  palette's skill rows already used (`capabilities.effect_of()`), and
+  the registry name and the full description moved to the tooltip. **The
+  search still finds the name** - the haystack is unchanged.
+  **Still open**: the Workbench's built-in list, the Help window's
+  capability list and /help are still three more answers to the same
+  question, and the Workbench's list is the *developer's* view of the
+  registry (its own words, on purpose) - which is what 11j's Developer
+  switch would put somewhere honest.
 - [ ] **10f Phone sprawl**: Phone, Phone link, Android, Devices, Wearables -
   five panels, four of them one switch each. One "Phone & devices" with tabs.
 - [x] **10g Background mode**: a single toggle labelled with its key
@@ -800,6 +825,20 @@ is trying to do, with the live things on the main window.
 - [ ] **11a "What Chronoa can do"** = Inventory + Skills + Workbench + Help
   window + /help: one searchable list, plain names, per-row switch, "Try it"
   fills the composer, "Make your own" (Workbench's add-a-skill) as an action.
+  **The list itself is done 2026-10-21**, and it is the capabilities
+  page: **plain names** (the title the person would use, not the
+  registry's), **a per-row switch** (the gate, writing the same key
+  Settings does), **"Try it"** on every row that has a question to try -
+  it fills the composer and lets the person send it, because a skill
+  that writes files should be *asked for* - and **a filter box**, so the
+  260 are searchable.
+  **"Try it" appears only where there is a question.** Thirty of the 260
+  skills have a prompt that exercises them (`capabilities._EXAMPLES`);
+  the button is on those thirty and on no other, because a button that
+  puts a *label* in the box is a worse affordance than no button.
+  **Still open**: the Workbench's built-in list and the Help window's
+  capability list are still two more answers, and "Make your own" is not
+  an action in the palette yet.
 - [ ] **11b "Phone & devices"** = Phone + Phone link + Android + Devices +
   Wearables + Screen share: tabs Calls & messages / Files / Screen / Watch &
   Bluetooth / USB. One permission banner at the top for whichever tab is shut.
