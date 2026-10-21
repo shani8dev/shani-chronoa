@@ -650,7 +650,11 @@ class TestTheKeyring:
         value = _row_value(desktop.build(_app()), "Desktop keyring")
         assert value.startswith("running"), value
         assert desktop.SECRET_SERVICE_NAME in value, value
-        assert "secret_store.py" in value, value
+        # **The keyring is the thing, not the module that talks to it.** A
+        # module's name is the code's word, and a person reading the answer
+        # cannot act on it.
+        assert "Chronoa can read and store API keys" in value, value
+        assert "secret_store.py" not in value, value
 
     def test_no_secret_service_on_a_real_bus_says_not_running(
         self, tmp_path, monkeypatch
@@ -674,12 +678,16 @@ class TestTheKeyring:
     ):
         """Both halves, because either alone is not a keyring: a machine with a
         Secret Service answering but no libsecret typelib still has nothing
-        `secret_store.py` can use."""
+        the keyring helper can use."""
         _busctl(tmp_path, monkeypatch, _listing(desktop.SECRET_SERVICE_NAME))
         monkeypatch.setattr(secret_store, "_secret", lambda: (None, None))
         value = _row_value(desktop.build(_app()), "Desktop keyring")
         assert value.startswith("not installed"), value
         assert "typelib" in value, value
+        # **The keyring is the thing, not the module that talks to it.** A
+        # module's name is the code's word, and a person reading the answer
+        # cannot act on it.
+        assert "secret_store.py" not in value, value
 
     def test_it_reads_the_keyring_through_secret_store(self, monkeypatch):
         """The probe really is `secret_store.py`'s own, not a second guess about

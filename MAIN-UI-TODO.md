@@ -878,6 +878,37 @@ is trying to do, with the live things on the main window.
   person-facing refusals (login history, list windows twice, ui_elements)
   now name the switch as Settings spells it.
 - [ ] **11l Engineering text** behind "Details" everywhere (approval pattern).
+  **One class done 2026-10-21**: the code's own file names. A module's
+  name is the code's word - "so secret_store.py can read and store API
+  keys" tells a person nothing they can act on, and the keyring is the
+  thing. Measured by building every panel: **three panels named a file
+  in a sentence a person reads** - the Desktop panel (twice), the
+  Diagnostics panel (twice, one of them a model file: "links it as
+  current.gguf") and the anatomy page ("presence.py", on the mode
+  strip). **Six sentences now name the thing instead of the file**, and
+  the file is in the evidence every panel already puts behind its own
+  **Details** button.
+  **The instrument counts what is on the page, not what is merely
+  visible.** `get_visible()` is per-widget, so a label inside a
+  collapsed `Gtk.Revealer` answers True - and the first sweep reported
+  the Voice panel's own "Details" reading (a whisper model file name)
+  as a defect. With effective visibility - visible itself, visible in
+  every ancestor, and not inside a collapsed revealer - the population
+  collapsed from eight panels to **one**: the artifacts panel, which is
+  a *file browser* and lists the user's own files, so naming one is the
+  answer rather than a leak. The Workbench is exempt for the same
+  reason: it is the developer page, and its answer names the tool to
+  run, which is the actionable thing. **Both exemptions are a count**,
+  so a third panel cannot be added quietly.
+  **A branch a machine never reaches is a branch no panel-wide sweep
+  can watch.** The Desktop panel's "libsecret's typelib is missing"
+  answer only renders on a machine without libsecret, so the sweep could
+  not see a module name put back into it - the witness is the Desktop
+  panel's own test, which makes the typelib absent on purpose.
+  **Still open**: the engine names beside their state (a panel saying
+  "llama.cpp on this computer" is the engine's own name, which is
+  legitimate), and the *paths* - which 11m already shortens to `~/...`
+  with the full one on hover.
 - [x] **11m Paths** as `~/...` with the full path on hover.
   **Done.** `common.home_paths()` shortens a path to `~/...` and
   `common.row()` - the row builder every panel uses - applies it to the title

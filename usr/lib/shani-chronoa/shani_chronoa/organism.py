@@ -157,7 +157,7 @@ INVENTORY: Tuple[Organ, ...] = (
           "breath: the rhythm of a day - awake, active, idle, asleep",
           ("daemon.py", "senses/idle.py", "model_service.py", "presence.py"), PART,
           missing="the awake/active/asleep cycle now exists for the *model* "
-                  "(presence.py, on the mode strip, and it reaches SLEEPING), "
+                  "(on the mode strip, and it reaches SLEEPING), "
                   "but nothing sleeps the rest of it: the daemon keeps its rules "
                   "and senses running through every state"),
 

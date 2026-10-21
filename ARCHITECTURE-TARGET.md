@@ -823,7 +823,7 @@ there is no left pinky, because nothing in here has one.
 | Action | Mouth | speech: saying things, in the voice that was chosen. | built | `mouth` | `tts.py`, `voices.py`, `sherpa.py`, `audio.py` |
 | Action | Hands | acting: changing the world - files, windows, services, settings, devices. | built | `hands` | `tools.py`, `skills/`, `office/`, `portal.py`, `desktop_session.py`, `phone.py`, `landline/` |
 | Action | Legs | getting about without being asked: rules that fire on their own. | built | - | `triggers/rules.py`, `triggers/event_rules.py`, `skills/timer.py`, `approvals.py` |
-| Action | Diaphragm | breath: the rhythm of a day - awake, active, idle, asleep. | part | - | `daemon.py`, `senses/idle.py`, `model_service.py`, `presence.py` | the awake/active/asleep cycle now exists for the *model* (presence.py, on the mode strip, and it reaches SLEEPING), but nothing sleeps the rest of it: the daemon keeps its rules and senses running through every state
+| Action | Diaphragm | breath: the rhythm of a day - awake, active, idle, asleep. | part | - | `daemon.py`, `senses/idle.py`, `model_service.py`, `presence.py` | the awake/active/asleep cycle now exists for the *model* (on the mode strip, and it reaches SLEEPING), but nothing sleeps the rest of it: the daemon keeps its rules and senses running through every state
 | Core | Brain | thinking: the language model and the tool loop it drives. | built | `brain` | `assistant.py`, `local_llm.py`, `ollama_llm.py`, `cloud_llm.py`, `mcp.py` |
 | Core | Prefrontal cortex | judgement before acting: permissions, plan mode, and the refusals. | built | - | `capabilities.py`, `planmode.py`, `permissions.py`, `approvals.py` |
 | Core | Cerebellum | checking its own work: post-conditions, and repairing a broken turn. | built | - | `verification.py`, `history_repair.py`, `guardrail.py` |
@@ -853,7 +853,7 @@ works and stops short of something specific.
 - **Fingertips** - the only sense that leaves the machine by default - it is gated on the Web search switch and the egress layer records it, but no organ owned it until now, and it is the one sense a person would assume is covered by eyes or skin.
 - **Touch** - no raw input events, on purpose - it watches devices, not you.
 - **Vestibular sense** - no salience or priority queue; selection is by tool relevance only.
-- **Diaphragm** - the awake/active/asleep cycle now exists for the *model* (presence.py, on the mode strip, and it reaches SLEEPING), but nothing sleeps the rest of it: the daemon keeps its rules and senses running through every state.
+- **Diaphragm** - the awake/active/asleep cycle now exists for the *model* (on the mode strip, and it reaches SLEEPING), but nothing sleeps the rest of it: the daemon keeps its rules and senses running through every state.
 - **Reticular formation** - no interrupt policy; everything notable is announced equally.
 - **Heart** - a liveness signal exists per subsystem; nothing consumes it yet.
 - **Thermoregulation** - it reads its temperature; it does not act on it unasked.

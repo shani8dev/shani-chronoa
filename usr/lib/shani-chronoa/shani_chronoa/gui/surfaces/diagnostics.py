@@ -408,7 +408,7 @@ def _brain() -> Tuple[str, str]:
             )
         return STATUS_NOT_WORKING, (
             "no model is downloaded yet, so the server has nothing to load; "
-            "setup downloads one and links it as current.gguf"
+            "setup downloads one and makes it the one that answers"
         ), (
             f"llama-server is at {binary}; no model file is in {model_dir}"
         )
@@ -991,7 +991,7 @@ def _atspi_extra() -> Tuple[str, str]:
 
     ui_elements._atspi()
     return STATUS_WORKING, (
-        "the AT-SPI typelib imports, so skills/ui_elements.py can read another app's "
+        "the AT-SPI typelib imports, so Chronoa can read another app's "
         "controls through the accessibility bus"
     )
 

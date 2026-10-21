@@ -573,17 +573,17 @@ def _keyring_sentence(names: Optional[List[str]], problem: str) -> str:
         Secret, _schema = secret_store._secret()
     except Exception as exc:  # noqa: BLE001 - the probe is not trusted to hold
         logger.debug("secret_store probe raised", exc_info=True)
-        return (f"{EVIDENCE_COULD_NOT_ASK} - secret_store.py's own availability "
-                f"probe raised {type(exc).__name__}: {exc}, so this panel cannot "
-                "say whether there is a keyring.")
+        return (f"{EVIDENCE_COULD_NOT_ASK} - the desktop keyring's own "
+                f"availability probe raised {type(exc).__name__}: {exc}, so this "
+                "panel cannot say whether there is a keyring.")
     if Secret is None:
         return (f"{EVIDENCE_NOT_INSTALLED} - libsecret's Python typelib is not "
-                "available, so secret_store.py has nothing to ask with whatever "
+                "available, so there is nothing here to ask with whatever "
                 "the session bus says. API keys stay in GSettings, which is "
                 "exactly how they behaved before the keyring existed.")
     return _bus_sentence(
         names, problem, SECRET_SERVICE_NAME,
-        "secret_store.py can read and store API keys in the desktop keyring",
+        "Chronoa can read and store API keys in the desktop keyring",
         "There is then no keyring here: keys stay in GSettings as they always "
         "did, and nothing is lost. A keyring that is present but locked is not "
         "told apart from an unlocked one - this panel unlocks nothing.",
