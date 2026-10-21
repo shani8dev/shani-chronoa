@@ -932,9 +932,18 @@ is trying to do, with the live things on the main window.
   Memory panel with a live store, the Calendar with events) is still
   counted - which a sweep that builds every panel on an empty machine
   cannot do. **The senses' and the skills' own wording is deliberately
-  not in scope**: a sense's summary and a skill's answer are written for
-  the *model*, and bending them for the person would change the model's
-  own contract for the sake of a screen they only pass through.
+  not in scope**, and the reason is worth stating precisely: a sense's
+  summary and a skill's answer are written for the *model*, which reads
+  them through the percept store and the tool result. Bending them for
+  the person would change the model's own contract - and there are
+  **eighty-five** in the senses and **two hundred and seventy-six** in
+  the skills, most of them in the skills' own answer text, which many
+  tests assert. **It is not invisible, though**: the Memory panel shows
+  a reading verbatim ("4 device(s) can play and 2 can record") and the
+  tool card shows a skill's answer, so those words reach a person's eye
+  on the way past. **The honest fix is to render them, not to rewrite
+  the model's words** - and 11h's split (the raw readings belong under
+  Health > Details) is the piece that would make that possible.
   **A sense's registry id is not a name a person reads.** The Senses
   panel calls them "Audio devices", "Boot history" and "Crashed
   programs" - the same switch, two spellings - and three panels showed
