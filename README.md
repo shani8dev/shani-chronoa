@@ -379,7 +379,7 @@ shani-chronoa-sense egress
 
 There are two kinds, and they are gated the same way.
 
-**Percept rules** match a deposited percept. **Event rules** fire on one of
+**Sense rules** match something a sense perceived. **Event rules** fire on one of
 **19 event types** — `audiodevice`, `btconnect`, `calendar`, `containerrun`,
 `dbusprop`, `expiry`, `failure`, `fswatch`, `git`, `journalmatch`, `netstate`,
 `phone`, `powerstate`, `schedule`, `screenlock`, `sleepwake`, `sound`,
