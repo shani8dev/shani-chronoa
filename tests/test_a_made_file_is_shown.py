@@ -184,7 +184,12 @@ def _thumbnail_of(block):
     if row is None:
         return None
     first = row.get_first_child()
-    return first if isinstance(first, Gtk.Image) else None
+    # A *thumbnail* is a rendered picture (a paintable). The row's first child is
+    # now always an image - a type icon when there is no thumbnail - so a type
+    # icon (drawn from an icon name, no paintable) is not counted as one here.
+    if isinstance(first, Gtk.Image) and first.get_paintable() is not None:
+        return first
+    return None
 
 
 #: The controls an artifact row is expected to carry. **Asserted as a set, not

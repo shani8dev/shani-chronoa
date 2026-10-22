@@ -869,13 +869,46 @@ class ArtifactBlock(Gtk.Box):
         for path in self._paths:
             self.append(self._row(path))
 
+    #: A file's kind -> a symbolic icon, so a row reads at a glance (harness's
+    #: Files tree does the same). Images show a thumbnail instead. All names are
+    #: standard freedesktop symbols present in Adwaita.
+    _TYPE_ICONS = {
+        ".pdf": "x-office-document-symbolic", ".docx": "x-office-document-symbolic",
+        ".odt": "x-office-document-symbolic", ".xlsx": "x-office-spreadsheet-symbolic",
+        ".ods": "x-office-spreadsheet-symbolic", ".csv": "x-office-spreadsheet-symbolic",
+        ".tsv": "x-office-spreadsheet-symbolic", ".pptx": "x-office-presentation-symbolic",
+        ".odp": "x-office-presentation-symbolic", ".html": "text-x-generic-symbolic",
+        ".htm": "text-x-generic-symbolic", ".md": "text-x-generic-symbolic",
+        ".zip": "package-x-generic-symbolic", ".tar": "package-x-generic-symbolic",
+        ".gz": "package-x-generic-symbolic", ".xz": "package-x-generic-symbolic",
+        ".mp3": "audio-x-generic-symbolic", ".wav": "audio-x-generic-symbolic",
+        ".ogg": "audio-x-generic-symbolic", ".flac": "audio-x-generic-symbolic",
+        ".mp4": "video-x-generic-symbolic", ".mkv": "video-x-generic-symbolic",
+        ".webm": "video-x-generic-symbolic", ".mov": "video-x-generic-symbolic",
+    }
+
+    def _type_icon(self, path: Path):
+        """A symbolic icon for a file's kind - a folder, a code file, an office
+        document - or a generic one. Images get a thumbnail elsewhere."""
+        try:
+            if path.is_dir():
+                name = "folder-symbolic"
+            else:
+                suffix = path.suffix.lower()
+                name = (self._TYPE_ICONS.get(suffix)
+                        or ("text-editor-symbolic" if suffix in self._LANG_BY_SUFFIX
+                            else "text-x-generic-symbolic"))
+        except OSError:
+            name = "text-x-generic-symbolic"
+        icon = Gtk.Image.new_from_icon_name(name)
+        icon.add_css_class("dim-label")
+        return icon
+
     def _row(self, path: Path) -> Gtk.Widget:
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
 
-        if path.suffix.lower() in self.IMAGE_SUFFIXES:
-            thumb = self._thumbnail(path)
-            if thumb is not None:
-                row.append(thumb)
+        thumb = self._thumbnail(path) if path.suffix.lower() in self.IMAGE_SUFFIXES else None
+        row.append(thumb if thumb is not None else self._type_icon(path))
 
         name = Gtk.Label(label=path.name)
         name.set_hexpand(True)
@@ -1164,8 +1197,35 @@ class ArtifactBlock(Gtk.Box):
             [f"Preview of {path.name}, {width} by {height} pixels"])
         return frame
 
+    #: File suffix -> the language `code_hl` colours it as. A code file's preview
+    #: is syntax-highlighted through the same highlighter the reply code blocks
+    #: use (harness-studio's Files pane colours code too); anything not here is
+    #: shown as plain monospace text.
+    _LANG_BY_SUFFIX = {
+        ".py": "python", ".js": "javascript", ".mjs": "javascript", ".ts": "typescript",
+        ".tsx": "tsx", ".jsx": "jsx", ".css": "css", ".scss": "scss", ".less": "less",
+        ".html": "html", ".htm": "html", ".xml": "xml", ".svg": "svg", ".json": "json",
+        ".yaml": "yaml", ".yml": "yaml", ".toml": "toml", ".sql": "sql", ".sh": "bash",
+        ".bash": "bash", ".zsh": "zsh", ".c": "c", ".h": "c", ".cpp": "cpp", ".cc": "cpp",
+        ".hpp": "cpp", ".go": "go", ".rs": "rust", ".java": "java", ".diff": "diff", ".patch": "diff",
+    }
+
+    def _preview_frame(self, child, path: Path):
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_max_content_height(280)
+        scroller.set_propagate_natural_height(True)
+        scroller.set_child(child)
+        frame = Gtk.Frame()
+        frame.add_css_class("artifact-preview")
+        frame.set_child(scroller)
+        frame.update_property([Gtk.AccessibleProperty.LABEL], [f"Preview of {path.name}"])
+        return frame
+
     def _text_preview(self, path: Path):
-        """The first `PREVIEW_LINES` lines, and a truthful note when cut."""
+        """The first `PREVIEW_LINES` lines - syntax-coloured for a known code
+        language, plain monospace otherwise. Selectable either way, because the
+        reason to preview a file in a conversation is to copy something out."""
         try:
             with open(path, "r", encoding="utf-8", errors="replace") as handle:
                 lines = []
@@ -1180,24 +1240,22 @@ class ArtifactBlock(Gtk.Box):
             return None
         if not lines:
             return None
-        scroller = Gtk.ScrolledWindow()
-        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scroller.set_max_content_height(280)
-        scroller.set_propagate_natural_height(True)
-        # Monospace and selectable, because the reason to preview a file in a
-        # conversation is to copy something out of it.
+        text = "\n".join(lines)
+        language = self._LANG_BY_SUFFIX.get(path.suffix.lower())
+        if language and code_hl.supports(language):
+            label = Gtk.Label()
+            label.set_markup(f"<tt>{code_hl.highlight(text, language)}</tt>")
+            label.set_xalign(0.0)
+            label.set_yalign(0.0)
+            label.set_selectable(True)
+            label.set_wrap(False)
+            return self._preview_frame(label, path)
         view = Gtk.TextView()
         view.set_editable(False)
         view.set_monospace(True)
         view.set_wrap_mode(Gtk.WrapMode.NONE)
-        view.get_buffer().set_text("\n".join(lines))
-        frame = Gtk.Frame()
-        frame.add_css_class("artifact-preview")
-        frame.set_child(scroller)
-        scroller.set_child(view)
-        frame.update_property([Gtk.AccessibleProperty.LABEL],
-                              [f"Preview of {path.name}"])
-        return frame
+        view.get_buffer().set_text(text)
+        return self._preview_frame(view, path)
 
     def _scrolled_text(self, text: str, path: Path, monospace: bool = True):
         """A read-only, selectable text view of `text` in the preview frame."""
@@ -1240,28 +1298,16 @@ class ArtifactBlock(Gtk.Box):
         return self._scrolled_text(text, path, monospace=False)
 
     def _pdf_preview(self, path: Path):
-        """The first page as a picture, rendered with poppler's `pdftoppm`.
+        """The first page as a picture, via `gui.pdf_render` (poppler's pdftoppm).
 
         No poppler, no preview - the row still opens the PDF in the desktop
         viewer. A picture of page one is enough to recognise the document, which
-        is what a preview is for; it is not a PDF reader.
+        is what a preview is for; it is not a PDF reader. The converter is called
+        from `pdf_render`, not here, because this module runs nothing itself.
         """
-        if not shutil.which("pdftoppm"):
-            return None
-        try:
-            with tempfile.TemporaryDirectory(prefix="chronoa-pdf-") as tmp:
-                prefix = Path(tmp) / "page"
-                proc = subprocess.run(
-                    ["pdftoppm", "-png", "-f", "1", "-l", "1", "-scale-to", "640",
-                     str(path), str(prefix)],
-                    capture_output=True, timeout=30, check=False)
-                pages = sorted(Path(tmp).glob("page*.png"))
-                if proc.returncode != 0 or not pages:
-                    return None
-                from gi.repository import GdkPixbuf
-                pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(str(pages[0]), 480, 640, True)
-        except Exception as exc:                                   # noqa: BLE001
-            logger.info("no pdf preview for %s: %s", path.name, exc)
+        from shani_chronoa.gui import pdf_render
+        pixbuf = pdf_render.first_page_pixbuf(path)
+        if pixbuf is None:
             return None
         frame = Gtk.Frame()
         frame.add_css_class("artifact-preview")

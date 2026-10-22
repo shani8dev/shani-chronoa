@@ -222,7 +222,50 @@ def test_html_falls_back_to_source_without_a_display(tmp_path, monkeypatch):
     _preview_button(block, "dash.html").emit("clicked")
     # no web view was built, so there is no Rendered/Source toggle - just the source
     assert _toggle(block, "Rendered") is None, "a web view was attempted with no display"
-    assert any(isinstance(n, Gtk.TextView) for n in _nodes(block)), "the HTML source is not shown"
+    # the source is shown: a preview frame with the file's text (HTML source is a
+    # markup Label through the code highlighter, plain text is a TextView)
+    frames = [n for n in _nodes(block) if isinstance(n, Gtk.Frame)
+              and "artifact-preview" in (n.get_css_classes() or [])]
+    assert frames, "no source preview was shown for the HTML file"
+    shown = [n for n in _nodes(frames[0]) if isinstance(n, (Gtk.TextView, Gtk.Label))]
+    assert shown, "the HTML source preview is empty"
+
+
+def test_a_code_file_preview_is_syntax_coloured(tmp_path):
+    """Harness-studio's Files pane colours code; this does too, through the same
+    highlighter the reply code blocks use."""
+    src = tmp_path / "calc.py"
+    src.write_text("def add(a, b):\n    return a + b  # sum\n", encoding="utf-8")
+    block = blocks.ArtifactBlock([src])
+    _preview_button(block, "calc.py").emit("clicked")
+    labels = [n for n in _nodes(block) if isinstance(n, Gtk.Label) and n.get_use_markup()]
+    coloured = [n for n in labels if "<span" in (n.get_label() or "")]
+    assert coloured, "a .py preview had no syntax-coloured markup"
+    # a plain .txt stays an ordinary text view, not highlighted
+    plain = tmp_path / "n.txt"
+    plain.write_text("just text\n", encoding="utf-8")
+    b2 = blocks.ArtifactBlock([plain])
+    _preview_button(b2, "n.txt").emit("clicked")
+    assert any(isinstance(n, Gtk.TextView) for n in _nodes(b2))
+
+
+def test_rows_carry_a_type_icon_and_every_name_resolves(tmp_path):
+    """Each row shows a kind icon (harness's typed file list); a name that does
+    not resolve would draw a broken glyph, so pin that every one exists."""
+    from gi.repository import Gdk
+    icons = set(blocks.ArtifactBlock._TYPE_ICONS.values()) | {
+        "text-editor-symbolic", "text-x-generic-symbolic", "folder-symbolic"}
+    display = Gdk.Display.get_default()
+    if display is not None:
+        theme = Gtk.IconTheme.get_for_display(display)
+        missing = [n for n in icons if not theme.has_icon(n)]
+        assert missing == [], f"artifact type icons missing from the theme: {missing}"
+    # a non-image file's row has an icon image
+    doc = tmp_path / "report.xlsx"
+    from shani_chronoa import office
+    doc.write_bytes(office.make_xlsx({"S": [["A", "B"], ["x", 1]]}))
+    block = blocks.ArtifactBlock([doc])
+    assert any(isinstance(n, Gtk.Image) for n in _nodes(block)), "the row has no type icon"
 
 
 def test_an_image_preview_is_capped_rather_than_decoded_at_full_size(tmp_path):
