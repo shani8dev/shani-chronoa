@@ -203,6 +203,14 @@ SHORTCUT_SECTIONS = (
         Shortcut("Stop speaking", "stop-speaking", "Escape",
                  "Cut off the reply being read out."),
     )),
+    ShortcutSection("View", (
+        Shortcut("Zoom in", "zoom-in", "<Ctrl>plus",
+                 "Make every bit of text larger, all together."),
+        Shortcut("Zoom out", "zoom-out", "<Ctrl>minus",
+                 "Make every bit of text smaller."),
+        Shortcut("Reset zoom", "zoom-reset", "<Ctrl>0",
+                 "Back to the size your desktop sets."),
+    )),
 )
 
 #: Whether this libadwaita has the native shortcuts widgets, and *which spelling*.

@@ -452,6 +452,39 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         if self.window is not None and hasattr(self.window, "_refresh_thinking_word"):
             self.window._refresh_thinking_word()
 
+    #: How far one Ctrl +/- step moves the zoom, and the range it stays inside.
+    _ZOOM_STEP = 1.1
+    _ZOOM_MIN = 0.7
+    _ZOOM_MAX = 2.5
+
+    def _on_zoom(self, _action, _param, name: str) -> None:
+        """Step the whole-app text zoom in, out, or back to the system size."""
+        current = getattr(self, "_zoom_level", 1.0)
+        if name == "zoom-in":
+            target = current * self._ZOOM_STEP
+        elif name == "zoom-out":
+            target = current / self._ZOOM_STEP
+        else:
+            target = 1.0
+        self._set_zoom(target)
+
+    def _set_zoom(self, level: float) -> None:
+        """Apply `level` by scaling gtk-xft-dpi from the system's own value.
+
+        The system value is captured once, the first time zoom is touched, so
+        resetting returns to exactly what the desktop set rather than a guess;
+        a desktop with no value set falls back to the standard 96 dpi.
+        """
+        level = max(self._ZOOM_MIN, min(self._ZOOM_MAX, level))
+        settings = Gtk.Settings.get_default()
+        if settings is None:
+            return
+        if getattr(self, "_base_xft_dpi", None) is None:
+            dpi = settings.get_property("gtk-xft-dpi")
+            self._base_xft_dpi = dpi if dpi and dpi > 0 else 96 * 1024
+        self._zoom_level = level
+        settings.set_property("gtk-xft-dpi", int(self._base_xft_dpi * level))
+
     def _on_choose_project(self, _action, _param) -> None:
         """Pick the project folder, and turn Build mode on with it.
 
@@ -1702,6 +1735,30 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         dictate_action.connect("activate", self.dictate)
         self.add_action(dictate_action)
         self.set_accels_for_action("app.dictate", ["<Ctrl><Shift>d"])
+
+        # Whole-app text zoom, like harness-studio's. Ctrl +/- steps it, Ctrl 0
+        # returns to the system size. It scales `gtk-xft-dpi`, so every label,
+        # the composer and the sidebar grow together rather than one widget - the
+        # same knob GNOME's text-scaling turns. Session-level: it does not change
+        # the desktop's own setting, and a new launch starts at the system size.
+        #
+        # Registered one by one, with literal names and keys, because
+        # `test_about` reads this source to check the shortcuts window against the
+        # real accelerators - a loop would hide the action name and the keys from it.
+        zoom_in = Gio.SimpleAction.new("zoom-in", None)
+        zoom_in.connect("activate", self._on_zoom, "zoom-in")
+        self.add_action(zoom_in)
+        self.set_accels_for_action("app.zoom-in", ["<Ctrl>plus"])
+
+        zoom_out = Gio.SimpleAction.new("zoom-out", None)
+        zoom_out.connect("activate", self._on_zoom, "zoom-out")
+        self.add_action(zoom_out)
+        self.set_accels_for_action("app.zoom-out", ["<Ctrl>minus"])
+
+        zoom_reset = Gio.SimpleAction.new("zoom-reset", None)
+        zoom_reset.connect("activate", self._on_zoom, "zoom-reset")
+        self.add_action(zoom_reset)
+        self.set_accels_for_action("app.zoom-reset", ["<Ctrl>0"])
 
         # An inbound channel on the session bus, for a meeting transcript or a
         # message bridge to type into. It exposes exactly one method and cannot

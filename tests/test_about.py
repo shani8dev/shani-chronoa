@@ -314,9 +314,9 @@ def test_the_source_parser_finds_the_real_registrations():
     assert {"toggle-listening", "stop-speaking", "quick-ask", "setup"} <= ACTIONS
 
 
-def test_the_three_sections_are_there_and_non_empty(built):
+def test_the_sections_are_there_and_non_empty(built):
     titles = [section["title"] for section in built["sections"]]
-    assert titles == ["General", "Conversation", "This window"]
+    assert titles == ["General", "Conversation", "This window", "View"]
     for section in built["sections"]:
         assert section["rows"], f"section {section['title']!r} has no rows"
 
