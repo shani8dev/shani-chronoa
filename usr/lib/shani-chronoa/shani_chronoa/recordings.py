@@ -69,9 +69,53 @@ def duration(path: Path) -> float:
         return 0.0
 
 
-def extract_audio(src: Path, wav: Path) -> None:
-    """16 kHz mono 16-bit WAV of the first MAX_SECONDS of `src`."""
-    proc = subprocess.run([_ffmpeg(), "-v", "error", "-nostdin", "-y", "-t", str(MAX_SECONDS), "-i", str(src),
+def parse_time(text: str) -> "Optional[float]":
+    """Seconds from "75.5", "1:10.4", "1:02:03.5" or a bare number, else None.
+
+    The Files tab marks a part of a recording as "1:10.4 to 1:25.0" (see the
+    `recording` skill's `range`), so a person - or the model quoting them -
+    writes the two ends in that same clock form. A trailing "s" is tolerated
+    because "70s" is a natural way to say it. Adopted from harness-studio's
+    `parseTime`, reimplemented; the minutes/seconds fields must be under 60 so
+    "1:70" is rejected rather than silently read as 130 seconds.
+    """
+    match = re.fullmatch(r"\s*(?:(?:(\d+):)?(\d+):)?(\d+(?:\.\d+)?)\s*s?\s*", str(text or ""))
+    if not match:
+        return None
+    hours, minutes, seconds = match.groups()
+    if (minutes is not None or hours is not None) and float(seconds) >= 60:
+        return None
+    return int(hours or 0) * 3600 + int(minutes or 0) * 60 + float(seconds)
+
+
+def parse_range(text: str) -> "Optional[tuple[float, float]]":
+    """[start, end] in seconds from "1:10.4 to 1:25", "70-85" or "1:10 – 1:25", else None.
+
+    Splits on " to " or a dash (hyphen/en/em), so the Files tab's own
+    "1:10.4 to 1:25.0" reference and a hand-typed "70-85" both work. The end
+    must be after the start, or it is no range.
+    """
+    parts = re.split(r"\s+to\s+|\s*[-–—]\s*", str(text or "").strip(), maxsplit=1)
+    if len(parts) != 2:
+        return None
+    start, end = parse_time(parts[0]), parse_time(parts[1])
+    if start is None or end is None or end <= start:
+        return None
+    return start, end
+
+
+def extract_audio(src: Path, wav: Path, start: float = 0.0,
+                  length: "Optional[float]" = None) -> None:
+    """16 kHz mono 16-bit WAV of `src`, from `start` for `length` seconds.
+
+    The defaults (start 0, length MAX_SECONDS) are the whole-file behaviour this
+    had before. `start` seeks before `-i` so a late clip does not decode the
+    whole file first, which is accurate enough for speech (ffmpeg discards to the
+    exact sample for audio); `length` caps the piece as MAX_SECONDS always did.
+    """
+    seek = ["-ss", f"{start:.3f}"] if start > 0 else []
+    proc = subprocess.run([_ffmpeg(), "-v", "error", "-nostdin", "-y", *seek,
+                           "-t", str(length if length is not None else MAX_SECONDS), "-i", str(src),
                            "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(wav)],
                           capture_output=True, text=True, timeout=600)
     if proc.returncode != 0 or not wav.is_file() or wav.stat().st_size <= 44:
@@ -113,6 +157,18 @@ def transcribe(wav: Path, language: str = "auto") -> List[Segment]:
         if text:
             segments.append(Segment(offsets.get("from", 0) / 1000.0, offsets.get("to", 0) / 1000.0, text))
     return segments
+
+
+def _clock(seconds: float) -> str:
+    """"1:25.0" or "1:02:03.5": the short clock form a person reads, for notes."""
+    whole = int(seconds)
+    tenths = int(round((seconds - whole) * 10))
+    if tenths == 10:
+        whole, tenths = whole + 1, 0
+    h, rem = divmod(whole, 3600)
+    m, s = divmod(rem, 60)
+    head = f"{h}:{m:02d}:" if h else f"{m}:"
+    return f"{head}{s:02d}.{tenths}"
 
 
 def _stamp(seconds: float) -> str:
@@ -187,15 +243,34 @@ def clean(src: Path, target: Path) -> None:
 
 
 def segments_for(src: Path, language: str = "auto", with_speakers: bool = False,
-                 speakers_count: Optional[int] = None) -> "tuple[List[Segment], str]":
-    """Timed segments for any audio or video file, and a note (cut short, no speaker model...)."""
+                 speakers_count: Optional[int] = None,
+                 clip: "Optional[tuple[float, float]]" = None) -> "tuple[List[Segment], str]":
+    """Timed segments for any audio or video file, and a note (cut short, no speaker model...).
+
+    `clip` is a (start, end) in seconds: only that part is read, and the segment
+    times are shifted back to the file's own clock so subtitles and "who said
+    what" still line up with the original - the part the Files tab marks as
+    "1:10.4 to 1:25.0".
+    """
     notes = []
     length = duration(src)
-    if length > MAX_SECONDS:
+    start, want = 0.0, None
+    if clip is not None:
+        start, end = clip
+        if length and start >= length:
+            raise RecordingError(f"{src.name} is only {int(length)}s long; {_clock(start)} is past its end")
+        end = min(end, length) if length else end
+        want = end - start
+        if want > MAX_SECONDS:
+            want = float(MAX_SECONDS)
+            notes.append(f"only {MAX_SECONDS // 60} minutes from {_clock(start)} were used")
+        else:
+            notes.append(f"the part from {_clock(start)} to {_clock(start + want)}")
+    elif length > MAX_SECONDS:
         notes.append(f"only the first {MAX_SECONDS // 60} minutes were used")
     with tempfile.TemporaryDirectory(prefix="chronoa-rec-") as tmp:
         wav = Path(tmp) / "audio.wav"
-        extract_audio(src, wav)
+        extract_audio(src, wav, start=start, length=want)
         segments = transcribe(wav, language)
         if with_speakers:
             from shani_chronoa import speakers
@@ -203,7 +278,12 @@ def segments_for(src: Path, language: str = "auto", with_speakers: bool = False,
             if problem:
                 notes.append(problem)
             else:
+                # Diarisation reads the clipped wav, so its turns are in the
+                # clip's own clock - assign here, then shift everything to the
+                # file's clock together below.
                 segments = assign_speakers(segments, speakers.diarize(wav, speakers_count))
+        if start:
+            segments = [s._replace(start=s.start + start, end=s.end + start) for s in segments]
     return segments, "; ".join(notes)
 
 

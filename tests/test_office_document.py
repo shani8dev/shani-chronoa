@@ -8,6 +8,10 @@ AGENTS.md. That x2t run is also why text cells use the shared-string table:
 `test_text_cells_use_the_shared_string_table` pins it.
 """
 
+import glob
+import os
+import shutil
+import subprocess
 import zipfile
 from xml.etree import ElementTree as ET
 
@@ -16,6 +20,32 @@ import pytest
 from shani_chronoa import office
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import office_document as od
+
+
+def _find_x2t():
+    """OnlyOffice's x2t converter: on PATH, or inside its flatpak, or None.
+
+    The suite's by-hand OnlyOffice check (see the module docstring) is run
+    automatically here when x2t is present, so a chart that OnlyOffice cannot
+    read is caught rather than only structurally plausible.
+    """
+    direct = shutil.which("x2t")
+    if direct:
+        return direct, None
+    for base in ("/var/lib/flatpak/app", os.path.expanduser("~/.local/share/flatpak/app")):
+        hits = glob.glob(base + "/org.onlyoffice.desktopeditors/*/*/*/files/bin/opt/onlyoffice/desktopeditors/converter/x2t")
+        if hits:
+            return hits[0], os.path.dirname(hits[0])
+    return None, None
+
+
+def _x2t_convert(src, dst):
+    """Convert with x2t; returns the completed process (exit 0 means it parsed)."""
+    x2t, conv = _find_x2t()
+    env = dict(os.environ)
+    if conv:
+        env["LD_LIBRARY_PATH"] = conv + ":" + env.get("LD_LIBRARY_PATH", "")
+    return subprocess.run([x2t, str(src), str(dst)], capture_output=True, timeout=120, env=env)
 
 MD = """# Trip plan
 Some **bold** words & <angle> text.
@@ -57,6 +87,149 @@ def test_xlsx_types_formulas_and_leading_zeros(tmp_path):
     assert '<c r="B5" t="s"' in sheet, "a leading-zero code stays text"
     assert '<c r="B2"><v>1200</v>' in sheet.replace(' s="1"', ""), "numbers are numbers"
     assert "fullCalcOnLoad" in zipfile.ZipFile(p).read("xl/workbook.xml").decode()
+
+
+def _chart_xml(path):
+    with zipfile.ZipFile(path) as z:
+        assert "xl/charts/chart1.xml" in z.namelist(), z.namelist()
+        return z.read("xl/charts/chart1.xml").decode()
+
+
+def test_xlsx_native_chart_references_cells_and_caches_their_values(tmp_path):
+    """A native, editable chart: it points at the sheet's cells (stays live in
+    Excel) and caches their values (a viewer draws it without recalculating)."""
+    p = tmp_path / "sales.xlsx"
+    rows = [["Month", "Sales"], ["Jan", 30], ["Feb", 45], ["Mar", 28], ["Apr", 60]]
+    p.write_bytes(office.make_xlsx({"Sheet1": rows}, header=True,
+                                   chart={"type": "bar", "title": "Monthly Sales",
+                                          "categories": "A2:A5", "values": "B2:B5"}))
+    _parts_are_xml(p)  # every part, including the chart and drawing, is well-formed
+    chart = _chart_xml(p)
+    assert "<c:barChart>" in chart
+    assert "Sheet1!$A$2:$A$5" in chart and "Sheet1!$B$2:$B$5" in chart, "it must reference the cells"
+    assert "<c:v>30</c:v>" in chart and "<c:v>60</c:v>" in chart, "and cache their values"
+    with zipfile.ZipFile(p) as z:
+        assert '<drawing r:id="rId1"/>' in z.read("xl/worksheets/sheet1.xml").decode()
+        assert "xl/worksheets/_rels/sheet1.xml.rels" in z.namelist()
+        ct = z.read("[Content_Types].xml").decode()
+        assert "chart+xml" in ct and "drawing+xml" in ct
+    # the data still reads back through our own reader with the chart present
+    assert "45" in office.read(p)
+
+
+def test_xlsx_chart_kinds_and_multi_series(tmp_path):
+    rows = [["Q", "Sales", "Cost"], ["Q1", 30, 20], ["Q2", 45, 25], ["Q3", 28, 18]]
+    line = tmp_path / "line.xlsx"
+    line.write_bytes(office.make_xlsx({"Sheet1": rows},
+                                      chart={"type": "line", "categories": "A2:A4", "values": "B2:B4"}))
+    _parts_are_xml(line)
+    assert "<c:lineChart>" in _chart_xml(line)
+    multi = tmp_path / "multi.xlsx"
+    multi.write_bytes(office.make_xlsx({"Sheet1": rows},
+                                       chart={"type": "bar", "categories": "A2:A4",
+                                              "values": ["B2:B4", "C2:C4"], "names": ["Sales", "Cost"]}))
+    _parts_are_xml(multi)
+    assert _chart_xml(multi).count("<c:ser>") == 2, "two value ranges make two series"
+    pie = tmp_path / "pie.xlsx"
+    pie.write_bytes(office.make_xlsx({"Sheet1": rows},
+                                     chart={"type": "pie", "categories": "A2:A4", "values": "B2:B4"}))
+    _parts_are_xml(pie)
+    assert "<c:pieChart>" in _chart_xml(pie) and "<c:legend>" in _chart_xml(pie)
+
+
+def test_a_bad_chart_type_is_refused_not_written(tmp_path):
+    with pytest.raises(office.OfficeError):
+        office.make_xlsx({"Sheet1": [["A", "B"], ["x", 1]]},
+                         chart={"type": "bogus", "categories": "A2:A2", "values": "B2:B2"})
+
+
+def test_pptx_chart_rides_its_own_slide_with_an_embedded_workbook(tmp_path):
+    """A deck chart keeps its data in an embedded .xlsx so PowerPoint can edit it;
+    that workbook must round-trip through our own reader, and the chart must cache
+    the same numbers it references."""
+    p = tmp_path / "deck.pptx"
+    p.write_bytes(office.make_pptx(
+        [{"title": "Q3", "subtitle": "demo"}],
+        chart={"type": "bar", "title": "Sales", "categories": ["Jan", "Feb", "Mar"],
+               "series": {"Sales": [30, 45, 28], "Cost": [20, 25, 18]}}))
+    _parts_are_xml(p)  # every part, chart and embedded workbook rels included
+    with zipfile.ZipFile(p) as z:
+        names = z.namelist()
+        assert "ppt/charts/chart1.xml" in names
+        assert "ppt/embeddings/Microsoft_Excel_Worksheet1.xlsx" in names
+        chart = z.read("ppt/charts/chart1.xml").decode()
+        assert "<c:barChart>" in chart and chart.count("<c:ser>") == 2
+        assert "externalData" in chart, "a deck chart links its embedded workbook"
+        assert "<c:v>30</c:v>" in chart and "<c:v>18</c:v>" in chart
+        assert 'r:id="rId2"' in z.read("ppt/slides/slide2.xml").decode()
+        emb = tmp_path / "emb.xlsx"
+        emb.write_bytes(z.read("ppt/embeddings/Microsoft_Excel_Worksheet1.xlsx"))
+    text = office.read(emb)  # real execution on the data path
+    assert "Jan" in text and "45" in text and "Cost" in text, text[:200]
+
+
+def test_pptx_chart_pie_and_single_series_form(tmp_path):
+    p = tmp_path / "pie.pptx"
+    p.write_bytes(office.make_pptx([{"title": "x"}],
+                                   chart={"type": "pie", "title": "Share", "data": [["A", 60], ["B", 40]]}))
+    _parts_are_xml(p)
+    with zipfile.ZipFile(p) as z:
+        assert "<c:pieChart>" in z.read("ppt/charts/chart1.xml").decode()
+
+
+def test_the_skill_embeds_a_chart_slide_in_a_deck(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    out = str(tmp_path / "deck.pptx")
+    said = od._run({"action": "create", "path": out, "slides": [{"title": "Q3", "subtitle": "demo"}],
+                    "chart": {"type": "bar", "title": "Sales", "categories": ["Jan", "Feb"],
+                              "series": {"Sales": [30, 45]}}})
+    assert "Created" in said, said
+    assert "ppt/charts/chart1.xml" in zipfile.ZipFile(out).namelist()
+
+
+@pytest.mark.skipif(_find_x2t()[0] is None, reason="OnlyOffice x2t not installed")
+def test_onlyoffice_reads_the_charts_we_write(tmp_path):
+    """Real-reader proof: OnlyOffice's engine converts our chart files and keeps
+    the chart. A chart OnlyOffice cannot parse makes x2t exit non-zero or drops
+    the chart object; both fail here."""
+    xlsx = tmp_path / "chart.xlsx"
+    xlsx.write_bytes(office.make_xlsx(
+        {"Sheet1": [["M", "Sales"], ["Jan", 30], ["Feb", 45], ["Mar", 28]]},
+        chart={"type": "bar", "title": "Sales", "categories": "A2:A4", "values": "B2:B4"}))
+    ods = tmp_path / "chart.ods"
+    proc = _x2t_convert(xlsx, ods)
+    assert proc.returncode == 0 and ods.exists(), proc.stderr[-300:]
+    with zipfile.ZipFile(ods) as z:
+        obj = next((n for n in z.namelist() if n.endswith("content.xml") and n.startswith("Object")), None)
+        assert obj, f"OnlyOffice dropped the chart: {z.namelist()}"
+        body = z.read(obj).decode("utf-8", "replace")
+        assert "chart:chart" in body and 'chart:class="chart:bar"' in body, "not read back as a bar chart"
+
+    pptx = tmp_path / "deck.pptx"
+    pptx.write_bytes(office.make_pptx(
+        [{"title": "Q3", "subtitle": "demo"}],
+        chart={"type": "pie", "title": "Share", "data": [["A", 60], ["B", 40]]}))
+    odp = tmp_path / "deck.odp"
+    proc = _x2t_convert(pptx, odp)
+    assert proc.returncode == 0 and odp.exists(), proc.stderr[-300:]
+    with zipfile.ZipFile(odp) as z:
+        assert any(n.startswith("Object") and n.endswith("content.xml") for n in z.namelist()), \
+            f"OnlyOffice dropped the deck's chart: {z.namelist()}"
+
+
+def test_the_skill_embeds_a_chart_on_create(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    out = str(tmp_path / "s.xlsx")
+    said = od._run({"action": "create", "path": out,
+                    "rows": [["Month", "Sales"], ["Jan", 30], ["Feb", 45]],
+                    "chart": {"type": "bar", "categories": "A2:A3", "values": "B2:B3"}})
+    assert "Created" in said, said
+    assert "xl/charts/chart1.xml" in zipfile.ZipFile(out).namelist()
+    # a bad chart is a message, not a crash, and leaves no half-file claimed as good
+    bad = od._run({"action": "create", "path": str(tmp_path / "bad.xlsx"),
+                   "rows": [["A", "B"], ["x", 1]],
+                   "chart": {"type": "nope", "categories": "A2:A2", "values": "B2:B2"}})
+    assert "bar, line, pie" in bad, bad
 
 
 def test_text_cells_use_the_shared_string_table(tmp_path):

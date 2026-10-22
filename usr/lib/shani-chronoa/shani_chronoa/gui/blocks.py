@@ -832,8 +832,26 @@ class ArtifactBlock(Gtk.Box):
     """
 
     #: What gets a thumbnail rather than a name. Everything else is listed by
-    #: name, because a preview that silently fails is worse than a name.
-    IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
+    #: name, because a preview that silently fails is worse than a name. SVG is
+    #: here too - the `chart` skill writes SVG, and GdkPixbuf renders it through
+    #: librsvg - but it is sized from a fixed box, not file dimensions a scalable
+    #: image may not carry.
+    IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg")
+
+    #: Word/Excel/PowerPoint and their OpenDocument forms: previewed as the text
+    #: `office.read` pulls out, so a document the assistant just made can be read
+    #: here rather than only opened in another app.
+    OFFICE_SUFFIXES = (".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp")
+
+    #: Delimited data shown as a table, not monospace text (harness-studio's
+    #: Files pane does the same); everything else delimited stays text.
+    TABLE_SUFFIXES = (".csv", ".tsv")
+
+    #: Files with two honest views - a rendered one and their source. These get a
+    #: Rendered / Source switch above the preview, like harness-studio's Files
+    #: pane: Markdown formatted vs. its text, a table vs. the CSV, the picture vs.
+    #: the SVG. The last choice is remembered for the next one (`_view_mode`).
+    SWITCHABLE_SUFFIXES = (".md", ".markdown", ".csv", ".tsv", ".svg", ".html", ".htm")
 
     def __init__(self, paths) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -902,7 +920,7 @@ class ArtifactBlock(Gtk.Box):
                      ".sh", ".js", ".ts", ".css", ".sql", ".desktop")
 
     def _preview_kind(self, path: Path):
-        """``"image"``, ``"text"``, or None when there is nothing to preview."""
+        """``"image"``, ``"office"``, ``"pdf"``, ``"table"``, ``"text"``, or None."""
         try:
             if path.is_dir():
                 return None
@@ -911,6 +929,12 @@ class ArtifactBlock(Gtk.Box):
             return None
         if suffix in self.IMAGE_SUFFIXES:
             return "image"
+        if suffix in self.OFFICE_SUFFIXES:
+            return "office"
+        if suffix == ".pdf":
+            return "pdf"
+        if suffix in self.TABLE_SUFFIXES:
+            return "table"
         if suffix in self.TEXT_SUFFIXES:
             return "text"
         return None
@@ -941,13 +965,162 @@ class ArtifactBlock(Gtk.Box):
         button.set_icon_name("view-conceal-symbolic")
         button.set_tooltip_text(f"Hide the preview of {path.name}")
 
+    #: The Rendered/Source choice, shared across previews in this session so the
+    #: switch stays where the reader last put it (harness remembers it the same
+    #: way, in browser storage).
+    _shared_view = {"mode": "rendered"}
+
     def _build_preview(self, path: Path):
+        if path.suffix.lower() in self.SWITCHABLE_SUFFIXES:
+            return self._switchable_preview(path)
         kind = self._preview_kind(path)
         if kind == "image":
             return self._image_preview(path)
+        if kind == "office":
+            return self._office_preview(path)
+        if kind == "pdf":
+            return self._pdf_preview(path)
+        if kind == "table":
+            return self._table_preview(path)
         if kind == "text":
             return self._text_preview(path)
         return None
+
+    def _rendered_view(self, path: Path):
+        """The 'nice' form of a switchable file: formatted, a table, or a picture."""
+        suffix = path.suffix.lower()
+        if suffix in (".md", ".markdown"):
+            return self._markdown_rendered(path)
+        if suffix in self.TABLE_SUFFIXES:
+            return self._table_preview(path)
+        if suffix == ".svg":
+            return self._image_preview(path)
+        if suffix in (".html", ".htm"):
+            return self._html_rendered(path)
+        return None
+
+    #: Largest HTML page to render in a preview, so a giant page is not loaded
+    #: into a web view inside the transcript.
+    HTML_PREVIEW_BYTES = 2 * 1024 * 1024
+
+    def _html_rendered(self, path: Path):
+        """An HTML page shown rendered in a web view - a dashboard in place.
+
+        **Safe or nothing.** Rendering needs WebKitGTK and a display; a web view
+        built with neither crashes rather than raises, so this only tries when a
+        display is present and WebKit is installed, and returns None otherwise -
+        the switch then drops and the source is shown. Scripts are disabled and
+        the page is loaded with a null base, so a preview never runs code or
+        reaches a local file; our own dashboards carry no scripts anyway.
+        """
+        import os
+        if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+            return None
+        try:
+            if path.stat().st_size > self.HTML_PREVIEW_BYTES:
+                return None
+            from shani_chronoa.gui.browser import _webkit
+            webkit = _webkit()
+            if webkit is None:
+                return None
+            text = path.read_text(encoding="utf-8", errors="replace")
+            view = webkit.WebView()
+            settings = webkit.Settings()
+            settings.set_enable_javascript(False)
+            try:
+                settings.set_enable_developer_extras(False)
+            except Exception:  # noqa: BLE001 - optional on some builds
+                pass
+            view.set_settings(settings)
+            view.set_size_request(-1, 360)
+            view.load_html(text, None)  # null base: no local-file or relative loads
+        except Exception as exc:  # noqa: BLE001 - a web view that will not build is "no preview"
+            logger.info("no html preview for %s: %s", path.name, exc)
+            return None
+        frame = Gtk.Frame()
+        frame.add_css_class("artifact-preview")
+        frame.set_child(view)
+        frame.update_property([Gtk.AccessibleProperty.LABEL],
+                              [f"Rendered preview of {path.name}"])
+        return frame
+
+    def _switchable_preview(self, path: Path):
+        """A Rendered / Source switch above the preview, content swapping below it.
+
+        Both forms are real: Rendered is the formatted document, the table or the
+        picture; Source is the file's own text. Where the rendered form cannot be
+        built (an SVG librsvg will not draw, say), the switch is dropped and the
+        source is shown plainly rather than a toggle that half works.
+        """
+        source = self._text_preview(path)
+        rendered = self._rendered_view(path)
+        if rendered is None:
+            return source
+        if source is None:
+            return rendered
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        switch = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        switch.add_css_class("linked")
+        switch.set_halign(Gtk.Align.START)
+        rendered_btn = Gtk.ToggleButton(label="Rendered")
+        source_btn = Gtk.ToggleButton(label="Source")
+        source_btn.set_group(rendered_btn)
+        switch.append(rendered_btn)
+        switch.append(source_btn)
+        box.append(switch)
+        slot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        slot.set_hexpand(True)
+        box.append(slot)
+
+        def show(mode: str) -> None:
+            child = slot.get_first_child()
+            if child is not None:
+                slot.remove(child)
+            slot.append(rendered if mode == "rendered" else source)
+            self._shared_view["mode"] = mode
+
+        rendered_btn.connect("toggled", lambda b: b.get_active() and show("rendered"))
+        source_btn.connect("toggled", lambda b: b.get_active() and show("source"))
+        start = self._shared_view.get("mode", "rendered")
+        (source_btn if start == "source" else rendered_btn).set_active(True)
+        if slot.get_first_child() is None:   # set_active may not fire if already active
+            show(start)
+        return box
+
+    #: How many characters of Markdown to render in a preview, so a huge file
+    #: does not build thousands of widgets into the transcript.
+    MARKDOWN_PREVIEW_CHARS = 12000
+
+    def _markdown_rendered(self, path: Path):
+        """Markdown shown formatted, through the same renderer the replies use."""
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            logger.info("no markdown preview for %s: %s", path.name, exc)
+            return None
+        if not text.strip():
+            return None
+        if len(text) > self.MARKDOWN_PREVIEW_CHARS:
+            text = text[:self.MARKDOWN_PREVIEW_CHARS] + "\n\n*... preview cut; open the file for the rest.*"
+        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        inner.set_margin_start(6)
+        inner.set_margin_end(6)
+        for widget in widgets_for(text):
+            inner.append(widget)
+        if inner.get_first_child() is None:
+            return None
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_max_content_height(320)
+        scroller.set_propagate_natural_height(True)
+        scroller.set_child(inner)
+        frame = Gtk.Frame()
+        frame.add_css_class("artifact-preview")
+        frame.set_child(scroller)
+        frame.update_property([Gtk.AccessibleProperty.LABEL],
+                              [f"Rendered preview of {path.name}"])
+        return frame
 
     #: How much of a text file to show, in lines. A 40,000-line log in the
     #: transcript is a denial of service on the scroll position, and the point
@@ -968,11 +1141,16 @@ class ArtifactBlock(Gtk.Box):
             if info is None:
                 return None
             width, height = info[1], info[2]
-            longest = max(width, height) or 1
-            scale = min(480.0 / longest, 1.0)
-            pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(
-                str(path), max(int(width * scale), 1), max(int(height * scale), 1),
-                True)
+            if path.suffix.lower() == ".svg" and (width <= 0 or height <= 0):
+                # A scalable image may carry no pixel size; render it into a box.
+                pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(str(path), 480, 480, True)
+                width, height = pixbuf.get_width(), pixbuf.get_height()
+            else:
+                longest = max(width, height) or 1
+                scale = min(480.0 / longest, 1.0)
+                pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(
+                    str(path), max(int(width * scale), 1), max(int(height * scale), 1),
+                    True)
         except Exception as exc:                                   # noqa: BLE001
             logger.info("no preview for %s: %s", path.name, exc)
             return None
@@ -1019,6 +1197,126 @@ class ArtifactBlock(Gtk.Box):
         scroller.set_child(view)
         frame.update_property([Gtk.AccessibleProperty.LABEL],
                               [f"Preview of {path.name}"])
+        return frame
+
+    def _scrolled_text(self, text: str, path: Path, monospace: bool = True):
+        """A read-only, selectable text view of `text` in the preview frame."""
+        if not text:
+            return None
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_max_content_height(280)
+        scroller.set_propagate_natural_height(True)
+        view = Gtk.TextView()
+        view.set_editable(False)
+        view.set_monospace(monospace)
+        view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR if not monospace else Gtk.WrapMode.NONE)
+        view.get_buffer().set_text(text)
+        frame = Gtk.Frame()
+        frame.add_css_class("artifact-preview")
+        frame.set_child(scroller)
+        scroller.set_child(view)
+        frame.update_property([Gtk.AccessibleProperty.LABEL], [f"Preview of {path.name}"])
+        return frame
+
+    #: How much extracted document text to show, in characters. The point of a
+    #: preview is to recognise the document, not to read a whole book here.
+    OFFICE_PREVIEW_CHARS = 8000
+
+    def _office_preview(self, path: Path):
+        """The text of a Word/Excel/PowerPoint file, the way `office.read` pulls it."""
+        try:
+            from shani_chronoa import office
+            text = office.read(path)
+        except Exception as exc:                                   # noqa: BLE001
+            logger.info("no office preview for %s: %s", path.name, exc)
+            return None
+        if not text.strip():
+            return None
+        if len(text) > self.OFFICE_PREVIEW_CHARS:
+            text = text[:self.OFFICE_PREVIEW_CHARS] + (
+                f"\n\n... cut off at {self.OFFICE_PREVIEW_CHARS} characters. "
+                "Open the file to read the rest.")
+        return self._scrolled_text(text, path, monospace=False)
+
+    def _pdf_preview(self, path: Path):
+        """The first page as a picture, rendered with poppler's `pdftoppm`.
+
+        No poppler, no preview - the row still opens the PDF in the desktop
+        viewer. A picture of page one is enough to recognise the document, which
+        is what a preview is for; it is not a PDF reader.
+        """
+        if not shutil.which("pdftoppm"):
+            return None
+        try:
+            with tempfile.TemporaryDirectory(prefix="chronoa-pdf-") as tmp:
+                prefix = Path(tmp) / "page"
+                proc = subprocess.run(
+                    ["pdftoppm", "-png", "-f", "1", "-l", "1", "-scale-to", "640",
+                     str(path), str(prefix)],
+                    capture_output=True, timeout=30, check=False)
+                pages = sorted(Path(tmp).glob("page*.png"))
+                if proc.returncode != 0 or not pages:
+                    return None
+                from gi.repository import GdkPixbuf
+                pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(str(pages[0]), 480, 640, True)
+        except Exception as exc:                                   # noqa: BLE001
+            logger.info("no pdf preview for %s: %s", path.name, exc)
+            return None
+        frame = Gtk.Frame()
+        frame.add_css_class("artifact-preview")
+        image = Gtk.Image.new_from_paintable(Gdk.Texture.new_for_pixbuf(pixbuf))
+        image.set_halign(Gtk.Align.START)
+        frame.set_child(image)
+        frame.update_property([Gtk.AccessibleProperty.LABEL],
+                              [f"First page of {path.name}"])
+        return frame
+
+    #: Rows of a table preview to draw before stopping. A preview recognises the
+    #: data; it does not render a million-row export into the transcript.
+    TABLE_PREVIEW_ROWS = 50
+
+    def _table_preview(self, path: Path):
+        """A CSV/TSV file as a grid, the header row kept distinct."""
+        import csv
+        delimiter = "\t" if path.suffix.lower() == ".tsv" else ","
+        rows = []
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace", newline="") as handle:
+                for i, row in enumerate(csv.reader(handle, delimiter=delimiter)):
+                    if i >= self.TABLE_PREVIEW_ROWS:
+                        break
+                    rows.append(row)
+        except OSError as exc:
+            logger.info("no table preview for %s: %s", path.name, exc)
+            return None
+        if not rows:
+            return None
+        grid = Gtk.Grid()
+        grid.add_css_class("artifact-table")
+        grid.set_column_spacing(16)
+        grid.set_row_spacing(2)
+        width = max(len(r) for r in rows)
+        for r, row in enumerate(rows):
+            for c in range(width):
+                value = row[c] if c < len(row) else ""
+                cell = Gtk.Label(label=value, xalign=0.0)
+                cell.set_ellipsize(Pango.EllipsizeMode.END)
+                cell.set_max_width_chars(28)
+                cell.set_selectable(True)
+                if r == 0:
+                    cell.add_css_class("heading")
+                grid.attach(cell, c, r, 1, 1)
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_max_content_height(280)
+        scroller.set_propagate_natural_height(True)
+        scroller.set_child(grid)
+        frame = Gtk.Frame()
+        frame.add_css_class("artifact-preview")
+        frame.set_child(scroller)
+        frame.update_property([Gtk.AccessibleProperty.LABEL],
+                              [f"Table preview of {path.name}"])
         return frame
 
     def _thumbnail(self, path: Path):

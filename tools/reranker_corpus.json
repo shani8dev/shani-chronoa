@@ -4,13 +4,13 @@
   "seed": 20261013,
   "counts": {
     "requests": 220,
-    "pairs": 1661,
+    "pairs": 1662,
     "train": 165,
     "held_out": 55
   },
   "recall": {
-    "offered": 214,
-    "not_offered": 6,
+    "offered": 213,
+    "not_offered": 7,
     "with_args": 111
   },
   "train": [
@@ -74,6 +74,14 @@
           "desc": "bluetooth_call: Use a paired Android phone as a Bluetooth speakerphone, with no cable and no app on the phone. 'status' says whether a phone is connected as a hands-free unit, whether a call is in progress, and which audio profile its call audio arrived on. 'dial' places a call - 'dial number=\"+441234567890\"' - asking you to confirm first, because it rings someone. 'answer' and 'hangup' work on a call already in progress. 'audio' reports where the call's voice is going and names anything missing from that path, and 'profile' switches the card between wide-band hfp_hf and narrow-band hsp_hs. The phone stays the radio; this routes the voice to this computer's speakers and microphone. Needs the phone connected over Bluetooth, not merely paired, and the 'bluetooth-call-enabled' consent key. (arguments: action, card, profile, to, number)"
         },
         {
+          "tool": "chart",
+          "desc": "chart: Make an SVG file from data, drawn on this computer with no install. chart: kind=bar|line|pie with data (bar/pie: [[label, number], ...]; line: [[x, y], ...], or several lines as series {name: [[x, y], ...]}), plus title, x_label, y_label. icon: a stroke icon by name (arrow-right, bell, calendar, check, clock, close, download, folder, heart, home, mail, search, settings, star, user). diagram: a top-to-bottom flow, steps=[\"Read\", \"Edit\", \"Test\"] with optional arrows [[from, to, label], ...]. output is the .svg path, e.g. '~/Pictures/sales.svg'. (arguments: action, output, kind, data, series, steps, arrows, name, title, x_label, y_label)"
+        },
+        {
+          "tool": "dashboard",
+          "desc": "dashboard: Build a dashboard as one self-contained HTML page (headline numbers, charts and tables), drawn on this computer with no install, no network and no scripts. Give any of: cards [{label, value, sub}], charts [{type: bar|line|pie, title, data: [[label, number], ...]}], tables [{title, rows: [[header...], [row...]]}], plus title and when (a 'as of ...' line). output is the .html path, e.g. '~/Documents/sales-dashboard.html'. Static: run again to refresh it. (arguments: output, title, when, cards, charts, tables)"
+        },
+        {
           "tool": "data_usage",
           "desc": "data_usage: How much internet data this computer has used today and this month, per network interface (from vnStat)."
         },
@@ -92,23 +100,19 @@
         {
           "tool": "landline_call",
           "desc": "landline_call: Place and answer calls on the JioFiber broadband landline over Wi-Fi, through the router - the same line the JioJoin app uses, the house's own landline number. 'status' says whether the line is connected and what call is on. 'dial' places a call - 'dial number=\"+911234567890\"' - asking you to confirm first, because it rings someone. 'answer' picks up a ringing call; 'hangup' ends, cancels or declines the current call. The voice is on this computer's speaker and microphone, nothing is recorded, and the landline handset keeps working. Needs this computer added to the line on the Phone page and the 'landline-enabled' consent key. This is the landline, not a mobile over Bluetooth - that is 'bluetooth_call'. (arguments: action, number, name)"
-        },
-        {
-          "tool": "login_history",
-          "desc": "login_history: Recent logins to this machine: which user, from which terminal or remote address, when they started and how long they lasted, and recent reboots. Use for 'who logged in', 'has anyone used my computer'. Requires the 'sessions-sense-enabled' consent key, because it reports other people's presence. Read-only. (arguments: limit)"
         }
       ],
       "offered": [
         "bluetooth_call",
+        "chart",
+        "dashboard",
         "data_usage",
         "disk_activity",
         "fm_radio",
         "lan_phone",
-        "landline_call",
-        "get_location",
-        "login_history"
+        "landline_call"
       ],
-      "recall_hit": true
+      "recall_hit": false
     },
     {
       "say": "List the lab networks built on this machine.",
@@ -510,12 +514,12 @@
           "desc": "find_and_replace: Find a string across files under a directory and optionally replace it. Reports what it would change without changing anything unless dry_run is explicitly false. Requires the 'bulk-edit-enabled' consent key. (arguments: find, replace, path, file_pattern, dry_run, case_sensitive)"
         },
         {
-          "tool": "search_documents",
-          "desc": "search_documents: Search inside the user's files by their contents, using the desktop's own search index (LocalSearch on GNOME, Baloo on Plasma). Requires the 'document-search-enabled' consent key. (arguments: query, kind, limit)"
+          "tool": "android_device",
+          "desc": "android_device: An Android phone connected with USB debugging (adb). devices: which are connected; info: model, Android version, battery, storage; screenshot: save the phone's screen as a PNG; apps: installed apps (query filters); push: copy a file to the phone (to, default /sdcard/Download); pull: copy a file from the phone; open_url: open a web link on the phone. Requires 'phone-control-enabled'. (arguments: action, serial, path, to, url, query, output)"
         },
         {
-          "tool": "search_file_contents",
-          "desc": "search_file_contents: Search inside text files under a directory for a literal string, and report which files contain it and on which lines. Skips binary files and very large files, and says how many it skipped. (arguments: text, path, file_pattern, case_sensitive, max_matches)"
+          "tool": "search_documents",
+          "desc": "search_documents: Search inside the user's files by their contents, using the desktop's own search index (LocalSearch on GNOME, Baloo on Plasma). Requires the 'document-search-enabled' consent key. (arguments: query, kind, limit)"
         }
       ],
       "offered": [
@@ -525,8 +529,8 @@
         "conversations",
         "open_files",
         "find_and_replace",
-        "search_documents",
-        "search_file_contents"
+        "android_device",
+        "search_documents"
       ],
       "recall_hit": false
     },
@@ -551,6 +555,10 @@
           "desc": "open_settings: Open the system Settings app at a specific page, e.g. 'wifi', 'bluetooth', 'display', 'sound', 'power', 'privacy', 'keyboard', 'mouse', 'touchpad', 'printers', 'users', 'about', 'date_time', 'region', 'notifications', 'background', 'accessibility'. GNOME and KDE Plasma. Use open_application for Settings without a page. (arguments: page)"
         },
         {
+          "tool": "chart",
+          "desc": "chart: Make an SVG file from data, drawn on this computer with no install. chart: kind=bar|line|pie with data (bar/pie: [[label, number], ...]; line: [[x, y], ...], or several lines as series {name: [[x, y], ...]}), plus title, x_label, y_label. icon: a stroke icon by name (arrow-right, bell, calendar, check, clock, close, download, folder, heart, home, mail, search, settings, star, user). diagram: a top-to-bottom flow, steps=[\"Read\", \"Edit\", \"Test\"] with optional arrows [[from, to, label], ...]. output is the .svg path, e.g. '~/Pictures/sales.svg'. (arguments: action, output, kind, data, series, steps, arrows, name, title, x_label, y_label)"
+        },
+        {
           "tool": "bluetooth_gatt",
           "desc": "bluetooth_gatt: Read what a paired Bluetooth Low Energy device says about itself - a watch's or headset's battery, a heart-rate strap's live reading, which services a band offers. 'list': every paired device and whether it speaks this protocol. 'services': what one exposes. 'read': one stored value. 'listen': a live reading of something the device only pushes, e.g. heart rate - 'nothing arrived' is the truthful answer when the device is not measuring. Speakers, headphones and car stereios are older Bluetooth and expose nothing here, which is a true answer, not a failure; wearables, bands, straps, smart tags and thermometers answer. Needs 'bluetooth-gatt-enabled' and the device must be connected. (arguments: action, device, seconds, characteristic)"
         },
@@ -561,10 +569,6 @@
         {
           "tool": "set_power_profile",
           "desc": "set_power_profile: Switch the machine between its power profiles - typically power-saver, balanced and performance - and report which one is active now. The profile list is read from the machine rather than assumed, because which profiles exist depends on the CPU driver: switching to one the machine does not have is refused with the valid names listed. Changes the CPU and platform power behaviour, not a per-application setting. (arguments: profile)"
-        },
-        {
-          "tool": "calculate",
-          "desc": "calculate: Evaluate arithmetic and percentages ('15% of 2400'), or convert between units. Handles the four operations, powers, parentheses, factorial, permutations and combinations (perm/nPr, comb/nCr), gcd, lcm, sqrt, exp, log, ln, trig and inverse trig, and pi/e/tau - exact for whole numbers. For algebra with variables, derivatives, integrals, limits or equations, use solve_math. Converts length, mass, volume, time, data, pressure, frequency, power, energy and temperature, in the units a person actually meets - say '200 km to miles' or '70kg in lb'. Runs entirely on this machine with no network call. Refuses to guess: a percentage needs a number to apply to, and converting between quantities that measure different things is an error rather than a number. (arguments: expression)"
         }
       ],
       "offered": [
@@ -572,10 +576,10 @@
         "power_action",
         "set_sleep_inhibit",
         "open_settings",
+        "chart",
         "bluetooth_gatt",
         "manage_triggers",
-        "set_power_profile",
-        "calculate"
+        "set_power_profile"
       ],
       "recall_hit": true
     },
@@ -590,39 +594,39 @@
           "desc": "files_by_name: Find every file with a given name under a directory, with sizes and modification dates, so you can see whether they are copies. Use for 'where are all my report.docx', 'how many copies of this do I have', 'which is the newest'. Reports the newest and whether the sizes agree, and does NOT claim the contents match - duplicate_files answers that. Deletes nothing. (arguments: name, path, case_sensitive)"
         },
         {
+          "tool": "chart",
+          "desc": "chart: Make an SVG file from data, drawn on this computer with no install. chart: kind=bar|line|pie with data (bar/pie: [[label, number], ...]; line: [[x, y], ...], or several lines as series {name: [[x, y], ...]}), plus title, x_label, y_label. icon: a stroke icon by name (arrow-right, bell, calendar, check, clock, close, download, folder, heart, home, mail, search, settings, star, user). diagram: a top-to-bottom flow, steps=[\"Read\", \"Edit\", \"Test\"] with optional arrows [[from, to, label], ...]. output is the .svg path, e.g. '~/Pictures/sales.svg'. (arguments: action, output, kind, data, series, steps, arrows, name, title, x_label, y_label)"
+        },
+        {
           "tool": "landline_call",
           "desc": "landline_call: Place and answer calls on the JioFiber broadband landline over Wi-Fi, through the router - the same line the JioJoin app uses, the house's own landline number. 'status' says whether the line is connected and what call is on. 'dial' places a call - 'dial number=\"+911234567890\"' - asking you to confirm first, because it rings someone. 'answer' picks up a ringing call; 'hangup' ends, cancels or declines the current call. The voice is on this computer's speaker and microphone, nothing is recorded, and the landline handset keeps working. Needs this computer added to the line on the Phone page and the 'landline-enabled' consent key. This is the landline, not a mobile over Bluetooth - that is 'bluetooth_call'. (arguments: action, number, name)"
         },
         {
           "tool": "recording",
-          "desc": "recording: Make subtitles or a transcript of a video or audio file, tell speakers apart, or remove background noise. Works on the sound, on this computer. text: what was said; subtitles: save an .srt beside it; speakers: who said what, turn by turn; clean: a copy with background noise removed; sounds: what can be heard in it (music, a dog, traffic...); listen: what can be heard around the computer right now (the microphone, a few seconds); streams: which applications are carrying audio right now, and the name to capture one by (a call in a browser is one); capture: record one of those for 5-600 seconds and transcribe it - which records the room, so it needs the sound consent like the microphone does. (arguments: action, path, language, people, seconds)"
+          "desc": "recording: Make subtitles or a transcript of a video or audio file, tell speakers apart, or remove background noise. Works on the sound, on this computer. text: what was said; subtitles: save an .srt beside it; speakers: who said what, turn by turn; clean: a copy with background noise removed; sounds: what can be heard in it (music, a dog, traffic...); listen: what can be heard around the computer right now (the microphone, a few seconds); streams: which applications are carrying audio right now, and the name to capture one by (a call in a browser is one); capture: record one of those for 5-600 seconds and transcribe it - which records the room, so it needs the sound consent like the microphone does. (arguments: action, path, range, language, people, seconds)"
         },
         {
           "tool": "bluetooth_call",
           "desc": "bluetooth_call: Use a paired Android phone as a Bluetooth speakerphone, with no cable and no app on the phone. 'status' says whether a phone is connected as a hands-free unit, whether a call is in progress, and which audio profile its call audio arrived on. 'dial' places a call - 'dial number=\"+441234567890\"' - asking you to confirm first, because it rings someone. 'answer' and 'hangup' work on a call already in progress. 'audio' reports where the call's voice is going and names anything missing from that path, and 'profile' switches the card between wide-band hfp_hf and narrow-band hsp_hs. The phone stays the radio; this routes the voice to this computer's speakers and microphone. Needs the phone connected over Bluetooth, not merely paired, and the 'bluetooth-call-enabled' consent key. (arguments: action, card, profile, to, number)"
         },
         {
+          "tool": "dashboard",
+          "desc": "dashboard: Build a dashboard as one self-contained HTML page (headline numbers, charts and tables), drawn on this computer with no install, no network and no scripts. Give any of: cards [{label, value, sub}], charts [{type: bar|line|pie, title, data: [[label, number], ...]}], tables [{title, rows: [[header...], [row...]]}], plus title and when (a 'as of ...' line). output is the .html path, e.g. '~/Documents/sales-dashboard.html'. Static: run again to refresh it. (arguments: output, title, when, cards, charts, tables)"
+        },
+        {
           "tool": "data_usage",
           "desc": "data_usage: How much internet data this computer has used today and this month, per network interface (from vnStat)."
-        },
-        {
-          "tool": "disk_activity",
-          "desc": "disk_activity: How hard this machine's disks are working right now: reads and writes per second, average wait, and how much of each disk's time is spent busy. Answers 'why is my computer slow', 'why is the disk grinding', 'is something writing all the time'. Read-only; nothing is started or stopped."
-        },
-        {
-          "tool": "fm_radio",
-          "desc": "fm_radio: FM and AM broadcast radio. Five actions: 'hardware' for whether this computer can receive anything at all (a laptop usually cannot, and that is a true answer rather than a failure - it needs an RTL2832U USB dongle), 'bands' for the coverage, 'tune' to a frequency, 'decode' to demodulate a recorded IQ capture, and 'scan' to look for carriers in one. A frequency is given in MHz, e.g. 98.6. rtl_fm is narrowband and retunes per channel, so it cannot scan - scanning needs a wideband recording. No station names are guessed: a carrier gives a frequency, and naming it would need a table for your region. Requires the 'fm-radio-enabled' consent key. (arguments: action, frequency, seconds, file, centre_mhz, out, deemphasis_us)"
         }
       ],
       "offered": [
         "files_by_name",
+        "chart",
         "landline_call",
         "recording",
         "set_hostname",
         "bluetooth_call",
-        "data_usage",
-        "disk_activity",
-        "fm_radio"
+        "dashboard",
+        "data_usage"
       ],
       "recall_hit": true
     },
@@ -795,12 +799,12 @@
           "desc": "lab_network_destroy: Remove a lab network built by lab_network_create, and everything in it. Only ever removes networks this tool built. Returns the plan unless apply=true. (arguments: name, apply)"
         },
         {
-          "tool": "driver_build",
-          "desc": "driver_build: Build a scaffolded out-of-tree kernel module with Kbuild, then read the resulting .ko back off disk. Needs the 'driver-build-enabled' consent key. Refuses with the missing package named when this machine has no toolchain. (arguments: name, path)"
-        },
-        {
           "tool": "scan_network",
           "desc": "scan_network: Find which devices are on the local network, with their names, addresses and hardware vendors. Local addresses only. Requires the network sense to be enabled. (arguments: range, resolve_names)"
+        },
+        {
+          "tool": "driver_build",
+          "desc": "driver_build: Build a scaffolded out-of-tree kernel module with Kbuild, then read the resulting .ko back off disk. Needs the 'driver-build-enabled' consent key. Refuses with the missing package named when this machine has no toolchain. (arguments: name, path)"
         },
         {
           "tool": "list_wifi_networks",
@@ -816,8 +820,8 @@
         "lab_network_list",
         "lab_network_status",
         "lab_network_destroy",
-        "driver_build",
         "scan_network",
+        "driver_build",
         "list_wifi_networks",
         "network_activity"
       ],
@@ -1086,7 +1090,7 @@
         },
         {
           "tool": "office_document",
-          "desc": "office_document: Word (.docx), Excel (.xlsx) and PowerPoint (.pptx) files; also reads .odt/.ods/.odp. read: text with headings, tables, one section per sheet or slide (sheet, cell_range like A1:D20, formulas=true to see formulas). create: a new file from content - for .docx Markdown-style text (# headings, - bullets, 1. lists, | tables |, **bold**); for .xlsx rows (list of lists), or sheets {name: rows}, or CSV/Markdown-table text in content, '=...' cells are formulas; for .pptx slides [{title, bullets[], subtitle}]. set_cells: values {'B12': 42, 'C1': 'Total'} in a sheet. replace_text / append: change a .docx. pdf_images: save a PDF's embedded pictures to a folder. Changing an existing file needs 'file-edit-enabled' and can be undone with undo_last_change. (arguments: action, path, content, rows, sheets, slides, values, sheet, cell_range, formulas, find, replace, title, overwrite, output_dir)"
+          "desc": "office_document: Word (.docx), Excel (.xlsx) and PowerPoint (.pptx) files; also reads .odt/.ods/.odp. read: text with headings, tables, one section per sheet or slide (sheet, cell_range like A1:D20, formulas=true to see formulas). create: a new file from content - for .docx Markdown-style text (# headings, - bullets, 1. lists, | tables |, **bold**); for .xlsx rows (list of lists), or sheets {name: rows}, or CSV/Markdown-table text in content, '=...' cells are formulas; for .pptx slides [{title, bullets[], subtitle}]. set_cells: values {'B12': 42, 'C1': 'Total'} in a sheet. replace_text / append: change a .docx. pdf_images: save a PDF's embedded pictures to a folder. Changing an existing file needs 'file-edit-enabled' and can be undone with undo_last_change. (arguments: action, path, content, rows, sheets, chart, slides, values, sheet, cell_range, formulas, find, replace, title, overwrite, output_dir)"
         },
         {
           "tool": "resolve_conflict",
@@ -1225,7 +1229,7 @@
       "negatives": [
         {
           "tool": "office_document",
-          "desc": "office_document: Word (.docx), Excel (.xlsx) and PowerPoint (.pptx) files; also reads .odt/.ods/.odp. read: text with headings, tables, one section per sheet or slide (sheet, cell_range like A1:D20, formulas=true to see formulas). create: a new file from content - for .docx Markdown-style text (# headings, - bullets, 1. lists, | tables |, **bold**); for .xlsx rows (list of lists), or sheets {name: rows}, or CSV/Markdown-table text in content, '=...' cells are formulas; for .pptx slides [{title, bullets[], subtitle}]. set_cells: values {'B12': 42, 'C1': 'Total'} in a sheet. replace_text / append: change a .docx. pdf_images: save a PDF's embedded pictures to a folder. Changing an existing file needs 'file-edit-enabled' and can be undone with undo_last_change. (arguments: action, path, content, rows, sheets, slides, values, sheet, cell_range, formulas, find, replace, title, overwrite, output_dir)"
+          "desc": "office_document: Word (.docx), Excel (.xlsx) and PowerPoint (.pptx) files; also reads .odt/.ods/.odp. read: text with headings, tables, one section per sheet or slide (sheet, cell_range like A1:D20, formulas=true to see formulas). create: a new file from content - for .docx Markdown-style text (# headings, - bullets, 1. lists, | tables |, **bold**); for .xlsx rows (list of lists), or sheets {name: rows}, or CSV/Markdown-table text in content, '=...' cells are formulas; for .pptx slides [{title, bullets[], subtitle}]. set_cells: values {'B12': 42, 'C1': 'Total'} in a sheet. replace_text / append: change a .docx. pdf_images: save a PDF's embedded pictures to a folder. Changing an existing file needs 'file-edit-enabled' and can be undone with undo_last_change. (arguments: action, path, content, rows, sheets, chart, slides, values, sheet, cell_range, formulas, find, replace, title, overwrite, output_dir)"
         },
         {
           "tool": "get_file_info",
@@ -1360,7 +1364,7 @@
         },
         {
           "tool": "recording",
-          "desc": "recording: Make subtitles or a transcript of a video or audio file, tell speakers apart, or remove background noise. Works on the sound, on this computer. text: what was said; subtitles: save an .srt beside it; speakers: who said what, turn by turn; clean: a copy with background noise removed; sounds: what can be heard in it (music, a dog, traffic...); listen: what can be heard around the computer right now (the microphone, a few seconds); streams: which applications are carrying audio right now, and the name to capture one by (a call in a browser is one); capture: record one of those for 5-600 seconds and transcribe it - which records the room, so it needs the sound consent like the microphone does. (arguments: action, path, language, people, seconds)"
+          "desc": "recording: Make subtitles or a transcript of a video or audio file, tell speakers apart, or remove background noise. Works on the sound, on this computer. text: what was said; subtitles: save an .srt beside it; speakers: who said what, turn by turn; clean: a copy with background noise removed; sounds: what can be heard in it (music, a dog, traffic...); listen: what can be heard around the computer right now (the microphone, a few seconds); streams: which applications are carrying audio right now, and the name to capture one by (a call in a browser is one); capture: record one of those for 5-600 seconds and transcribe it - which records the room, so it needs the sound consent like the microphone does. (arguments: action, path, range, language, people, seconds)"
         },
         {
           "tool": "audio_output",
@@ -1649,7 +1653,7 @@
         },
         {
           "tool": "office_document",
-          "desc": "office_document: Word (.docx), Excel (.xlsx) and PowerPoint (.pptx) files; also reads .odt/.ods/.odp. read: text with headings, tables, one section per sheet or slide (sheet, cell_range like A1:D20, formulas=true to see formulas). create: a new file from content - for .docx Markdown-style text (# headings, - bullets, 1. lists, | tables |, **bold**); for .xlsx rows (list of lists), or sheets {name: rows}, or CSV/Markdown-table text in content, '=...' cells are formulas; for .pptx slides [{title, bullets[], subtitle}]. set_cells: values {'B12': 42, 'C1': 'Total'} in a sheet. replace_text / append: change a .docx. pdf_images: save a PDF's embedded pictures to a folder. Changing an existing file needs 'file-edit-enabled' and can be undone with undo_last_change. (arguments: action, path, content, rows, sheets, slides, values, sheet, cell_range, formulas, find, replace, title, overwrite, output_dir)"
+          "desc": "office_document: Word (.docx), Excel (.xlsx) and PowerPoint (.pptx) files; also reads .odt/.ods/.odp. read: text with headings, tables, one section per sheet or slide (sheet, cell_range like A1:D20, formulas=true to see formulas). create: a new file from content - for .docx Markdown-style text (# headings, - bullets, 1. lists, | tables |, **bold**); for .xlsx rows (list of lists), or sheets {name: rows}, or CSV/Markdown-table text in content, '=...' cells are formulas; for .pptx slides [{title, bullets[], subtitle}]. set_cells: values {'B12': 42, 'C1': 'Total'} in a sheet. replace_text / append: change a .docx. pdf_images: save a PDF's embedded pictures to a folder. Changing an existing file needs 'file-edit-enabled' and can be undone with undo_last_change. (arguments: action, path, content, rows, sheets, chart, slides, values, sheet, cell_range, formulas, find, replace, title, overwrite, output_dir)"
         },
         {
           "tool": "read_document",
@@ -1832,7 +1836,7 @@
         "action": "*",
         "path": "*"
       },
-      "positives_desc": "office_document: Word (.docx), Excel (.xlsx) and PowerPoint (.pptx) files; also reads .odt/.ods/.odp. read: text with headings, tables, one section per sheet or slide (sheet, cell_range like A1:D20, formulas=true to see formulas). create: a new file from content - for .docx Markdown-style text (# headings, - bullets, 1. lists, | tables |, **bold**); for .xlsx rows (list of lists), or sheets {name: rows}, or CSV/Markdown-table text in content, '=...' cells are formulas; for .pptx slides [{title, bullets[], subtitle}]. set_cells: values {'B12': 42, 'C1': 'Total'} in a sheet. replace_text / append: change a .docx. pdf_images: save a PDF's embedded pictures to a folder. Changing an existing file needs 'file-edit-enabled' and can be undone with undo_last_change. (arguments: action, path, content, rows, sheets, slides, values, sheet, cell_range, formulas, find, replace, title, overwrite, output_dir)",
+      "positives_desc": "office_document: Word (.docx), Excel (.xlsx) and PowerPoint (.pptx) files; also reads .odt/.ods/.odp. read: text with headings, tables, one section per sheet or slide (sheet, cell_range like A1:D20, formulas=true to see formulas). create: a new file from content - for .docx Markdown-style text (# headings, - bullets, 1. lists, | tables |, **bold**); for .xlsx rows (list of lists), or sheets {name: rows}, or CSV/Markdown-table text in content, '=...' cells are formulas; for .pptx slides [{title, bullets[], subtitle}]. set_cells: values {'B12': 42, 'C1': 'Total'} in a sheet. replace_text / append: change a .docx. pdf_images: save a PDF's embedded pictures to a folder. Changing an existing file needs 'file-edit-enabled' and can be undone with undo_last_change. (arguments: action, path, content, rows, sheets, chart, slides, values, sheet, cell_range, formulas, find, replace, title, overwrite, output_dir)",
       "negatives": [
         {
           "tool": "calendar_edit",
@@ -1999,7 +2003,7 @@
         },
         {
           "tool": "recording",
-          "desc": "recording: Make subtitles or a transcript of a video or audio file, tell speakers apart, or remove background noise. Works on the sound, on this computer. text: what was said; subtitles: save an .srt beside it; speakers: who said what, turn by turn; clean: a copy with background noise removed; sounds: what can be heard in it (music, a dog, traffic...); listen: what can be heard around the computer right now (the microphone, a few seconds); streams: which applications are carrying audio right now, and the name to capture one by (a call in a browser is one); capture: record one of those for 5-600 seconds and transcribe it - which records the room, so it needs the sound consent like the microphone does. (arguments: action, path, language, people, seconds)"
+          "desc": "recording: Make subtitles or a transcript of a video or audio file, tell speakers apart, or remove background noise. Works on the sound, on this computer. text: what was said; subtitles: save an .srt beside it; speakers: who said what, turn by turn; clean: a copy with background noise removed; sounds: what can be heard in it (music, a dog, traffic...); listen: what can be heard around the computer right now (the microphone, a few seconds); streams: which applications are carrying audio right now, and the name to capture one by (a call in a browser is one); capture: record one of those for 5-600 seconds and transcribe it - which records the room, so it needs the sound consent like the microphone does. (arguments: action, path, range, language, people, seconds)"
         },
         {
           "tool": "bluetooth_gatt",
@@ -2369,8 +2373,8 @@
           "desc": "ui_elements: Use another app's controls by what they are, through the accessibility tree. apps: which apps are reachable. inspect: list a window's buttons, fields, menus and labels with ids (app = its name; query narrows by text). press: activate an element by id (a button, checkbox, link, menu item). set_text: put text in a field by id. read: an element's text or value. menu: open a menu path like 'File > Export'. drive: one turn of driving - give an action and a control number and the reply is the app's new state in the same short numbered form, which is what a small model can act on. act: click, type or key an app by name or position, with a visible cursor. state: the numbered controls an app is showing. Works on a container's app and on this desktop's own apps alike. Requires 'input-control-enabled'; drive start also runs a container, so it needs 'container-control-enabled' as well. (arguments: action, app, id, text, query, path, do, how, number, image, keys, x, y)"
         },
         {
-          "tool": "compute_hash",
-          "desc": "compute_hash: Compute a checksum of a file, and optionally compare it with an expected value. Defaults to SHA-256, which is what package managers and download sites publish. (arguments: path, algorithm, expected)"
+          "tool": "chart",
+          "desc": "chart: Make an SVG file from data, drawn on this computer with no install. chart: kind=bar|line|pie with data (bar/pie: [[label, number], ...]; line: [[x, y], ...], or several lines as series {name: [[x, y], ...]}), plus title, x_label, y_label. icon: a stroke icon by name (arrow-right, bell, calendar, check, clock, close, download, folder, heart, home, mail, search, settings, star, user). diagram: a top-to-bottom flow, steps=[\"Read\", \"Edit\", \"Test\"] with optional arrows [[from, to, label], ...]. output is the .svg path, e.g. '~/Pictures/sales.svg'. (arguments: action, output, kind, data, series, steps, arrows, name, title, x_label, y_label)"
         }
       ],
       "offered": [
@@ -2381,7 +2385,7 @@
         "notes",
         "system_info",
         "ui_elements",
-        "compute_hash"
+        "chart"
       ],
       "recall_hit": true
     },
@@ -2889,6 +2893,10 @@
           "desc": "run_command: Run one program in the project folder and get its exit code and output - the project's tests (pytest, npm test, cargo test), its build or linter - to check that a change works. One program per call: no pipes, redirections or shell syntax. Requires the 'run-command-enabled' consent key; asks each time. (arguments: command, cwd, timeout_seconds, where, image, machine, network)"
         },
         {
+          "tool": "recording",
+          "desc": "recording: Make subtitles or a transcript of a video or audio file, tell speakers apart, or remove background noise. Works on the sound, on this computer. text: what was said; subtitles: save an .srt beside it; speakers: who said what, turn by turn; clean: a copy with background noise removed; sounds: what can be heard in it (music, a dog, traffic...); listen: what can be heard around the computer right now (the microphone, a few seconds); streams: which applications are carrying audio right now, and the name to capture one by (a call in a browser is one); capture: record one of those for 5-600 seconds and transcribe it - which records the room, so it needs the sound consent like the microphone does. (arguments: action, path, range, language, people, seconds)"
+        },
+        {
           "tool": "calculate",
           "desc": "calculate: Evaluate arithmetic and percentages ('15% of 2400'), or convert between units. Handles the four operations, powers, parentheses, factorial, permutations and combinations (perm/nPr, comb/nCr), gcd, lcm, sqrt, exp, log, ln, trig and inverse trig, and pi/e/tau - exact for whole numbers. For algebra with variables, derivatives, integrals, limits or equations, use solve_math. Converts length, mass, volume, time, data, pressure, frequency, power, energy and temperature, in the units a person actually meets - say '200 km to miles' or '70kg in lb'. Runs entirely on this machine with no network call. Refuses to guess: a percentage needs a number to apply to, and converting between quantities that measure different things is an error rather than a number. (arguments: expression)"
         },
@@ -2903,21 +2911,17 @@
         {
           "tool": "manage_goals",
           "desc": "manage_goals: Save a multi-step goal as a plan of tool steps that can be run later from the Goals panel, list saved goals, answer one that is waiting for you, or remove one. Saving runs nothing. Each step names a tool, its arguments, and a name for its result; a later step can use an earlier result as $name in a string argument, and lists the names it depends_on. A depends_on name that no earlier step produces is a question for the user: the goal waits there until they answer it. Requires the 'goals-enabled' consent key. (arguments: action, goal, steps, id, answer)"
-        },
-        {
-          "tool": "ask_user",
-          "desc": "ask_user: Ask the user a clarifying question and wait for their answer, with 2 to 4 short options they can pick. Use this whenever a request is genuinely ambiguous - especially when several files or devices could match. Do not guess instead, and do not ask when one option is obviously right. In a headless session there is nobody to answer and this will say so. (arguments: question, options)"
         }
       ],
       "offered": [
         "routines",
         "git_commit",
         "run_command",
+        "recording",
         "calculate",
         "analyze_table",
         "kill_process",
-        "manage_goals",
-        "ask_user"
+        "manage_goals"
       ],
       "recall_hit": true
     },
@@ -2978,7 +2982,7 @@
       "negatives": [
         {
           "tool": "office_document",
-          "desc": "office_document: Word (.docx), Excel (.xlsx) and PowerPoint (.pptx) files; also reads .odt/.ods/.odp. read: text with headings, tables, one section per sheet or slide (sheet, cell_range like A1:D20, formulas=true to see formulas). create: a new file from content - for .docx Markdown-style text (# headings, - bullets, 1. lists, | tables |, **bold**); for .xlsx rows (list of lists), or sheets {name: rows}, or CSV/Markdown-table text in content, '=...' cells are formulas; for .pptx slides [{title, bullets[], subtitle}]. set_cells: values {'B12': 42, 'C1': 'Total'} in a sheet. replace_text / append: change a .docx. pdf_images: save a PDF's embedded pictures to a folder. Changing an existing file needs 'file-edit-enabled' and can be undone with undo_last_change. (arguments: action, path, content, rows, sheets, slides, values, sheet, cell_range, formulas, find, replace, title, overwrite, output_dir)"
+          "desc": "office_document: Word (.docx), Excel (.xlsx) and PowerPoint (.pptx) files; also reads .odt/.ods/.odp. read: text with headings, tables, one section per sheet or slide (sheet, cell_range like A1:D20, formulas=true to see formulas). create: a new file from content - for .docx Markdown-style text (# headings, - bullets, 1. lists, | tables |, **bold**); for .xlsx rows (list of lists), or sheets {name: rows}, or CSV/Markdown-table text in content, '=...' cells are formulas; for .pptx slides [{title, bullets[], subtitle}]. set_cells: values {'B12': 42, 'C1': 'Total'} in a sheet. replace_text / append: change a .docx. pdf_images: save a PDF's embedded pictures to a folder. Changing an existing file needs 'file-edit-enabled' and can be undone with undo_last_change. (arguments: action, path, content, rows, sheets, chart, slides, values, sheet, cell_range, formulas, find, replace, title, overwrite, output_dir)"
         },
         {
           "tool": "find_device",
@@ -3188,7 +3192,7 @@
         },
         {
           "tool": "recording",
-          "desc": "recording: Make subtitles or a transcript of a video or audio file, tell speakers apart, or remove background noise. Works on the sound, on this computer. text: what was said; subtitles: save an .srt beside it; speakers: who said what, turn by turn; clean: a copy with background noise removed; sounds: what can be heard in it (music, a dog, traffic...); listen: what can be heard around the computer right now (the microphone, a few seconds); streams: which applications are carrying audio right now, and the name to capture one by (a call in a browser is one); capture: record one of those for 5-600 seconds and transcribe it - which records the room, so it needs the sound consent like the microphone does. (arguments: action, path, language, people, seconds)"
+          "desc": "recording: Make subtitles or a transcript of a video or audio file, tell speakers apart, or remove background noise. Works on the sound, on this computer. text: what was said; subtitles: save an .srt beside it; speakers: who said what, turn by turn; clean: a copy with background noise removed; sounds: what can be heard in it (music, a dog, traffic...); listen: what can be heard around the computer right now (the microphone, a few seconds); streams: which applications are carrying audio right now, and the name to capture one by (a call in a browser is one); capture: record one of those for 5-600 seconds and transcribe it - which records the room, so it needs the sound consent like the microphone does. (arguments: action, path, range, language, people, seconds)"
         },
         {
           "tool": "set_privacy",
@@ -3218,7 +3222,7 @@
         "action": "speakers",
         "path": "~meeting.m4a"
       },
-      "positives_desc": "recording: Make subtitles or a transcript of a video or audio file, tell speakers apart, or remove background noise. Works on the sound, on this computer. text: what was said; subtitles: save an .srt beside it; speakers: who said what, turn by turn; clean: a copy with background noise removed; sounds: what can be heard in it (music, a dog, traffic...); listen: what can be heard around the computer right now (the microphone, a few seconds); streams: which applications are carrying audio right now, and the name to capture one by (a call in a browser is one); capture: record one of those for 5-600 seconds and transcribe it - which records the room, so it needs the sound consent like the microphone does. (arguments: action, path, language, people, seconds)",
+      "positives_desc": "recording: Make subtitles or a transcript of a video or audio file, tell speakers apart, or remove background noise. Works on the sound, on this computer. text: what was said; subtitles: save an .srt beside it; speakers: who said what, turn by turn; clean: a copy with background noise removed; sounds: what can be heard in it (music, a dog, traffic...); listen: what can be heard around the computer right now (the microphone, a few seconds); streams: which applications are carrying audio right now, and the name to capture one by (a call in a browser is one); capture: record one of those for 5-600 seconds and transcribe it - which records the room, so it needs the sound consent like the microphone does. (arguments: action, path, range, language, people, seconds)",
       "negatives": [
         {
           "tool": "convert_media",
@@ -3389,12 +3393,12 @@
           "desc": "manage_triggers: Arm, list, or remove automatic rules that run a Chronoa action when a perception matches - for example, notify when the battery sense reports low. A rule names one already-whitelisted skill; it cannot run an arbitrary command or an LLM-authored prompt. Listing needs no permission; arming or disarming requires the 'trigger-control-enabled' consent key. (arguments: action, name, sense, match_mode, substring, keywords, actuator, arguments, cooldown_seconds, event_type, source, params, ask_first, retry_policy, debounce_seconds)"
         },
         {
-          "tool": "lan_phone",
-          "desc": "lan_phone: Find phones on the SAME Wi-Fi network, using the KDE Connect protocol directly - so it works without KDE Connect or GSConnect installed. 'devices': what announced itself on this network in the last few seconds (phones, tablets, other computers). 'announce': make this computer findable by a phone's KDE Connect app. 'status': what this computer can and cannot do on the LAN. 'pair': pair with the device 'devices' found (the phone asks its owner). Needs the 'lan-phone-enabled' consent key. (arguments: action, seconds)"
-        },
-        {
           "tool": "cleanup_apply",
           "desc": "cleanup_apply: Actually free the disk space cleanup_report measured: empty your cache folder, or remove Flatpak runtimes no app uses. Both are recoverable or provably unused. Requires the 'cleanup-enabled' consent key. The system log is not here - that needs root, which Chronoa cannot ask for from inside a tool call. (arguments: target)"
+        },
+        {
+          "tool": "lan_phone",
+          "desc": "lan_phone: Find phones on the SAME Wi-Fi network, using the KDE Connect protocol directly - so it works without KDE Connect or GSConnect installed. 'devices': what announced itself on this network in the last few seconds (phones, tablets, other computers). 'announce': make this computer findable by a phone's KDE Connect app. 'status': what this computer can and cannot do on the LAN. 'pair': pair with the device 'devices' found (the phone asks its owner). Needs the 'lan-phone-enabled' consent key. (arguments: action, seconds)"
         }
       ],
       "offered": [
@@ -3404,8 +3408,8 @@
         "android_device",
         "default_apps",
         "manage_triggers",
-        "lan_phone",
-        "cleanup_apply"
+        "cleanup_apply",
+        "lan_phone"
       ],
       "recall_hit": true
     },
@@ -4008,12 +4012,12 @@
           "desc": "check_internet: Check whether the internet is working and, if not, which step fails: network connection, router, internet, DNS, or websites. Also reports the delay to the router and to the internet."
         },
         {
-          "tool": "search_documents",
-          "desc": "search_documents: Search inside the user's files by their contents, using the desktop's own search index (LocalSearch on GNOME, Baloo on Plasma). Requires the 'document-search-enabled' consent key. (arguments: query, kind, limit)"
+          "tool": "chart",
+          "desc": "chart: Make an SVG file from data, drawn on this computer with no install. chart: kind=bar|line|pie with data (bar/pie: [[label, number], ...]; line: [[x, y], ...], or several lines as series {name: [[x, y], ...]}), plus title, x_label, y_label. icon: a stroke icon by name (arrow-right, bell, calendar, check, clock, close, download, folder, heart, home, mail, search, settings, star, user). diagram: a top-to-bottom flow, steps=[\"Read\", \"Edit\", \"Test\"] with optional arrows [[from, to, label], ...]. output is the .svg path, e.g. '~/Pictures/sales.svg'. (arguments: action, output, kind, data, series, steps, arrows, name, title, x_label, y_label)"
         },
         {
-          "tool": "search_file_contents",
-          "desc": "search_file_contents: Search inside text files under a directory for a literal string, and report which files contain it and on which lines. Skips binary files and very large files, and says how many it skipped. (arguments: text, path, file_pattern, case_sensitive, max_matches)"
+          "tool": "search_documents",
+          "desc": "search_documents: Search inside the user's files by their contents, using the desktop's own search index (LocalSearch on GNOME, Baloo on Plasma). Requires the 'document-search-enabled' consent key. (arguments: query, kind, limit)"
         }
       ],
       "offered": [
@@ -4023,8 +4027,8 @@
         "download_file",
         "network_activity",
         "check_internet",
-        "search_documents",
-        "search_file_contents"
+        "chart",
+        "search_documents"
       ],
       "recall_hit": true
     },
@@ -4104,16 +4108,16 @@
           "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'find' (make the watch ring), 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
         },
         {
+          "tool": "chart",
+          "desc": "chart: Make an SVG file from data, drawn on this computer with no install. chart: kind=bar|line|pie with data (bar/pie: [[label, number], ...]; line: [[x, y], ...], or several lines as series {name: [[x, y], ...]}), plus title, x_label, y_label. icon: a stroke icon by name (arrow-right, bell, calendar, check, clock, close, download, folder, heart, home, mail, search, settings, star, user). diagram: a top-to-bottom flow, steps=[\"Read\", \"Edit\", \"Test\"] with optional arrows [[from, to, label], ...]. output is the .svg path, e.g. '~/Pictures/sales.svg'. (arguments: action, output, kind, data, series, steps, arrows, name, title, x_label, y_label)"
+        },
+        {
           "tool": "desktop_setting",
           "desc": "desktop_setting: Read or change one desktop setting from a fixed list: animations (window and menu animations); cursor_size (mouse pointer size in pixels (24 is normal; 32, 48, 64 are larger)); single_click (open files and folders with a single click); clock_24h (show the top-bar clock in 24-hour format); clock_seconds (show seconds in the top-bar clock); battery_percentage (show the battery percentage in the top bar); hot_corner (open the overview when the pointer hits the top-left corner); natural_scroll (touchpad natural (reverse) scrolling); tap_to_click (tap the touchpad to click). Changing requires the 'appearance-control-enabled' consent key. (arguments: setting, value)"
         },
         {
           "tool": "boot_report",
           "desc": "boot_report: How the last boot went: total boot time split into firmware, loader, kernel and userspace, the services that took longest to start, when the machine booted and whether it shut down cleanly before, and which EFI entry the firmware will boot by default. Use for 'why does it boot slowly', 'did it crash last time'. Boot history uses the 'boots-sense-enabled' switch. Read-only. (arguments: top)"
-        },
-        {
-          "tool": "calculate",
-          "desc": "calculate: Evaluate arithmetic and percentages ('15% of 2400'), or convert between units. Handles the four operations, powers, parentheses, factorial, permutations and combinations (perm/nPr, comb/nCr), gcd, lcm, sqrt, exp, log, ln, trig and inverse trig, and pi/e/tau - exact for whole numbers. For algebra with variables, derivatives, integrals, limits or equations, use solve_math. Converts length, mass, volume, time, data, pressure, frequency, power, energy and temperature, in the units a person actually meets - say '200 km to miles' or '70kg in lb'. Runs entirely on this machine with no network call. Refuses to guess: a percentage needs a number to apply to, and converting between quantities that measure different things is an error rather than a number. (arguments: expression)"
         }
       ],
       "offered": [
@@ -4122,9 +4126,9 @@
         "alarm",
         "maps",
         "watch",
+        "chart",
         "desktop_setting",
-        "boot_report",
-        "calculate"
+        "boot_report"
       ],
       "recall_hit": true
     },
@@ -4732,12 +4736,12 @@
           "desc": "set_locale: Report the system language and regional formats, list the locales available on this machine, or change one: the system language, or the date format (British day/month or American month/day order), number format (decimal comma or point), money, measurement or paper size (e.g. what='dates', locale='en_GB.UTF-8'). Takes effect at the next login. Changing requires the 'locale-control-enabled' consent key. (arguments: action, locale, what)"
         },
         {
-          "tool": "manage_triggers",
-          "desc": "manage_triggers: Arm, list, or remove automatic rules that run a Chronoa action when a perception matches - for example, notify when the battery sense reports low. A rule names one already-whitelisted skill; it cannot run an arbitrary command or an LLM-authored prompt. Listing needs no permission; arming or disarming requires the 'trigger-control-enabled' consent key. (arguments: action, name, sense, match_mode, substring, keywords, actuator, arguments, cooldown_seconds, event_type, source, params, ask_first, retry_policy, debounce_seconds)"
+          "tool": "chart",
+          "desc": "chart: Make an SVG file from data, drawn on this computer with no install. chart: kind=bar|line|pie with data (bar/pie: [[label, number], ...]; line: [[x, y], ...], or several lines as series {name: [[x, y], ...]}), plus title, x_label, y_label. icon: a stroke icon by name (arrow-right, bell, calendar, check, clock, close, download, folder, heart, home, mail, search, settings, star, user). diagram: a top-to-bottom flow, steps=[\"Read\", \"Edit\", \"Test\"] with optional arrows [[from, to, label], ...]. output is the .svg path, e.g. '~/Pictures/sales.svg'. (arguments: action, output, kind, data, series, steps, arrows, name, title, x_label, y_label)"
         },
         {
-          "tool": "routines",
-          "desc": "routines: Save a routine: a short phrase (e.g. 'good morning', 'leaving work') that later runs a whole request, e.g. 'tell me the weather, my calendar today and the top news'. Also list or delete routines. Saving runs nothing; saying the phrase later runs the request. (arguments: action, name, request, phrases)"
+          "tool": "manage_triggers",
+          "desc": "manage_triggers: Arm, list, or remove automatic rules that run a Chronoa action when a perception matches - for example, notify when the battery sense reports low. A rule names one already-whitelisted skill; it cannot run an arbitrary command or an LLM-authored prompt. Listing needs no permission; arming or disarming requires the 'trigger-control-enabled' consent key. (arguments: action, name, sense, match_mode, substring, keywords, actuator, arguments, cooldown_seconds, event_type, source, params, ask_first, retry_policy, debounce_seconds)"
         }
       ],
       "offered": [
@@ -4747,8 +4751,8 @@
         "date_math",
         "data_usage",
         "set_locale",
-        "manage_triggers",
-        "routines"
+        "chart",
+        "manage_triggers"
       ],
       "recall_hit": true
     },
@@ -4898,6 +4902,14 @@
           "desc": "undo_last_change: Put a file back the way Chronoa last found it, by restoring the content recorded just before Chronoa's own last edit to it. Undoes Chronoa's recent writes only - NOT git history, NOT changes you made in an editor or a shell, and only while a recorded pre-image is still held. Requires the 'file-edit-enabled' consent key. (arguments: path, list, steps)"
         },
         {
+          "tool": "calendar_events",
+          "desc": "calendar_events: List events on the user's calendars (GNOME calendars and online accounts): today, tomorrow, this week, or the next few hours. Requires the 'calendar-read-enabled' consent key. (arguments: range, hours)"
+        },
+        {
+          "tool": "date_math",
+          "desc": "date_math: Date arithmetic: days until a date ('how many days until 25 December'), the date N days/weeks/months from a date ('what date is 45 days from now'), days between two dates, or the weekday of a date. (arguments: operation, date, other_date, amount, unit)"
+        },
+        {
           "tool": "search_documents",
           "desc": "search_documents: Search inside the user's files by their contents, using the desktop's own search index (LocalSearch on GNOME, Baloo on Plasma). Requires the 'document-search-enabled' consent key. (arguments: query, kind, limit)"
         },
@@ -4908,25 +4920,17 @@
         {
           "tool": "web_search",
           "desc": "web_search: Look something up on the web and return what the pages actually say: facts, prices, how-tos, anything no more specific tool covers. Give a search query, a specific URL, or both. For a scholarly question - a paper, a preprint, prior work, 'what does the research say' - set source=arxiv and it searches the arXiv preprint archive instead of the web. For news headlines use news; to click, fill in or book something on a site use browse. Requires the web sense to be enabled and privacy mode to be off. (arguments: query, url, source)"
-        },
-        {
-          "tool": "calendar_events",
-          "desc": "calendar_events: List events on the user's calendars (GNOME calendars and online accounts): today, tomorrow, this week, or the next few hours. Requires the 'calendar-read-enabled' consent key. (arguments: range, hours)"
-        },
-        {
-          "tool": "date_math",
-          "desc": "date_math: Date arithmetic: days until a date ('how many days until 25 December'), the date N days/weeks/months from a date ('what date is 45 days from now'), days between two dates, or the weekday of a date. (arguments: operation, date, other_date, amount, unit)"
         }
       ],
       "offered": [
         "conversations",
         "search_my_files",
         "undo_last_change",
+        "calendar_events",
+        "date_math",
         "search_documents",
         "search_file_contents",
-        "web_search",
-        "calendar_events",
-        "date_math"
+        "web_search"
       ],
       "recall_hit": true
     },
@@ -5682,10 +5686,6 @@
           "desc": "open_application: Open or launch an installed application by name or by kind, e.g. 'firefox', 'files', 'settings', 'music player', 'text editor'. Not for websites: use browse to open a site and work on it. (arguments: name)"
         },
         {
-          "tool": "watch",
-          "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'find' (make the watch ring), 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
-        },
-        {
           "tool": "open_file",
           "desc": "open_file: Open one specific file or folder (by its path) using the desktop's default application for it - the same thing double-clicking it would do. To launch an app such as the file manager, use open_application. (arguments: path)"
         },
@@ -5702,6 +5702,10 @@
           "desc": "system_info: Describe the machine Chronoa is running on: distribution, kernel, architecture, uptime, load, memory, CPU count, whether this is a desktop session or a container, and the hardware identity (make, model, board, BIOS version)."
         },
         {
+          "tool": "watch",
+          "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'find' (make the watch ring), 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
+        },
+        {
           "tool": "browse",
           "desc": "browse: Open a website and do things on it for the person: find information, fill in forms, click through. Drive a web browser: navigate, read the page's text (get_text), click, type, select options, scroll, move through history, take screenshots and wait for conditions. While Chronoa's window is open this is the in-app browser the user can watch: there it opens only http(s) pages the egress policy allows, and key, hover, drag, upload_file, tabs and evaluate are not available. Otherwise it is a headless Chromium with all actions. Requires the web sense to be enabled and privacy mode to be off. (arguments: action, url, selector, text, key, value, label, files, x, y, to_x, to_y, to_selector, delta_x, delta_y, steps, repeat, tab_id, path, wait_for, timeout, settle)"
         }
@@ -5709,11 +5713,11 @@
       "offered": [
         "open_settings",
         "open_application",
-        "watch",
         "open_file",
         "open_files",
         "system_history",
         "system_info",
+        "watch",
         "browse"
       ],
       "recall_hit": true
@@ -6019,16 +6023,16 @@
           "desc": "open_files: Find which programs have a file, directory or network socket open. Use for 'what is using this file', 'why can't I delete this', 'what has my disk open', 'which process is holding that socket'. Names the holding program with its full command line, and flags deleted files whose space cannot be reclaimed. Reads only this user's processes unless run as root. Read-only: it lists open handles and never closes one. (arguments: path, pid, limit)"
         },
         {
-          "tool": "identify_file",
-          "desc": "identify_file: Identify a file by reading its first bytes rather than trusting its name. Use for 'why won't this open', 'what is this file', 'is this really a PNG', 'this file has no extension'. Reports the detected format and whether the filename agrees with it, which is the usual cause of a file refusing to open in the program its name implies. Says plainly when a signature is unrecognised. Read-only. (arguments: path)"
-        },
-        {
           "tool": "open_application",
           "desc": "open_application: Open or launch an installed application by name or by kind, e.g. 'firefox', 'files', 'settings', 'music player', 'text editor'. Not for websites: use browse to open a site and work on it. (arguments: name)"
         },
         {
           "tool": "open_settings",
           "desc": "open_settings: Open the system Settings app at a specific page, e.g. 'wifi', 'bluetooth', 'display', 'sound', 'power', 'privacy', 'keyboard', 'mouse', 'touchpad', 'printers', 'users', 'about', 'date_time', 'region', 'notifications', 'background', 'accessibility'. GNOME and KDE Plasma. Use open_application for Settings without a page. (arguments: page)"
+        },
+        {
+          "tool": "identify_file",
+          "desc": "identify_file: Identify a file by reading its first bytes rather than trusting its name. Use for 'why won't this open', 'what is this file', 'is this really a PNG', 'this file has no extension'. Reports the detected format and whether the filename agrees with it, which is the usual cause of a file refusing to open in the program its name implies. Says plainly when a signature is unrecognised. Read-only. (arguments: path)"
         },
         {
           "tool": "android_device",
@@ -6046,9 +6050,9 @@
       "offered": [
         "open_file",
         "open_files",
-        "identify_file",
         "open_application",
         "open_settings",
+        "identify_file",
         "android_device",
         "conversations",
         "browse"
@@ -6130,11 +6134,11 @@
         },
         {
           "tool": "recording",
-          "desc": "recording: Make subtitles or a transcript of a video or audio file, tell speakers apart, or remove background noise. Works on the sound, on this computer. text: what was said; subtitles: save an .srt beside it; speakers: who said what, turn by turn; clean: a copy with background noise removed; sounds: what can be heard in it (music, a dog, traffic...); listen: what can be heard around the computer right now (the microphone, a few seconds); streams: which applications are carrying audio right now, and the name to capture one by (a call in a browser is one); capture: record one of those for 5-600 seconds and transcribe it - which records the room, so it needs the sound consent like the microphone does. (arguments: action, path, language, people, seconds)"
+          "desc": "recording: Make subtitles or a transcript of a video or audio file, tell speakers apart, or remove background noise. Works on the sound, on this computer. text: what was said; subtitles: save an .srt beside it; speakers: who said what, turn by turn; clean: a copy with background noise removed; sounds: what can be heard in it (music, a dog, traffic...); listen: what can be heard around the computer right now (the microphone, a few seconds); streams: which applications are carrying audio right now, and the name to capture one by (a call in a browser is one); capture: record one of those for 5-600 seconds and transcribe it - which records the room, so it needs the sound consent like the microphone does. (arguments: action, path, range, language, people, seconds)"
         },
         {
-          "tool": "files_by_name",
-          "desc": "files_by_name: Find every file with a given name under a directory, with sizes and modification dates, so you can see whether they are copies. Use for 'where are all my report.docx', 'how many copies of this do I have', 'which is the newest'. Reports the newest and whether the sizes agree, and does NOT claim the contents match - duplicate_files answers that. Deletes nothing. (arguments: name, path, case_sensitive)"
+          "tool": "chart",
+          "desc": "chart: Make an SVG file from data, drawn on this computer with no install. chart: kind=bar|line|pie with data (bar/pie: [[label, number], ...]; line: [[x, y], ...], or several lines as series {name: [[x, y], ...]}), plus title, x_label, y_label. icon: a stroke icon by name (arrow-right, bell, calendar, check, clock, close, download, folder, heart, home, mail, search, settings, star, user). diagram: a top-to-bottom flow, steps=[\"Read\", \"Edit\", \"Test\"] with optional arrows [[from, to, label], ...]. output is the .svg path, e.g. '~/Pictures/sales.svg'. (arguments: action, output, kind, data, series, steps, arrows, name, title, x_label, y_label)"
         }
       ],
       "offered": [
@@ -6145,7 +6149,7 @@
         "search_documents",
         "search_file_contents",
         "recording",
-        "files_by_name"
+        "chart"
       ],
       "recall_hit": true
     },
@@ -6317,16 +6321,16 @@
           "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'find' (make the watch ring), 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
         },
         {
+          "tool": "chart",
+          "desc": "chart: Make an SVG file from data, drawn on this computer with no install. chart: kind=bar|line|pie with data (bar/pie: [[label, number], ...]; line: [[x, y], ...], or several lines as series {name: [[x, y], ...]}), plus title, x_label, y_label. icon: a stroke icon by name (arrow-right, bell, calendar, check, clock, close, download, folder, heart, home, mail, search, settings, star, user). diagram: a top-to-bottom flow, steps=[\"Read\", \"Edit\", \"Test\"] with optional arrows [[from, to, label], ...]. output is the .svg path, e.g. '~/Pictures/sales.svg'. (arguments: action, output, kind, data, series, steps, arrows, name, title, x_label, y_label)"
+        },
+        {
           "tool": "desktop_setting",
           "desc": "desktop_setting: Read or change one desktop setting from a fixed list: animations (window and menu animations); cursor_size (mouse pointer size in pixels (24 is normal; 32, 48, 64 are larger)); single_click (open files and folders with a single click); clock_24h (show the top-bar clock in 24-hour format); clock_seconds (show seconds in the top-bar clock); battery_percentage (show the battery percentage in the top bar); hot_corner (open the overview when the pointer hits the top-left corner); natural_scroll (touchpad natural (reverse) scrolling); tap_to_click (tap the touchpad to click). Changing requires the 'appearance-control-enabled' consent key. (arguments: setting, value)"
         },
         {
           "tool": "boot_report",
           "desc": "boot_report: How the last boot went: total boot time split into firmware, loader, kernel and userspace, the services that took longest to start, when the machine booted and whether it shut down cleanly before, and which EFI entry the firmware will boot by default. Use for 'why does it boot slowly', 'did it crash last time'. Boot history uses the 'boots-sense-enabled' switch. Read-only. (arguments: top)"
-        },
-        {
-          "tool": "calculate",
-          "desc": "calculate: Evaluate arithmetic and percentages ('15% of 2400'), or convert between units. Handles the four operations, powers, parentheses, factorial, permutations and combinations (perm/nPr, comb/nCr), gcd, lcm, sqrt, exp, log, ln, trig and inverse trig, and pi/e/tau - exact for whole numbers. For algebra with variables, derivatives, integrals, limits or equations, use solve_math. Converts length, mass, volume, time, data, pressure, frequency, power, energy and temperature, in the units a person actually meets - say '200 km to miles' or '70kg in lb'. Runs entirely on this machine with no network call. Refuses to guess: a percentage needs a number to apply to, and converting between quantities that measure different things is an error rather than a number. (arguments: expression)"
         }
       ],
       "offered": [
@@ -6335,9 +6339,9 @@
         "alarm",
         "maps",
         "watch",
+        "chart",
         "desktop_setting",
-        "boot_report",
-        "calculate"
+        "boot_report"
       ],
       "recall_hit": true
     },
@@ -6404,7 +6408,7 @@
         },
         {
           "tool": "office_document",
-          "desc": "office_document: Word (.docx), Excel (.xlsx) and PowerPoint (.pptx) files; also reads .odt/.ods/.odp. read: text with headings, tables, one section per sheet or slide (sheet, cell_range like A1:D20, formulas=true to see formulas). create: a new file from content - for .docx Markdown-style text (# headings, - bullets, 1. lists, | tables |, **bold**); for .xlsx rows (list of lists), or sheets {name: rows}, or CSV/Markdown-table text in content, '=...' cells are formulas; for .pptx slides [{title, bullets[], subtitle}]. set_cells: values {'B12': 42, 'C1': 'Total'} in a sheet. replace_text / append: change a .docx. pdf_images: save a PDF's embedded pictures to a folder. Changing an existing file needs 'file-edit-enabled' and can be undone with undo_last_change. (arguments: action, path, content, rows, sheets, slides, values, sheet, cell_range, formulas, find, replace, title, overwrite, output_dir)"
+          "desc": "office_document: Word (.docx), Excel (.xlsx) and PowerPoint (.pptx) files; also reads .odt/.ods/.odp. read: text with headings, tables, one section per sheet or slide (sheet, cell_range like A1:D20, formulas=true to see formulas). create: a new file from content - for .docx Markdown-style text (# headings, - bullets, 1. lists, | tables |, **bold**); for .xlsx rows (list of lists), or sheets {name: rows}, or CSV/Markdown-table text in content, '=...' cells are formulas; for .pptx slides [{title, bullets[], subtitle}]. set_cells: values {'B12': 42, 'C1': 'Total'} in a sheet. replace_text / append: change a .docx. pdf_images: save a PDF's embedded pictures to a folder. Changing an existing file needs 'file-edit-enabled' and can be undone with undo_last_change. (arguments: action, path, content, rows, sheets, chart, slides, values, sheet, cell_range, formulas, find, replace, title, overwrite, output_dir)"
         },
         {
           "tool": "read_document",
@@ -6563,9 +6567,9 @@
         }
       ],
       "offered": [
-        "write_text_file",
         "convert_document",
         "create_document",
+        "write_text_file",
         "file_locks",
         "move_or_copy_file",
         "browse",
@@ -6767,12 +6771,12 @@
           "desc": "android_device: An Android phone connected with USB debugging (adb). devices: which are connected; info: model, Android version, battery, storage; screenshot: save the phone's screen as a PNG; apps: installed apps (query filters); push: copy a file to the phone (to, default /sdcard/Download); pull: copy a file from the phone; open_url: open a web link on the phone. Requires 'phone-control-enabled'. (arguments: action, serial, path, to, url, query, output)"
         },
         {
-          "tool": "set_sleep_inhibit",
-          "desc": "set_sleep_inhibit: Report what is currently holding the machine awake, or take a bounded hold so it does not sleep for a while, or release ours. Use for 'keep it awake while I...' - a long install, a backup, a test run. Scoped and self-lapsing; to change the machine's idle timeout permanently use set_screensaver instead. Gated by 'sleep-inhibit-enabled' consent key; reporting needs no such permission. (arguments: action, reason, seconds)"
-        },
-        {
           "tool": "lock_screen",
           "desc": "lock_screen: Lock this session so a password is needed to come back to it. Uses the session's own mechanism so the same thing happens as the desktop's Lock button. Requires the 'screen-lock-enabled' consent key."
+        },
+        {
+          "tool": "screen_to_phone",
+          "desc": "screen_to_phone: Show this computer's screen on a paired phone, over the Bluetooth network. 'status': could this be shared here at all, and what is missing if not. 'start': ask the desktop to share the screen and serve it to the phone - the desktop shows its own 'Share screen' dialog, which only the person can answer. 'stop': end it and close the portal session. The picture goes over Bluetooth, so it is not on Wi-Fi, but it is the whole screen - which is why this needs the 'screen-share-enabled' consent key. (arguments: action)"
         }
       ],
       "offered": [
@@ -6782,8 +6786,8 @@
         "speed_test",
         "browse",
         "android_device",
-        "set_sleep_inhibit",
-        "lock_screen"
+        "lock_screen",
+        "screen_to_phone"
       ],
       "recall_hit": true
     },
@@ -6911,7 +6915,7 @@
         },
         {
           "tool": "office_document",
-          "desc": "office_document: Word (.docx), Excel (.xlsx) and PowerPoint (.pptx) files; also reads .odt/.ods/.odp. read: text with headings, tables, one section per sheet or slide (sheet, cell_range like A1:D20, formulas=true to see formulas). create: a new file from content - for .docx Markdown-style text (# headings, - bullets, 1. lists, | tables |, **bold**); for .xlsx rows (list of lists), or sheets {name: rows}, or CSV/Markdown-table text in content, '=...' cells are formulas; for .pptx slides [{title, bullets[], subtitle}]. set_cells: values {'B12': 42, 'C1': 'Total'} in a sheet. replace_text / append: change a .docx. pdf_images: save a PDF's embedded pictures to a folder. Changing an existing file needs 'file-edit-enabled' and can be undone with undo_last_change. (arguments: action, path, content, rows, sheets, slides, values, sheet, cell_range, formulas, find, replace, title, overwrite, output_dir)"
+          "desc": "office_document: Word (.docx), Excel (.xlsx) and PowerPoint (.pptx) files; also reads .odt/.ods/.odp. read: text with headings, tables, one section per sheet or slide (sheet, cell_range like A1:D20, formulas=true to see formulas). create: a new file from content - for .docx Markdown-style text (# headings, - bullets, 1. lists, | tables |, **bold**); for .xlsx rows (list of lists), or sheets {name: rows}, or CSV/Markdown-table text in content, '=...' cells are formulas; for .pptx slides [{title, bullets[], subtitle}]. set_cells: values {'B12': 42, 'C1': 'Total'} in a sheet. replace_text / append: change a .docx. pdf_images: save a PDF's embedded pictures to a folder. Changing an existing file needs 'file-edit-enabled' and can be undone with undo_last_change. (arguments: action, path, content, rows, sheets, chart, slides, values, sheet, cell_range, formulas, find, replace, title, overwrite, output_dir)"
         },
         {
           "tool": "read_document",
@@ -7069,7 +7073,7 @@
         },
         {
           "tool": "recording",
-          "desc": "recording: Make subtitles or a transcript of a video or audio file, tell speakers apart, or remove background noise. Works on the sound, on this computer. text: what was said; subtitles: save an .srt beside it; speakers: who said what, turn by turn; clean: a copy with background noise removed; sounds: what can be heard in it (music, a dog, traffic...); listen: what can be heard around the computer right now (the microphone, a few seconds); streams: which applications are carrying audio right now, and the name to capture one by (a call in a browser is one); capture: record one of those for 5-600 seconds and transcribe it - which records the room, so it needs the sound consent like the microphone does. (arguments: action, path, language, people, seconds)"
+          "desc": "recording: Make subtitles or a transcript of a video or audio file, tell speakers apart, or remove background noise. Works on the sound, on this computer. text: what was said; subtitles: save an .srt beside it; speakers: who said what, turn by turn; clean: a copy with background noise removed; sounds: what can be heard in it (music, a dog, traffic...); listen: what can be heard around the computer right now (the microphone, a few seconds); streams: which applications are carrying audio right now, and the name to capture one by (a call in a browser is one); capture: record one of those for 5-600 seconds and transcribe it - which records the room, so it needs the sound consent like the microphone does. (arguments: action, path, range, language, people, seconds)"
         },
         {
           "tool": "bluetooth_call",
@@ -7406,6 +7410,10 @@
           "desc": "calendar_edit: Change the user's calendar: 'create' adds an event to the default calendar (title, start, optional duration or end, location); 'move' reschedules an event found by its current time and/or title to new_start; 'cancel' deletes one. Times in words: 'tomorrow 3pm', 'friday 5 pm', '2026-10-09 14:00'. Move and cancel ask the person to confirm. Ambiguous matches are refused with the candidates. Requires the 'calendar-write-enabled' consent key (move/cancel also 'calendar-read-enabled'). No invitations are sent. (arguments: action, title, start, duration, end, new_start, location, notes)"
         },
         {
+          "tool": "chart",
+          "desc": "chart: Make an SVG file from data, drawn on this computer with no install. chart: kind=bar|line|pie with data (bar/pie: [[label, number], ...]; line: [[x, y], ...], or several lines as series {name: [[x, y], ...]}), plus title, x_label, y_label. icon: a stroke icon by name (arrow-right, bell, calendar, check, clock, close, download, folder, heart, home, mail, search, settings, star, user). diagram: a top-to-bottom flow, steps=[\"Read\", \"Edit\", \"Test\"] with optional arrows [[from, to, label], ...]. output is the .svg path, e.g. '~/Pictures/sales.svg'. (arguments: action, output, kind, data, series, steps, arrows, name, title, x_label, y_label)"
+        },
+        {
           "tool": "manage_triggers",
           "desc": "manage_triggers: Arm, list, or remove automatic rules that run a Chronoa action when a perception matches - for example, notify when the battery sense reports low. A rule names one already-whitelisted skill; it cannot run an arbitrary command or an LLM-authored prompt. Listing needs no permission; arming or disarming requires the 'trigger-control-enabled' consent key. (arguments: action, name, sense, match_mode, substring, keywords, actuator, arguments, cooldown_seconds, event_type, source, params, ask_first, retry_policy, debounce_seconds)"
         },
@@ -7420,21 +7428,17 @@
         {
           "tool": "set_locale",
           "desc": "set_locale: Report the system language and regional formats, list the locales available on this machine, or change one: the system language, or the date format (British day/month or American month/day order), number format (decimal comma or point), money, measurement or paper size (e.g. what='dates', locale='en_GB.UTF-8'). Takes effect at the next login. Changing requires the 'locale-control-enabled' consent key. (arguments: action, locale, what)"
-        },
-        {
-          "tool": "routines",
-          "desc": "routines: Save a routine: a short phrase (e.g. 'good morning', 'leaving work') that later runs a whole request, e.g. 'tell me the weather, my calendar today and the top news'. Also list or delete routines. Saving runs nothing; saying the phrase later runs the request. (arguments: action, name, request, phrases)"
         }
       ],
       "offered": [
         "calendar_month",
         "calendar_edit",
         "calendar_events",
+        "chart",
         "manage_triggers",
         "data_usage",
         "date_math",
-        "set_locale",
-        "routines"
+        "set_locale"
       ],
       "recall_hit": true
     },
@@ -7494,10 +7498,6 @@
       "positives_desc": "desktop_setting: Read or change one desktop setting from a fixed list: animations (window and menu animations); cursor_size (mouse pointer size in pixels (24 is normal; 32, 48, 64 are larger)); single_click (open files and folders with a single click); clock_24h (show the top-bar clock in 24-hour format); clock_seconds (show seconds in the top-bar clock); battery_percentage (show the battery percentage in the top bar); hot_corner (open the overview when the pointer hits the top-left corner); natural_scroll (touchpad natural (reverse) scrolling); tap_to_click (tap the touchpad to click). Changing requires the 'appearance-control-enabled' consent key. (arguments: setting, value)",
       "negatives": [
         {
-          "tool": "alarm",
-          "desc": "alarm: Alarm clock: set an alarm at a time of day (once, or repeating daily/weekdays/weekends/chosen days), list alarms, say when the next one is, change one's time or label, snooze the one that just rang, or delete one. Examples: 'set an alarm for 7am', 'alarm for 6:30 on weekdays', 'when is my next alarm?', 'change my 7am alarm to 7:30', 'snooze', 'delete the 7am alarm'. Times may be words ('7am', '7:30 pm', 'tomorrow 6:45'). It rings with a notification and the alarm sound even if the assistant is closed; it is held by systemd --user, so a reboot drops it until alarms are next listed, which re-arms it. (arguments: action, time, label, repeat, id, new_time, new_label, minutes)"
-        },
-        {
           "tool": "set_scaling",
           "desc": "set_scaling: Report or change the desktop's text scaling factor (1.0 is normal, 1.5 is 150%). Text scaling only - display-resolution and HiDPI scaling are not changed by this, because driving those black-screens sessions. Requires the 'appearance-control-enabled' consent key; reporting needs no such permission. (arguments: action, factor)"
         },
@@ -7508,6 +7508,10 @@
         {
           "tool": "set_wallpaper",
           "desc": "set_wallpaper: Report or change the GNOME desktop wallpaper, setting the light and dark variants together. Refuses a path that does not exist, rather than leaving a blank desktop with no error. KDE is not supported and will say so. Requires the 'appearance-control-enabled' consent key; reporting needs no such permission. (arguments: action, image)"
+        },
+        {
+          "tool": "alarm",
+          "desc": "alarm: Alarm clock: set an alarm at a time of day (once, or repeating daily/weekdays/weekends/chosen days), list alarms, say when the next one is, change one's time or label, snooze the one that just rang, or delete one. Examples: 'set an alarm for 7am', 'alarm for 6:30 on weekdays', 'when is my next alarm?', 'change my 7am alarm to 7:30', 'snooze', 'delete the 7am alarm'. Times may be words ('7am', '7:30 pm', 'tomorrow 6:45'). It rings with a notification and the alarm sound even if the assistant is closed; it is held by systemd --user, so a reboot drops it until alarms are next listed, which re-arms it. (arguments: action, time, label, repeat, id, new_time, new_label, minutes)"
         },
         {
           "tool": "ui_elements",
@@ -7524,10 +7528,10 @@
       ],
       "offered": [
         "desktop_setting",
-        "alarm",
         "set_scaling",
         "set_theme",
         "set_wallpaper",
+        "alarm",
         "ui_elements",
         "set_timer",
         "set_locale"
@@ -8054,16 +8058,24 @@
       "positives_desc": "analyze_table: Ask questions of a .csv, .tsv, .xlsx or .json (list of records) file with read-only SQLite SQL. describe: the tables, columns, types, row counts and a sample - do this first. query: run one SELECT (the table is `data`, or one table per sheet name for a workbook); save_as='~/x.csv' or .xlsx keeps the full result. chart: bar, line or pie chart saved as .svg from a SELECT returning (label, value) columns. (arguments: action, path, sql, save_as, kind, title, output)",
       "negatives": [
         {
+          "tool": "chart",
+          "desc": "chart: Make an SVG file from data, drawn on this computer with no install. chart: kind=bar|line|pie with data (bar/pie: [[label, number], ...]; line: [[x, y], ...], or several lines as series {name: [[x, y], ...]}), plus title, x_label, y_label. icon: a stroke icon by name (arrow-right, bell, calendar, check, clock, close, download, folder, heart, home, mail, search, settings, star, user). diagram: a top-to-bottom flow, steps=[\"Read\", \"Edit\", \"Test\"] with optional arrows [[from, to, label], ...]. output is the .svg path, e.g. '~/Pictures/sales.svg'. (arguments: action, output, kind, data, series, steps, arrows, name, title, x_label, y_label)"
+        },
+        {
           "tool": "ask_user",
           "desc": "ask_user: Ask the user a clarifying question and wait for their answer, with 2 to 4 short options they can pick. Use this whenever a request is genuinely ambiguous - especially when several files or devices could match. Do not guess instead, and do not ask when one option is obviously right. In a headless session there is nobody to answer and this will say so. (arguments: question, options)"
+        },
+        {
+          "tool": "office_document",
+          "desc": "office_document: Word (.docx), Excel (.xlsx) and PowerPoint (.pptx) files; also reads .odt/.ods/.odp. read: text with headings, tables, one section per sheet or slide (sheet, cell_range like A1:D20, formulas=true to see formulas). create: a new file from content - for .docx Markdown-style text (# headings, - bullets, 1. lists, | tables |, **bold**); for .xlsx rows (list of lists), or sheets {name: rows}, or CSV/Markdown-table text in content, '=...' cells are formulas; for .pptx slides [{title, bullets[], subtitle}]. set_cells: values {'B12': 42, 'C1': 'Total'} in a sheet. replace_text / append: change a .docx. pdf_images: save a PDF's embedded pictures to a folder. Changing an existing file needs 'file-edit-enabled' and can be undone with undo_last_change. (arguments: action, path, content, rows, sheets, chart, slides, values, sheet, cell_range, formulas, find, replace, title, overwrite, output_dir)"
         },
         {
           "tool": "json_query",
           "desc": "json_query: Ask questions about the shape of a JSON document: what keys it has, what a field contains, how many entries an array has, or the sum/unique/sorted values of an array. Give either a file path or paste the document itself. (arguments: path, document, field, operation, of)"
         },
         {
-          "tool": "office_document",
-          "desc": "office_document: Word (.docx), Excel (.xlsx) and PowerPoint (.pptx) files; also reads .odt/.ods/.odp. read: text with headings, tables, one section per sheet or slide (sheet, cell_range like A1:D20, formulas=true to see formulas). create: a new file from content - for .docx Markdown-style text (# headings, - bullets, 1. lists, | tables |, **bold**); for .xlsx rows (list of lists), or sheets {name: rows}, or CSV/Markdown-table text in content, '=...' cells are formulas; for .pptx slides [{title, bullets[], subtitle}]. set_cells: values {'B12': 42, 'C1': 'Total'} in a sheet. replace_text / append: change a .docx. pdf_images: save a PDF's embedded pictures to a folder. Changing an existing file needs 'file-edit-enabled' and can be undone with undo_last_change. (arguments: action, path, content, rows, sheets, slides, values, sheet, cell_range, formulas, find, replace, title, overwrite, output_dir)"
+          "tool": "dashboard",
+          "desc": "dashboard: Build a dashboard as one self-contained HTML page (headline numbers, charts and tables), drawn on this computer with no install, no network and no scripts. Give any of: cards [{label, value, sub}], charts [{type: bar|line|pie, title, data: [[label, number], ...]}], tables [{title, rows: [[header...], [row...]]}], plus title and when (a 'as of ...' line). output is the .html path, e.g. '~/Documents/sales-dashboard.html'. Static: run again to refresh it. (arguments: output, title, when, cards, charts, tables)"
         },
         {
           "tool": "fingerprint_status",
@@ -8072,25 +8084,17 @@
         {
           "tool": "list_processes",
           "desc": "list_processes: List the processes running on this machine, with their pid, name, owner, CPU and memory use, sorted by CPU unless sort_by says otherwise. Use this to find what is using the machine - pass sort_by='memory' for the RAM question, which CPU order does not answer - or the pid of something you want to stop. (arguments: name_filter, sort_by, limit)"
-        },
-        {
-          "tool": "manage_goals",
-          "desc": "manage_goals: Save a multi-step goal as a plan of tool steps that can be run later from the Goals panel, list saved goals, answer one that is waiting for you, or remove one. Saving runs nothing. Each step names a tool, its arguments, and a name for its result; a later step can use an earlier result as $name in a string argument, and lists the names it depends_on. A depends_on name that no earlier step produces is a question for the user: the goal waits there until they answer it. Requires the 'goals-enabled' consent key. (arguments: action, goal, steps, id, answer)"
-        },
-        {
-          "tool": "web_search",
-          "desc": "web_search: Look something up on the web and return what the pages actually say: facts, prices, how-tos, anything no more specific tool covers. Give a search query, a specific URL, or both. For a scholarly question - a paper, a preprint, prior work, 'what does the research say' - set source=arxiv and it searches the arXiv preprint archive instead of the web. For news headlines use news; to click, fill in or book something on a site use browse. Requires the web sense to be enabled and privacy mode to be off. (arguments: query, url, source)"
         }
       ],
       "offered": [
         "analyze_table",
+        "chart",
         "ask_user",
-        "json_query",
         "office_document",
+        "json_query",
+        "dashboard",
         "fingerprint_status",
-        "list_processes",
-        "manage_goals",
-        "web_search"
+        "list_processes"
       ],
       "recall_hit": true
     },
@@ -8165,7 +8169,7 @@
         },
         {
           "tool": "recording",
-          "desc": "recording: Make subtitles or a transcript of a video or audio file, tell speakers apart, or remove background noise. Works on the sound, on this computer. text: what was said; subtitles: save an .srt beside it; speakers: who said what, turn by turn; clean: a copy with background noise removed; sounds: what can be heard in it (music, a dog, traffic...); listen: what can be heard around the computer right now (the microphone, a few seconds); streams: which applications are carrying audio right now, and the name to capture one by (a call in a browser is one); capture: record one of those for 5-600 seconds and transcribe it - which records the room, so it needs the sound consent like the microphone does. (arguments: action, path, language, people, seconds)"
+          "desc": "recording: Make subtitles or a transcript of a video or audio file, tell speakers apart, or remove background noise. Works on the sound, on this computer. text: what was said; subtitles: save an .srt beside it; speakers: who said what, turn by turn; clean: a copy with background noise removed; sounds: what can be heard in it (music, a dog, traffic...); listen: what can be heard around the computer right now (the microphone, a few seconds); streams: which applications are carrying audio right now, and the name to capture one by (a call in a browser is one); capture: record one of those for 5-600 seconds and transcribe it - which records the room, so it needs the sound consent like the microphone does. (arguments: action, path, range, language, people, seconds)"
         },
         {
           "tool": "convert_color",
@@ -8540,7 +8544,7 @@
         },
         {
           "tool": "recording",
-          "desc": "recording: Make subtitles or a transcript of a video or audio file, tell speakers apart, or remove background noise. Works on the sound, on this computer. text: what was said; subtitles: save an .srt beside it; speakers: who said what, turn by turn; clean: a copy with background noise removed; sounds: what can be heard in it (music, a dog, traffic...); listen: what can be heard around the computer right now (the microphone, a few seconds); streams: which applications are carrying audio right now, and the name to capture one by (a call in a browser is one); capture: record one of those for 5-600 seconds and transcribe it - which records the room, so it needs the sound consent like the microphone does. (arguments: action, path, language, people, seconds)"
+          "desc": "recording: Make subtitles or a transcript of a video or audio file, tell speakers apart, or remove background noise. Works on the sound, on this computer. text: what was said; subtitles: save an .srt beside it; speakers: who said what, turn by turn; clean: a copy with background noise removed; sounds: what can be heard in it (music, a dog, traffic...); listen: what can be heard around the computer right now (the microphone, a few seconds); streams: which applications are carrying audio right now, and the name to capture one by (a call in a browser is one); capture: record one of those for 5-600 seconds and transcribe it - which records the room, so it needs the sound consent like the microphone does. (arguments: action, path, range, language, people, seconds)"
         },
         {
           "tool": "list_shortcuts",
@@ -9776,6 +9780,10 @@
           "desc": "browse: Open a website and do things on it for the person: find information, fill in forms, click through. Drive a web browser: navigate, read the page's text (get_text), click, type, select options, scroll, move through history, take screenshots and wait for conditions. While Chronoa's window is open this is the in-app browser the user can watch: there it opens only http(s) pages the egress policy allows, and key, hover, drag, upload_file, tabs and evaluate are not available. Otherwise it is a headless Chromium with all actions. Requires the web sense to be enabled and privacy mode to be off. (arguments: action, url, selector, text, key, value, label, files, x, y, to_x, to_y, to_selector, delta_x, delta_y, steps, repeat, tab_id, path, wait_for, timeout, settle)"
         },
         {
+          "tool": "chart",
+          "desc": "chart: Make an SVG file from data, drawn on this computer with no install. chart: kind=bar|line|pie with data (bar/pie: [[label, number], ...]; line: [[x, y], ...], or several lines as series {name: [[x, y], ...]}), plus title, x_label, y_label. icon: a stroke icon by name (arrow-right, bell, calendar, check, clock, close, download, folder, heart, home, mail, search, settings, star, user). diagram: a top-to-bottom flow, steps=[\"Read\", \"Edit\", \"Test\"] with optional arrows [[from, to, label], ...]. output is the .svg path, e.g. '~/Pictures/sales.svg'. (arguments: action, output, kind, data, series, steps, arrows, name, title, x_label, y_label)"
+        },
+        {
           "tool": "cpu_frequency",
           "desc": "cpu_frequency: What the processor is doing right now: which speed governor it is in, roughly what speed it is running at, and the range its hardware allows. Use after setting a power mode, to see whether the machine actually took it up - 'why is my fan so loud', 'is my CPU being throttled', 'did performance mode do anything'. Read-only; changes nothing."
         },
@@ -9786,10 +9794,6 @@
         {
           "tool": "discover_hosts",
           "desc": "discover_hosts: Find which devices are on this network right now, by asking rather than by reading the cache - so devices that have never talked to this machine are found too. Reports an address and a hardware address for each, and counts devices answering on more than one address. The range is always the private network this machine is on; pass network= for a different private range, and a public one is refused. Connects to nothing it finds and reads no packet contents. Needs raw-socket access, so unprivileged it may report that rather than a partial sweep. (arguments: interface, network)"
-        },
-        {
-          "tool": "disk_activity",
-          "desc": "disk_activity: How hard this machine's disks are working right now: reads and writes per second, average wait, and how much of each disk's time is spent busy. Answers 'why is my computer slow', 'why is the disk grinding', 'is something writing all the time'. Read-only; nothing is started or stopped."
         }
       ],
       "offered": [
@@ -9797,10 +9801,10 @@
         "click_pointer",
         "ask_user",
         "browse",
+        "chart",
         "cpu_frequency",
         "cpu_per_core",
-        "discover_hosts",
-        "disk_activity"
+        "discover_hosts"
       ],
       "recall_hit": false
     },
@@ -9985,16 +9989,16 @@
           "desc": "find_and_replace: Find a string across files under a directory and optionally replace it. Reports what it would change without changing anything unless dry_run is explicitly false. Requires the 'bulk-edit-enabled' consent key. (arguments: find, replace, path, file_pattern, dry_run, case_sensitive)"
         },
         {
-          "tool": "find_device",
-          "desc": "find_device: Make a paired Bluetooth watch, band or tag buzz or ring so the person can find it - 'where is my watch', 'find my band'. Works on devices with the standard Immediate Alert service and on MoYoung (Da Fit) watches; anything else is refused rather than sent an unknown command. The device must be in range. Requires the 'bluetooth-gatt-enabled' consent key. (arguments: device)"
-        },
-        {
-          "tool": "find_emoji",
-          "desc": "find_emoji: Find an emoji or symbol by name (heart, thumbs up, rupee sign, arrow) and copy the best match to the clipboard. (arguments: name)"
-        },
-        {
           "tool": "duplicate_files",
           "desc": "duplicate_files: Find files with identical content under a directory, and how much space the copies waste. Use for 'why is my disk full', 'are there duplicates in my Downloads', 'where is my space going'. Reports verified groups only - same size is evidence, a matching hash is proof - and never marks one copy as the original. Read-only: it hashes and lists, and deletes nothing. (arguments: path, limit)"
+        },
+        {
+          "tool": "open_files",
+          "desc": "open_files: Find which programs have a file, directory or network socket open. Use for 'what is using this file', 'why can't I delete this', 'what has my disk open', 'which process is holding that socket'. Names the holding program with its full command line, and flags deleted files whose space cannot be reclaimed. Reads only this user's processes unless run as root. Read-only: it lists open handles and never closes one. (arguments: path, pid, limit)"
+        },
+        {
+          "tool": "stale_files",
+          "desc": "stale_files: Find files that are both large and untouched for a long time - the deletion candidates a disk-usage answer only gestures at. Use for 'what can I delete', 'what is safe to clean up', 'what in here is old and big'. Reports candidates only: it claims nothing is safe to delete, removes nothing, and says that an untouched timestamp is not proof a file is unused. Read-only. (arguments: path, older_than_days, limit)"
         }
       ],
       "offered": [
@@ -10003,9 +10007,9 @@
         "find_recently_modified",
         "temp_files",
         "find_and_replace",
-        "find_device",
-        "find_emoji",
-        "duplicate_files"
+        "duplicate_files",
+        "open_files",
+        "stale_files"
       ],
       "recall_hit": true
     },
@@ -10028,12 +10032,12 @@
           "desc": "print_queue: Show the printers, which one is the default, the print jobs still waiting, and what this machine can print to even when nothing is configured; or cancel a waiting job by its id. Use for 'what's printing', 'why isn't my printer there', 'what can I print to', 'cancel that print'. Cancelling requires the 'print-control-enabled' consent key; listing does not. (arguments: action, job, printer, option)"
         },
         {
-          "tool": "alarm",
-          "desc": "alarm: Alarm clock: set an alarm at a time of day (once, or repeating daily/weekdays/weekends/chosen days), list alarms, say when the next one is, change one's time or label, snooze the one that just rang, or delete one. Examples: 'set an alarm for 7am', 'alarm for 6:30 on weekdays', 'when is my next alarm?', 'change my 7am alarm to 7:30', 'snooze', 'delete the 7am alarm'. Times may be words ('7am', '7:30 pm', 'tomorrow 6:45'). It rings with a notification and the alarm sound even if the assistant is closed; it is held by systemd --user, so a reboot drops it until alarms are next listed, which re-arms it. (arguments: action, time, label, repeat, id, new_time, new_label, minutes)"
-        },
-        {
           "tool": "process_cost",
           "desc": "process_cost: What each running program is COSTING this machine right now, measured over the last second rather than as a snapshot: percent CPU split into user and system time, how much memory it holds, page faults (including the major ones that mean it is thrashing), and how many kB a second it is reading and writing. Answers 'what is using my CPU', 'what is making my computer slow', 'what is writing to my disk all the time', 'which program is swapping', 'why did everything freeze'. Use this when the machine feels slow; use list_processes to see what is running and disk_activity to see whether the disk itself is busy. Read-only; nothing is started, stopped or changed."
+        },
+        {
+          "tool": "alarm",
+          "desc": "alarm: Alarm clock: set an alarm at a time of day (once, or repeating daily/weekdays/weekends/chosen days), list alarms, say when the next one is, change one's time or label, snooze the one that just rang, or delete one. Examples: 'set an alarm for 7am', 'alarm for 6:30 on weekdays', 'when is my next alarm?', 'change my 7am alarm to 7:30', 'snooze', 'delete the 7am alarm'. Times may be words ('7am', '7:30 pm', 'tomorrow 6:45'). It rings with a notification and the alarm sound even if the assistant is closed; it is held by systemd --user, so a reboot drops it until alarms are next listed, which re-arms it. (arguments: action, time, label, repeat, id, new_time, new_label, minutes)"
         },
         {
           "tool": "run_command",
@@ -10049,8 +10053,8 @@
         "get_datetime",
         "get_world_time",
         "print_queue",
-        "alarm",
         "process_cost",
+        "alarm",
         "run_command",
         "list_shortcuts"
       ],
@@ -10097,7 +10101,7 @@
         "action": "subtitles",
         "path": "~talk.mp4"
       },
-      "positives_desc": "recording: Make subtitles or a transcript of a video or audio file, tell speakers apart, or remove background noise. Works on the sound, on this computer. text: what was said; subtitles: save an .srt beside it; speakers: who said what, turn by turn; clean: a copy with background noise removed; sounds: what can be heard in it (music, a dog, traffic...); listen: what can be heard around the computer right now (the microphone, a few seconds); streams: which applications are carrying audio right now, and the name to capture one by (a call in a browser is one); capture: record one of those for 5-600 seconds and transcribe it - which records the room, so it needs the sound consent like the microphone does. (arguments: action, path, language, people, seconds)",
+      "positives_desc": "recording: Make subtitles or a transcript of a video or audio file, tell speakers apart, or remove background noise. Works on the sound, on this computer. text: what was said; subtitles: save an .srt beside it; speakers: who said what, turn by turn; clean: a copy with background noise removed; sounds: what can be heard in it (music, a dog, traffic...); listen: what can be heard around the computer right now (the microphone, a few seconds); streams: which applications are carrying audio right now, and the name to capture one by (a call in a browser is one); capture: record one of those for 5-600 seconds and transcribe it - which records the room, so it needs the sound consent like the microphone does. (arguments: action, path, range, language, people, seconds)",
       "negatives": [
         {
           "tool": "read_video",

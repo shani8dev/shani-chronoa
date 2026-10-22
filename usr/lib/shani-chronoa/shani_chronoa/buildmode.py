@@ -88,11 +88,20 @@ def prompt_clause() -> str:
     # **The loop, as steps.** Measured 2026-10-15 with Qwen3-1.7B: asked to
     # fix a failing test, it ran pytest three times and never opened the file -
     # "after changing code, check it" told it when to test, not how to fix.
+    #
+    # **The waste, as a rule.** Measured 2026-10-08 (assistant.py MAX_TOOL_ROUNDS
+    # note): a free model used ~30 actions where ~18 sufficed, re-reading a file
+    # after every edit to confirm the edit landed. edit_file already returns the
+    # new text, so the read is pure waste; the two sentences below say so.
     return (f"You are working on the project in {folder}. Relative paths are "
             "inside it, and run_command already runs there. To fix or change "
             "code: 1) read the file with read_text_file, 2) change it with "
             "edit_file, 3) run the tests or build with run_command and read the "
             "result, 4) if it still fails, read the error and repeat from 2. "
+            "When edit_file succeeds the file already holds your change - do not "
+            "read it back to confirm; running the tests is the only check that "
+            "counts. When you need several files or facts that do not depend on "
+            "each other, ask for them together in one step, not one call at a time. "
             "Do not say it is done until the result says it passes. For a job "
             "with several steps, first write them with todo_list (action add, "
             "one per step), set each to in_progress when you start it and "

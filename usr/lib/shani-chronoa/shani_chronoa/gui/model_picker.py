@@ -146,8 +146,7 @@ def cloud_rows_for(app) -> "list":
         # rest of the list about something it cannot know.
         if active and not listed:
             out.append((provider_id, active,
-                        f"{label} - answering now - not in this provider's "
-                        f"published list", True, False))
+                        f"{label}", True, False))
     return out
 
 

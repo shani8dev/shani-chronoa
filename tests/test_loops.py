@@ -306,3 +306,36 @@ class TestThroughTheAssistant:
         _turn(llm)
         assert len(counted_tools) <= MAX_TOOL_ROUNDS
         assert llm.rounds <= MAX_TOOL_ROUNDS + 1
+
+
+# --- the result-repeat guard: the same answer from different arguments -------
+
+def test_result_repeat_nudges_after_the_threshold():
+    from shani_chronoa.loops import ResultRepeat, RESULT_REPEAT_THRESHOLD
+    r = ResultRepeat()
+    # Different arguments, same result each time (probing a dead end).
+    assert r.note("find_files", "not found") is None          # 1
+    assert r.note("find_files", "not found") is None          # 2
+    nudge = r.note("find_files", "not found")                 # 3 -> threshold
+    assert nudge and "same result" in nudge and "find_files" in nudge
+    # One nudge, not a drip.
+    assert r.note("find_files", "not found") is None          # 4
+
+
+def test_result_repeat_is_per_result_not_per_tool():
+    from shani_chronoa.loops import ResultRepeat
+    r = ResultRepeat()
+    for _ in range(3):
+        r.note("read_text_file", "A")
+    # A different result for the same tool is progress, not a repeat.
+    assert r.note("read_text_file", "B") is None
+    # And A having already nudged does not re-fire.
+    assert r.note("read_text_file", "A") is None
+
+
+def test_result_repeat_exempts_waiting_tools():
+    from shani_chronoa.loops import ResultRepeat
+    r = ResultRepeat()
+    for _ in range(6):
+        assert r.note("wait", "still waiting") is None
+        assert r.note("todo_list", "[]") is None

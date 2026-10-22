@@ -187,8 +187,8 @@ class TestARetryTellsTheModelHowToAskAgain:
 class TestAValueOutsideTheDeclaredEnumIsRefusedBeforeDispatch:
     """**The enum is the only schema constraint nothing was checking.**
 
-    Measured over the whole registry: 682 property nodes across 256 tools, of
-    which **94 declare an `enum`** in **76 tools**, and **zero** declare a
+    Measured over the whole registry: 717 property nodes across 262 tools, of
+    which **96 declare an `enum`** in **77 tools**, and **zero** declare a
     numeric or string bound. So `enum` is the entire gap - there is nothing else
     in these schemas left to validate.
 
@@ -285,8 +285,8 @@ class TestEveryEnumToolDeclaresWhatItsSkillAccepts:
         """The number the reason above quotes, so a schema change that shrinks
         it cannot leave the reason quietly wrong."""
         tools = dict(self._enum_tools())
-        assert len(tools) == 76, len(tools)
-        assert sum(len(v) for v in tools.values()) == 94, (
+        assert len(tools) == 77, len(tools)
+        assert sum(len(v) for v in tools.values()) == 96, (
             sum(len(v) for v in tools.values()))
 
     def test_every_alias_a_skill_accepts_is_declared_in_its_enum(self):

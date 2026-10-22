@@ -46,6 +46,11 @@ SCHEMA = {
             "content": {"type": "string", "description": "create (.docx or table text) / append: the text."},
             "rows": {"type": "array", "items": {"type": "array", "items": {}}},
             "sheets": {"type": "object", "description": "create .xlsx: {sheet name: rows}."},
+            "chart": {"type": "object", "description": "create: one native, editable chart. "
+                      "For .xlsx it reads the sheet's cells - {type: bar|line|pie, categories: 'A2:A6', "
+                      "values: 'B2:B6' (or a list for several series), title, sheet, names}. "
+                      "For .pptx it goes on its own slide with the data given directly - "
+                      "{type, title, categories: [labels], series: {name: [values]}} (or data: [[label, value], ...])."},
             "slides": {"type": "array", "items": {"type": "object"}},
             "values": {"type": "object", "description": "set_cells: {cell: value}."},
             "sheet": {"type": "string"},
@@ -158,20 +163,26 @@ def _run(arguments: dict) -> str:
             elif ext == ".xlsx":
                 sheets = _maybe_json(arguments.get("sheets"))
                 rows = _maybe_json(arguments.get("rows"))
+                chart = _maybe_json(arguments.get("chart")) or None
+                if chart is not None and not isinstance(chart, dict):
+                    return "chart is an object like {type: 'bar', categories: 'A2:A6', values: 'B2:B6'}."
                 if isinstance(sheets, dict) and sheets:
-                    data = office.make_xlsx(sheets)
+                    data = office.make_xlsx(sheets, chart=chart)
                 elif isinstance(rows, list) and rows:
-                    data = office.make_xlsx({arguments.get("sheet") or "Sheet1": rows})
+                    data = office.make_xlsx({arguments.get("sheet") or "Sheet1": rows}, chart=chart)
                 elif (arguments.get("content") or "").strip():
                     data = office.make_xlsx({arguments.get("sheet") or "Sheet1":
-                                             office.rows_from_text(arguments["content"])})
+                                             office.rows_from_text(arguments["content"])}, chart=chart)
                 else:
                     return "Give rows, sheets, or table text in content."
             else:
                 slides = _maybe_json(arguments.get("slides"))
                 if not isinstance(slides, list) or not slides:
                     return "Give slides as a list of {title, bullets}."
-                data = office.make_pptx(slides, title)
+                pchart = _maybe_json(arguments.get("chart")) or None
+                if pchart is not None and not isinstance(pchart, dict):
+                    return "chart is an object like {type: 'bar', categories: [...], series: {...}}."
+                data = office.make_pptx(slides, title, chart=pchart)
             target.parent.mkdir(parents=True, exist_ok=True)
             note = _write(target, data, existed)
             return f"{'Replaced' if existed else 'Created'} {target}. It reads back as:\n{_summary(target)}{note}"
@@ -237,10 +248,18 @@ POST_CONDITION = _post_condition
 SKILLS = [Skill(name="office_document", schema=SCHEMA, run=_run)]
 
 
-#: **This one declares a directory, not a file.** `office_document` extracts the
-#: page images out of a document into a folder, and the folder is the thing the
-#: person wants to go and look at. `ArtifactBlock` renders a directory without a
-#: thumbnail and without a save-a-copy control - a folder cannot be read into
-#: bytes, and offering a button that silently fails is worse than not offering it.
-DECLARES_ARTIFACTS = files.paths_in(r"^Saved \d+ picture\(s\) from .+ to (.+?)\.$")
+#: Two things this skill produces are worth showing. **A created document** -
+#: the .docx/.xlsx/.pptx `create` just wrote - so it gets a viewer row in the
+#: transcript (`ArtifactBlock` previews its text, and a chart-bearing workbook
+#: opens in a spreadsheet). **And a folder of page images** from `pdf_images`,
+#: which `ArtifactBlock` renders without a thumbnail or save-a-copy control - a
+#: folder cannot be read into bytes, and a button that silently fails is worse
+#: than none. `tools.artifacts_for` still requires each to be an absolute path
+#: that exists, so a wrong match is dropped rather than rendered.
+_declares_created = files.paths_in(r"^(?:Created|Replaced) (.+?)\. It reads back as:")
+_declares_images = files.paths_in(r"^Saved \d+ picture\(s\) from .+ to (.+?)\.$")
+
+
+def DECLARES_ARTIFACTS(result_text):  # noqa: N802 - the module-level contract name
+    return tuple(_declares_created(result_text)) + tuple(_declares_images(result_text))
 

@@ -17,7 +17,18 @@ import gi  # noqa: E402
 gi.require_version("Gtk", "4.0")
 from gi.repository import GdkPixbuf, Gtk  # noqa: E402
 
+import pytest  # noqa: E402
+
 from shani_chronoa.gui import blocks  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _default_rendered_view():
+    """The Rendered/Source choice is remembered process-wide (as harness remembers
+    it per browser), so reset it before each test rather than leak one test's
+    toggle into the next."""
+    blocks.ArtifactBlock._shared_view["mode"] = "rendered"
+    yield
 
 
 def _nodes(widget):
@@ -90,18 +101,51 @@ def test_a_preview_opens_and_closes_in_place(tmp_path):
     assert not frames, "the second click did not close the preview"
 
 
-def test_a_text_preview_shows_the_file_and_is_selectable(tmp_path):
+def _toggle(block, label):
+    for node in _nodes(block):
+        if isinstance(node, Gtk.ToggleButton) and node.get_label() == label:
+            return node
+    return None
+
+
+def test_a_plain_text_file_shows_its_source_directly(tmp_path):
     """The reason to preview inside a conversation is to copy something out."""
-    doc = tmp_path / "notes.md"
-    doc.write_text("# Title\\n\\nfirst line\\nsecond line\\n", encoding="utf-8")
+    doc = tmp_path / "notes.txt"
+    doc.write_text("first line\nsecond line\n", encoding="utf-8")
     block = blocks.ArtifactBlock([doc])
-    _preview_button(block, "notes.md").emit("clicked")
+    _preview_button(block, "notes.txt").emit("clicked")
 
     views = [n for n in _nodes(block) if isinstance(n, Gtk.TextView)]
     assert views, "a text preview with no text view in it"
     text = views[0].get_buffer().get_text(
         views[0].get_buffer().get_start_iter(), views[0].get_buffer().get_end_iter(), False)
-    assert "first line" in text and "# Title" in text, f"preview shows {text!r}"
+    assert "first line" in text, f"preview shows {text!r}"
+    # a .txt is not switchable, so there is no Rendered/Source toggle
+    assert _toggle(block, "Source") is None
+
+
+def test_markdown_renders_by_default_and_a_switch_reveals_its_source(tmp_path):
+    """Harness-studio's Files pane shows Markdown rendered with a Source switch;
+    this is the same, through the renderer the replies use."""
+    doc = tmp_path / "notes.md"
+    doc.write_text("# Title\n\nfirst line\nsecond line\n", encoding="utf-8")
+    block = blocks.ArtifactBlock([doc])
+    _preview_button(block, "notes.md").emit("clicked")
+
+    # Rendered by default: the heading is a formatted label, no raw '# Title'.
+    assert _toggle(block, "Rendered").get_active(), "did not start on Rendered"
+    assert not any(isinstance(n, Gtk.TextView) for n in _nodes(block)), "source shown, not rendered"
+    labels = [lbl.get_text() for n in _nodes(block) if isinstance(n, Gtk.Label)
+              for lbl in [n]]
+    assert any("Title" in t for t in labels) and not any(t.strip() == "# Title" for t in labels)
+
+    # Flip to Source: now the raw Markdown text is there to copy.
+    _toggle(block, "Source").emit("clicked")
+    views = [n for n in _nodes(block) if isinstance(n, Gtk.TextView)]
+    assert views, "the Source view has no text in it"
+    buf = views[0].get_buffer()
+    text = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False)
+    assert "# Title" in text and "first line" in text, text
 
 
 def test_a_long_file_says_it_was_cut_rather_than_looking_complete(tmp_path):
@@ -122,6 +166,63 @@ def test_a_long_file_says_it_was_cut_rather_than_looking_complete(tmp_path):
     assert "cut off at 200 lines" in text, (
         f"a truncated preview did not say so; it ends {text[-80:]!r}")
     assert "line 499" not in text, "the whole file was shown, so the cut is not exercised"
+
+
+def test_an_svg_chart_previews_as_a_picture(tmp_path):
+    """The chart skill writes SVG; it must show here, not only offer 'Open'."""
+    from shani_chronoa import charts
+    svg = tmp_path / "sales.svg"
+    svg.write_text(charts.bar_chart([("Jan", 30), ("Feb", 45)], title="Sales"), encoding="utf-8")
+    block = blocks.ArtifactBlock([svg])
+    assert block._preview_kind(svg) == "image"
+    button = _preview_button(block, "sales.svg")
+    assert button is not None, "an SVG offered no preview"
+    button.emit("clicked")
+    assert any(isinstance(n, Gtk.Image) for n in _nodes(block)), "no picture for the SVG"
+
+
+def test_an_office_document_previews_as_its_text(tmp_path):
+    from shani_chronoa import office
+    doc = tmp_path / "budget.xlsx"
+    doc.write_bytes(office.make_xlsx({"Sheet1": [["Item", "Cost"], ["Train", 1200]]}))
+    block = blocks.ArtifactBlock([doc])
+    assert block._preview_kind(doc) == "office"
+    _preview_button(block, "budget.xlsx").emit("clicked")
+    views = [n for n in _nodes(block) if isinstance(n, Gtk.TextView)]
+    assert views, "no text view for the office document"
+    buf = views[0].get_buffer()
+    text = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False)
+    assert "Train" in text and "1200" in text, f"office preview shows {text!r}"
+
+
+def test_a_csv_previews_as_a_table_with_a_heading_row(tmp_path):
+    csv = tmp_path / "scores.csv"
+    csv.write_text("name,score\nAda,9\nGrace,10\n", encoding="utf-8")
+    block = blocks.ArtifactBlock([csv])
+    assert block._preview_kind(csv) == "table"
+    _preview_button(block, "scores.csv").emit("clicked")
+    grids = [n for n in _nodes(block) if isinstance(n, Gtk.Grid)]
+    assert grids, "a CSV preview with no table in it"
+    labels = [n for n in _nodes(grids[0]) if isinstance(n, Gtk.Label)]
+    texts = [lbl.get_text() for lbl in labels]
+    assert "name" in texts and "Grace" in texts, texts
+    header = next(lbl for lbl in labels if lbl.get_text() == "name")
+    assert "heading" in (header.get_css_classes() or []), "the header row is not marked"
+
+
+def test_html_falls_back_to_source_without_a_display(tmp_path, monkeypatch):
+    """An HTML page renders in a web view where one is possible; with no display
+    (the test environment) it shows its source rather than crashing on a web view."""
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    page = tmp_path / "dash.html"
+    page.write_text("<!doctype html><html><body><h1>Hi</h1></body></html>", encoding="utf-8")
+    block = blocks.ArtifactBlock([page])
+    assert _preview_button(block, "dash.html") is not None
+    _preview_button(block, "dash.html").emit("clicked")
+    # no web view was built, so there is no Rendered/Source toggle - just the source
+    assert _toggle(block, "Rendered") is None, "a web view was attempted with no display"
+    assert any(isinstance(n, Gtk.TextView) for n in _nodes(block)), "the HTML source is not shown"
 
 
 def test_an_image_preview_is_capped_rather_than_decoded_at_full_size(tmp_path):

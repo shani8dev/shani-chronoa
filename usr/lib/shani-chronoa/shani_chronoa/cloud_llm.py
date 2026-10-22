@@ -394,7 +394,13 @@ def list_models(provider_id: str, timeout: float = 12.0,
     ids = []
     for row in rows:
         if isinstance(row, dict) and row.get("id"):
-            ids.append(str(row["id"]))
+            model_id = str(row["id"])
+            ids.append(model_id)
+            # Remember the provider's own context length for this model, so the
+            # window is read from the model rather than guessed from its name.
+            ctx = _row_context(row)
+            if ctx:
+                _MODEL_CONTEXT[model_id] = ctx
         elif isinstance(row, str):
             ids.append(row)
     if not ids:
@@ -806,9 +812,51 @@ CLOUD_CONTEXT_WINDOWS = (
 )
 DEFAULT_CLOUD_CONTEXT = 32_768
 
+#: The real context length each model reported on its own `/models` row, filled
+#: by `list_models` as a provider is listed. Read first by `context_window`, so
+#: the window is the model's own number rather than a guess from its name - a
+#: router like `kilo-auto/free` and a model the name table never heard of (a new
+#: Nemotron, say) both get their true window instead of the modest default.
+#: A dict assignment is atomic under the GIL and every value is a finished int,
+#: so the cross-thread read here needs no lock, the same as `_MODEL_CACHE`.
+_MODEL_CONTEXT: dict = {}
+
+#: `/models` row fields that carry a context length, provider by provider:
+#: OpenRouter puts it top-level *and* under `top_provider`; vLLM uses
+#: `max_model_len`; others use `context_window`/`max_context_length`.
+_CONTEXT_FIELDS = ("context_length", "context_window", "max_context_length",
+                   "max_model_len", "max_tokens")
+
+
+def _row_context(row: dict) -> int:
+    """The context length a `/models` row reports, or 0 when it reports none."""
+    candidates = [row.get(f) for f in _CONTEXT_FIELDS]
+    top = row.get("top_provider")
+    if isinstance(top, dict):
+        candidates.append(top.get("context_length"))
+    for value in candidates:
+        try:
+            tokens = int(value)
+        except (TypeError, ValueError):
+            continue
+        # A sane window only: some rows carry a 0 or a tiny output cap in these
+        # fields, and taking that as the context would summarise every turn away.
+        if tokens >= 2048:
+            return tokens
+    return 0
+
 
 def context_window(model: str) -> int:
-    """Tokens of context `model` accepts, from `CLOUD_CONTEXT_WINDOWS`."""
+    """Tokens of context `model` accepts.
+
+    The model's **own reported length** first (from its `/models` row, cached in
+    `_MODEL_CONTEXT`), then the name table, then the modest default - so a model
+    the table never heard of is read correctly once it has been listed, and only
+    a model nobody has listed yet falls back to a guess.
+    """
+    dynamic = _MODEL_CONTEXT.get(model) or _MODEL_CONTEXT.get((model or "").strip())
+    if dynamic:
+        return int(dynamic)
     name = (model or "").lower()
     for fragment, tokens in CLOUD_CONTEXT_WINDOWS:
         if fragment in name:

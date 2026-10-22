@@ -570,13 +570,26 @@ def _void_has_room(adjustment, content_height=None) -> bool:
 def _orb_mark():
     """The mark that fills a wizard page's void. A picture, never a control.
 
+    The mascot - Chronoa's own orbit-sprite (`mascot_art`) - is what fills the
+    void, so a sparse page carries the app's character rather than a flat
+    mic-circle. `mascot_art` is pure (no display, no GUI import), so it is safe
+    on the headless paths this module also serves; `_ORB_MARK_SVG` is the
+    fallback if it is ever unavailable.
+
     Imports its own, because `Gtk` is imported inside `build_window` on purpose -
     this module is imported by the MCP server and the CLI, which may run on a
     machine with no display at all.
     """
     from gi.repository import GLib, Gtk
 
-    svg = Gtk.Svg.new_from_bytes(GLib.Bytes.new(_ORB_MARK_SVG))
+    try:
+        from shani_chronoa import mascot_art
+        # The sprite is authored at 512; the mark sits at 148 in the void.
+        svg_bytes = mascot_art.svg("idle").replace(
+            'width="512" height="512"', 'width="148" height="148"', 1).encode()
+    except Exception:  # noqa: BLE001 - the flat mark is a fine fallback
+        svg_bytes = _ORB_MARK_SVG
+    svg = Gtk.Svg.new_from_bytes(GLib.Bytes.new(svg_bytes))
     picture = Gtk.Picture.new_for_paintable(svg)
     picture.set_can_shrink(False)
     # A picture of the app is not a control: it must never take a click, or the
@@ -598,7 +611,7 @@ def _orb_mark():
 #: "Open the {title} page" - a title called "The assistant" reads as
 #: "Open the The assistant page".
 _SETUP_PAGES = [
-    ("welcome", "Welcome"), ("mode", "Mode"), ("cloud-keys", "Cloud keys"),
+    ("welcome", "Welcome"), ("mode", "Mode"), ("cloud-keys", "Cloud answers"),
     ("brain", "Assistant"), ("model-picker", "Model"), ("ears", "Hearing"),
     ("voice", "Voice"), ("review", "Review"), ("extras", "Optional extras"),
     ("eyes", "Seeing"), ("imagine", "Pictures"), ("memory", "Search"),
@@ -1515,11 +1528,11 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         "On this computer downloads a language model once "
         f"({local_llm.SPECS[local_llm.recommended()].size_bytes / 1e9:.1f} GB for "
         "the recommended one) and nothing else leaves this machine. In the cloud "
-        "downloads nothing and sends every question to the provider you pick, so "
-        "it needs an API key."))
+        "downloads nothing and sends your questions to a provider - you can start "
+        "free with no key, or use your own provider's key."))
     modes = [
-        ("local", "On this computer", "nothing leaves the machine"),
-        ("cloud", "In the cloud", "nothing to download"),
+        ("local", "On this computer", "private, nothing leaves the machine"),
+        ("cloud", "In the cloud", "nothing to download, free to start"),
     ]
     group, chosen_mode = choice_group("Choose one to start with", modes, mode)
     box.append(group)
@@ -1586,12 +1599,24 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
             return [], str(exc)
 
     keys_page, box = page(
-        "Cloud keys", "cloud-keys",
-        "Chronoa needs a key to talk to a provider on your behalf. Keys are "
-        "kept in your desktop keyring when there is one, and never written to "
-        "a log. Free gateways further down need no key at all.")
+        "Cloud answers", "cloud-keys",
+        "You can start free - no key needed. Chronoa will answer through the free "
+        "gateways below; just continue. A key is only for using a specific "
+        "provider like Anthropic or OpenAI, and is kept in your desktop keyring.")
     existing = config.cloud_llm_api_keys()
-    key_rows = Adw.PreferencesGroup(title="Providers")
+    # **Free first.** The page used to lead with the key fields, so a new person
+    # read "Chronoa needs a key" and stopped - when cloud mode already works with
+    # no key through these gateways. So the no-key option is the primary one, at
+    # the top, and the keyed providers are the secondary path underneath.
+    free = Adw.PreferencesGroup(
+        title="Start free - no key needed",
+        description="Chronoa answers through a free gateway (" + ", ".join(
+            cloud_llm.PROVIDERS[p].name for p in cloud_llm.DEFAULT_PROVIDER_ORDER
+            if p in cloud_llm.PROVIDERS) + "). Nothing to paste - continue and it just works.")
+    box.append(free)
+    key_rows = Adw.PreferencesGroup(
+        title="Use a specific provider (optional)",
+        description="Paste a key only if you want a particular provider.")
     box.append(key_rows)
     entered: Dict[str, str] = {}
     for provider_id in cloud_llm.BYOK_PROVIDER_ORDER:
@@ -1613,12 +1638,6 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         row.add_suffix(entry)
         row.set_activatable_widget(entry)
         key_rows.add(row)
-    free = Adw.PreferencesGroup(
-        title="No key needed",
-        description=", ".join(cloud_llm.PROVIDERS[p].name
-                              for p in cloud_llm.DEFAULT_PROVIDER_ORDER if p in cloud_llm.PROVIDERS))
-    box.append(free)
-
     # ── which model answers ─────────────────────────────────────────────
     # **The page named the provider and never the model.** Someone choosing
     # "Anthropic" was told which providers can also hear and speak, and nothing
@@ -2213,7 +2232,7 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         row = Adw.SwitchRow(title=title, subtitle=(
             f"{what}. Can do it: {names}. "
             + ("You have a key for one of them." if keyed else
-               "Needs a key for one of them - add it on the Cloud keys page.")))
+               "Needs a key for one of them - add it on the Cloud answers page.")))
         row.set_active(config.get_bool(key, False))
         row.connect("notify::active", lambda r, _p: config.set(key, "true" if r.get_active() else "false"))
         group.add(row)

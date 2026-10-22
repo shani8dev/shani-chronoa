@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING, Callable, Optional
 from shani_chronoa.tool_tracking import ORIGIN_USER, ORIGIN_UNATTENDED
 from shani_chronoa.ollama_llm import OllamaLLM
 from shani_chronoa.cloud_llm import thinking_level
-from shani_chronoa.loops import LOOP_THRESHOLD, LoopDetector
+from shani_chronoa.loops import LOOP_THRESHOLD, LoopDetector, ResultRepeat
 from shani_chronoa import (compression, context_meter, history_repair,
                            conversation_store, user_prompts)
 from shani_chronoa.senses.context import ContextBuilder
@@ -1095,6 +1095,13 @@ class Assistant:
         # record pin sixteen legitimate `ask_user` calls in one turn.
         attempts: dict[str, int] = {}
         loop = LoopDetector()
+        # Per turn, like `loop`: the other half of loop-catching - a tool that
+        # keeps returning the same result for different arguments (loops.py).
+        # Reset here so it spans `_run_turn` and any `_keep_going` continuation,
+        # which are the same turn.
+        self._result_repeat = ResultRepeat()
+        #: Fired once per turn, halfway through the round budget: "take stock".
+        self._half_reminded = False
 
         try:
             reply = await self._run_turn(
@@ -1171,11 +1178,24 @@ class Assistant:
         # pydantic-ai's split `AgentRetries` budget, applied here to the
         # shape-validation edge: see MAX_VALIDATION_MISSES.
         validation_misses = 0
-        for _ in range(max_rounds):
+        for round_index in range(max_rounds):
             over = self._over_budget(deadline)
             if over:
                 self.close_interrupted_turn("budget")
                 return over
+            # Halfway through the round budget, ask the model to take stock -
+            # summarise progress and check whether it is spiralling, before it
+            # spends the rest of the budget. A small model given this at the
+            # halfway point stops a dead-end search of its own accord far more
+            # often than one that only meets the hard limit. Once per turn.
+            if not self._half_reminded and round_index >= max_rounds // 2:
+                self._half_reminded = True
+                self._record({"role": "user", "content": (
+                    f"You have taken {round_index} tool rounds on this. Pause and take "
+                    "stock: in two or three lines, what have you done and found so far? "
+                    "If you are retrying or probing without new information, or need "
+                    "something only the user can do, stop and say so instead of "
+                    f"continuing - the turn ends at {max_rounds} rounds.")})
             started = time.monotonic()
             forced = named if not in_use else ""
             if forced:
@@ -1451,6 +1471,12 @@ class Assistant:
                              # reload, so the file never holds the nonce and
                              # `_history` never holds an extra key.
                              source=source)
+                # The same result reached by different arguments is probing a
+                # dead end: nudge once (after the result is recorded, so the
+                # tool_call/tool_result pair stays intact and valid).
+                nudge = self._result_repeat.note(name, result)
+                if nudge:
+                    self._record({"role": "user", "content": nudge})
                 # **"No, and stop this turn" now stops the turn.**
                 # `permissions.decide()` files a `Decision.CANCEL` when the user
                 # picks it, and until now nothing read it - the option was

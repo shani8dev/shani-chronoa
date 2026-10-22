@@ -66,6 +66,72 @@ def call_key(name: str, arguments: object) -> str:
     return f"{name}\x00{canonical}"
 
 
+#: Identical *results* from one tool, within a turn, at which the model is told it is
+#: not making progress. Lower than `LOOP_THRESHOLD`: this is a softer signal (a nudge,
+#: not a stop) and it catches the case the call detector cannot - the same answer reached
+#: by *different* arguments, which is probing without learning anything new.
+RESULT_REPEAT_THRESHOLD = 3
+
+#: Tools whose result is expected to be the same each time while they do their job -
+#: waiting, polling, listing a to-do - so an identical result is not a stuck turn.
+_RESULT_REPEAT_EXEMPT = frozenset({
+    "wait", "sleep", "get_datetime", "todo_list", "watch_dashboard", "watch",
+})
+
+
+def result_key(result: object) -> str:
+    """A stable identity for a tool's result, for the repeated-result guard."""
+    try:
+        return json.dumps(result, sort_keys=True, default=repr)
+    except (TypeError, ValueError):
+        return repr(result)
+
+
+class ResultRepeat:
+    """Catches a tool that keeps returning the same result, whatever the arguments.
+
+    `LoopDetector` stops a run of *identical calls*; this is the other half. A model that
+    varies an argument every time - a different path, a different query - but gets the same
+    answer back is not looping by that definition, yet it is learning nothing: the classic
+    small-model failure of probing a dead end (measured on Qwen3-1.7B: it listed three
+    different non-existent directories and read the same "not found" each time). Here the
+    *result* is the key, counted per tool across the whole turn, and at the threshold the
+    model is nudged once to change approach rather than stopped.
+
+    One per turn, like `LoopDetector`, and the nudge is a message the caller adds to the
+    conversation - not a refusal: the call already ran and its result stands.
+    """
+
+    def __init__(self, threshold: int = RESULT_REPEAT_THRESHOLD):
+        self._threshold = threshold
+        self._counts: "dict[str, int]" = {}
+        self._nudged: "set[str]" = set()
+
+    def note(self, name: str, result: object) -> "str | None":
+        """Record one tool result; return a nudge the first time it repeats too often.
+
+        Returns the nudge text once per (tool, result) that crosses the threshold, then
+        `None` for further repeats of the same thing - one nudge, not a drip.
+        """
+        tool = name if isinstance(name, str) else ""
+        if tool in _RESULT_REPEAT_EXEMPT:
+            return None
+        key = f"{tool}\x00{result_key(result)}"
+        self._counts[key] = self._counts.get(key, 0) + 1
+        if self._counts[key] >= self._threshold and key not in self._nudged:
+            self._nudged.add(key)
+            logger.info("Tool %r returned the same result %d times this turn; nudging",
+                        tool, self._counts[key])
+            return (
+                f"The last {self._counts[key]} calls to `{tool[:_MAX_SUBJECT_CHARS]}` "
+                "returned exactly the same result, even though the arguments differed. "
+                "Calling it again - with any arguments - will not reveal anything new. "
+                "Use what that result already tells you, change your approach, or stop "
+                "and say what is blocking you."
+            )
+        return None
+
+
 class LoopDetector:
     """Counts *consecutive* identical tool calls within one turn.
 

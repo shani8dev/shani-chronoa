@@ -357,6 +357,8 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "create_document": ("Files", "Create a markdown, text, or HTML document"),
     "convert_document": ("Files", "Convert a document between md, txt, and html"),
     "convert_media": ("Files", "Convert audio, video and pictures"),
+    "chart": ("Pictures", "Make a chart, icon or diagram as an SVG file"),
+    "dashboard": ("Files", "Build a dashboard as a self-contained HTML page"),
     # ── the optional extras get their own pages ─────────────────────────────
     #
     # All five of these were filed under "Files", so a person who spent 2.0 GB on
@@ -1534,6 +1536,7 @@ MUTATING_TOOLS = frozenset({
     "find_emoji", "stopwatch", "bluetooth_devices",
     # writes only new files (a saved result, a chart); the source is never written
     "analyze_table", "qr_code", "generate_image", "photo_video", "recording",
+    "chart", "dashboard",
     # makes sound and leaves a rendering on disk, exactly as `speak` makes sound.
     # It was missing from this set while `sing` existed, so cli_matrix classified
     # the skill as read-only ("skill", not "actuator"), the MCP read_only_hint
@@ -1676,6 +1679,18 @@ NEVER_DEFAULTED_ON = frozenset({
     # reachable by any nearby device - so the everyday preset has to agree
     # with the schema, or a fresh install reads as a preset it is not.
     "phone-remote-enabled",
+    # **Reading and controlling your phone, because it is a standing intrusion
+    # into another device's private data.** With these on, a paired phone makes
+    # `map_notify` hold an OBEX MAP session and continuously read your text
+    # inbox - personal messages nobody agreed to share with this computer - and
+    # `phone-control` dials and acts on the phone. That is the "captures people
+    # who never agreed" case, not a dead end hit by asking for something, so
+    # like the others here it is off until turned on from the Phone page. (It
+    # also made a fresh install with a paired phone log an OBEX error every
+    # retry, because the session was attempted before anyone asked for it.)
+    "phone-control-enabled",
+    "phone-messages-read-enabled",
+    "phone-messages-send-enabled",
 })
 
 PRESETS = {

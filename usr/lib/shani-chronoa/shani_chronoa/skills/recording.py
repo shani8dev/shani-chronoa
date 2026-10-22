@@ -10,6 +10,10 @@
 - sounds: what can be heard in it - music, a dog, traffic, applause (the
   optional sound model, `sounds.py`).
 
+A `range` ("1:10 to 1:25") narrows text, subtitles, speakers and sounds to one
+part of a long file - the part the Files tab marks - and the timestamps still
+read in the whole file's clock (`recordings.segments_for`).
+
 Everything runs on this machine. Results are new files beside the original,
 which is never touched; nothing is overwritten.
 """
@@ -43,6 +47,7 @@ SCHEMA = {
         "parameters": {"type": "object", "properties": {
             "action": {"type": "string", "enum": list(_ACTIONS)},
             "path": {"type": "string", "description": "The audio or video file, or a YouTube link (text only: its captions)."},
+            "range": {"type": "string", "description": "Only this part of the file, as \"1:10 to 1:25\" or \"70-85\" (seconds, or m:ss / h:mm:ss). Default: the whole file. Works for text, subtitles, speakers and sounds."},
             "language": {"type": "string", "description": "Spoken language code (en, hi...); default: detect."},
             "people": {"type": "integer", "description": "speakers: how many people talk, if known."},
             "seconds": {"type": "number", "description": "listen: how long, 1-30 (default 5)."},
@@ -354,6 +359,13 @@ def _run(arguments: dict) -> str:
     language = (arguments.get("language") or "auto").strip().lower() or "auto"
     if not language.replace("-", "").isalpha() or len(language) > 8:
         return "language is a code like en or hi."
+    raw_range = str(arguments.get("range") or "").strip()
+    clip = None
+    if raw_range:
+        clip = recordings.parse_range(raw_range)
+        if clip is None:
+            return (f"I could not read {raw_range!r} as a time range. Write it as "
+                    f"\"1:10 to 1:25\" or \"70-85\" - seconds, or m:ss, with the end after the start.")
     try:
         if action == "clean":
             target = _beside(src, "clean", src.suffix if src.suffix.lower() != ".webm" else ".mkv")
@@ -366,10 +378,14 @@ def _run(arguments: dict) -> str:
                 return problem
             with tempfile.TemporaryDirectory(prefix="chronoa-snd-") as tmp:
                 wav = Path(tmp) / "audio.wav"
-                recordings.extract_audio(src, wav)
+                if clip is not None:
+                    recordings.extract_audio(src, wav, start=clip[0], length=clip[1] - clip[0])
+                else:
+                    recordings.extract_audio(src, wav)
                 return f"In {src.name}: {sounds.describe(sounds.tag(wav))}."
         segments, note = recordings.segments_for(src, language, with_speakers=action == "speakers",
-                                                 speakers_count=arguments.get("people") or None)
+                                                 speakers_count=arguments.get("people") or None,
+                                                 clip=clip)
         if not segments:
             return f"No speech was found in {src.name}."
         said = f" ({note})" if note else ""

@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**260 skills in 24 groups.** Each is a named, schema-typed module; the model
+**262 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. The whitelist *is* the design, so a new capability is a
 new named skill. The one exception is `run_command`, for running a project's
 tests and builds: off by default, sandboxed (no network, nothing outside the
@@ -37,7 +37,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**95 of 260 are consent-gated and 17 are destructive.**
+**95 of 262 are consent-gated and 17 are destructive.**
 
 ## System
 
@@ -122,6 +122,7 @@ Read, write, move, archive and undo files.
 | `create_archive` | Make or extract an archive | — |
 | `create_directory` | Create a folder | — |
 | `create_document` | Create a markdown, text, or HTML document | — |
+| `dashboard` | Build a dashboard as a self-contained HTML page | — |
 | `delete_file` | Delete a file or folder, recoverably from the trash | **asks first, always** · needs `file-delete-enabled` |
 | `directory_tree` | Show a folder's shape | — |
 | `disk_layout` | How this machine's disks are partitioned | — |
@@ -349,6 +350,17 @@ Launch, list and find applications.
 | `open_application` | Open an app | — |
 | `vm` | Run and drive a virtual machine | needs `vm-control-enabled` |
 
+## Pictures
+
+| Skill | What it does | Before it runs |
+|---|---|---|
+| `chart` | Make a chart, icon or diagram as an SVG file | — |
+| `create_video` | Make a slideshow or colour clip | — |
+| `edit_audio` | Trim, normalize, change volume or speed | — |
+| `edit_image` | Resize, compress or edit a picture | — |
+| `edit_video` | Trim, resize, rotate, or mute a video | — |
+| `generate_image` | Make a new picture from a description, on this computer | — |
+
 ## Pointer and keyboard
 
 Drive the desktop without the keyboard.
@@ -361,16 +373,6 @@ Drive the desktop without the keyboard.
 | `set_keyboard_layout` | Change the keyboard layout | — |
 | `type_text` | Type text | needs `input-control-enabled` |
 | `ui_elements` | Press buttons, fill fields and open menus in other apps, and drive them visible | needs `input-control-enabled` |
-
-## Pictures
-
-| Skill | What it does | Before it runs |
-|---|---|---|
-| `create_video` | Make a slideshow or colour clip | — |
-| `edit_audio` | Trim, normalize, change volume or speed | — |
-| `edit_image` | Resize, compress or edit a picture | — |
-| `edit_video` | Trim, resize, rotate, or mute a video | — |
-| `generate_image` | Make a new picture from a description, on this computer | — |
 
 ## Services and logs
 

@@ -445,6 +445,12 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
             self.config.set("thinking", level)
         action.set_state(GLib.Variant("s", self.config.thinking))
         self._refresh_strip()
+        # The composer's own "Think:" chip reads config directly, so it stays
+        # stale when the level changes anywhere but its own menu (a switch from
+        # the model picker, D-Bus, or a preset). Redraw it from the one place the
+        # change lands, so the chip can never disagree with the level in force.
+        if self.window is not None and hasattr(self.window, "_refresh_thinking_word"):
+            self.window._refresh_thinking_word()
 
     def _on_choose_project(self, _action, _param) -> None:
         """Pick the project folder, and turn Build mode on with it.

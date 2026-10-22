@@ -1011,17 +1011,17 @@ Off by default, and the reason is measured rather than assumed: the Find Me aler
       <description>When true, Chronoa may start a virtual machine with QEMU - a window on the desktop plus a QMP control socket, the same shape as the browser skill's window-plus-protocol - take a screenshot of its screen, send keys and clicks into it, read its power state and shut it down. On by default: a VM boots whatever disk or ISO it is pointed at and does whatever that software does. The QEMU process runs as a user systemd unit so it is not killed when the skill call that started it ends, and so it is not confined by the sandbox's address-space ceiling, which is smaller than the guest memory it would allocate.</description>
     </key>
     <key name="phone-control-enabled" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>Let Chronoa use your paired phone</summary>
       <description>When true, Chronoa may see your phone through GSConnect (GNOME) or KDE Connect (Plasma), ring it so you can find it, ping it, and send it a file or link. On by default. Sending text messages, reading the phone's notifications and remote input are not offered at all.</description>
     </key>
     <key name="phone-messages-read-enabled" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>Let Chronoa read your phone's text messages</summary>
       <description>When true, Chronoa may read text messages from your paired phone when you ask - the latest, those from a contact, or the unread ones. On by default, and separate from letting Chronoa use the phone at all: seeing that a phone is paired and can be rung is nothing like reading what your family said to you. A phone that cannot be read is reported as refusing, never as having no messages.</description>
     </key>
     <key name="phone-messages-send-enabled" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>Let Chronoa send text messages and place calls from your phone</summary>
       <description>When true, Chronoa may send a text message from your paired phone, and open its dialer to place a call, when you ask. On by default, and separate from reading: a message leaves this machine and appears on the other end, so it needs its own agreement. Chronoa drafts the text and asks you before anything is sent, and reports a refusal rather than sending something you did not confirm.</description>
     </key>

@@ -74,6 +74,96 @@ def test_the_skill_routes_and_refuses(tmp_path, monkeypatch):
     assert "language is a code" in recording._run({"action": "text", "path": str(wav), "language": "en; rm"})
 
 
+# --- a marked time range: "1:10 to 1:25" transcribes exactly that part --------
+#
+# The Files tab marks a part of a long recording ("1:10.4 to 1:25.0") so the
+# model can transcribe, subtitle or diarise just that slice instead of the whole
+# file. Harvested from harness-studio's transcribe tool, which does the same with
+# a [clip.mp4, 1:10.4 to 1:25.0] reference; here it reuses the whole recordings
+# pipeline and keeps whisper's own timestamps, shifted back to the file's clock.
+
+
+def test_time_and_range_parse_the_forms_a_person_writes():
+    assert recordings.parse_time("75.5") == 75.5
+    assert recordings.parse_time("1:10.4") == 70.4
+    assert recordings.parse_time("1:02:03.5") == 3723.5
+    assert recordings.parse_time("70s") == 70.0
+    # rejected: minutes/seconds field over 59, and plain junk
+    assert recordings.parse_time("1:70") is None
+    assert recordings.parse_time("later") is None
+    assert recordings.parse_range("1:10.4 to 1:25") == (70.4, 85.0)
+    assert recordings.parse_range("70-85") == (70.0, 85.0)
+    assert recordings.parse_range("1:10 – 1:25") == (70.0, 85.0)  # en dash
+    # the end must come after the start, and one end alone is no range
+    assert recordings.parse_range("85-70") is None
+    assert recordings.parse_range("70") is None
+
+
+def test_clock_is_the_short_human_form():
+    assert recordings._clock(85.0) == "1:25.0"
+    assert recordings._clock(3723.5) == "1:02:03.5"
+    assert recordings._clock(5.96) == "0:06.0", "tenths that round up carry into the second"
+
+
+def test_a_clip_reads_only_that_part_and_keeps_the_files_clock(monkeypatch):
+    """segments_for(clip=...) extracts just the slice and shifts its segment
+    times back to the whole file's clock, so subtitles still line up."""
+    calls = {}
+
+    def fake_extract(src, wav, start=0.0, length=None):
+        calls["start"], calls["length"] = start, length
+
+    # whisper would return times relative to the clip (it only saw 15 seconds)
+    monkeypatch.setattr(recordings, "duration", lambda _p: 600.0)
+    monkeypatch.setattr(recordings, "extract_audio", fake_extract)
+    monkeypatch.setattr(recordings, "transcribe",
+                        lambda wav, language="auto": [Segment(0.0, 3.0, "hello"), Segment(3.0, 14.0, "world")])
+
+    segs, note = recordings.segments_for(Path("/x/long.mp4"), clip=(70.4, 85.0))
+
+    assert calls["start"] == 70.4 and abs(calls["length"] - 14.6) < 1e-6, calls
+    # 0.0/3.0 in the clip are 70.4/73.4 in the file
+    assert segs[0] == Segment(70.4, 73.4, "hello") and segs[1] == Segment(73.4, 84.4, "world"), segs
+    assert "1:10.4" in note and "1:25.0" in note, note
+
+
+def test_a_clip_past_the_end_is_refused(monkeypatch):
+    monkeypatch.setattr(recordings, "duration", lambda _p: 40.0)
+    with pytest.raises(recordings.RecordingError):
+        recordings.segments_for(Path("/x/short.wav"), clip=(70.0, 85.0))
+
+
+def test_the_skill_offers_range_and_refuses_a_bad_one(tmp_path, monkeypatch):
+    from shani_chronoa import tools
+    from shani_chronoa.skills import recording
+    props = [entry["function"]["parameters"]["properties"]
+             for entry in tools.TOOLS if entry.get("function", {}).get("name") == "recording"]
+    assert props and "range" in props[0], "range must be offered or no request names it"
+    monkeypatch.setenv("HOME", str(tmp_path))
+    wav = tmp_path / "a.wav"
+    wav.write_bytes(b"RIFF")
+    said = recording._run({"action": "text", "path": str(wav), "range": "backwards"})
+    assert "could not read" in said and "1:10 to 1:25" in said, said
+
+
+def test_the_skill_threads_a_good_range_to_the_pipeline(tmp_path, monkeypatch):
+    from shani_chronoa.skills import recording
+    from shani_chronoa import recordings as rec_mod
+    monkeypatch.setenv("HOME", str(tmp_path))
+    wav = tmp_path / "talk.wav"
+    wav.write_bytes(b"RIFF")
+    seen = {}
+
+    def fake_segments(src, language="auto", with_speakers=False, speakers_count=None, clip=None):
+        seen["clip"] = clip
+        return [Segment(70.0, 72.0, "the marked bit")], ""
+
+    monkeypatch.setattr(rec_mod, "segments_for", fake_segments)
+    said = recording._run({"action": "text", "path": str(wav), "range": "1:10 to 1:25"})
+    assert seen["clip"] == (70.0, 85.0), seen
+    assert "the marked bit" in said, said
+
+
 # --- the sound trigger: "the doorbell rang" as an event (microphone faked) ---
 
 def _heard(*pairs):

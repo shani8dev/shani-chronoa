@@ -67,8 +67,11 @@ class MessageWatcher:
                     phones = [a for a, _n, _up in phone_bluez.phones()]
                     if phones:
                         self.hold(phones[0])
-                except Exception:  # noqa: BLE001 - out of range, permission off: try later
-                    logger.info("message watcher: not listening this time", exc_info=True)
+                except Exception as exc:  # noqa: BLE001 - out of range, OBEX down: try later
+                    # An expected, recurring condition (no OBEX, phone out of
+                    # range): a one-line debug note, not an INFO stack trace that
+                    # reads like a crash in the log every retry.
+                    logger.debug("message watcher: not listening this time: %s", exc)
             self._stop.wait(RETRY_SECONDS)
 
     def hold(self, address: str) -> None:
