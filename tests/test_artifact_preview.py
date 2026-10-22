@@ -101,6 +101,14 @@ def test_a_preview_opens_and_closes_in_place(tmp_path):
     assert not frames, "the second click did not close the preview"
 
 
+def _control(block, tip_start):
+    """A row button whose tooltip starts with `tip_start`, or None."""
+    for node in _nodes(block):
+        if isinstance(node, Gtk.Button) and (node.get_tooltip_text() or "").startswith(tip_start):
+            return node
+    return None
+
+
 def _toggle(block, label):
     for node in _nodes(block):
         if isinstance(node, Gtk.ToggleButton) and node.get_label() == label:
@@ -266,6 +274,55 @@ def test_rows_carry_a_type_icon_and_every_name_resolves(tmp_path):
     doc.write_bytes(office.make_xlsx({"S": [["A", "B"], ["x", 1]]}))
     block = blocks.ArtifactBlock([doc])
     assert any(isinstance(n, Gtk.Image) for n in _nodes(block)), "the row has no type icon"
+
+
+def test_web_content_opens_in_the_app_browser_and_other_files_do_not(tmp_path, monkeypatch):
+    """Harness opens files in-app; here HTML and SVG open in Chronoa's own
+    browser (keeping the egress checks and the way back), and anything else uses
+    the desktop handler. A missing in-app browser falls back, never drops it."""
+    html = tmp_path / "dash.html"
+    html.write_text("<html><body>hi</body></html>", encoding="utf-8")
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+    seen = {"browser": [], "uri": []}
+    monkeypatch.setattr(blocks, "show_in_own_browser",
+                        lambda w, url: (seen["browser"].append(url) or True))
+    monkeypatch.setattr(Gtk, "show_uri", lambda root, uri, t: seen["uri"].append(uri))
+    block = blocks.ArtifactBlock([html, pdf])
+    button = Gtk.Button()
+
+    block._on_open(button, html)
+    assert seen["browser"] and not seen["uri"], "HTML should open in the app browser"
+    block._on_open(button, pdf)
+    assert any("doc.pdf" in u for u in seen["uri"]), "a PDF should use the desktop handler"
+
+    # no in-app browser -> fall back to the desktop handler rather than drop it
+    seen["browser"].clear(); seen["uri"].clear()
+    monkeypatch.setattr(blocks, "show_in_own_browser",
+                        lambda w, url: (seen["browser"].append(url) or False))
+    block._on_open(button, html)
+    assert seen["browser"] and any("dash.html" in u for u in seen["uri"])
+
+
+def test_copy_contents_is_offered_for_text_files_and_copies_their_text(tmp_path):
+    """Harness's Files pane lets you copy a file's text; here a document, a
+    sheet or a code file offers it, a picture or PDF does not, and the text is
+    read only when pressed."""
+    from shani_chronoa import office
+    code = tmp_path / "a.py"
+    code.write_text("print('hi')\n", encoding="utf-8")
+    sheet = tmp_path / "b.xlsx"
+    sheet.write_bytes(office.make_xlsx({"S": [["Item", "Cost"], ["Train", 1200]]}))
+    pdf = tmp_path / "c.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+
+    code_block = blocks.ArtifactBlock([code])
+    assert _control(code_block, "Copy the text") is not None, "no copy-contents on a code file"
+    assert _control(blocks.ArtifactBlock([sheet]), "Copy the text") is not None
+    assert _control(blocks.ArtifactBlock([pdf]), "Copy the text") is None, "a PDF has no text to copy here"
+    # the text is what gets copied (office goes through office.read)
+    assert "hi" in code_block._contents_text(code)
+    assert "Train" in blocks.ArtifactBlock([sheet])._contents_text(sheet)
 
 
 def test_an_image_preview_is_capped_rather_than_decoded_at_full_size(tmp_path):

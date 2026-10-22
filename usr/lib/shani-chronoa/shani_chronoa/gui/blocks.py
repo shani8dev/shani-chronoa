@@ -923,6 +923,12 @@ class ArtifactBlock(Gtk.Box):
                                 self._on_open, path))
         row.append(_flat_button("edit-copy-symbolic", "Copy this file's path",
                                 self._on_copy_path, path))
+        # Copy the file's *text* (harness's Files pane lets you do this): a
+        # document's words, a sheet's cells, a code file's source - read when the
+        # button is pressed, not now, so building a row never reads every file.
+        if self._can_copy_contents(path):
+            row.append(_flat_button("edit-select-all-symbolic", f"Copy the text of {path.name}",
+                                    self._on_copy_contents, path))
         # **No "save a copy" for a directory.** `_saved` reads the source with
         # `read_bytes()`, which on a folder raises `IsADirectoryError` - caught, as
         # an `OSError`, and logged, so the button would do nothing and say
@@ -1405,13 +1411,54 @@ class ArtifactBlock(Gtk.Box):
             logger.info("no thumbnail for %s", path, exc_info=True)
             return None
 
+    #: Files that are web content, so they open in Chronoa's own browser rather
+    #: than leaving for a system app - a dashboard or an SVG opens in the pane
+    #: that keeps the egress checks and the way back to the conversation, the way
+    #: harness-studio opens files in-app.
+    _IN_APP_OPEN = (".html", ".htm", ".svg")
+
     def _on_open(self, button: Gtk.Button, path: Path) -> None:
-        """Open with whatever the desktop uses for this kind of file."""
+        """Open web content in Chronoa's own browser; everything else with the
+        desktop's handler. A missing in-app browser falls back, never drops it."""
         try:
-            Gtk.show_uri(button.get_root(), path.as_uri(),
-                         Gdk.CURRENT_TIME)
+            if (path.suffix.lower() in self._IN_APP_OPEN
+                    and show_in_own_browser(button, path.as_uri())):
+                return
+            Gtk.show_uri(button.get_root(), path.as_uri(), Gdk.CURRENT_TIME)
         except Exception:                                   # noqa: BLE001
             logger.warning("could not open %s", path, exc_info=True)
+
+    def _can_copy_contents(self, path: Path) -> bool:
+        """Whether this file's text can be put on the clipboard - decided by kind,
+        cheaply, so a row never reads a file just to show the button."""
+        try:
+            if path.is_dir():
+                return False
+            suffix = path.suffix.lower()
+        except OSError:
+            return False
+        return (suffix in self.OFFICE_SUFFIXES or suffix in self.TEXT_SUFFIXES
+                or suffix in self.TABLE_SUFFIXES or suffix in self.SWITCHABLE_SUFFIXES)
+
+    def _contents_text(self, path: Path):
+        """The file's text for the clipboard, or None - a document through
+        `office.read`, anything else as its own bytes decoded."""
+        suffix = path.suffix.lower()
+        try:
+            if suffix in self.OFFICE_SUFFIXES:
+                from shani_chronoa import office
+                return office.read(path) or None
+            return path.read_text(encoding="utf-8", errors="replace") or None
+        except Exception as exc:  # noqa: BLE001 - an unreadable file copies nothing
+            logger.info("no contents to copy for %s: %s", path.name, exc)
+            return None
+
+    def _on_copy_contents(self, button: Gtk.Button, path: Path) -> None:
+        text = self._contents_text(path)
+        if not text:
+            return
+        _copy_to_clipboard(button, text)
+        CodeBlock._flash(button, "edit-select-all-symbolic", "edit-select-all-symbolic")
 
     def _on_copy_path(self, button: Gtk.Button, path: Path) -> None:
         _copy_to_clipboard(button, str(path))
