@@ -7,10 +7,10 @@
 <p align="center"><b>Hand your computer a job. It does it — on your machine, not someone else's.</b><br>
 Fix the failing test. Tidy the screen for focus. Transcribe the call and write the notes.<br>
 Pair the phone, read the watch, keep your rules running while you're away.<br>
-Your data never leaves the desk, every action can be undone, and it asks before anything risky.</p>
+With a local model your data never leaves the desk, every action can be undone, and it asks before anything risky.</p>
 
 <p align="center">
-  <a href="CAPABILITIES.md">260 skills</a> ·
+  <a href="CAPABILITIES.md">262 skills</a> ·
   free (GPL-3.0) ·
   runs offline ·
   no account, no telemetry ·
@@ -33,7 +33,7 @@ through skills you can read, switch off, and undo.
   voice (Kokoro or Piper) that you pick and preview in the app.
 - 🛠️ **It does things, not just chats.** Files, apps, windows, settings,
   calendar, reminders, network, Bluetooth, screenshots, documents, images,
-  git — [260 skills](CAPABILITIES.md), each a small, typed, auditable module.
+  git — [262 skills](CAPABILITIES.md), each a small, typed, auditable module.
 - 💻 **Builds with you.** Point it at a project folder: it edits with inline
   diffs, runs your tests in a sandbox, commits, and reverts a whole turn with
   one click. Plan mode, subagents, and MCP servers in both directions.
@@ -90,7 +90,7 @@ plan. Chronoa is a different bet:
 | Account, telemetry, training on your chats | **None** | Account required; training is opt-out |
 | Works offline | **Yes**, local model by default | No |
 | Price | **Free**, GPL-3.0 | Free tier, then paid plans |
-| What it may do | 260 typed skills you can read and switch off | Whatever the vendor's integrations allow |
+| What it may do | 262 typed skills you can read and switch off | Whatever the vendor's integrations allow |
 | Risky actions | Asks first, **sandboxed** (bubblewrap, Landlock, seccomp) | Asks first |
 | Undo | **Revert a file or a whole turn** | — |
 | Code | Edits, tests, diffs and revert in Build mode | Usually not the focus |
@@ -147,7 +147,7 @@ its own **Download** button.
 - **Local speech-to-text** — whisper.cpp; runs on CPU or CUDA.
 - **On-device LLM** — tool-calling via llama.cpp `llama-server` by default
   (the `ollama` package is also supported), so Chronoa can act on your machine
-  rather than just chatting about it. **260 callable
+  rather than just chatting about it. **262 callable
   skills**, every one a named, schema-typed module under `skills/`. The
   whitelist is the design; the one command runner (`run_command`, for a
   project's tests and builds) is sandboxed, off by default, and asks each time.
@@ -205,9 +205,12 @@ its own **Download** button.
   a gap.
 - **GTK4 native UI** — integrates into the Shanios shell alongside
   shani-cassini.
-- **Privacy-first** — everything runs locally by default. Nothing leaves the
-  machine unless you turn privacy mode off *and* separately enable
-  `cloud-fallback-enabled`; two switches, so it never activates from one.
+- **Local-first, honest about the cloud** — once a local model is installed,
+  everything runs on this machine. Until then, a fresh install answers through a
+  free cloud gateway (LLM7, Kilo, BlockRun) because `privacy-mode` is off and
+  `cloud-fallback-enabled` is on by default, and every cloud turn is announced in
+  the transcript. Turn privacy mode on to keep every prompt on the machine,
+  whatever else is configured.
 - **Learning from outcomes** — every skill call is recorded with the verdict
   its post-condition produced, and two models are fitted from that record.
   Both are deliberately conservative about what they are allowed to claim, and
@@ -510,7 +513,9 @@ are deliberately *not* defaults:
 `llama-server` and Ollama are interchangeable behind one `chat_message()`
 interface, and a cloud provider (Anthropic, OpenAI, Gemini, Groq, OpenRouter,
 opencode-zen, and keyless gateways) is reachable behind the same interface
-**only** when privacy mode is off *and* `cloud-fallback-enabled` is on. The MCP
+**only** when privacy mode is off *and* `cloud-fallback-enabled` is on - which
+are both the defaults, so a fresh install with no local model answers from the
+cloud until one is installed or privacy mode is turned on. The MCP
 server is a *second entry point to the same skill set*, started on demand by
 `shani-chronoa-mcp`; it is not a service the running app depends on.
 
