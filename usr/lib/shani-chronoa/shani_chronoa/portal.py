@@ -216,6 +216,18 @@ class RemoteInput:
         self.session = None
 
     def __enter__(self) -> "RemoteInput":
+        # **`__exit__` is not called when `__enter__` raises**, and the client
+        # pushed its own MainContext as the calling thread's default when it
+        # was made. A desktop without RemoteDesktop left that context pushed on
+        # whichever thread asked - on the GTK thread, every later async D-Bus
+        # reply (AT-SPI's among them) went to a context nothing iterates.
+        try:
+            return self._start()
+        except BaseException:
+            self.__exit__(None, None, None)
+            raise
+
+    def _start(self) -> "RemoteInput":
         c, GLib = self.client, self.client.GLib
         if c.version(RD_IFACE) == 0:
             raise PortalError("this desktop's portal does not offer RemoteDesktop")

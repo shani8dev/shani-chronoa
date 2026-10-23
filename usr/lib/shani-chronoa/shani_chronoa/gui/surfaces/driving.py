@@ -43,14 +43,14 @@ logger = logging.getLogger(__name__)
 TITLE = "Driving"
 ICON = "input-gaming-symbolic"
 SECTION = "Acting"
-#: **Built when opened, not at start.** Its portal row asks the RemoteDesktop
-#: portal for a real session - which is the point of the row, and also a
-#: request for remote control of the desktop. Built in the start-up prebuild
-#: pass, that request went out the moment Chronoa launched, and measured in a
-#: shani-testbed slot (2026-10-23) the app then stopped answering AT-SPI: every
-#: query timed out and the setup wizard's buttons never reached a screen
-#: reader. Bisected over all 39 panels to this one, and within it to
-#: `ui_driver._portal_input()`. The same arrangement `diagnostics.py` uses.
+#: **Built when opened, not at start.** Its rows run their probes on the GTK
+#: thread - xdotool, a screen capture, the RemoteDesktop portal client - which
+#: is work for when someone asks, not for start-up. Prebuilt, the portal row
+#: also left the portal client's MainContext pushed on the GTK thread, and the
+#: app stopped answering AT-SPI (measured in a shani-testbed slot, 2026-10-23;
+#: bisected over all 39 panels to this one). That leak is fixed at its source in
+#: `_portal_row` and `portal.RemoteInput`; this keeps the probes off start-up.
+#: The same arrangement `diagnostics.py` uses.
 PREBUILD = False
 SUBTITLE = ("What Chronoa can do with a mouse and a keyboard on this desktop, "
             "and where it has to say it cannot.")
@@ -240,7 +240,14 @@ class _DrivingView(Gtk.Box):
         repo has already caught disagreeing once.
         """
         try:
-            ui_driver._portal_input()
+            remote = ui_driver._portal_input()
+            # **Closed at once.** Making it pushes the portal client's own
+            # MainContext as this thread's default - and this is the GTK thread.
+            # Left pushed, every async D-Bus reply started here afterwards,
+            # AT-SPI's among them, went to a context nothing iterates: opening
+            # this panel, or prebuilding it, made the whole app stop answering
+            # screen readers (measured in a shani-testbed slot, 2026-10-23).
+            remote.client.close()
         except ui_driver.GuiUnavailable as exc:
             return Row("RemoteDesktop portal", f"did not answer: {exc}",
                        Row.UNKNOWN,

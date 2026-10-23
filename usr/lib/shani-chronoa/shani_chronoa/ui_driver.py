@@ -2269,9 +2269,17 @@ def portal_available() -> bool:
     """Whether the desktop offers the RemoteDesktop portal this route needs."""
     try:
         from shani_chronoa import portal as _portal
-        return _portal.PortalClient().version(_portal.RD_IFACE) > 0
+        client = _portal.PortalClient()
     except Exception:  # noqa: BLE001 - no portal is a route that does not exist
         return False
+    # Closed, because a client pushes its own MainContext on the calling thread
+    # and only `close()` pops it - see `portal.RemoteInput.__enter__`.
+    try:
+        return client.version(_portal.RD_IFACE) > 0
+    except Exception:  # noqa: BLE001
+        return False
+    finally:
+        client.close()
 def type_text(app: str, title: str, text: str,
               window_id: "str | None" = None) -> str:
     """Type into a container's GUI app, with the cursor shown where it lands."""
