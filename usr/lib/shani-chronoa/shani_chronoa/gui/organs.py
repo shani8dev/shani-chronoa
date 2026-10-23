@@ -29,6 +29,7 @@ import math
 import struct
 import subprocess
 import tempfile
+import threading
 import wave
 from pathlib import Path
 from typing import Optional
@@ -38,7 +39,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gtk  # type: ignore
+from gi.repository import Adw, GLib, Gtk  # type: ignore
 
 from shani_chronoa import body as body_module
 
@@ -114,6 +115,25 @@ def tone_wav(path: Path, frequency: float, milliseconds: int = 140) -> bool:
         return False
 
 
+
+def _on_gtk_thread(refresh):
+    """A body listener that redraws on the GTK thread, whichever thread changed it.
+
+    The register notifies on the thread that lit or unlit an organ, and a tool
+    run from a panel's worker thread unlights its hands there. Redrawing widgets
+    from that thread aborted the process - CI's test run died with "Fatal Python
+    error: Aborted" in `OrganStrip.refresh`, called from `triggers.py`'s worker,
+    and every test after it went unreported. On the GTK thread it redraws at
+    once, so nothing that reads the strip right after a change sees it stale.
+    """
+    def listener(_body) -> None:
+        if (threading.current_thread() is threading.main_thread()
+                or GLib.MainContext.default().is_owner()):
+            refresh()
+        else:
+            GLib.idle_add(lambda: (refresh(), False)[1])
+    return listener
+
 class OrganStrip(Gtk.FlowBox):
     """The row of organ lights. Subscribes to the body and redraws on change.
 
@@ -174,7 +194,7 @@ class OrganStrip(Gtk.FlowBox):
         self._rows: dict = {}
         self._unsubscribe = None
         self._build()
-        self._unsubscribe = body_module.body.subscribe(lambda _b: self.refresh())
+        self._unsubscribe = body_module.body.subscribe(_on_gtk_thread(self.refresh))
 
     def do_measure(self, orientation, for_size):
         """Report the width the lights actually need, so the strip can centre.
@@ -345,7 +365,7 @@ class OrganPanel(Adw.NavigationPage):
         body_scroll.append(self._group)
         toolbar.set_content(body_scroll)
         self.set_child(toolbar)
-        self._unsubscribe = body_module.body.subscribe(lambda _b: self.refresh())
+        self._unsubscribe = body_module.body.subscribe(_on_gtk_thread(self.refresh))
         self.refresh()
 
     def refresh(self) -> None:
