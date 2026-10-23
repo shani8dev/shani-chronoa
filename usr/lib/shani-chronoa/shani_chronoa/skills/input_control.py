@@ -48,6 +48,11 @@ _CONSENT_KEY = "input-control-enabled"
 # xdotool button numbers for the named buttons.
 _BUTTON_NUMBERS = {"left": "1", "middle": "2", "right": "3"}
 
+# Scroll directions, named. xdotool rides the wheel buttons (4 up, 5 down, 6
+# left, 7 right); the GNOME extension and the directions the model may give.
+_SCROLL_DIRECTIONS = ("up", "down", "left", "right")
+_SCROLL_XDO = {"up": "4", "down": "5", "left": "6", "right": "7"}
+
 
 def _consent(config: ChronoaConfig) -> tuple[bool, str]:
     """Return (allowed, reason). Fail-closed: an undeclared key => False."""
@@ -119,6 +124,11 @@ def _build_command(backend: tuple[str, list[str]], action: str, params: dict) ->
         if action == "type":
             # `--` ends option parsing so a leading `-` in the text is literal.
             return prefix + ["type", "--clearmodifiers", "--", params["text"]]
+        if action == "scroll":
+            button = _SCROLL_XDO.get(params.get("direction"))
+            if button is None:
+                return None
+            return prefix + ["click", "--repeat", str(max(1, int(params.get("amount", 3)))), button]
     elif name == "wtype":
         # **Typing only.** wtype(1) is a virtual *keyboard*: it has no pointer
         # at all, and `-M` presses a modifier - so the old `wtype -M hello`
@@ -348,6 +358,8 @@ def _run_gnome(gnome, action: str, params: dict, description: str) -> str:
         elif action == "click":
             button = str(params["button"])
             gnome.pointer_click(_BUTTON_NAMES.get(button, button), int(params.get("count", 1)))
+        elif action == "scroll":
+            gnome.pointer_scroll(str(params["direction"]), int(params.get("amount", 3)))
         elif action == "type":
             text = params["text"]
             # Keys reach only what the layout can produce. Anything beyond
@@ -440,6 +452,19 @@ def _run_type_text(arguments: dict) -> str:
     return _run_action("type", {"text": text}, description="text typed")
 
 
+def _run_scroll(arguments: dict) -> str:
+    direction = arguments.get("direction")
+    if not isinstance(direction, str) or direction.strip().lower() not in _SCROLL_DIRECTIONS:
+        return "Invalid direction: expected 'up', 'down', 'left' or 'right'."
+    direction = direction.strip().lower()
+    amount = arguments.get("amount", 3)
+    if isinstance(amount, bool) or not isinstance(amount, int):
+        return "Invalid amount: expected an integer number of wheel steps."
+    amount = max(1, min(amount, 100))  # a bounded number of notches, never a runaway
+    return _run_action("scroll", {"direction": direction, "amount": amount},
+                       description=f"scrolled {direction} {amount}")
+
+
 SKILLS = [
     Skill(
         name="move_pointer",
@@ -515,6 +540,36 @@ SKILLS = [
             },
         },
         run=_run_type_text,
+    ),
+    Skill(
+        name="scroll",
+        schema={
+            "type": "function",
+            "function": {
+                "name": "scroll",
+                "description": (
+                    "Scroll the window under the pointer up, down, left or right by a number of "
+                    "wheel steps (move the pointer over it first). Requires the "
+                    "'input-control-enabled' consent key (separate from the vision sense)."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "direction": {
+                            "type": "string",
+                            "enum": list(_SCROLL_DIRECTIONS),
+                            "description": "Which way to scroll: up, down, left or right.",
+                        },
+                        "amount": {
+                            "type": "integer",
+                            "description": "How many wheel steps (default 3).",
+                        },
+                    },
+                    "required": ["direction"],
+                },
+            },
+        },
+        run=_run_scroll,
     ),
 ]
 

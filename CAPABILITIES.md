@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**262 skills in 24 groups.** Each is a named, schema-typed module; the model
+**263 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. The whitelist *is* the design, so a new capability is a
 new named skill. The one exception is `run_command`, for running a project's
 tests and builds: off by default, sandboxed (no network, nothing outside the
@@ -37,7 +37,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**95 of 262 are consent-gated and 17 are destructive.**
+**96 of 263 are consent-gated and 17 are destructive.**
 
 ## System
 
@@ -350,6 +350,20 @@ Launch, list and find applications.
 | `open_application` | Open an app | — |
 | `vm` | Run and drive a virtual machine | needs `vm-control-enabled` |
 
+## Pointer and keyboard
+
+Drive the desktop without the keyboard.
+
+| Skill | What it does | Before it runs |
+|---|---|---|
+| `click_pointer` | Click | needs `input-control-enabled` |
+| `list_shortcuts` | What the keyboard shortcuts on this machine are | — |
+| `move_pointer` | Move the pointer | needs `input-control-enabled` |
+| `scroll` | Scroll a window up, down or sideways | needs `input-control-enabled` |
+| `set_keyboard_layout` | Change the keyboard layout | — |
+| `type_text` | Type text | needs `input-control-enabled` |
+| `ui_elements` | Press buttons, fill fields and open menus in other apps, and drive them visible | needs `input-control-enabled` |
+
 ## Pictures
 
 | Skill | What it does | Before it runs |
@@ -360,19 +374,6 @@ Launch, list and find applications.
 | `edit_image` | Resize, compress or edit a picture | — |
 | `edit_video` | Trim, resize, rotate, or mute a video | — |
 | `generate_image` | Make a new picture from a description, on this computer | — |
-
-## Pointer and keyboard
-
-Drive the desktop without the keyboard.
-
-| Skill | What it does | Before it runs |
-|---|---|---|
-| `click_pointer` | Click | needs `input-control-enabled` |
-| `list_shortcuts` | What the keyboard shortcuts on this machine are | — |
-| `move_pointer` | Move the pointer | needs `input-control-enabled` |
-| `set_keyboard_layout` | Change the keyboard layout | — |
-| `type_text` | Type text | needs `input-control-enabled` |
-| `ui_elements` | Press buttons, fill fields and open menus in other apps, and drive them visible | needs `input-control-enabled` |
 
 ## Services and logs
 

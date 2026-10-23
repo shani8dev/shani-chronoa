@@ -36,6 +36,7 @@ const IFACE = `
     <method name="Cue"><arg type="s" name="text"/><arg type="b" name="hold"/></method>
     <method name="PointerMove"><arg type="i" name="x"/><arg type="i" name="y"/></method>
     <method name="PointerClick"><arg type="s" name="button"/><arg type="i" name="count"/></method>
+    <method name="Scroll"><arg type="s" name="direction"/><arg type="i" name="amount"/></method>
     <method name="KeyPress"><arg type="s" name="combo"/><arg type="i" name="repeat"/></method>
     <method name="TypeText"><arg type="s" name="text"/></method>
     <method name="LaunchApp"><arg type="s" name="desktop_id"/></method>
@@ -63,6 +64,12 @@ function find(id) {
 // Clutter's numbers: mutter turns them into evdev codes itself (sent 0x110,
 // it logged "Unknown/invalid virtual device button 0x21b").
 const BUTTONS = {left: 1, middle: 2, right: 3, 1: 1, 2: 2, 3: 3};
+// Named scroll directions -> Clutter's enum. One discrete step per notify is a
+// wheel notch, which mutter turns into the axis events an app reads.
+const SCROLL = {
+    up: Clutter.ScrollDirection.UP, down: Clutter.ScrollDirection.DOWN,
+    left: Clutter.ScrollDirection.LEFT, right: Clutter.ScrollDirection.RIGHT,
+};
 const MODIFIERS = {
     ctrl: 'Control_L', control: 'Control_L', shift: 'Shift_L', alt: 'Alt_L',
     super: 'Super_L', meta: 'Super_L', win: 'Super_L', cmd: 'Super_L',
@@ -326,6 +333,25 @@ class WindowsService {
                 await wait(40);
                 pointer().notify_button(usec(), code, Clutter.ButtonState.RELEASED);
                 await wait(60);
+            }
+            invocation.return_value(null);
+        } catch (e) {
+            invocation.return_error_literal(Gio.DBusError, Gio.DBusError.FAILED, e.message);
+        }
+    }
+
+    // Wheel notches, one at a time with a gap - the same pacing PointerClick
+    // needs, because a burst of discrete scrolls is coalesced by the app into one.
+    async ScrollAsync([direction, amount], invocation) {
+        try {
+            const dir = SCROLL[direction];
+            if (dir === undefined)
+                throw new Error(`no scroll direction called ${direction}: use up, down, left or right`);
+            cue(`Chronoa is scrolling ${direction}`);
+            await ready(Clutter.InputDeviceType.POINTER_DEVICE);
+            for (let i = 0; i < Math.max(1, amount); i++) {
+                pointer().notify_discrete_scroll(usec(), dir, Clutter.ScrollSource.WHEEL);
+                await wait(40);
             }
             invocation.return_value(null);
         } catch (e) {

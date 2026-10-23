@@ -209,6 +209,55 @@ class TestInputControlCommandConstruction:
 
         assert run_calls == [["xdotool", "type", "--clearmodifiers", "--", "a; rm -rf /"]]
 
+    def test_scroll_builds_xdotool_wheel_argv(self, chronoa_config, monkeypatch):
+        # xdotool rides the wheel buttons: 4 up, 5 down, 6 left, 7 right.
+        _allow_input_control(monkeypatch)
+        _pin_xdotool_backend(monkeypatch)
+        run_calls = _spy_subprocess(monkeypatch)
+        from shani_chronoa.skills.input_control import _run_scroll
+
+        result = _run_scroll({"direction": "down", "amount": 3})
+
+        assert result == "Scrolled down 3 done."
+        assert run_calls == [["xdotool", "click", "--repeat", "3", "5"]]
+
+    def test_scroll_each_direction_maps_to_its_wheel_button(self, chronoa_config, monkeypatch):
+        _allow_input_control(monkeypatch)
+        _pin_xdotool_backend(monkeypatch)
+        run_calls = _spy_subprocess(monkeypatch)
+        from shani_chronoa.skills.input_control import _run_scroll
+
+        for direction, button in (("up", "4"), ("down", "5"), ("left", "6"), ("right", "7")):
+            _run_scroll({"direction": direction, "amount": 1})
+        assert run_calls == [["xdotool", "click", "--repeat", "1", b] for b in ("4", "5", "6", "7")]
+
+    def test_scroll_refuses_a_bad_direction_before_any_command(self, chronoa_config, monkeypatch):
+        _allow_input_control(monkeypatch)
+        _pin_xdotool_backend(monkeypatch)
+        run_calls = _spy_subprocess(monkeypatch)
+        from shani_chronoa.skills.input_control import _run_scroll
+
+        assert "Invalid direction" in _run_scroll({"direction": "sideways"})
+        assert "Invalid amount" in _run_scroll({"direction": "up", "amount": "lots"})
+        assert run_calls == [], "a rejected scroll must build no command"
+
+    def test_scroll_uses_the_gnome_extension_when_present(self, chronoa_config, monkeypatch):
+        """On Wayland the GNOME extension is the path; it gets the direction and
+        the step count, not an xdotool wheel button."""
+        _allow_input_control(monkeypatch)
+        import shani_chronoa.skills.input_control as mod
+        seen = []
+        import types
+        gnome = types.SimpleNamespace(pointer_scroll=lambda d, a: seen.append((d, a)))
+        monkeypatch.setattr(mod, "_gnome_input", lambda: gnome)
+        run_calls = _spy_subprocess(monkeypatch)
+        from shani_chronoa.skills.input_control import _run_scroll
+
+        result = _run_scroll({"direction": "up", "amount": 5})
+        assert seen == [("up", 5)], "the extension did not get the scroll"
+        assert run_calls == [], "the extension path must not shell out"
+        assert "Scrolled up 5 done" in result
+
     def test_no_backend_available_refuses(self, chronoa_config, monkeypatch):
         # Given: consent is on but no backend is detected
         _allow_input_control(monkeypatch)
