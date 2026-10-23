@@ -191,6 +191,10 @@ SURFACE_IDS = (
     "editor",
     "diff",
     "artifact_store",
+    # The dashboards Chronoa has built (the `dashboard` skill), each one a page
+    # of charts opened in Chronoa's own browser. The skill shipped with no pane,
+    # so a built dashboard was a path to remember.
+    "dashboards",
     # Other apps and chat channels: the MCP server and the channel bridge,
     # both complete and both with no UI until 2026-10-08.
     "connections",

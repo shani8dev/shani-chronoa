@@ -29,7 +29,8 @@ SCHEMA = {
             "output is the .html path, e.g. '~/Documents/sales-dashboard.html'. Static: run again to refresh it."
         ),
         "parameters": {"type": "object", "properties": {
-            "output": {"type": "string", "description": "The .html file to write."},
+            "output": {"type": "string", "description": "The .html file to write. Optional: with no path it is "
+                       "kept in the Dashboards pane's folder, named from the title."},
             "title": {"type": "string"},
             "when": {"type": "string", "description": "A subtitle like 'as of 22 Oct 2026'."},
             "cards": {"type": "array", "items": {"type": "object"},
@@ -38,20 +39,30 @@ SCHEMA = {
                        "description": "[{type: bar|line|pie, title, data: [[label, number], ...]}]."},
             "tables": {"type": "array", "items": {"type": "object"},
                        "description": "[{title, rows: [[header...], ...]}]."},
-        }, "required": ["output"]},
+        }, "required": []},
     },
 }
 
 
 def _run(arguments: dict) -> str:
-    if not str(arguments.get("output") or "").strip():
-        return "Give the output .html path."
-    try:
-        target = files.resolve_in_home(arguments["output"])
-    except files.PathProblem as exc:
-        return str(exc)
-    if target.suffix.lower() not in (".html", ".htm"):
-        target = target.with_suffix(".html")
+    given = str(arguments.get("output") or "").strip()
+    if given:
+        try:
+            target = files.resolve_in_home(given)
+        except files.PathProblem as exc:
+            return str(exc)
+        if target.suffix.lower() not in (".html", ".htm"):
+            target = target.with_suffix(".html")
+    else:
+        # No path: keep it in the dashboards folder the pane lists, named from
+        # the title, with a number if that name is taken.
+        base = dashboard.slug(arguments.get("title") or "dashboard")
+        folder = dashboard.default_dir()
+        target = folder / f"{base}.html"
+        n = 2
+        while target.exists():
+            target = folder / f"{base}-{n}.html"
+            n += 1
     if target.exists():
         return f"{target} already exists; give another output."
     try:

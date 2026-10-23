@@ -15,9 +15,24 @@ same in Chronoa's browser pane, a real browser, or anywhere it is sent.
 from __future__ import annotations
 
 import html
+import re
+from pathlib import Path
 from typing import List
 
 from shani_chronoa import charts
+
+
+def default_dir() -> Path:
+    """Where dashboards go when no path is given - one folder the Dashboards pane
+    lists, the way harness-studio keeps them together."""
+    from shani_chronoa import files
+    return files.data_home() / "dashboards"
+
+
+def slug(title: str) -> str:
+    """A filename stem from a title: lowercase words joined by '-', else 'dashboard'."""
+    out = re.sub(r"[^a-z0-9]+", "-", str(title or "").strip().lower()).strip("-")
+    return out[:60] or "dashboard"
 
 
 def _esc(text: object) -> str:

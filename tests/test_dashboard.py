@@ -90,3 +90,54 @@ def test_the_skill_writes_verifies_declares_and_guards(tmp_path, monkeypatch):
 def test_the_skill_is_offered(monkeypatch):
     from shani_chronoa import tools
     assert any(e["function"]["name"] == "dashboard" for e in tools.TOOLS), "dashboard is not registered"
+
+
+def test_with_no_path_a_dashboard_lands_in_the_pane_folder(tmp_path, monkeypatch):
+    """No output given: it goes to the Dashboards pane's folder, named from the
+    title, numbered if that name is taken - so the pane always has it."""
+    from shani_chronoa import dashboard, tools
+    from shani_chronoa.skills import dashboard as dskill
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    said = dskill._run({"title": "Q3 Sales", "cards": [{"label": "Rev", "value": "$1M"}]})
+    arts = tools.artifacts_for("dashboard", said)
+    assert arts and arts[0].parent == dashboard.default_dir()
+    assert arts[0].name == "q3-sales.html", arts[0].name
+    again = dskill._run({"title": "Q3 Sales", "cards": [{"label": "x", "value": "1"}]})
+    assert "q3-sales-2.html" in again, again
+    # an explicit path still wins
+    out = str(tmp_path / "mine.html")
+    assert out in dskill._run({"output": out, "cards": [{"label": "x", "value": "1"}]})
+
+
+def test_the_dashboards_pane_lists_and_opens_them(tmp_path, monkeypatch):
+    import gi
+    gi.require_version("Gtk", "4.0")
+    from gi.repository import Gtk
+    from shani_chronoa.skills import dashboard as dskill
+    from shani_chronoa.gui import surfaces
+    from shani_chronoa.gui.surfaces import dashboards as pane
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+
+    assert "dashboards" in surfaces.available_surfaces(), "pane not registered"
+    assert surfaces.sections().get("dashboards") == "Acting"
+    # empty first
+    assert pane._dashboards() == []
+    # make two, newest first, each openable
+    dskill._run({"title": "Older", "cards": [{"label": "a", "value": "1"}]})
+    dskill._run({"title": "Newer", "cards": [{"label": "b", "value": "2"}]})
+    names = [p.name for p in pane._dashboards()]
+    assert "older.html" in names and "newer.html" in names
+    page = pane.build(None)
+
+    def nodes(w, out=None):
+        out = out if out is not None else []
+        out.append(w)
+        c = w.get_first_child() if hasattr(w, "get_first_child") else None
+        while c is not None:
+            nodes(c, out)
+            c = c.get_next_sibling()
+        return out
+    opens = [n for n in nodes(page) if isinstance(n, Gtk.Button) and n.get_label() == "Open"]
+    assert len(opens) == 2, "each dashboard needs an Open control"
