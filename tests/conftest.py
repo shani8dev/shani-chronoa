@@ -532,6 +532,27 @@ def _isolate_xdg_data_home(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _calendar_reads_in_line(monkeypatch):
+    """Build the Calendar panel synchronously, as every test here expects.
+
+    The panel reads Evolution Data Server on a worker thread and applies the
+    answer on the GTK main loop, because the synchronous read froze the whole
+    window at start-up. A test has no main loop running, so without this every
+    panel would stay on "Reading your calendar" and every assertion about rows
+    would be made against the placeholder. The threaded path itself is tested
+    by `test_the_calendar_does_not_block_the_main_loop.py`, which captures the
+    real function at import, before this runs.
+    """
+    # Only when a test has already imported the panel: importing it here, for
+    # every test, pulled Gtk and the skills in ahead of
+    # `test_the_defaults_are_the_everyday_preset.py` and changed which schema
+    # that test read - five of its tests failed.
+    module = sys.modules.get("shani_chronoa.gui.surfaces.calendar")
+    if module is not None:
+        monkeypatch.setattr(module, "_in_background", lambda work, then: then(work()))
+
+
+@pytest.fixture(autouse=True)
 def _no_organ_may_stay_lit(request):
     """No test may leave an organ lit behind it.
 

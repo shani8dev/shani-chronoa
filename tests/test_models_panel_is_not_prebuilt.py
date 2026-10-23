@@ -55,7 +55,9 @@ from shani_chronoa.gui import surfaces, window as window_mod  # noqa: E402
 #: modules themselves, never typed - a hand-kept list of which panels opt out is
 #: a list that rots, and a panel added tomorrow would then fail the control below
 #: for the wrong reason.  Measured: models, diagnostics and phone.
-NAMED_SLOW = ("models", "diagnostics")
+#: `driving` since 2026-10-23: its portal row requests a RemoteDesktop session,
+#: and asked at start-up that left the app unable to answer AT-SPI.
+NAMED_SLOW = ("models", "diagnostics", "driving")
 
 
 def _declared_slow(panels):

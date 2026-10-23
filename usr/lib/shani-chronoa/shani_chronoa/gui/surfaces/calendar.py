@@ -54,6 +54,7 @@ unescaped `<` renders an *empty* label rather than a wrong one.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from datetime import date, datetime, timedelta
 from typing import Any, List, Optional, Tuple
@@ -61,7 +62,7 @@ from typing import Any, List, Optional, Tuple
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gtk  # noqa: E402
+from gi.repository import GLib, Gtk  # noqa: E402
 
 from shani_chronoa import eds_calendar, markdown_lite  # noqa: E402
 from shani_chronoa.capabilities import gate_label  # noqa: E402
@@ -219,6 +220,40 @@ def _window(now: float) -> Tuple[float, float, str]:
     a different week than the spoken answer for the same words.
     """
     return skill_calendar.span(WINDOW, 0, now)
+
+
+STATE_READING = "reading"
+READING_TITLE = "Reading your calendar"
+READING_DETAIL = "Asking the calendar service for the events in range."
+
+
+def _in_background(work: Any, then: Any) -> None:
+    """Run `work()` on a thread, then `then(result)` on the GTK main loop.
+
+    The one seam between the panel and its thread: a test that wants the
+    panel built synchronously swaps this for `then(work())`.
+    """
+    def run() -> None:
+        result = work()
+        GLib.idle_add(lambda: then(result) and False)
+
+    threading.Thread(target=run, daemon=True, name="calendar-read").start()
+
+
+def _where_lookup() -> Tuple[str, Optional[str]]:
+    """`(name, error)` for the default calendar - run on a worker thread."""
+    try:
+        return eds_calendar.default_calendar_name(), None
+    except Exception as exc:  # noqa: BLE001 - said plainly by _where_row, never raised
+        return "", str(exc)
+
+
+def _read_guarded(now: float) -> Tuple[Optional[List[Any]], str, str]:
+    try:
+        return _read(now)
+    except Exception as exc:  # noqa: BLE001 - the panel's own last line of defence
+        logger.warning("the calendar panel could not read the calendar", exc_info=True)
+        return None, STATE_UNREADABLE, UNREADABLE_DETAIL.format(reason=str(exc) or repr(exc))
 
 
 def _read(now: float) -> Tuple[Optional[List[Any]], str, str]:
@@ -472,14 +507,6 @@ class _CalendarSurface:
             child = following
         self._content.append(self._status_slot)
         common.clear(self._status_slot)
-        # **Before every early return below**, because the question this answers
-        # matters most in the states that return early: with no permission, no
-        # backend, nothing readable, or *no events at all* - and "no events" is
-        # exactly when a person would ask Chronoa to add one. Placed inside
-        # `_show_events` it only appeared when there was something to list.
-        where = self._where_row()
-        if where is not None:
-            self._status_slot.append(where)
         self._rows = []
         self._groups = []
         self._events = []
@@ -488,6 +515,18 @@ class _CalendarSurface:
 
         now = _now(self._app)
         allowed, detail = _permitted(self._app)
+        # **Off the main loop.** Both reads below are synchronous Evolution Data
+        # Server calls - `SourceRegistry.new_sync` and a `connect_sync` with a
+        # 10 s timeout per calendar - and this runs while the window is being
+        # built. Where EDS is slow or absent, the whole app stopped answering:
+        # measured in a shani-testbed slot (2026-10-23) with faulthandler, the
+        # main thread sat in `events_between` in 5 of 9 dumps, every AT-SPI
+        # request timed out, and the setup wizard's buttons never appeared to
+        # a screen reader or a test driver. So the reads go to a thread, the
+        # page says it is reading, and the answer is applied on the main loop;
+        # a later refresh supersedes an earlier one that is still in flight.
+        self._generation = getattr(self, "_generation", 0) + 1
+        generation = self._generation
         if not allowed:
             self._state = STATE_CONSENT
             self._message = detail
@@ -497,14 +536,47 @@ class _CalendarSurface:
                 common.STATUS_OFF,
                 "Calendar is not granted"))
             self._show_state(CONSENT_TITLE, detail)
-            return
+        else:
+            self._state = STATE_READING
+            self._message = READING_DETAIL
+            self.status_recorder.set(common.STATUS_UNKNOWN)
+            self._show_state(READING_TITLE, READING_DETAIL)
 
-        try:
-            events, state, detail = _read(now)
-        except Exception as exc:  # noqa: BLE001 - the panel's own last line of defence
-            logger.warning("the calendar panel could not read the calendar", exc_info=True)
-            events, state, detail = None, STATE_UNREADABLE, UNREADABLE_DETAIL.format(
-                reason=str(exc) or repr(exc))
+        def work() -> Tuple[Tuple[str, Optional[str]], Any]:
+            return _where_lookup(), (_read_guarded(now) if allowed else None)
+
+        _in_background(work, lambda answer: self._apply(generation, now, *answer))
+
+    def _apply(self, generation: int, now: float, where, read) -> bool:
+        """Show what the worker read, unless a newer refresh has started since."""
+        if generation != getattr(self, "_generation", 0):
+            return False
+        # **The where-row goes first, in every state**, because the question it
+        # answers matters most in the states that show no list: with no
+        # permission, no backend, nothing readable, or *no events at all* - and
+        # "no events" is exactly when a person would ask Chronoa to add one.
+        row = self._where_row(*where)
+        if row is not None:
+            self._status_slot.prepend(row)
+        if read is None:            # not granted: the consent state is already up
+            return False
+        # the "Reading..." placeholder goes; what was read replaces it
+        child = self._content.get_first_child()
+        while child is not None:
+            following = child.get_next_sibling()
+            if child is not self._status_slot:
+                self._content.remove(child)
+            child = following
+        events, state, detail = read
+        self._show_read(now, events, state, detail)
+        # The window read the sidebar dot when it built this panel, which was
+        # while it still said "Reading"; say the answer there too.
+        sidebar = getattr(getattr(self._app, "window", None), "_sidebar_page", None)
+        if sidebar is not None:
+            sidebar.set_status("calendar", self.status_recorder.status())
+        return False
+
+    def _show_read(self, now: float, events, state: str, detail: str) -> None:
         self._state = state
         self._message = detail
 
@@ -541,7 +613,7 @@ class _CalendarSurface:
             detail))
         self._show_events(self._events, now)
 
-    def _where_row(self) -> Optional[Gtk.Widget]:
+    def _where_row(self, name: str = "", error: Optional[str] = None) -> Optional[Gtk.Widget]:
         """Which calendar an event asked for in chat would actually land in.
 
         **`eds_calendar.default_calendar_name()` had no caller in the tree.**
@@ -567,12 +639,8 @@ class _CalendarSurface:
         synchronous read of a display name. Saying "writable" here without having
         asked would be a claim this row cannot support.
         """
-        try:
-            from shani_chronoa import eds_calendar
-
-            name = eds_calendar.default_calendar_name()
-        except Exception as exc:  # noqa: BLE001 - said plainly, never raised
-            text = str(exc)
+        if error is not None:
+            text = error
             if "no default calendar" in text.lower():
                 return self.status_recorder.row(
                     common.STATUS_ATTENTION,
