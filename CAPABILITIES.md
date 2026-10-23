@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**263 skills in 24 groups.** Each is a named, schema-typed module; the model
+**264 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. The whitelist *is* the design, so a new capability is a
 new named skill. The one exception is `run_command`, for running a project's
 tests and builds: off by default, sandboxed (no network, nothing outside the
@@ -37,7 +37,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**96 of 263 are consent-gated and 17 are destructive.**
+**97 of 264 are consent-gated and 17 are destructive.**
 
 ## System
 
@@ -357,6 +357,7 @@ Drive the desktop without the keyboard.
 | Skill | What it does | Before it runs |
 |---|---|---|
 | `click_pointer` | Click | needs `input-control-enabled` |
+| `drag` | Drag from one point to another | needs `input-control-enabled` |
 | `list_shortcuts` | What the keyboard shortcuts on this machine are | — |
 | `move_pointer` | Move the pointer | needs `input-control-enabled` |
 | `scroll` | Scroll a window up, down or sideways | needs `input-control-enabled` |

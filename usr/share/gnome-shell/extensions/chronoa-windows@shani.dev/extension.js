@@ -37,6 +37,7 @@ const IFACE = `
     <method name="PointerMove"><arg type="i" name="x"/><arg type="i" name="y"/></method>
     <method name="PointerClick"><arg type="s" name="button"/><arg type="i" name="count"/></method>
     <method name="Scroll"><arg type="s" name="direction"/><arg type="i" name="amount"/></method>
+    <method name="Drag"><arg type="i" name="sx"/><arg type="i" name="sy"/><arg type="i" name="ex"/><arg type="i" name="ey"/></method>
     <method name="KeyPress"><arg type="s" name="combo"/><arg type="i" name="repeat"/></method>
     <method name="TypeText"><arg type="s" name="text"/></method>
     <method name="LaunchApp"><arg type="s" name="desktop_id"/></method>
@@ -107,6 +108,28 @@ async function ready(kind) {
 
 const pointer = () => device(Clutter.InputDeviceType.POINTER_DEVICE);
 const keyboard = () => device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
+
+// Walk the pointer to (x, y) the same way PointerMove does - across, then down,
+// re-reading the position - but without claiming success or failure, so Drag can
+// step through a press and a release around two of these. PointerMove keeps its
+// own copy on purpose: that one is the proven path and is not disturbed here.
+async function moveTo(x, y) {
+    await ready(Clutter.InputDeviceType.POINTER_DEVICE);
+    for (let i = 0; i < 6; i++) {
+        let [cx, cy] = global.get_pointer();
+        if (Math.abs(cx - x) <= 1 && Math.abs(cy - y) <= 1)
+            return;
+        if (Math.abs(cx - x) > 1) {
+            pointer().notify_relative_motion(usec(), x - cx, 0);
+            await wait(30);
+            [cx, cy] = global.get_pointer();
+        }
+        if (Math.abs(cy - y) > 1) {
+            pointer().notify_relative_motion(usec(), 0, y - cy);
+            await wait(30);
+        }
+    }
+}
 
 // "Return", "ctrl", "F5", "a", "Page_Down" -> a keysym; an unknown name is an
 // error that says so, never a guess.
@@ -353,6 +376,25 @@ class WindowsService {
                 pointer().notify_discrete_scroll(usec(), dir, Clutter.ScrollSource.WHEEL);
                 await wait(40);
             }
+            invocation.return_value(null);
+        } catch (e) {
+            invocation.return_error_literal(Gio.DBusError, Gio.DBusError.FAILED, e.message);
+        }
+    }
+
+    // Press at the start, walk to the end, release - a press and a release the
+    // button sits held between, with a gap each side (a drag sent in one instant
+    // is read as a click, the same reason PointerClick pauses). Left button only,
+    // which is what select, move and resize use.
+    async DragAsync([sx, sy, ex, ey], invocation) {
+        try {
+            cue('Chronoa is dragging');
+            await moveTo(sx, sy);
+            pointer().notify_button(usec(), 1, Clutter.ButtonState.PRESSED);
+            await wait(80);
+            await moveTo(ex, ey);
+            await wait(80);
+            pointer().notify_button(usec(), 1, Clutter.ButtonState.RELEASED);
             invocation.return_value(null);
         } catch (e) {
             invocation.return_error_literal(Gio.DBusError, Gio.DBusError.FAILED, e.message);

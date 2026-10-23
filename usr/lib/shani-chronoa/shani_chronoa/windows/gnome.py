@@ -111,6 +111,9 @@ class GnomeBackend(Backend):
     def pointer_scroll(self, direction: str, amount: int = 3) -> None:
         self._call("Scroll", "si", (str(direction), int(amount)))
 
+    def pointer_drag(self, sx: int, sy: int, ex: int, ey: int) -> None:
+        self._call("Drag", "iiii", (int(sx), int(sy), int(ex), int(ey)))
+
     def key_press(self, combo: str, repeat: int = 1) -> None:
         self._call("KeyPress", "si", (str(combo), int(repeat)))
 

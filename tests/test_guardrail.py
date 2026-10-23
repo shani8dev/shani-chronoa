@@ -187,7 +187,7 @@ class TestARetryTellsTheModelHowToAskAgain:
 class TestAValueOutsideTheDeclaredEnumIsRefusedBeforeDispatch:
     """**The enum is the only schema constraint nothing was checking.**
 
-    Measured over the whole registry: 719 property nodes across 263 tools, of
+    Measured over the whole registry: 723 property nodes across 264 tools, of
     which **97 declare an `enum`** in **78 tools**, and **zero** declare a
     numeric or string bound. So `enum` is the entire gap - there is nothing else
     in these schemas left to validate.

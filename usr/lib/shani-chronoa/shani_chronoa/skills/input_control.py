@@ -129,6 +129,13 @@ def _build_command(backend: tuple[str, list[str]], action: str, params: dict) ->
             if button is None:
                 return None
             return prefix + ["click", "--repeat", str(max(1, int(params.get("amount", 3)))), button]
+        if action == "drag":
+            # One xdotool invocation chains the moves and the button, so the
+            # press is held across the move - a separate mousedown then mousemove
+            # would be two processes and the button would not stay down.
+            return prefix + ["mousemove", str(params["sx"]), str(params["sy"]),
+                             "mousedown", "1", "mousemove", str(params["ex"]), str(params["ey"]),
+                             "mouseup", "1"]
     elif name == "wtype":
         # **Typing only.** wtype(1) is a virtual *keyboard*: it has no pointer
         # at all, and `-M` presses a modifier - so the old `wtype -M hello`
@@ -360,6 +367,9 @@ def _run_gnome(gnome, action: str, params: dict, description: str) -> str:
             gnome.pointer_click(_BUTTON_NAMES.get(button, button), int(params.get("count", 1)))
         elif action == "scroll":
             gnome.pointer_scroll(str(params["direction"]), int(params.get("amount", 3)))
+        elif action == "drag":
+            gnome.pointer_drag(int(params["sx"]), int(params["sy"]),
+                               int(params["ex"]), int(params["ey"]))
         elif action == "type":
             text = params["text"]
             # Keys reach only what the layout can produce. Anything beyond
@@ -463,6 +473,17 @@ def _run_scroll(arguments: dict) -> str:
     amount = max(1, min(amount, 100))  # a bounded number of notches, never a runaway
     return _run_action("scroll", {"direction": direction, "amount": amount},
                        description=f"scrolled {direction} {amount}")
+
+
+def _run_drag(arguments: dict) -> str:
+    coords = {}
+    for key in ("sx", "sy", "ex", "ey"):
+        value = arguments.get(key)
+        if isinstance(value, bool) or not isinstance(value, int):
+            return f"Invalid drag coordinate: '{key}' must be an integer pixel position."
+        coords[key] = value
+    return _run_action("drag", coords,
+                       description=f"dragged from {coords['sx']},{coords['sy']} to {coords['ex']},{coords['ey']}")
 
 
 SKILLS = [
@@ -570,6 +591,31 @@ SKILLS = [
             },
         },
         run=_run_scroll,
+    ),
+    Skill(
+        name="drag",
+        schema={
+            "type": "function",
+            "function": {
+                "name": "drag",
+                "description": (
+                    "Drag with the left button held from one pixel position to another - to select "
+                    "text, move an item, or resize by its edge. Requires the 'input-control-enabled' "
+                    "consent key (separate from the vision sense)."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "sx": {"type": "integer", "description": "Start horizontal pixel."},
+                        "sy": {"type": "integer", "description": "Start vertical pixel."},
+                        "ex": {"type": "integer", "description": "End horizontal pixel."},
+                        "ey": {"type": "integer", "description": "End vertical pixel."},
+                    },
+                    "required": ["sx", "sy", "ex", "ey"],
+                },
+            },
+        },
+        run=_run_drag,
     ),
 ]
 

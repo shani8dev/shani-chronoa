@@ -258,6 +258,42 @@ class TestInputControlCommandConstruction:
         assert run_calls == [], "the extension path must not shell out"
         assert "Scrolled up 5 done" in result
 
+    def test_drag_chains_one_xdotool_invocation(self, chronoa_config, monkeypatch):
+        # The press must stay held across the move, so it is one xdotool call,
+        # not a mousedown and a mousemove as two processes.
+        _allow_input_control(monkeypatch)
+        _pin_xdotool_backend(monkeypatch)
+        run_calls = _spy_subprocess(monkeypatch)
+        from shani_chronoa.skills.input_control import _run_drag
+
+        result = _run_drag({"sx": 10, "sy": 20, "ex": 100, "ey": 200})
+
+        assert "done" in result
+        assert run_calls == [["xdotool", "mousemove", "10", "20", "mousedown", "1",
+                              "mousemove", "100", "200", "mouseup", "1"]]
+
+    def test_drag_uses_the_gnome_extension_when_present(self, chronoa_config, monkeypatch):
+        _allow_input_control(monkeypatch)
+        import shani_chronoa.skills.input_control as mod
+        import types
+        seen = []
+        gnome = types.SimpleNamespace(pointer_drag=lambda a, b, c, d: seen.append((a, b, c, d)))
+        monkeypatch.setattr(mod, "_gnome_input", lambda: gnome)
+        run_calls = _spy_subprocess(monkeypatch)
+        from shani_chronoa.skills.input_control import _run_drag
+
+        _run_drag({"sx": 10, "sy": 20, "ex": 100, "ey": 200})
+        assert seen == [(10, 20, 100, 200)] and run_calls == []
+
+    def test_drag_refuses_non_integer_coordinates(self, chronoa_config, monkeypatch):
+        _allow_input_control(monkeypatch)
+        _pin_xdotool_backend(monkeypatch)
+        run_calls = _spy_subprocess(monkeypatch)
+        from shani_chronoa.skills.input_control import _run_drag
+
+        assert "Invalid drag coordinate" in _run_drag({"sx": 1, "sy": 2, "ex": "x", "ey": 4})
+        assert run_calls == []
+
     def test_no_backend_available_refuses(self, chronoa_config, monkeypatch):
         # Given: consent is on but no backend is detected
         _allow_input_control(monkeypatch)
