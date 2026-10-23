@@ -290,6 +290,43 @@ def chronoa_has_focus() -> str:
     return ""
 
 
+#: App-id fragments of the terminals a paste must reach with Ctrl+Shift+V, not
+#: Ctrl+V. **This is the terminal-aware paste from AIYantra's "Extra" desktop
+#: engine.** A terminal reads Ctrl+V as a literal control character (or nothing),
+#: so a clipboard paste that works everywhere else silently fails there - a
+#: Devanagari or emoji word, which only the paste path can enter, never arrives.
+#: Matched as a lowercase substring of the focused window's app id, so
+#: `org.gnome.Terminal`, `org.gnome.Console`, `com.gnome.Ptyxis` and the rest hit.
+_TERMINAL_APP_IDS = frozenset({
+    "terminal", "console", "konsole", "xterm", "alacritty", "kitty", "foot",
+    "wezterm", "ptyxis", "tilix", "terminator", "rxvt", "st-", "contour",
+    "blackbox", "guake", "yakuake", "cool-retro-term", "qterminal", "sakura",
+})
+
+
+def _focused_is_terminal() -> bool:
+    """Whether the window that would receive a paste is a terminal emulator.
+
+    Read from the window list, like `chronoa_has_focus`; an unreadable list is
+    not a terminal (Ctrl+V, the safe default for every other app).
+    """
+    try:
+        from shani_chronoa.windows import detect
+        backend, _why = detect()
+        if backend is None:
+            return False
+        focused = next((w for w in backend.list() if w.focused), None)
+    except Exception:  # noqa: BLE001 - an unreadable list is "not a terminal"
+        return False
+    app_id = (getattr(focused, "app_id", "") or "").lower()
+    return any(fragment in app_id for fragment in _TERMINAL_APP_IDS)
+
+
+def _paste_combo() -> str:
+    """The key combo that pastes into the focused window - terminals need Shift."""
+    return "ctrl+shift+v" if _focused_is_terminal() else "ctrl+v"
+
+
 def _gnome_input():
     """Chronoa's GNOME Shell extension, when it can send input (see windows.gnome)."""
     try:
@@ -320,8 +357,10 @@ def _run_gnome(gnome, action: str, params: dict, description: str) -> str:
                 from shani_chronoa import ibus_input
                 if ibus_input.type_via_ibus(text):
                     return f"{description.capitalize()} done (through Chronoa's IBus input)."
-                if paste_text(text, lambda: gnome.key_press("ctrl+v", 1)):
-                    return (f"{description.capitalize()} done (pasted - Chronoa's IBus input "
+                combo = _paste_combo()
+                if paste_text(text, lambda: gnome.key_press(combo, 1)):
+                    where = " into the terminal with Ctrl+Shift+V" if combo == "ctrl+shift+v" else ""
+                    return (f"{description.capitalize()} done (pasted{where} - Chronoa's IBus input "
                             f"is not running; your clipboard was put back).")
                 return ("Input control: that text has characters no key can type, "
                         "Chronoa's IBus input is not running and the clipboard could not "
