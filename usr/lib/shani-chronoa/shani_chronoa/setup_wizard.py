@@ -41,7 +41,7 @@ from __future__ import annotations
 import logging
 import shutil
 import threading
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from shani_chronoa.config import (  # noqa: E402  (the factory above needs the real class)
     API_KEY_SETTINGS,
@@ -1264,6 +1264,22 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         group = Adw.PreferencesGroup(title="To download")
         body.append(group)
         _review_rows: List[Adw.PreferencesRow] = []
+        # The button and the consent row are built after the first render, and
+        # every later render (a "Remove" press) has to restate them too: they
+        # used to be computed once, so removing two of three items left the page
+        # saying "Download 3 thing(s)" over a 1309 MB consent line while the list
+        # and the Total row showed one item (found by a testbed agent run,
+        # 2026-10-23).
+        _counted: Dict[str, Any] = {}
+
+        def restate() -> None:
+            go_btn, consent = _counted.get("go"), _counted.get("consent")
+            if go_btn is not None:
+                go_btn.set_label(f"Download {len(plan)} thing(s)" if plan else "Continue")
+            if consent is not None:
+                consent.set_subtitle(f"{plan_total() / 1e6:.0f} MB for the {len(plan)} thing(s) listed above")
+            if _counted.get("on_consent") is not None:
+                _counted["on_consent"](bool(consent.get_active()) if consent is not None else True)
 
         def render() -> None:
             # Only the rows this function added. Walking `get_first_child()` on
@@ -1279,6 +1295,7 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
                                     subtitle="Everything you need is already here")
                 group.add(row)
                 _review_rows.append(row)
+                restate()
                 return
             for item_id, item in plan.items():
                 mb = float(item["size"]) / 1e6
@@ -1305,6 +1322,7 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
                          + f" across {len(plan)} download(s)")
             group.add(total_row)
             _review_rows.append(total_row)
+            restate()
 
         render()
         status = wrapping("")
@@ -1321,8 +1339,10 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
             else:
                 go.set_tooltip_text("")
 
-        consent_row(body, plan_total() / 1e6,
-                    f"the {len(plan)} thing(s) listed above", config, on_consent)
+        _counted["consent"] = consent_row(body, plan_total() / 1e6,
+                                          f"the {len(plan)} thing(s) listed above", config, on_consent)
+        _counted["go"] = go
+        _counted["on_consent"] = on_consent
 
         def run_all(_button=None) -> None:
             # `clicked` hands the button in. `run_all()` with no parameter raised
@@ -1344,8 +1364,17 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
                     GLib.idle_add(bar.set_text, str(label))
                     GLib.idle_add(bar.set_visible, True)
                     try:
-                        item["run"](lambda f, t: GLib.idle_add(
-                            bar.set_fraction, f))
+                        # The text matters as much as the fraction: the brain's
+                        # last report is (1.0, "Starting the model..."), and the
+                        # start can take minutes, so dropping the text left a full
+                        # bar and no word of what was happening - which read as a
+                        # wizard with no "done" state (testbed agent run,
+                        # 2026-10-23).
+                        def _report(f, t, _label=label):
+                            GLib.idle_add(bar.set_fraction, f)
+                            if t:
+                                GLib.idle_add(status.set_label, f"{_label}: {t}")
+                        item["run"](_report)
                     except Exception as exc:                     # noqa: BLE001
                         GLib.idle_add(status.set_label,
                                        f"{label} did not finish: {exc}")
@@ -1361,6 +1390,11 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
 
         go.connect("clicked", run_all)
         on_consent(pending_consent[0])
+        # The page is built once, at the end of construction, but every choice
+        # page can change the plan afterwards (a radio toggle re-records its
+        # item). Rendered again each time it is shown, or it lists whatever was
+        # selected when the wizard opened.
+        review.connect("showing", lambda *_a: render())
         body.append(go)
         more = Gtk.Button(label="Add something optional", css_classes=["flat"],
                           halign=Gtk.Align.CENTER)
@@ -1423,7 +1457,7 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         n.connect("clicked", lambda *_: goto("review"))
         page_footer(box).append(n)
 
-    def navigate(box, next_tag, skip_label: str = "") -> "Gtk.Button":
+    def navigate(box, next_tag, skip_label: str = "", drop: str = "") -> "Gtk.Button":
         """Just the way forward: a Next button and a way past the rest.
 
         Split out from `worker_area` because a page that has nothing to download
@@ -1457,9 +1491,18 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         page_footer(box).append(nxt)
         retitle(nxt)
         if skip_label:
+            # **"Skip for now" skips this step, not the rest of setup.** It used
+            # to go straight to Done, past Voice and past Review - the only page
+            # that downloads anything - so a model picked two pages earlier was
+            # silently never fetched and Done said "That is everything" (found by
+            # a testbed agent run, 2026-10-23). Now it drops this page's own item
+            # (`drop`) from the plan and moves on to the next page.
+            def _skip(*_a) -> None:
+                if drop:
+                    unchoose(drop)
+                goto(resolve())
             skip = Gtk.Button(label=skip_label, css_classes=["flat"], halign=Gtk.Align.CENTER)
-            skip.connect("clicked", lambda *_: goto(
-                "done" if resolve() != "done" else resolve()))
+            skip.connect("clicked", _skip)
             page_footer(box).append(skip)
         return nxt
 
@@ -2209,13 +2252,22 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
             # Recorded, not downloaded. The review page at the end downloads it,
             # so the person sees the whole list and the total before anything
             # moves.
-            _spec = local_llm.SPECS[chosen()]
-            choose("brain", f"Language model - {local_llm.SPECS[chosen()].key}",
-                   with_engine("llama-server", _spec.size_bytes),
-                   lambda report: setup_brain(chosen(), report, win.cancel, config),
-                   None)
+            # Re-recorded on every toggle, like the voice page: the label and
+            # size used to be read once, when this page was built, so picking
+            # Small after the default Medium downloaded Qwen3 0.6B while the
+            # review page still listed "qwen3-1.7b" at 1.1 GB (found by a
+            # testbed agent run, 2026-10-23).
+            def record_brain(*_a) -> None:
+                _spec = local_llm.SPECS[chosen()]
+                choose("brain", f"Language model - {_spec.key}",
+                       with_engine("llama-server", _spec.size_bytes),
+                       lambda report: setup_brain(chosen(), report, win.cancel, config),
+                       None)
+            for _check in _choice_rows[id(group)].values():
+                _check.connect("toggled", record_brain)
+            record_brain()
             _download_buttons.clear()
-            navigate(box, "ears", skip_label="Skip for now")
+            navigate(box, "ears", skip_label="Skip for now", drop="brain")
     view.add(picker)
 
     def _cloud_speech_switch(title: str, key: str, route, what: str) -> Gtk.Widget:
@@ -2297,16 +2349,21 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         # usual.
         box.append(group)
         unchoose("ears")
-        navigate(box, "voice", skip_label="Skip for now")
+        navigate(box, "voice", skip_label="Skip for now", drop="ears")
     else:
         box.append(group)
-        _espec = stt_provision.MODELS[chosen_stt()]
-        choose("ears", f"Listening - whisper.cpp {chosen_stt()}",
-               with_engine("whisper-cli", _espec.size_bytes),
-               lambda report: setup_ears(chosen_stt(), report, win.cancel, config),
-               _espec.note)
+        # Re-recorded on every toggle, for the same reason as the brain page.
+        def record_ears(*_a) -> None:
+            _espec = stt_provision.MODELS[chosen_stt()]
+            choose("ears", f"Listening - whisper.cpp {chosen_stt()}",
+                   with_engine("whisper-cli", _espec.size_bytes),
+                   lambda report: setup_ears(chosen_stt(), report, win.cancel, config),
+                   _espec.note)
+        for _check in _choice_rows[id(group)].values():
+            _check.connect("toggled", record_ears)
+        record_ears()
         _download_buttons.clear()
-        navigate(box, "voice", skip_label="Skip for now")
+        navigate(box, "voice", skip_label="Skip for now", drop="ears")
     view.add(ears)
 
     # 4. voice: one list of voices; each brings the engine that speaks it
