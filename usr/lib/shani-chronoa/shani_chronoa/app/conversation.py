@@ -422,6 +422,23 @@ class ConversationMixin:
             # giving up, and say what to do instead of a bare "not available".
             if self.assistant and self._use_local_server():
                 pass
+            elif self.assistant and getattr(self, "_local_server_loading", False):
+                # Started and still loading: hold this turn (and anything typed
+                # meanwhile, which `_submit` queues behind `_turn_in_flight`)
+                # until the model answers, rather than answering "no model".
+                self._turn_in_flight = True
+
+                def ready() -> None:
+                    self._turn_in_flight = False
+                    self._start_turn(text, channel)
+
+                def gave_up() -> None:
+                    self._turn_in_flight = False
+                    self._explain_no_model(text)
+                    self._turn_finished()
+
+                self._wait_for_local_server(ready, gave_up)
+                return
             else:
                 self._explain_no_model(text)
                 return

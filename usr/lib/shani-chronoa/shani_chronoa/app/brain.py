@@ -171,16 +171,56 @@ class BrainMixin:
                 logger.warning("could not start the local model server: %s", problem)
                 return False
             if not local_llm.is_up():
-                # Started, and still not answering. Saying so beats a silent
-                # False: the difference is "it is loading" and "it will not".
-                logger.warning("the local model server was started but is not answering")
+                # Started, and still loading: `systemctl restart` returns before
+                # the model is in memory, so one `is_up()` straight after it is
+                # false on every cold start. The caller waits for it off the main
+                # thread (`_wait_for_local_server`) instead of treating "loading"
+                # as "will not" - which is what dropped the question on the floor
+                # in a testbed agent run (2026-10-23): "started but is not
+                # answering", logged in the same second the start was issued.
+                logger.info("the local model server was started and is still loading")
+                self._local_server_loading = True
                 return False
+        self._local_server_loading = False
         self.llm = local_llm.LocalLLM()
         self._ollama_available = True
         if getattr(self, "assistant", None):
             self.assistant.llm = self.llm
         logger.info("Using the local llama.cpp server at %s", local_llm.BASE_URL)
         return True
+
+    def _wait_for_local_server(self, then, otherwise, timeout: float = 180.0) -> None:
+        """Wait for a just-started local model to answer, without blocking the window.
+
+        Polls `local_llm.is_up()` on a worker thread (each probe can take up to
+        1.5 s, which on the main loop is a frozen window and an accessibility
+        bus that stops answering) and calls `then()` once it answers, or
+        `otherwise()` after `timeout` seconds - both on the main loop.
+        """
+        import time as _time
+        from shani_chronoa import local_llm
+        if getattr(self, "window", None):
+            self.window.set_status("Starting the local model - the first answer takes a moment")
+
+        def done(ok: bool) -> bool:
+            self._local_server_loading = False
+            if ok and self._use_local_server(wake=False):
+                then()
+            else:
+                logger.warning("the local model did not answer within %.0f s of starting", timeout)
+                otherwise()
+            return False
+
+        def worker() -> None:
+            deadline = _time.monotonic() + timeout
+            while _time.monotonic() < deadline:
+                if local_llm.is_up():
+                    GLib.idle_add(done, True)
+                    return
+                _time.sleep(1.0)
+            GLib.idle_add(done, False)
+
+        threading.Thread(target=worker, daemon=True, name="local-llm-wait").start()
 
     def _maybe_enable_cloud_fallback(self) -> None:
         """Switch self.llm to the free cloud LLM chain if both opt-in gates are open.
