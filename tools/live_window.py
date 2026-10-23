@@ -130,6 +130,43 @@ def _seed_code(win):
                      "returns the line instead of printing it.")
 
 
+def _seed_media(win):
+    """A recording artifact, with its player opened, to photograph the clip markers."""
+    import pathlib
+    import subprocess
+    from gi.repository import GLib, Gtk
+    from shani_chronoa.gui import blocks
+    work = pathlib.Path(os.environ.get("XDG_DATA_HOME", "/tmp")) / "project"
+    work.mkdir(parents=True, exist_ok=True)
+    clip = work / "interview.wav"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi",
+                    "-i", "sine=f=330:d=12", "-ar", "16000", "-ac", "1", str(clip)], check=True)
+    win.add_user_turn("record the room for a bit")
+    win.add_tool_call("recording", {"action": "capture", "seconds": 12},
+                      f"Recorded 12s, kept at {clip} - `subtitles` can run on that file.",
+                      artifacts=(clip,))
+    win.set_response("Recorded it. Open the player below, mark a part, and "
+                     "**Add to message** to have me transcribe just that bit.")
+
+    def open_player():
+        for node in _walk_widgets(win):
+            if isinstance(node, Gtk.Button) and (node.get_tooltip_text() or "").startswith("Preview"):
+                node.emit("clicked")
+                break
+        return False
+    GLib.timeout_add(1500, open_player)
+
+
+def _walk_widgets(widget, out=None):
+    out = out if out is not None else []
+    out.append(widget)
+    child = widget.get_first_child() if hasattr(widget, "get_first_child") else None
+    while child is not None:
+        _walk_widgets(child, out)
+        child = child.get_next_sibling()
+    return out
+
+
 def _seed_ask(win):
     """An edit waiting for approval, through the real preview and question."""
     import pathlib
@@ -176,6 +213,8 @@ def _on_map(win):
         _seed_code(win)
     elif os.environ.get("SEED") == "ask":
         _seed_ask(win)
+    elif os.environ.get("SEED") == "media":
+        _seed_media(win)
     elif os.environ.get("SEED") == "palette":
         # **The palette, open.** It is the one surface that is built but
         # never *seen* in a capture, because nothing opens it - a person

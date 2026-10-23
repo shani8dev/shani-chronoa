@@ -325,6 +325,59 @@ def test_copy_contents_is_offered_for_text_files_and_copies_their_text(tmp_path)
     assert "Train" in blocks.ArtifactBlock([sheet])._contents_text(sheet)
 
 
+def test_a_clip_reference_round_trips_through_the_recording_parser():
+    """'Add to message' drops a reference the `recording` skill can read back."""
+    from shani_chronoa import recordings
+    ref = blocks.clip_reference("interview.wav", 70.4, 85.0)
+    assert ref == "[interview.wav, 1:10.4 to 1:25.0]"
+    inner = ref[ref.index(",") + 1:ref.rindex("]")].strip()
+    assert recordings.parse_range(inner) == (70.4, 85.0)
+
+
+def test_audio_and_video_route_to_a_media_player(tmp_path):
+    block = blocks.ArtifactBlock([tmp_path])
+    for name in ("talk.mp3", "clip.mp4", "song.flac", "demo.webm"):
+        assert block._preview_kind(tmp_path / name) == "media", name
+    # a picture is still an image, not media
+    assert block._preview_kind(tmp_path / "photo.png") == "image"
+
+
+def test_add_to_message_inserts_into_the_composer_and_degrades(tmp_path, monkeypatch):
+    import types
+    buffer = Gtk.TextBuffer()
+    entry = types.SimpleNamespace(get_buffer=lambda: buffer, grab_focus=lambda: None)
+    app = types.SimpleNamespace(window=types.SimpleNamespace(_input_entry=entry))
+    monkeypatch.setattr(blocks, "_app_for", lambda w: app)
+    block = blocks.ArtifactBlock([tmp_path])
+    assert block._add_to_message(Gtk.Button(), "[clip.mp4, 1:10.0 to 1:25.0]")
+    text = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
+    assert "[clip.mp4, 1:10.0 to 1:25.0]" in text
+    # no composer to reach -> False, never a crash
+    monkeypatch.setattr(blocks, "_app_for", lambda w: None)
+    assert block._add_to_message(Gtk.Button(), "x") is False
+
+
+def test_the_media_player_builds_with_markers(tmp_path):
+    """Validated visually in the real window via tools/live_window.sh -m; this
+    pins the player's controls and that Add-to-message starts disabled."""
+    import shutil
+    import subprocess
+    if not shutil.which("ffmpeg"):
+        import pytest
+        pytest.skip("ffmpeg not installed")
+    wav = tmp_path / "tone.wav"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=f=440:d=2",
+                    "-ar", "16000", "-ac", "1", str(wav)], check=True)
+    block = blocks.ArtifactBlock([wav])
+    player = block._media_preview(wav)
+    assert player is not None, "no player built for a real audio file"
+    labels = [n.get_label() for n in _nodes(player) if isinstance(n, Gtk.Button) and n.get_label()]
+    assert {"Set start", "Set end", "Add to message"} <= set(labels), labels
+    assert any(isinstance(n, Gtk.Scale) for n in _nodes(player)), "no scrubber"
+    add = next(n for n in _nodes(player) if isinstance(n, Gtk.Button) and n.get_label() == "Add to message")
+    assert not add.get_sensitive(), "Add to message must start disabled until a part is marked"
+
+
 def test_an_image_preview_is_capped_rather_than_decoded_at_full_size(tmp_path):
     """The cost here is the decoded surface, not the width on screen."""
     big = tmp_path / "big.png"

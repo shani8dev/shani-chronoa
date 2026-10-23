@@ -34,13 +34,14 @@
 # Output: OUT.png, and OUT.log with the app's log plus PROBE/TREE/SHOT lines.
 set -u
 SIZE=460x640 SEED=1 TREE="" QUIT=1 PAGE="" MCP=""
-while getopts "s:ecat:kp:M:P" opt; do
+while getopts "s:ecamt:kp:M:P" opt; do
   case $opt in
     s) SIZE=$OPTARG ;;
     e) SEED=0 ;;
     c) SEED=code ;;
     P) SEED=palette ;;
     a) SEED=ask ;;
+    m) SEED=media ;;
     t) TREE=$OPTARG ;;
     k) QUIT=0 ;;
     p) PAGE=$OPTARG ;;

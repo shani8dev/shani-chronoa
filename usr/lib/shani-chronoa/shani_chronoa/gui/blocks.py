@@ -811,6 +811,15 @@ class InlineDiff(Gtk.Box):
         self.append(lines)
 
 
+def clip_reference(name: str, start: float, end: float) -> str:
+    """"[clip.mp4, 1:10.4 to 1:25.0]" - a marked part of a recording, in the form
+    the `recording` skill reads back (`recordings.parse_range`). Put in the
+    composer by the media player's "Add to message", so the next turn can ask to
+    transcribe, subtitle or clip exactly that part."""
+    from shani_chronoa import recordings
+    return f"[{name}, {recordings._clock(start)} to {recordings._clock(end)}]"
+
+
 class ArtifactBlock(Gtk.Box):
     """A file a skill **declared** it produced, shown rather than described.
 
@@ -852,6 +861,12 @@ class ArtifactBlock(Gtk.Box):
     #: pane: Markdown formatted vs. its text, a table vs. the CSV, the picture vs.
     #: the SVG. The last choice is remembered for the next one (`_view_mode`).
     SWITCHABLE_SUFFIXES = (".md", ".markdown", ".csv", ".tsv", ".svg", ".html", ".htm")
+
+    #: Playable media. A preview is a small player with a scrubber and clip
+    #: markers (like harness-studio's): mark a part and "Add to message" puts a
+    #: reference to it in the composer, which the `recording` skill transcribes.
+    AUDIO_SUFFIXES = (".mp3", ".wav", ".ogg", ".oga", ".opus", ".m4a", ".aac", ".flac", ".wma", ".mka")
+    VIDEO_SUFFIXES = (".mp4", ".mkv", ".mov", ".webm", ".m4v", ".avi", ".3gp")
 
     def __init__(self, paths) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -968,6 +983,8 @@ class ArtifactBlock(Gtk.Box):
             return None
         if suffix in self.IMAGE_SUFFIXES:
             return "image"
+        if suffix in self.AUDIO_SUFFIXES or suffix in self.VIDEO_SUFFIXES:
+            return "media"
         if suffix in self.OFFICE_SUFFIXES:
             return "office"
         if suffix == ".pdf":
@@ -1017,6 +1034,8 @@ class ArtifactBlock(Gtk.Box):
             return self._image_preview(path)
         if kind == "office":
             return self._office_preview(path)
+        if kind == "media":
+            return self._media_preview(path)
         if kind == "pdf":
             return self._pdf_preview(path)
         if kind == "table":
@@ -1322,6 +1341,156 @@ class ArtifactBlock(Gtk.Box):
         frame.set_child(image)
         frame.update_property([Gtk.AccessibleProperty.LABEL],
                               [f"First page of {path.name}"])
+        return frame
+
+    def _add_to_message(self, widget: Gtk.Widget, text: str) -> bool:
+        """Put `text` in the composer at the cursor (not sent). False if there is
+        no composer to reach - the caller then does nothing rather than crash."""
+        app = _app_for(widget)
+        window = getattr(app, "window", None) if app is not None else None
+        entry = getattr(window, "_input_entry", None) if window is not None else None
+        if entry is None:
+            return False
+        try:
+            buffer = entry.get_buffer()
+            if buffer.get_char_count():
+                buffer.insert_at_cursor(" ")
+            buffer.insert_at_cursor(text + " ")
+            entry.grab_focus()
+        except Exception as exc:  # noqa: BLE001 - a composer that will not take it is not fatal
+            logger.info("could not add clip reference to the message: %s", exc)
+            return False
+        return True
+
+    def _media_preview(self, path: Path):
+        """A small player with a scrubber and clip markers for an audio/video file.
+
+        Mark a part with Set start / Set end and "Add to message" drops a
+        reference to it in the composer, so the next turn can ask to transcribe
+        or subtitle exactly that part (the `recording` skill reads the range).
+        A file GtkMediaFile cannot open gets no preview rather than a dead player.
+        """
+        try:
+            stream = Gtk.MediaFile.new_for_filename(str(path))
+        except Exception as exc:  # noqa: BLE001
+            logger.info("no media preview for %s: %s", path.name, exc)
+            return None
+        if stream is None:
+            return None
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        if path.suffix.lower() in self.VIDEO_SUFFIXES:
+            video = Gtk.Video()
+            video.set_media_stream(stream)
+            video.set_size_request(-1, 220)
+            box.append(video)
+
+        marks = {"start": None, "end": None}
+        guard = {"seeking": False}
+
+        controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        play = Gtk.ToggleButton(icon_name="media-playback-start-symbolic")
+        play.set_tooltip_text("Play or pause")
+        scrubber = Gtk.Scale(orientation=Gtk.Orientation.HORIZONTAL)
+        scrubber.set_hexpand(True)
+        scrubber.set_draw_value(False)
+        scrubber.set_range(0, 1)
+        time_label = Gtk.Label(label="0:00.0")
+        time_label.add_css_class("dim-label")
+        controls.append(play)
+        controls.append(scrubber)
+        controls.append(time_label)
+        box.append(controls)
+
+        marker_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        set_start = Gtk.Button(label="Set start")
+        set_end = Gtk.Button(label="Set end")
+        add = Gtk.Button(label="Add to message")
+        add.add_css_class("suggested-action")
+        add.set_sensitive(False)
+        range_label = Gtk.Label(label="No part marked")
+        range_label.add_css_class("dim-label")
+        range_label.set_hexpand(True)
+        range_label.set_xalign(0.0)
+        for w in (set_start, set_end, range_label, add):
+            marker_row.append(w)
+        box.append(marker_row)
+
+        def secs(micro):
+            return (micro or 0) / 1_000_000.0
+
+        def refresh_range():
+            s, e = marks["start"], marks["end"]
+            if s is not None and e is not None and e > s:
+                from shani_chronoa import recordings
+                range_label.set_label(f"{recordings._clock(s)} to {recordings._clock(e)}")
+                add.set_sensitive(True)
+            else:
+                add.set_sensitive(False)
+                if s is not None and e is None:
+                    from shani_chronoa import recordings
+                    range_label.set_label(f"from {recordings._clock(s)} - now set the end")
+                elif s is not None and e is not None:
+                    range_label.set_label("the end must come after the start")
+                else:
+                    range_label.set_label("No part marked")
+
+        def on_play(button):
+            if button.get_active():
+                stream.play()
+                button.set_icon_name("media-playback-pause-symbolic")
+            else:
+                stream.pause()
+                button.set_icon_name("media-playback-start-symbolic")
+
+        def on_duration(*_a):
+            dur = secs(stream.get_duration())
+            if dur > 0:
+                scrubber.set_range(0, dur)
+
+        def on_timestamp(*_a):
+            from shani_chronoa import recordings
+            pos = secs(stream.get_timestamp())
+            guard["seeking"] = True
+            scrubber.set_value(pos)
+            guard["seeking"] = False
+            time_label.set_label(recordings._clock(pos))
+            if not stream.get_playing() and play.get_active():
+                play.set_active(False)
+
+        def on_scrub(_scale):
+            if not guard["seeking"]:
+                stream.seek(int(scrubber.get_value() * 1_000_000))
+
+        def on_set_start(_b):
+            marks["start"] = secs(stream.get_timestamp())
+            if marks["end"] is not None and marks["end"] <= marks["start"]:
+                marks["end"] = None
+            refresh_range()
+
+        def on_set_end(_b):
+            marks["end"] = secs(stream.get_timestamp())
+            refresh_range()
+
+        def on_add(button):
+            s, e = marks["start"], marks["end"]
+            if s is None or e is None or e <= s:
+                return
+            self._add_to_message(button, clip_reference(path.name, s, e))
+
+        play.connect("toggled", on_play)
+        stream.connect("notify::duration", on_duration)
+        stream.connect("notify::timestamp", on_timestamp)
+        scrubber.connect("value-changed", on_scrub)
+        set_start.connect("clicked", on_set_start)
+        set_end.connect("clicked", on_set_end)
+        add.connect("clicked", on_add)
+        on_duration()
+
+        frame = Gtk.Frame()
+        frame.add_css_class("artifact-preview")
+        frame.set_child(box)
+        frame.update_property([Gtk.AccessibleProperty.LABEL], [f"Player for {path.name}"])
         return frame
 
     #: Rows of a table preview to draw before stopping. A preview recognises the
