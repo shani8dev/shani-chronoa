@@ -1462,10 +1462,8 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._model_picker_lead = lead
         row.append(button)
         row.append(self._thinking_button())
-        row.append(self._composer_style_chip())
         row.append(self._speak_toggle())
         self._refresh_model_word()
-        self._refresh_composer_style()
         return row
 
     def _speak_toggle(self) -> Gtk.ToggleButton:
@@ -1519,57 +1517,23 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         label = Gtk.Label()
         label.add_css_class("caption")
         button.set_child(label)
-        # **One question per chip.** This menu is only "how hard it thinks" -
-        # the reply style is its own chip now (`_composer_style_chip`), because
-        # cramming thinking effort and writing style into one dropdown made a
-        # single control carry two unrelated settings, and a person opening it to
-        # change one scrolled past the other.
         menu = Gio.Menu()
+        levels = Gio.Menu()
         for level in THINKING_LEVELS:
-            menu.append(self._THINKING_WORDS[level], f"app.thinking::{level}")
+            levels.append(self._THINKING_WORDS[level], f"app.thinking::{level}")
+        menu.append_section("How hard it thinks", levels)
+        # **The reply style lives here too**: thinking is how much work goes
+        # into the answer, the style how much of it is written out, and both
+        # are set per question. It used to share a button beside Send with plan
+        # mode, which is about acting rather than answering.
+        styles = Gio.Menu()
+        for key, word, _line, _icon in _ModeStrip._STYLES:
+            styles.append(word, f"app.reply-style::{key}")
+        menu.append_section("How it replies", styles)
         button.set_menu_model(menu)
         self._thinking_picker_button = button
         self._thinking_picker_word = label
         return button
-
-    def _composer_style_chip(self) -> Gtk.MenuButton:
-        """How replies are written - its own chip in the composer, beside thinking.
-
-        The reply style was a section inside the thinking dropdown; split out so
-        each composer chip asks one thing. Bound to the same stateful
-        `app.reply-style` action as the mode strip's chip, so the two cannot
-        disagree.
-        """
-        button = Gtk.MenuButton()
-        button.add_css_class("flat")
-        label = Gtk.Label()
-        label.add_css_class("caption")
-        button.set_child(label)
-        menu = Gio.Menu()
-        for key, word, _line, _icon in _ModeStrip._STYLES:
-            menu.append(word, f"app.reply-style::{key}")
-        button.set_menu_model(menu)
-        self._composer_style_button = button
-        self._composer_style_word = label
-        return button
-
-    def _refresh_composer_style(self) -> None:
-        """Redraw the composer's reply-style chip from the style in force."""
-        label = getattr(self, "_composer_style_word", None)
-        if label is None:
-            return
-        style = "ordinary"
-        strip = getattr(self, "_mode_strip", None)
-        if strip is not None:
-            try:
-                style = strip._read_reply_style()
-            except Exception:  # noqa: BLE001
-                style = "ordinary"
-        word = next((r[1] for r in _ModeStrip._STYLES if r[0] == style), "Ordinary")
-        compact = getattr(self, "_composer_compact", False)
-        label.set_label(f"Reply: {word}" if compact else f"Replies: {word}")
-        if getattr(self, "_composer_style_button", None) is not None:
-            self._composer_style_button.set_tooltip_text(f"How replies are written: {word}")
 
     def _thinking_word(self) -> str:
         from shani_chronoa.cloud_llm import thinking_level
@@ -1588,10 +1552,18 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         level = self._thinking_word()
         word = self._THINKING_WORDS[level]
         compact = getattr(self, "_composer_compact", False)
-        # Thinking only - the reply style is its own chip now, refreshed here too
-        # so one call keeps both composer chips current.
-        label.set_label(f"Think: {word}" if compact else f"Thinking: {word}")
-        self._refresh_composer_style()
+        style = "ordinary"
+        strip = getattr(self, "_mode_strip", None)
+        if strip is not None:
+            try:
+                style = strip._read_reply_style()
+            except Exception:                           # noqa: BLE001
+                style = "ordinary"
+        style_word = next((r[1] for r in _ModeStrip._STYLES if r[0] == style), "")
+        # The style is named only when it departs from ordinary, the same
+        # "quiet" rule every chip follows.
+        suffix = "" if style == "ordinary" else f" · {style_word}"
+        label.set_label((f"Think: {word}" if compact else f"Thinking: {word}") + suffix)
         if level == "off":
             what = "It answers without thinking first - the fastest choice."
         elif self._answering_kind() == "cloud":
@@ -1600,7 +1572,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         else:
             what = ("A local model has no levels, so this turns its thinking "
                     "on. On a CPU that is most of the wait.")
-        button.set_tooltip_text(f"Thinking: {word}. {what}")
+        button.set_tooltip_text(f"Thinking: {word}. {what} Replies: {style_word or 'Ordinary'}.")
         button.update_property(
             [Gtk.AccessibleProperty.LABEL],
             [f"How hard it thinks before answering, currently {word}"])
