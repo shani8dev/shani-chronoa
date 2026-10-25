@@ -881,9 +881,12 @@ class TestNobodyToAskSaysNobodyIsThere:
         # **A count, and it moves when a conversion lands.** Six of the
         # refusals now name the Settings row instead of the key - the
         # phone, android, bluetooth and calendar skills, and the two cloud
-        # voice engines - so the number is 61.
-        assert counts["key_only"] == 61, (
-            f"the raw-key count moved from 61 to {counts['key_only']} - either a "
+        # voice engines - so the number is 61. 2026-10-23: scroll and drag joined
+        # move_pointer behind `input-control-enabled` (63), and that gate now names
+        # its Settings row too; the five of its seven tools this sweep reaches
+        # leave this count: 58.
+        assert counts["key_only"] == 58, (
+            f"the raw-key count moved from 58 to {counts['key_only']} - either a "
             "skill now names the Settings row (update this, and the sweep "
             "beside it still holds), or a gate stopped naming anything at all"
         )

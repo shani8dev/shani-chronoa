@@ -709,6 +709,7 @@ _PACKAGE_HINTS = {
     "lircd": "lirc",
     "udisksctl": "udisks2",
     "pdftotext": "poppler",
+    "pdftoppm": "poppler",
     "scanimage": "sane",
     "smartctl": "smartmontools",
     "vnstat": "vnstat",

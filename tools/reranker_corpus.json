@@ -47,8 +47,8 @@
           "desc": "todo_list: Keep a list of tasks that survives between turns and restarts: add an item, change its status, mark what it is blocked by, or list what is outstanding. Use this to track a multi-step job rather than holding it in the conversation. Requires the 'todo-list-enabled' consent key. (arguments: action, id, content, status, blocked_by)"
         },
         {
-          "tool": "sync_folder",
-          "desc": "sync_folder: Sync one folder to another, sending only what changed - and show the plan first, before anything is copied. Use for 'copy my files to the server', 'sync these folders', 'what would change if I synced'. Does not delete anything at the destination unless you ask it to, and asks first even then. (arguments: source, destination, apply, delete)"
+          "tool": "take_photo",
+          "desc": "take_photo: Take a photo or selfie with the webcam and save it to the Pictures folder, optionally after a countdown in seconds (0-30). Requires the vision/camera consent. Not for screenshots (use screenshot) or video (use capture_video). (arguments: countdown, path, device, infrared)"
         }
       ],
       "offered": [
@@ -59,7 +59,7 @@
         "empty_directories",
         "manage_triggers",
         "todo_list",
-        "sync_folder"
+        "take_photo"
       ],
       "recall_hit": true
     },
@@ -190,12 +190,12 @@
           "desc": "ui_elements: Use another app's controls by what they are, through the accessibility tree. apps: which apps are reachable. inspect: list a window's buttons, fields, menus and labels with ids (app = its name; query narrows by text). press: activate an element by id (a button, checkbox, link, menu item). set_text: put text in a field by id. read: an element's text or value. menu: open a menu path like 'File > Export'. drive: one turn of driving - give an action and a control number and the reply is the app's new state in the same short numbered form, which is what a small model can act on. act: click, type or key an app by name or position, with a visible cursor. state: the numbered controls an app is showing. Works on a container's app and on this desktop's own apps alike. Requires 'input-control-enabled'; drive start also runs a container, so it needs 'container-control-enabled' as well. (arguments: action, app, id, text, query, path, do, how, number, image, keys, x, y)"
         },
         {
-          "tool": "calendar_edit",
-          "desc": "calendar_edit: Change the user's calendar: 'create' adds an event to the default calendar (title, start, optional duration or end, location); 'move' reschedules an event found by its current time and/or title to new_start; 'cancel' deletes one. Times in words: 'tomorrow 3pm', 'friday 5 pm', '2026-10-09 14:00'. Move and cancel ask the person to confirm. Ambiguous matches are refused with the candidates. Requires the 'calendar-write-enabled' consent key (move/cancel also 'calendar-read-enabled'). No invitations are sent. (arguments: action, title, start, duration, end, new_start, location, notes)"
-        },
-        {
           "tool": "browse",
           "desc": "browse: Open a website and do things on it for the person: find information, fill in forms, click through. Drive a web browser: navigate, read the page's text (get_text), click, type, select options, scroll, move through history, take screenshots and wait for conditions. While Chronoa's window is open this is the in-app browser the user can watch: there it opens only http(s) pages the egress policy allows, and key, hover, drag, upload_file, tabs and evaluate are not available. Otherwise it is a headless Chromium with all actions. Requires the web sense to be enabled and privacy mode to be off. (arguments: action, url, selector, text, key, value, label, files, x, y, to_x, to_y, to_selector, delta_x, delta_y, steps, repeat, tab_id, path, wait_for, timeout, settle)"
+        },
+        {
+          "tool": "calendar_edit",
+          "desc": "calendar_edit: Change the user's calendar: 'create' adds an event to the default calendar (title, start, optional duration or end, location); 'move' reschedules an event found by its current time and/or title to new_start; 'cancel' deletes one. Times in words: 'tomorrow 3pm', 'friday 5 pm', '2026-10-09 14:00'. Move and cancel ask the person to confirm. Ambiguous matches are refused with the candidates. Requires the 'calendar-write-enabled' consent key (move/cancel also 'calendar-read-enabled'). No invitations are sent. (arguments: action, title, start, duration, end, new_start, location, notes)"
         }
       ],
       "offered": [
@@ -205,8 +205,8 @@
         "open_settings",
         "open_files",
         "ui_elements",
-        "calendar_edit",
-        "browse"
+        "browse",
+        "calendar_edit"
       ],
       "recall_hit": true
     },
@@ -807,12 +807,12 @@
           "desc": "driver_build: Build a scaffolded out-of-tree kernel module with Kbuild, then read the resulting .ko back off disk. Needs the 'driver-build-enabled' consent key. Refuses with the missing package named when this machine has no toolchain. (arguments: name, path)"
         },
         {
-          "tool": "list_wifi_networks",
-          "desc": "list_wifi_networks: Scan for and list the WiFi networks in range, with signal strength and whether this machine is joined to one. Scans the radio, so it requires the 'network-sense-enabled' consent. (arguments: rescan)"
+          "tool": "dashboard",
+          "desc": "dashboard: Build a dashboard as one self-contained HTML page (headline numbers, charts and tables), drawn on this computer with no install, no network and no scripts. Give any of: cards [{label, value, sub}], charts [{type: bar|line|pie, title, data: [[label, number], ...]}], tables [{title, rows: [[header...], [row...]]}], plus title and when (a 'as of ...' line). output is the .html path, e.g. '~/Documents/sales-dashboard.html'. Static: run again to refresh it. (arguments: output, title, when, cards, charts, tables)"
         },
         {
-          "tool": "network_activity",
-          "desc": "network_activity: Report what this machine's network is doing right now, per program: which processes are sending and receiving, and how fast each interface is moving. Use for 'what is using my bandwidth', 'why is the network slow', 'what is uploading', 'is something downloading right now'. Interface rates come from /proc/net/dev and always work; per-program rates need nethogs and can only name programs this user owns. Says which half it could not measure and why, and reports an unattributed socket as unattributed rather than guessing at a program. Read-only; nothing is changed or blocked."
+          "tool": "list_wifi_networks",
+          "desc": "list_wifi_networks: Scan for and list the WiFi networks in range, with signal strength and whether this machine is joined to one. Scans the radio, so it requires the 'network-sense-enabled' consent. (arguments: rescan)"
         }
       ],
       "offered": [
@@ -822,8 +822,8 @@
         "lab_network_destroy",
         "scan_network",
         "driver_build",
-        "list_wifi_networks",
-        "network_activity"
+        "dashboard",
+        "list_wifi_networks"
       ],
       "recall_hit": true
     },
@@ -1957,8 +1957,8 @@
           "desc": "set_timer: Set a countdown timer that sends a desktop notification when it finishes; list pending timers, say how much time is left, add or take off time, pause, resume, reset to the original length, and cancel. With one timer pending, 'my timer' needs no id. The countdown is owned by systemd, so it fires even if the assistant is closed. It is refused rather than silently accepted when systemd is unavailable, because a timer recorded as pending that will never fire is the same lie as a camera reported as disabled when it is not. (arguments: action, seconds, label, id)"
         },
         {
-          "tool": "arrange_window",
-          "desc": "arrange_window: Arrange a window: tile (snap it to the left, right, top or bottom half of the screen - 'put it on the left half', side by side), minimize, maximize, unmaximize, make fullscreen, leave fullscreen, move, resize, or send it to another workspace - by window id from list_windows or by part of its title. tile takes side; move takes x and y, resize width and height (pixels), set_workspace a 0-based workspace. Nothing is closed; close_window does that. (arguments: action, window_id, title_contains, x, y, width, height, workspace, side)"
+          "tool": "charger_info",
+          "desc": "charger_info: Report what is powering this machine: on battery or plugged in, AC adapter or USB-C, whether USB Power Delivery is in use, and the charger's wattage when the firmware reports it, plus battery charge and rate."
         }
       ],
       "offered": [
@@ -1969,7 +1969,7 @@
         "power_action",
         "vm",
         "set_timer",
-        "arrange_window"
+        "charger_info"
       ],
       "recall_hit": true
     },
@@ -3862,12 +3862,12 @@
           "desc": "browse: Open a website and do things on it for the person: find information, fill in forms, click through. Drive a web browser: navigate, read the page's text (get_text), click, type, select options, scroll, move through history, take screenshots and wait for conditions. While Chronoa's window is open this is the in-app browser the user can watch: there it opens only http(s) pages the egress policy allows, and key, hover, drag, upload_file, tabs and evaluate are not available. Otherwise it is a headless Chromium with all actions. Requires the web sense to be enabled and privacy mode to be off. (arguments: action, url, selector, text, key, value, label, files, x, y, to_x, to_y, to_selector, delta_x, delta_y, steps, repeat, tab_id, path, wait_for, timeout, settle)"
         },
         {
-          "tool": "ir_remote",
-          "desc": "ir_remote: Send and receive infrared remote-control codes, and build or read the pulse-space timings themselves. 'devices': is there IR hardware here (most machines have none, and that is a true answer). 'encode': turn an address and command into the NEC or RC-6 timings that would carry them. 'decode': turn timings into a code. 'send': transmit a code through an IR device. 'receive': capture a button press and decode it. Needs the 'ir-remote-enabled' consent key. (arguments: action, protocol, address, command, timings, seconds)"
-        },
-        {
           "tool": "press_key",
           "desc": "press_key: Press a key or key combination in the focused window, e.g. 'Return', 'Escape', 'Tab' or 'ctrl+shift+t'. This sends a key, not text - use type_text to type a string. Requires the 'input-control-enabled' consent key. X11 only. (arguments: key, repeat)"
+        },
+        {
+          "tool": "ir_remote",
+          "desc": "ir_remote: Send and receive infrared remote-control codes, and build or read the pulse-space timings themselves. 'devices': is there IR hardware here (most machines have none, and that is a true answer). 'encode': turn an address and command into the NEC or RC-6 timings that would carry them. 'decode': turn timings into a code. 'send': transmit a code through an IR device. 'receive': capture a button press and decode it. Needs the 'ir-remote-enabled' consent key. (arguments: action, protocol, address, command, timings, seconds)"
         },
         {
           "tool": "default_apps",
@@ -3886,8 +3886,8 @@
         "ui_elements",
         "phone_remote",
         "browse",
-        "ir_remote",
         "press_key",
+        "ir_remote",
         "default_apps",
         "list_apps",
         "android_device"
@@ -4055,20 +4055,20 @@
           "desc": "phone: The user's paired phone via GSConnect/KDE Connect: status (reachable, battery), ring it to find it, ping it, share a file or link to it; read text messages ('messages': latest, from a contact, or unread only); send a text message ('send': to a contact name or number, or omit contact to reply to the latest conversation) with exactly the text given - draft it first; or 'call' a contact or number (opens the phone's dialer). The user confirms every message and call before it goes. Requires the 'phone-control-enabled' consent key; reading needs 'phone-messages-read-enabled', sending and calling 'phone-messages-send-enabled'. (arguments: action, device, target, contact, text, unread_only, limit)"
         },
         {
+          "tool": "alarm",
+          "desc": "alarm: Alarm clock: set an alarm at a time of day (once, or repeating daily/weekdays/weekends/chosen days), list alarms, say when the next one is, change one's time or label, snooze the one that just rang, or delete one. Examples: 'set an alarm for 7am', 'alarm for 6:30 on weekdays', 'when is my next alarm?', 'change my 7am alarm to 7:30', 'snooze', 'delete the 7am alarm'. Times may be words ('7am', '7:30 pm', 'tomorrow 6:45'). It rings with a notification and the alarm sound even if the assistant is closed; it is held by systemd --user, so a reboot drops it until alarms are next listed, which re-arms it. (arguments: action, time, label, repeat, id, new_time, new_label, minutes)"
+        },
+        {
+          "tool": "calendar_edit",
+          "desc": "calendar_edit: Change the user's calendar: 'create' adds an event to the default calendar (title, start, optional duration or end, location); 'move' reschedules an event found by its current time and/or title to new_start; 'cancel' deletes one. Times in words: 'tomorrow 3pm', 'friday 5 pm', '2026-10-09 14:00'. Move and cancel ask the person to confirm. Ambiguous matches are refused with the candidates. Requires the 'calendar-write-enabled' consent key (move/cancel also 'calendar-read-enabled'). No invitations are sent. (arguments: action, title, start, duration, end, new_start, location, notes)"
+        },
+        {
           "tool": "encode_text",
           "desc": "encode_text: Encode or decode text: base64, url (percent-encoding), hex, binary, rot13, morse. (arguments: text, scheme, direction)"
         },
         {
           "tool": "type_text",
           "desc": "type_text: Type text at the currently focused window. Requires the 'input-control-enabled' consent key (separate from the vision sense) to be enabled. (arguments: text)"
-        },
-        {
-          "tool": "read_text_file",
-          "desc": "read_text_file: Read a text file and return its contents, optionally a range of lines. Use this to see what a file actually says. (arguments: path, start_line, max_lines)"
-        },
-        {
-          "tool": "write_text_file",
-          "desc": "write_text_file: Write text to a file, creating it or replacing its contents. Refuses to replace a non-empty file unless asked to overwrite, and refuses binary data. (arguments: path, content, overwrite, append)"
         }
       ],
       "offered": [
@@ -4076,10 +4076,10 @@
         "translate_text",
         "undo_last_change",
         "phone",
+        "alarm",
+        "calendar_edit",
         "encode_text",
-        "type_text",
-        "read_text_file",
-        "write_text_file"
+        "type_text"
       ],
       "recall_hit": true
     },
@@ -5198,16 +5198,16 @@
           "desc": "click_pointer: Click a mouse button at the current pointer position. Requires the 'input-control-enabled' consent key (separate from the vision sense) to be enabled. (arguments: button, count)"
         },
         {
+          "tool": "scroll",
+          "desc": "scroll: Scroll the window under the pointer up, down, left or right by a number of wheel steps (move the pointer over it first). Requires the 'input-control-enabled' consent key (separate from the vision sense). (arguments: direction, amount)"
+        },
+        {
           "tool": "read_audio",
           "desc": "read_audio: Read an audio file's basics out loud: how long it is, its codec, sample rate, channels, and bitrate. The original is never modified. (arguments: path)"
         },
         {
           "tool": "read_image",
           "desc": "read_image: Read a picture's basics out loud: width by height, format, and colour type, plus file size. For what the picture says, use read_document on it. The original is never modified. (arguments: path)"
-        },
-        {
-          "tool": "read_video",
-          "desc": "read_video: Read a video's basics out loud (for subtitles or what was said use recording): how long it is, its resolution, its video codec, whether it has audio, and its bitrate. Add keyframes=true to also save the moments the image changes. The original is never modified. (arguments: path, keyframes)"
         }
       ],
       "offered": [
@@ -5216,9 +5216,9 @@
         "cpu_frequency",
         "arrange_window",
         "click_pointer",
+        "scroll",
         "read_audio",
-        "read_image",
-        "read_video"
+        "read_image"
       ],
       "recall_hit": true
     },
@@ -5255,8 +5255,8 @@
           "desc": "media_control: Control music and video players: play, pause, toggle, next track, previous track, stop, restart (current track from the beginning), seek (skip ahead or go back by 'seconds'; negative goes back), or 'status' to say what is playing. (arguments: action, seconds)"
         },
         {
-          "tool": "browse",
-          "desc": "browse: Open a website and do things on it for the person: find information, fill in forms, click through. Drive a web browser: navigate, read the page's text (get_text), click, type, select options, scroll, move through history, take screenshots and wait for conditions. While Chronoa's window is open this is the in-app browser the user can watch: there it opens only http(s) pages the egress policy allows, and key, hover, drag, upload_file, tabs and evaluate are not available. Otherwise it is a headless Chromium with all actions. Requires the web sense to be enabled and privacy mode to be off. (arguments: action, url, selector, text, key, value, label, files, x, y, to_x, to_y, to_selector, delta_x, delta_y, steps, repeat, tab_id, path, wait_for, timeout, settle)"
+          "tool": "drag",
+          "desc": "drag: Drag with the left button held from one pixel position to another - to select text, move an item, or resize by its edge. Requires the 'input-control-enabled' consent key (separate from the vision sense). (arguments: sx, sy, ex, ey)"
         }
       ],
       "offered": [
@@ -5267,7 +5267,7 @@
         "focus_window",
         "move_or_copy_file",
         "media_control",
-        "browse"
+        "drag"
       ],
       "recall_hit": true
     },
@@ -9108,6 +9108,10 @@
           "desc": "move_or_copy_file: Move or copy a file or directory to a new path. Moving a directory into itself is refused, and an existing destination is not overwritten unless asked. (arguments: source, destination, mode, overwrite)"
         },
         {
+          "tool": "scroll",
+          "desc": "scroll: Scroll the window under the pointer up, down, left or right by a number of wheel steps (move the pointer over it first). Requires the 'input-control-enabled' consent key (separate from the vision sense). (arguments: direction, amount)"
+        },
+        {
           "tool": "vm",
           "desc": "vm: Run a virtual machine with QEMU and drive it like a browser: launch it with a visible window on the desktop and a QMP control socket beside it, photograph its screen, send key combinations, type text into it, move and click its pointer (percentages of its screen), check its power state, and stop it. Requires the 'vm-control-enabled' consent key, off by default. Listing the VMs already running is `list_vms` (virsh) or this skill's list action; this one starts and drives them. (arguments: action, name, memory_mb, iso, disk, display, firmware, tpm, keys, text, x, y, button)"
         },
@@ -9122,21 +9126,17 @@
         {
           "tool": "calendar_edit",
           "desc": "calendar_edit: Change the user's calendar: 'create' adds an event to the default calendar (title, start, optional duration or end, location); 'move' reschedules an event found by its current time and/or title to new_start; 'cancel' deletes one. Times in words: 'tomorrow 3pm', 'friday 5 pm', '2026-10-09 14:00'. Move and cancel ask the person to confirm. Ambiguous matches are refused with the candidates. Requires the 'calendar-write-enabled' consent key (move/cancel also 'calendar-read-enabled'). No invitations are sent. (arguments: action, title, start, duration, end, new_start, location, notes)"
-        },
-        {
-          "tool": "container",
-          "desc": "container: Run containers on this machine with podman (run an image, run a command inside a running container, stop it, read its logs, list what is running, list local images, pull one) and start/stop nspawn machines with machinectl. A container started with display=x11 draws on this desktop, and the ui_elements tool is what drives it by name with a visible cursor; this tool starts it, and stops it. Needs 'container-control-enabled', off by default. (arguments: action, image, name, command, detach, display, share_bus, publish, all, tail)"
         }
       ],
       "offered": [
         "move_pointer",
         "click_pointer",
         "move_or_copy_file",
+        "scroll",
         "vm",
         "alarm",
         "arrange_window",
-        "calendar_edit",
-        "container"
+        "calendar_edit"
       ],
       "recall_hit": true
     },
@@ -9772,6 +9772,10 @@
           "desc": "click_pointer: Click a mouse button at the current pointer position. Requires the 'input-control-enabled' consent key (separate from the vision sense) to be enabled. (arguments: button, count)"
         },
         {
+          "tool": "scroll",
+          "desc": "scroll: Scroll the window under the pointer up, down, left or right by a number of wheel steps (move the pointer over it first). Requires the 'input-control-enabled' consent key (separate from the vision sense). (arguments: direction, amount)"
+        },
+        {
           "tool": "ask_user",
           "desc": "ask_user: Ask the user a clarifying question and wait for their answer, with 2 to 4 short options they can pick. Use this whenever a request is genuinely ambiguous - especially when several files or devices could match. Do not guess instead, and do not ask when one option is obviously right. In a headless session there is nobody to answer and this will say so. (arguments: question, options)"
         },
@@ -9790,21 +9794,17 @@
         {
           "tool": "cpu_per_core",
           "desc": "cpu_per_core: Which individual processor cores are busy right now, and how much of each is user time versus waiting on disk. Use when the machine feels slow but nothing looks busy - a single process pinning one core looks idle in every system-wide average. Read-only; starts nothing."
-        },
-        {
-          "tool": "discover_hosts",
-          "desc": "discover_hosts: Find which devices are on this network right now, by asking rather than by reading the cache - so devices that have never talked to this machine are found too. Reports an address and a hardware address for each, and counts devices answering on more than one address. The range is always the private network this machine is on; pass network= for a different private range, and a public one is refused. Connects to nothing it finds and reads no packet contents. Needs raw-socket access, so unprivileged it may report that rather than a partial sweep. (arguments: interface, network)"
         }
       ],
       "offered": [
         "arrange_window",
         "click_pointer",
+        "scroll",
         "ask_user",
         "browse",
         "chart",
         "cpu_frequency",
-        "cpu_per_core",
-        "discover_hosts"
+        "cpu_per_core"
       ],
       "recall_hit": false
     },

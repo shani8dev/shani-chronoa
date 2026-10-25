@@ -58,6 +58,8 @@ EXPECTED = [
     "toggle-cloud-fallback", "toggle-debug", "toggle-listening",
     "toggle-model-download", "toggle-plan-mode", "toggle-privacy",
     "toggle-rail", "toggle-sidebar", "toggle-start-hidden", "toggle-wake-word",
+    # 2026-10-23: whole-app text zoom (Ctrl +, Ctrl -, Ctrl 0).
+    "zoom-in", "zoom-out", "zoom-reset",
 ]
 
 

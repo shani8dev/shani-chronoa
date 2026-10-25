@@ -109,7 +109,10 @@ def build(app: Any) -> Gtk.Widget:
     recorder = common.StatusRecorder()
     page.status = recorder.status
     content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-    set_content(content)  # once: it appends, so later refreshes fill `content`
+    # once: it appends, so later refreshes fill `content`. Scrolled, like every
+    # other panel - a long list of dashboards ran off the bottom with no way down
+    # (`test_every_surface_can_scroll[dashboards]`).
+    set_content(common.scrolled(content))
     _fill(content, recorder)
     # Re-read on every showing: the skill writes new dashboards from a chat turn
     # while this page sits built and cached in the window.

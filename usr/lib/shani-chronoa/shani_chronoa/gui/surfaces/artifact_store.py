@@ -47,7 +47,7 @@ TITLE = "Artifacts"
 # Not the download arrow: Export uses `document-save-symbolic`, which Adwaita
 # draws as the same arrow, so the two neighbouring rows had one glyph.
 ICON = "folder-documents-symbolic"
-SECTION = "Acting"
+SECTION = "Making"
 
 SUBTITLE = (
     "Where models, voices, documents and exports are stored. "

@@ -303,9 +303,15 @@ stackswitcher button {
             # reads it: `StatusRecorder.set` records without building a row.
             self.status_recorder.set(common.STATUS_OFF)
             # The switch by name, turned on here, and the panel rebuilds.
-            body.append(common.consent_banner(
+            banner = common.consent_banner(
                 self.app, CONTROL_KEY, "Nothing was asked of your phone.",
-                on_change=lambda: common.reload_surface(self.app, "phone")))
+                on_change=lambda: common.reload_surface(self.app, "phone"))
+            # **The banner is the row the dot stands for**, so it carries the
+            # state's class: the sidebar's "off" then points at something on
+            # the page, without a second sentence saying it again. The class
+            # styles only `.status-row`/`.status-dot`, so nothing here changes.
+            banner.add_css_class(common.STATUS_CLASSES[common.STATUS_OFF])
+            body.append(banner)
             set_content(common.scrolled(body))
             return page
         self.set_status(common.STATUS_UNKNOWN, "Looking for your phone...")

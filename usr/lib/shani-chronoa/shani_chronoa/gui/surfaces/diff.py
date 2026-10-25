@@ -50,7 +50,7 @@ TITLE = "Diff"
 #: bug rather than as a missing glyph. `document-edit-symbolic` is the theme's
 #: own name for "a document being changed".
 ICON = "document-edit-symbolic"
-SECTION = "Acting"
+SECTION = "Making"
 
 SUBTITLE = (
     "What Chronoa changed on this machine, file by file, with line numbers. "

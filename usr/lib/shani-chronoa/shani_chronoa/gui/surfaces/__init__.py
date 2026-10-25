@@ -237,8 +237,17 @@ SURFACE_IDS = (
 #: opens with an untitled "Conversation" row for the live chat, and a heading by
 #: that name above a "Conversations" panel would give it two things called
 #: Conversation. The saved list leads "Remembering" instead.
-SECTION_ORDER = ("Remembering", "Acting", "Phone and remote", "Sensing",
+SECTION_ORDER = ("Remembering", "Acting", "Making", "Phone and remote", "Sensing",
                  "Thinking", "Health and trust", "Everything else")
+
+
+#: **`"Making"`, added 2026-10-23.** "Acting" had grown back to 11 panels, past
+#: the cap `test_sections_are_categories` holds it to, when Dashboards joined.
+#: Four of them are about the files Chronoa writes and how they changed - the
+#: editor, the diff, the artifact store and export - which is a question about
+#: *what it made*, not about what it can do. They moved; "Acting" keeps the
+#: seven that run something (driving, routines, skills, triggers, goals, the
+#: workbench, dashboards).
 
 
 #: **`"Phone and remote"`, added 2026-10-12.** Measured on the real sidebar,
@@ -272,7 +281,7 @@ DEFAULT_SECTION = {
     "model": "Thinking",
     "privacy": "Health and trust",
     "daemon": "Health and trust",
-    "editor": "Acting",
+    "editor": "Making",
 }
 
 

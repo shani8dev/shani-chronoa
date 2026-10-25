@@ -83,8 +83,13 @@ class TestTheInlineEmptyState:
             "inline=True still built a StatusPage, which carries the 301px floor")
 
     def test_it_fits_in_a_fraction_of_a_status_page(self):
+        """Its own height, not a scroller's. The bound was 120px while the box came
+        wrapped in a `Gtk.ScrolledWindow`, whose small minimum hid the content's;
+        cd5ac30 removed that scroller (it was the child that got squeezed, to a
+        58px sliver on Triggers). Measured without it: 191px - icon, title,
+        description and margins - against the StatusPage's 301px."""
         inline = common.empty_state("x-symbolic", "Nothing here", "why", inline=True)
-        assert _min_height(inline) < 120, (
+        assert _min_height(inline) < STATUS_PAGE_MIN_HEIGHT * 2 // 3, (
             f"the inline empty state still demands {_min_height(inline)}px; the "
             f"StatusPage it replaced demands {STATUS_PAGE_MIN_HEIGHT}px")
 
@@ -102,16 +107,23 @@ class TestTheInlineEmptyState:
         replaced wrapped its own."""
         long_title = "The assistant's memory is not available to this window"
         inline = common.empty_state("x-symbolic", long_title, "because", inline=True)
-        inline.measure(Gtk.Orientation.VERTICAL, 900)
-        natural = inline.measure(Gtk.Orientation.HORIZONTAL, -1)
-        offered = inline.measure(Gtk.Orientation.HORIZONTAL, 200)
-        assert offered[1] <= 200 + 1, (
-            f"the title needs {natural[1]}px and ignores the {offered[1]}px it is "
-            f"given, so it runs off the edge")
+        minimum, natural = inline.measure(Gtk.Orientation.HORIZONTAL, -1)[:2]
+        assert minimum <= 200, (
+            f"the title needs {minimum}px at least (natural {natural}px), so in a "
+            f"200px column it runs off the edge")
+        wide = inline.measure(Gtk.Orientation.VERTICAL, 900)[0]
+        narrow = inline.measure(Gtk.Orientation.VERTICAL, 200)[0]
+        assert narrow > wide, (
+            f"at 200px wide it is no taller ({narrow}px) than at 900px ({wide}px), "
+            f"so the title did not wrap - it was clipped")
 
-    def test_it_carries_its_own_scroller(self):
-        """`test_every_surface_can_scroll[memory]` was passing only because the
-        `Adw.StatusPage` it no longer uses contains one internally."""
+    def test_it_carries_no_scroller_of_its_own(self):
+        """**Inverted 2026-10-23, after cd5ac30.** This used to require a scroller,
+        for `test_every_surface_can_scroll[memory]`. But a `Gtk.ScrolledWindow`
+        reports a small minimum, so on a page taller than the window it is the
+        child that absorbs the shortfall - measured on Triggers, 58px for 154px of
+        content: a sliver of the icon and none of the words. The page scrolls; a
+        caller that needs a scroller in its own tree adds one (memory does)."""
         inline = common.empty_state("x-symbolic", "Nothing here", "why", inline=True)
         found = []
 
@@ -124,7 +136,9 @@ class TestTheInlineEmptyState:
                 child = child.get_next_sibling()
 
         walk(inline)
-        assert found, "the inline empty state has no Gtk.ScrolledWindow"
+        assert not found, (
+            "the inline empty state carries its own Gtk.ScrolledWindow again - the "
+            "child a tall page squeezes to a sliver")
 
 
 class TestThePageEmptyStateIsUnchanged:

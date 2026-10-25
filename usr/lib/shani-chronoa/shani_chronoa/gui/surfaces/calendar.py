@@ -539,7 +539,11 @@ class _CalendarSurface:
         else:
             self._state = STATE_READING
             self._message = READING_DETAIL
-            self.status_recorder.set(common.STATUS_UNKNOWN)
+            # A row, not just a recorded word: the sidebar dot reads the
+            # recorder, and a dot with no row behind it is a claim the panel
+            # does not show (`test_the_dot_agrees_with_the_row_the_panel_shows`).
+            self._status_slot.append(self.status_recorder.row(
+                common.STATUS_UNKNOWN, READING_TITLE))
             self._show_state(READING_TITLE, READING_DETAIL)
 
         def work() -> Tuple[Tuple[str, Optional[str]], Any]:
@@ -551,6 +555,8 @@ class _CalendarSurface:
         """Show what the worker read, unless a newer refresh has started since."""
         if generation != getattr(self, "_generation", 0):
             return False
+        if read is not None:        # the "Reading" row goes; the answer's rows replace it
+            common.clear(self._status_slot)
         # **The where-row goes first, in every state**, because the question it
         # answers matters most in the states that show no list: with no
         # permission, no backend, nothing readable, or *no events at all* - and

@@ -213,7 +213,11 @@ def test_the_next_button_names_where_the_cloud_choice_goes():
     _LABEL.clear()
     _run([_to_mode])
     label = _LABEL.get("next")
-    assert label == "Next: Cloud keys", (
+    # The page's own title, not a copy of it: "Cloud keys" became "Cloud
+    # answers" (2026-10-23) when free gateways made a key optional, and a typed
+    # literal here failed on a correct label.
+    title = dict(setup_wizard._SETUP_PAGES)["cloud-keys"]
+    assert label == f"Next: {title}", (
         f"after choosing 'In the cloud' the button still read {label!r}. A "
         "person reading 'Next: Brain' is being told the opposite of where they "
         "are about to go - which is the sentence the page exists to get right.")

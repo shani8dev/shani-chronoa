@@ -57,9 +57,14 @@ _SCROLL_XDO = {"up": "4", "down": "5", "left": "6", "right": "7"}
 def _consent(config: ChronoaConfig) -> tuple[bool, str]:
     """Return (allowed, reason). Fail-closed: an undeclared key => False."""
     if not config.get_bool(_CONSENT_KEY, False):
+        # **The switch by the name the Settings row shows**, and the key beside
+        # it for a person reading a log - as android_device and the others do.
+        from shani_chronoa.capabilities import gate_label
         return False, (
-            f"input control is turned off (enable '{_CONSENT_KEY}'); "
-            "this is a separate consent gate from the vision sense"
+            f"input control is turned off - turn on "
+            f"\u201c{gate_label(_CONSENT_KEY)}\u201d in Settings "
+            f"('{_CONSENT_KEY}'); this is a separate consent gate from the "
+            "vision sense"
         )
     return True, ""
 
