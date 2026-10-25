@@ -112,19 +112,6 @@ class _PrivateAudio:
         home.mkdir(exist_ok=True)
         self.env = {"PATH": "/usr/bin:/bin", "HOME": str(home), "LANG": "C.UTF-8",
                     "XDG_RUNTIME_DIR": str(self.run), "PIPEWIRE_RUNTIME_DIR": str(self.run)}
-        out = subprocess.run(["dbus-daemon", "--session", "--fork", "--print-address=1",
-                              "--print-pid=1"], env=self.env, capture_output=True, text=True,
-                             timeout=20, check=True).stdout.split()
-        self.env["DBUS_SESSION_BUS_ADDRESS"], self.bus_pid = out[0], int(out[1])
-        self.procs = []
-        self._spawn(["pipewire"], 1.5)
-        self._spawn(["wireplumber"], 2.0)
-        self._spawn(["pw-loopback", "-n", "demo-mic",
-                     "--capture-props=media.class=Audio/Sink node.name=mic_feed node.description=mic_feed",
-                     "--playback-props=media.class=Audio/Source node.name=demo_mic node.description=demo_mic"], 0)
-        self._spawn(["pw-loopback", "-n", "demo-speaker",
-                     "--capture-props=media.class=Audio/Sink node.name=demo_speaker node.description=demo_speaker",
-                     "--playback-props=media.class=Audio/Source node.name=speaker_tap node.description=speaker_tap"], 0)
         # **A graph that fails to come up cleans up after itself.** Everything
         # above this line has already spawned `dbus-daemon`, `pipewire`,
         # `wireplumber` and two `pw-loopback`s, and the failure arrives 15 seconds
@@ -134,6 +121,19 @@ class _PrivateAudio:
         # them. Measured: two runs that skipped left exactly two orphaned graphs,
         # and the run after them could not start one.
         try:
+            out = subprocess.run(["dbus-daemon", "--session", "--fork", "--print-address=1",
+                                  "--print-pid=1"], env=self.env, capture_output=True, text=True,
+                                 timeout=20, check=True).stdout.split()
+            self.env["DBUS_SESSION_BUS_ADDRESS"], self.bus_pid = out[0], int(out[1])
+            self.procs = []
+            self._spawn(["pipewire"], 1.5)
+            self._spawn(["wireplumber"], 2.0)
+            self._spawn(["pw-loopback", "-n", "demo-mic",
+                         "--capture-props=media.class=Audio/Sink node.name=mic_feed node.description=mic_feed",
+                         "--playback-props=media.class=Audio/Source node.name=demo_mic node.description=demo_mic"], 0)
+            self._spawn(["pw-loopback", "-n", "demo-speaker",
+                         "--capture-props=media.class=Audio/Sink node.name=demo_speaker node.description=demo_speaker",
+                         "--playback-props=media.class=Audio/Source node.name=speaker_tap node.description=speaker_tap"], 0)
             self._wait_for_nodes(("mic_feed", "demo_mic", "demo_speaker",
                                   "speaker_tap"))
         except BaseException:
@@ -203,7 +203,10 @@ class _PrivateAudio:
         return found
 
     def stop(self) -> None:
-        for proc in reversed(self.procs):
+        # Tolerant of partial construction: __init__ can fail after creating
+        # `self.run` but before setting `self.procs` / `self.bus_pid`, in which
+        # case stop() must still reap what it can without raising AttributeError.
+        for proc in reversed(getattr(self, "procs", [])):
             if proc.poll() is None:
                 proc.terminate()
                 try:
@@ -213,30 +216,35 @@ class _PrivateAudio:
         # **And the ones that daemonised away from their Popen.** Found by runtime
         # directory and killed by pid, which is the only addressing that reaches
         # a process whose handle is already spent.
-        for pid in self._daemons_of_this_graph():
+        run = getattr(self, "run", None)
+        if run is not None:
+            for pid in self._daemons_of_this_graph():
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    continue
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                if not self._daemons_of_this_graph():
+                    break
+                time.sleep(0.2)
+            for pid in self._daemons_of_this_graph():
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+        bus_pid = getattr(self, "bus_pid", None)
+        if bus_pid is not None:
             try:
-                os.kill(pid, signal.SIGTERM)
-            except ProcessLookupError:
-                continue
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline:
-            if not self._daemons_of_this_graph():
-                break
-            time.sleep(0.2)
-        for pid in self._daemons_of_this_graph():
-            try:
-                os.kill(pid, signal.SIGKILL)
+                os.kill(bus_pid, signal.SIGTERM)
             except ProcessLookupError:
                 pass
-        try:
-            os.kill(self.bus_pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        shutil.rmtree(self.run, ignore_errors=True)
-        # A GIO client can recreate `gvfs/` here a moment after the first removal
-        # (seen once); a second pass after a beat leaves nothing behind.
-        time.sleep(0.5)
-        shutil.rmtree(self.run, ignore_errors=True)
+        if run is not None:
+            shutil.rmtree(run, ignore_errors=True)
+            # A GIO client can recreate `gvfs/` here a moment after the first removal
+            # (seen once); a second pass after a beat leaves nothing behind.
+            time.sleep(0.5)
+            shutil.rmtree(run, ignore_errors=True)
 
 
 @pytest.fixture(scope="module")
