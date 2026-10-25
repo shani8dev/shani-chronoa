@@ -81,7 +81,25 @@ jobs:
       # on shutil.which("bluetoothctl"), so without this package six tests in
       # test_bluetooth_listen_skill.py fail on the absence of the binary
       # rather than on anything they are testing.
-      apt-packages: python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 libglib2.0-bin xvfb gir1.2-secret-1 wireplumber xdotool x11-apps imagemagick bluez python3-numpy
+      # Batch-2 (CI-side): packages Chronoa's skills and senses need that the
+      # hosted runner image does not ship. Verified each name resolves on this
+      # Ubuntu 26.04 host (the CI runner image) before adding; a missing name
+      # makes `apt install` exit 100 and the whole Test job reports zero
+      # failures because it never ran a test. `pulseaudio` is deliberately
+      # left out: the voice-loop test needs PipeWire (pw-loopback/pw-play/
+      # pw-record/pw-cli from pipewire-bin), and the pulseaudio daemon
+      # conflicts with pipewire's pulse replacement on 26.04.
+      #
+      # poppler-utils  -> pdf_pages (pdftoppm)
+      # tesseract-ocr-eng -> OCR / vision sense
+      # nmap -> test_skill_scan_network (real defect: CI installs nmap rather
+      #           than weakening the test)
+      # bc, localsearch, gir1.2-webkit-6.0, gir1.2-gtk4layershell-1.0
+      # pipewire-bin, alsa-utils, usbutils, mtr-tiny, i2c-tools -> senses
+      # espeak-ng -> TTS fallback used by the voice-loop test
+      # bubblewrap -> sandbox, dbus-x11, fonts-noto-color-emoji, v4l-utils,
+      # libnotify-bin, upower -> capabilities exercised by the suite
+      apt-packages: python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 libglib2.0-bin xvfb gir1.2-secret-1 wireplumber xdotool x11-apps imagemagick bluez python3-numpy poppler-utils tesseract-ocr-eng nmap bc localsearch gir1.2-webkit-6.0 gir1.2-gtk4layershell-1.0 pipewire-bin alsa-utils usbutils mtr-tiny i2c-tools espeak-ng bubblewrap dbus-x11 fonts-noto-color-emoji v4l-utils libnotify-bin upower
       # Nine tests read shani-pkgbuilds/shani-chronoa/PKGBUILD next door: the
       # package's install list, its units, its icon, its optdepends and the
       # bytecode rule are all asserted against the real file, because the
