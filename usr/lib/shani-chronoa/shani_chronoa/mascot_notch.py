@@ -167,6 +167,36 @@ def available() -> tuple[bool, str]:
     return True, ""
 
 
+def hosted() -> tuple[bool, str]:
+    """Whether the owner of the bus name has asked to *host* the companion.
+
+    **A shell that draws the companion itself says so, and is believed.** On a
+    compositor with layer-shell the window normally wins (`mascot.create`), but
+    a desktop shell that owns `BUS_NAME` - shani-shell's Island, drawn in its
+    own bar - answers `Host()` with the name of its presentation. Two companions
+    on one screen (the shell's and a floating window) would be the same mascot
+    twice, so a host that asks gets the strip's surface.
+
+    The GNOME extension does not implement `Host`, so it answers with an error
+    and nothing changes there: no layer-shell, so the notch, as before. No
+    owner at all answers immediately. Either way this costs one round trip,
+    bounded by `_CALL_TIMEOUT_MS` like every other call here.
+    """
+    try:
+        from gi.repository import Gio, GLib
+    except Exception as error:  # noqa: BLE001 - no typelib, so no bus
+        return False, f"no GObject introspection ({error})"
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        reply = bus.call_sync(
+            BUS_NAME, OBJECT_PATH, IFACE, "Host", None,
+            GLib.VariantType("(s)"), Gio.DBusCallFlags.NONE, _CALL_TIMEOUT_MS, None)
+    except GLib.Error as error:
+        return False, f"{BUS_NAME} does not host the companion ({error.message})"
+    who = reply.unpack()[0]
+    return bool(who), who
+
+
 class Notch:
     """The companion as a strip. Same surface as `mascot.Mascot`; see that class
     and this module's docstring for what the two are."""
@@ -378,7 +408,7 @@ class Notch:
         if owner:
             logger.info("mascot notch: %s came back; repainting", EXTENSION)
             self._drawn = None
-            self._call("Show", "true")
+            self._call("Show", True)
             self._render()
         else:
             logger.info("mascot notch: %s went away", EXTENSION)
@@ -458,7 +488,7 @@ class Notch:
             # the failure, so the strip is told to hide rather than left showing
             # the last good frame as if it were live.
             logger.warning("mascot notch: the Shell could not load %s", self._art)
-            self._call("Show", "false")
+            self._call("Show", False)
 
     def _push_status(self) -> None:
         self._call("Status", self._title, self._detail)

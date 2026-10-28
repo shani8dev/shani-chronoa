@@ -1076,8 +1076,12 @@ class Mascot:
 def create(app):
     """The companion this machine can actually show, or the window if it cannot.
 
-    **The window is preferred, and that is the product decision rather than a
-    fallback order.** A layer-shell window can be dragged, clicked and moved;
+    **A host shell comes first.** When the owner of the notch's bus name answers
+    `Host()` (`mascot_notch.hosted`), the desktop shell draws the companion
+    itself and gets it - see that function for why.
+
+    **Otherwise the window is preferred, and that is the product decision rather
+    than a fallback order.** A layer-shell window can be dragged, clicked and moved;
     the notch is a strip in the Shell's own composite with no input region of
     its own (`mascot_notch`'s docstring says so), so it is strictly less
     capable. Where the compositor allows the window, the window wins, and the
@@ -1099,12 +1103,19 @@ def create(app):
     handle absence cannot tell "no companion on this machine" from "nobody built
     one", and the first is a fact about the machine while the second is a bug.
     """
-    ok, why = available()
-    if ok:
-        return Mascot(app)
     # The import is inside the function and not at module scope because
     # `mascot_notch` imports this module: a top-level import would be a cycle.
     from shani_chronoa import mascot_notch
+    # A desktop shell that draws the companion in its own bar (shani-shell's
+    # Island) asks for it over the bus; it wins even where a window could run,
+    # because the window beside it would be the same mascot twice.
+    host_ok, host = mascot_notch.hosted()
+    if host_ok:
+        logger.info("mascot: hosted by the desktop shell (%s)", host)
+        return mascot_notch.Notch(app)
+    ok, why = available()
+    if ok:
+        return Mascot(app)
     notch_ok, notch_why = mascot_notch.available()
     if notch_ok:
         logger.info("mascot: %s (no layer-shell here, so the notch)", why)

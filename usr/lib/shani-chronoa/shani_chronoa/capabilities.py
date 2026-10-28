@@ -68,6 +68,8 @@ GATED: dict[str, str] = {
     "drag": "input-control-enabled",
     "notify": "notification-enabled",
     "screenshot": "vision-sense-enabled",
+    # A picture's pixels go to the vision model: the vision sense's data class.
+    "look_at_image": "vision-sense-enabled",
     "delete_file": "file-delete-enabled",
     # Deleting a saved conversation is deleting a file of the user's; the rest of the skill is ungated.
     "conversations": "file-delete-enabled",
@@ -356,6 +358,7 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "read_video": ("Files", "Read a video's length, size, and format"),
     "read_audio": ("Files", "Read an audio file's length, format, and bitrate"),
     "read_image": ("Files", "Read a picture's dimensions, format, and colour"),
+    "look_at_image": ("Files", "Look at a picture and say what it shows"),
     "create_video": ("Pictures", "Make a slideshow or colour clip"),
     "capture_video": ("Seeing", "Record a short video from the camera"),
     "create_document": ("Files", "Create a markdown, text, or HTML document"),
@@ -1442,7 +1445,7 @@ READ_ONLY_TOOLS = frozenset({
     "get_weather", "get_location", "get_world_time", "convert_units",
     "convert_currency", "lookup_wikipedia", "define_word", "solve_math",
     "spell_word", "explain_command", "check_internet", "data_usage",
-    "date_math", "random_pick", "my_ip_address", "read_document", "read_video", "read_audio", "read_image", "create_document", "convert_document",
+    "date_math", "random_pick", "my_ip_address", "read_document", "read_video", "read_audio", "read_image", "look_at_image", "create_document", "convert_document",
     "encode_text", "convert_color", "calendar_month", "cleanup_report", "tailscale_status",
     # Read-only, and deliberately not gated: a user must be able to see what
     # the machine will do, and what is armed, without first being granted

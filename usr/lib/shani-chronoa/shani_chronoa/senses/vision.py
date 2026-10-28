@@ -412,6 +412,22 @@ def _model(arguments: dict, config: ChronoaConfig) -> str:
 # --- the sense --------------------------------------------------------------
 
 
+def choose_backend(arguments: dict, config: ChronoaConfig) -> "tuple[str, str, str]":
+    """Which local model describes the image, and where: (backend, model, host).
+
+    A vision model set up in Chronoa's own setup (llama.cpp, on 127.0.0.1)
+    comes first; a local Ollama is the fallback. Asking for a model by name
+    means Ollama, as it always has. Shared with `skills/look_at_image`, so a
+    picture from a file goes exactly where a capture would - never anywhere
+    `local_endpoint` would refuse. Raises VisionError.
+    """
+    from shani_chronoa import local_vision, model_service
+    backend = BACKEND_LLAMACPP if not arguments.get("model") and local_vision.available() else BACKEND_OLLAMA
+    if backend == BACKEND_LLAMACPP:
+        return backend, local_vision.active(), model_service.base_url(local_vision.INSTANCE)
+    return backend, _model(arguments, config), local_endpoint(config)
+
+
 def run(arguments: dict) -> "str | Percept":
     """Capture one image and describe it. Returns a Percept, or a refusal string.
 
@@ -429,17 +445,8 @@ def run(arguments: dict) -> "str | Percept":
     if not config.sense_allowed(CONSENT_SENSE):
         return _refusal(config.sense_allowed_reason(CONSENT_SENSE))
 
-    # A vision model set up in Chronoa's own setup (llama.cpp, on 127.0.0.1)
-    # comes first; a local Ollama is the fallback. Asking for a model by name
-    # means Ollama, as it always has.
-    from shani_chronoa import local_vision, model_service
-    backend = BACKEND_LLAMACPP if not arguments.get("model") and local_vision.available() else BACKEND_OLLAMA
     try:
-        if backend == BACKEND_LLAMACPP:
-            model, host = local_vision.active(), model_service.base_url(local_vision.INSTANCE)
-        else:
-            model = _model(arguments, config)
-            host = local_endpoint(config)
+        backend, model, host = choose_backend(arguments, config)
         timeout = _timeout(arguments)
         source = str(arguments.get("source") or screengrab.SOURCE_SCREEN).strip()
         _require(source in screengrab.SOURCES, f"{source!r} is not a capture source; expected one of {', '.join(screengrab.SOURCES)}")

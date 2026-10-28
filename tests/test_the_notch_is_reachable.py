@@ -538,6 +538,26 @@ class TestTheManifest:
 # --------------------------------------------------------------------------
 
 class TestCreatePicksASurface:
+    @pytest.fixture(autouse=True)
+    def _no_host(self, monkeypatch):
+        """Nothing here hosts the companion unless a test says so.
+
+        `hosted()` really asks the session bus; left live, these tests would
+        answer differently on a desktop running shani-shell than in CI.
+        """
+        monkeypatch.setattr(mascot_notch, "hosted", lambda: (False, "no host"))
+
+    def test_a_host_shell_wins_even_where_a_window_could_run(self, monkeypatch):
+        """shani-shell draws the companion in its bar and asks for it.
+
+        A floating window beside the shell's Island would be the same mascot
+        twice, so a host that answers `Host()` gets the strip's surface even on
+        a compositor that offers layer-shell.
+        """
+        monkeypatch.setattr(mascot_notch, "hosted", lambda: (True, "island"))
+        monkeypatch.setattr(mascot, "available", lambda: (True, "a layer surface"))
+        assert isinstance(mascot.create(None), mascot_notch.Notch)
+
     def test_the_window_wins_where_a_layer_shell_exists(self, monkeypatch):
         """Not a fallback order - a product decision.
 
@@ -1285,3 +1305,86 @@ class TestTheManifestChecksCanBite:
         with pytest.raises(AssertionError, match="passed with the fact planted"):
             _schema_bites(only_the_choices_assertion, tmp_path, monkeypatch,
                           (self._TOP_CENTRE, '<default>"bottom-right"</default>'))
+
+
+# --------------------------------------------------------------------------
+# hosted() - the bus answer, not a guess
+# --------------------------------------------------------------------------
+
+class TestHosted:
+    """`hosted()` against a real owner of the name on a private bus.
+
+    **The whole exchange runs in a subprocess.** `Gio.TestDBus.up()` changes the
+    C environment and `Gio.bus_get_sync` caches the session bus for the life of
+    the process (AGENTS.md, "Test isolation traps"): done in this process,
+    `hosted()` reached the cached *real* session bus instead, and the torn-down
+    private bus left GLib waiting on a weak ref for the rest of the run.
+    """
+
+    _SCRIPT = r"""
+import sys, threading
+sys.path.insert(0, sys.argv[1])
+from gi.repository import Gio, GLib
+from shani_chronoa import mascot_notch
+host = sys.argv[2] == "host"
+bus = Gio.TestDBus.new(Gio.TestDBusFlags.NONE)
+bus.up()
+conn = Gio.DBusConnection.new_for_address_sync(
+    bus.get_bus_address(),
+    Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION,
+    None, None)
+method = ("<method name='Host'><arg type='s' name='p' direction='out'/></method>" if host else
+          "<method name='Show'><arg type='b' name='v' direction='in'/></method>")
+node = Gio.DBusNodeInfo.new_for_xml(
+    f"<node><interface name='{mascot_notch.IFACE}'>{method}</interface></node>")
+def handler(_c, _s, _p, _i, name, _params, inv):
+    if name == "Host":
+        inv.return_value(GLib.Variant("(s)", ("island",)))
+    else:
+        inv.return_value(None)
+conn.register_object(mascot_notch.OBJECT_PATH, node.interfaces[0], handler, None, None)
+conn.call_sync("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus",
+               "RequestName", GLib.Variant("(su)", (mascot_notch.BUS_NAME, 4)),
+               None, Gio.DBusCallFlags.NONE, 1000, None)
+out = {}
+t = threading.Thread(target=lambda: out.update(r=mascot_notch.hosted()))
+t.start()
+ctx = GLib.MainContext.default()
+while t.is_alive():
+    ctx.iteration(False)
+    t.join(0.01)
+print(repr(out["r"]))
+"""
+
+    def _hosted(self, kind: str):
+        import ast
+        lib = str(Path(mascot_notch.__file__).resolve().parents[1])
+        out = subprocess.run([sys.executable, "-c", self._SCRIPT, lib, kind],
+                             capture_output=True, text=True, timeout=30)
+        assert out.returncode == 0, out.stderr
+        return ast.literal_eval(out.stdout.strip().splitlines()[-1])
+
+    def test_a_shell_that_implements_host_is_believed(self):
+        assert self._hosted("host") == (True, "island")
+
+    def test_the_gnome_extension_without_host_is_not_a_host(self):
+        """The extension owns the name but has no `Host`: GNOME is unchanged."""
+        ok, why = self._hosted("extension")
+        assert ok is False and "does not host" in why, why
+
+
+def test_show_is_sent_as_a_boolean():
+    """`Show` takes `b`. The strings "true"/"false" were refused by the
+    interface and the error swallowed, so after a Shell restart the strip
+    never came back and an unloadable frame never hid it."""
+    import inspect
+    src = inspect.getsource(mascot_notch)
+    assert '_call("Show", "true")' not in src and '_call("Show", "false")' not in src
+    import types
+    sent = []
+    n = mascot_notch.Notch(None)
+    n._proxy = types.SimpleNamespace(get_name_owner=lambda: ":1.42")
+    n._call = lambda method, *args: sent.append((method, args))
+    n._render = lambda: None
+    n._on_owner_changed(None, None)     # the Shell came back
+    assert ("Show", (True,)) in sent, sent
