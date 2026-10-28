@@ -11,6 +11,8 @@ actually has:
 - **KWin** (`kwin.py`) - Plasma's own scripting API over D-Bus.
 - **The accessibility bus** (`atspi.py`) - GNOME without the extension: close,
   minimize and maximize on GTK4 apps, which offer those as AT-SPI actions.
+- **niri** (`niri.py`) - its own IPC (`niri msg`), by window id; the
+  compositor of the AI desktop (shani-desktop-niri).
 - **X11** (`x11.py`) - `xdotool` (and `wmctrl` where a verb needs it).
 
 Input tools (`ydotool`, `wtype`, `dotool`) are deliberately *not* a backend
@@ -19,7 +21,7 @@ cannot list windows or say which one that is - so "close the Slack window" would
 become "close whatever is in front", the wrong-window failure this package
 exists to rule out. They live in `skills/input_control.py`.
 
-GNOME, Plasma and X11 are the desktops Shanios ships, so those are the backends.
+GNOME, Plasma, niri and X11 are the desktops Shanios ships, so those are the backends.
 A backend never guesses: an operation it cannot do raises `WindowError` saying so, rather than doing something
 nearby and reporting success.
 """
@@ -119,6 +121,9 @@ def detect() -> Tuple[Optional[Backend], str]:
         if "gnome" in desktop or "ubuntu" in desktop:
             from shani_chronoa.windows import gnome
             return gnome.available()
+        if "niri" in desktop or os.environ.get("NIRI_SOCKET"):
+            from shani_chronoa.windows import niri
+            return niri.available()
         # Another Wayland desktop: the accessibility bus is the one route that
         # does not depend on the compositor.
         from shani_chronoa.windows import atspi
