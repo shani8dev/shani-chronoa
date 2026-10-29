@@ -2,7 +2,7 @@
 
 A daily task the project could not do at all.
 
-Prefers a local translation tool and falls back to a public web API - and says
+Prefers Chronoa's own local model and falls back to a public web API - and says
 which one it used, because "translated by a local model" and "translated by
 sending your text to a third-party server" are very different acts, and the user
 is entitled to know which happened before they paste something private.
@@ -25,8 +25,6 @@ Honesty rules:
 from __future__ import annotations
 
 import json
-import shutil
-import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -35,6 +33,7 @@ from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
 
 _TIMEOUT = 20
+_LOCAL_TIMEOUT = 180     # a CPU model on a long text
 _MAX_CHARS = 5000
 _ENDPOINT = "https://api.mymemory.translated.net/get"
 _UA = "shani-chronoa/1.0 (local assistant)"
@@ -44,9 +43,9 @@ SCHEMA = {
     "function": {
         "name": "translate_text",
         "description": (
-            "Translate text into another language, using a local translation "
-            "tool when one is installed and a web service otherwise. The reply "
-            "says which was used, because one sends your text to a third party."
+            "Translate text into another language, with the local model when "
+            "it is running and a web service otherwise. The reply says which was "
+            "used, because one sends your text to a third party."
         ),
         "parameters": {
             "type": "object",
@@ -67,23 +66,28 @@ SCHEMA = {
 
 
 def _local_translate(text: str, target: str) -> "str | None":
-    """Use whichever offline translator is installed, if any."""
-    for binary, argv in (("trans", ["-brief", "-source", "auto", "-target", target, "-"]),
-                         ("argos-translate", None)):
-        if shutil.which(binary) is None:
-            continue
-        try:
-            if binary == "trans":
-                proc = subprocess.run(["trans", "-brief", "-source", "auto",
-                                       "-target", target, text],
-                                      capture_output=True, text=True,
-                                      timeout=_TIMEOUT, check=False)
-                out = (proc.stdout or "").strip()
-                return out or None
-            return None
-        except (subprocess.TimeoutExpired, OSError):
-            return None
-    return None
+    """Chronoa's own model (llama-server on 127.0.0.1, local_llm.BASE_URL):
+    nothing leaves the machine. None when it is not running or says nothing.
+
+    This used to try `trans` first and call it local - but translate-shell's
+    default engine is Google Translate, so the text left the machine under a
+    "Translated locally (no network)" label and without the web consent. The
+    argos-translate branch beside it never returned anything.
+    """
+    from shani_chronoa import local_llm
+    body = {"messages": [{"role": "user", "content":
+            f"Translate this into the language with code '{target}'. Answer with only the translation.\n\n{text} /no_think"}],
+            "temperature": 0.1, "max_tokens": 2048}
+    req = urllib.request.Request(local_llm.BASE_URL + "/chat/completions", json.dumps(body).encode(),
+                                 {"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=_LOCAL_TIMEOUT) as response:
+            out = json.loads(response.read().decode("utf-8"))["choices"][0]["message"]["content"]
+    except (urllib.error.URLError, OSError, ValueError, KeyError, IndexError):
+        return None
+    out = (out or "").split("</think>")[-1].strip()
+    # the text handed back is not a translation of it
+    return out if out and out != text.strip() else None
 
 
 def _web_translate(text: str, target: str, source: "str | None") -> "tuple[str, str] | str":
@@ -125,15 +129,15 @@ def _run(arguments: dict) -> str:
 
     local = _local_translate(text, target)
     if local:
-        return f"Translated locally (no network). Result:\n{local}"
+        return f"Translated on this computer by the local model (no network). Result:\n{local}"
 
     config = ChronoaConfig()
     if not config.sense_allowed("web"):
         return (
-            f"No local translation tool is installed, and the web fallback is "
+            f"Chronoa's local model did not answer, and the web fallback is "
             f"turned off ({config.sense_allowed_reason('web')}). Translating "
-            f"locally would need `trans` or `argos-translate`; enabling the "
-            f"web sense would send this text to a third-party service."
+            f"locally needs the local model running (shani-chronoa-llm.service); "
+            f"enabling the web sense would send this text to a third-party service."
         )
 
     result = _web_translate(text, target, source)

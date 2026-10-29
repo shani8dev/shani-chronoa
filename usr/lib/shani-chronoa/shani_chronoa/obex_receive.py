@@ -11,7 +11,8 @@ arrived (or failed).
 Gated on `phone-control-enabled`: the agent is registered with obexd only while
 that switch is on (re-checked every few seconds), and the switch is checked
 again per file. obexd has **one** agent slot, so holding it while switched off
-rejected every incoming file and kept the desktop's own receiver out. Runs on
+rejected every incoming file and kept the desktop's own receiver out. Inside
+shani-shell it never takes the slot: the shell's receiver is the desktop's. Runs on
 its own thread, main context and D-Bus connection, like `incoming_call.py`.
 """
 
@@ -78,6 +79,17 @@ def downloads() -> str:
     path = path or os.path.expanduser("~/Downloads")
     os.makedirs(path, exist_ok=True)
     return path
+
+
+def desktop_has_receiver() -> bool:
+    """True inside shani-shell (niri with the shell's config installed), whose
+    own OBEX agent receives files for the desktop."""
+    desktops = os.environ.get("XDG_CURRENT_DESKTOP", "").lower().split(":")
+    if "niri" not in desktops:
+        return False
+    dirs = [os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")]
+    dirs += (os.environ.get("XDG_CONFIG_DIRS") or "/etc/xdg").split(":")
+    return any(os.path.isdir(os.path.join(d, "quickshell", "shani")) for d in dirs)
 
 
 class ObexReceiver:
@@ -154,6 +166,11 @@ class ObexReceiver:
         source.attach(self._ctx)
 
     def _allowed(self) -> bool:
+        # inside shani-shell the desktop has its own receiver (Bluetooth >
+        # receive files, the same Accept/Decline into Downloads): one agent,
+        # never a race for obexd's single slot
+        if desktop_has_receiver():
+            return False
         try:
             return bool(self.config.get_bool(KEY, False))
         except Exception:  # noqa: BLE001

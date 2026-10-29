@@ -9,7 +9,9 @@ on obexd's ObjectManager. So this holds one MAP session open and listens for
 that, then lists the inbox to get who it is from and what it says.
 
 Gated on `phone-control-enabled` and `phone-messages-read-enabled` - the second
-because the notification shows other people's words - checked per message.
+because the notification shows other people's words - checked per message. With
+`phone-messages-send-enabled` on too, the notification has a reply field (the
+"inline-reply" action) and the reply goes back through the phone.
 Text is screened by `phone.clean_text` like every other message display.
 
 The session is held on its own connection and thread (obexd drops a session
@@ -28,13 +30,21 @@ logger = logging.getLogger(__name__)
 OBEX = "org.bluez.obex"
 MESSAGE_IFACE = "org.bluez.obex.Message1"
 KEYS = ("phone-control-enabled", "phone-messages-read-enabled")
+#: Reply from the notification only while sending is allowed too (checked again per reply)
+SEND_KEY = "phone-messages-send-enabled"
+NOTIFY = "org.freedesktop.Notifications"
+NOTIFY_PATH = "/org/freedesktop/Notifications"
 RETRY_SECONDS = 60
 
 
 class MessageWatcher:
-    def __init__(self, config: Any, notify: Optional[Callable[[str, str], None]] = None):
+    def __init__(self, config: Any, notify: Optional[Callable[[str, str], None]] = None,
+                 send: Optional[Callable[[str, str, str], None]] = None):
         self.config = config
         self.notify = notify or _desktop_notify
+        self._send = send
+        self.replies: "dict[int, tuple[str, str]]" = {}      # notification id -> (phone, number)
+        self.sent: "list[tuple[str, str]]" = []
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self.seen: set = set()
@@ -45,6 +55,44 @@ class MessageWatcher:
             return all(self.config.get_bool(k, False) for k in KEYS)
         except Exception:  # noqa: BLE001
             return False
+
+    def _may_send(self) -> bool:
+        try:
+            return bool(self.config.get_bool(SEND_KEY, False))
+        except Exception:  # noqa: BLE001
+            return False
+
+    # --- replying from the notification -------------------------------------------
+    # The desktop's notification server draws a reply field for an action named
+    # "inline-reply" and answers with NotificationReplied(id, text) - the
+    # convention KDE started and shani-shell's server (Quickshell) speaks. The
+    # reply goes to the phone's outbox (phone_bluez.send_sms), which sends it.
+
+    def notify_replyable(self, bus, title: str, body: str, phone: str, number: str) -> int:
+        from gi.repository import GLib
+        hints = {"x-kde-reply-placeholder-text": GLib.Variant("s", "Reply…"),
+                 "category": GLib.Variant("s", "im.received")}
+        nid = bus.call_sync(NOTIFY, NOTIFY_PATH, NOTIFY, "Notify",
+                            GLib.Variant("(susssasa{sv}i)", ("Shani Chronoa", 0, "mail-message-new-symbolic",
+                                                             title, body, ["inline-reply", "Reply"], hints, -1)),
+                            None, 0, 5000, None).unpack()[0]
+        self.replies[nid] = (phone, number)
+        return nid
+
+    def on_replied(self, nid: int, text: str) -> bool:
+        """A reply typed into the notification: sent while sending is allowed."""
+        target = self.replies.pop(nid, None)
+        text = (text or "").strip()
+        if not target or not text or not self._may_send():
+            return False
+        send = self._send
+        if send is None:
+            from shani_chronoa import phone_bluez
+            send = phone_bluez.send_sms
+        phone, number = target
+        send(phone, number, text)
+        self.sent.append((number, text))
+        return True
 
     def start(self) -> None:
         if self._thread is None:
@@ -97,7 +145,16 @@ class MessageWatcher:
             if str(params.unpack()[0]) == session:
                 state["gone"] = True                       # the phone ended the session
 
-        subs = [bus.signal_subscribe(OBEX, "org.freedesktop.DBus.ObjectManager", "InterfacesAdded", "/", None,
+        def on_replied(_c, _s, _p, _i, _sig, params):
+            nid, text = params.unpack()
+            try:
+                self.on_replied(int(nid), str(text))
+            except Exception as exc:  # noqa: BLE001 - the phone went, OBEX refused: say so in the log
+                logger.warning("message watcher: the reply was not sent: %s", exc)
+
+        subs = [bus.signal_subscribe(None, NOTIFY, "NotificationReplied", NOTIFY_PATH, None,
+                                     Gio.DBusSignalFlags.NONE, on_replied),
+                bus.signal_subscribe(OBEX, "org.freedesktop.DBus.ObjectManager", "InterfacesAdded", "/", None,
                                      Gio.DBusSignalFlags.NONE, on_added),
                 bus.signal_subscribe(OBEX, "org.freedesktop.DBus.ObjectManager", "InterfacesRemoved", "/", None,
                                      Gio.DBusSignalFlags.NONE, on_removed)]
@@ -115,7 +172,7 @@ class MessageWatcher:
                 if state["new"]:
                     state["new"].clear()
                     time.sleep(1.0)                                     # let the phone finish storing it
-                    self._announce(bus, session)
+                    self._announce(bus, session, address)
                 time.sleep(0.2)
         finally:
             for s in subs:
@@ -134,7 +191,7 @@ class MessageWatcher:
                              GLib.Variant("(sa{sv})", ("inbox", {"MaxCount": GLib.Variant("q", 10)})),
                              None, 0, 30000, None).unpack()[0]
 
-    def _announce(self, bus, session: str) -> None:
+    def _announce(self, bus, session: str, phone: str = "") -> None:
         from shani_chronoa import phone as ph
         for path, f in self._inbox(bus, session).items():
             if path in self.seen:
@@ -145,6 +202,14 @@ class MessageWatcher:
             who = ph.clean_text(str(f.get("SenderName") or f.get("Sender") or f.get("SenderAddress") or "Someone"))
             text = ph.clean_text(str(f.get("Subject") or "")).strip() or "(no text)"
             self.shown.append((who, text))
+            number = str(f.get("SenderAddress") or "").strip()
+            # replyable when sending is allowed and the desktop's default notifier is in use
+            if number and phone and self._may_send() and self.notify is _desktop_notify:
+                try:
+                    self.notify_replyable(bus, f"Message from {who}", text[:200], phone, number)
+                    continue
+                except Exception as exc:  # noqa: BLE001 - no notification server: the plain one
+                    logger.debug("message watcher: replyable notification failed: %s", exc)
             self.notify(f"Message from {who}", text[:200])
 
 
