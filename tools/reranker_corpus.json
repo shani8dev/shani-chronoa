@@ -901,12 +901,12 @@
           "desc": "explain_command: Explain a Linux shell command (not a general topic) from the local manuals (tldr, man), e.g. 'what does tar do', 'how do I use rsync'; or find which command does something, e.g. 'which command shows disk usage'. (arguments: command, task)"
         },
         {
-          "tool": "manage_triggers",
-          "desc": "manage_triggers: Arm, list, or remove automatic rules that run a Chronoa action when a perception matches - for example, notify when the battery sense reports low. A rule names one already-whitelisted skill; it cannot run an arbitrary command or an LLM-authored prompt. Listing needs no permission; arming or disarming requires the 'trigger-control-enabled' consent key. (arguments: action, name, sense, match_mode, substring, keywords, actuator, arguments, cooldown_seconds, event_type, source, params, ask_first, retry_policy, debounce_seconds)"
-        },
-        {
           "tool": "web_search",
           "desc": "web_search: Look something up on the web and return what the pages actually say: facts, prices, how-tos, anything no more specific tool covers. Give a search query, a specific URL, or both. For a scholarly question - a paper, a preprint, prior work, 'what does the research say' - set source=arxiv and it searches the arXiv preprint archive instead of the web. For news headlines use news; to click, fill in or book something on a site use browse. Requires the web sense to be enabled and privacy mode to be off. (arguments: query, url, source)"
+        },
+        {
+          "tool": "manage_triggers",
+          "desc": "manage_triggers: Arm, list, or remove automatic rules that run a Chronoa action when a perception matches - for example, notify when the battery sense reports low. A rule names one already-whitelisted skill; it cannot run an arbitrary command or an LLM-authored prompt. Listing needs no permission; arming or disarming requires the 'trigger-control-enabled' consent key. (arguments: action, name, sense, match_mode, substring, keywords, actuator, arguments, cooldown_seconds, event_type, source, params, ask_first, retry_policy, debounce_seconds)"
         },
         {
           "tool": "ui_elements",
@@ -922,8 +922,8 @@
         "container",
         "list_containers",
         "explain_command",
-        "manage_triggers",
         "web_search",
+        "manage_triggers",
         "ui_elements",
         "edit_image"
       ],
@@ -1009,8 +1009,8 @@
           "desc": "screenshot: Capture the screen to a PNG file and return the path it was saved to. Refuses when there is no display."
         },
         {
-          "tool": "browse",
-          "desc": "browse: Open a website and do things on it for the person: find information, fill in forms, click through. Drive a web browser: navigate, read the page's text (get_text), click, type, select options, scroll, move through history, take screenshots and wait for conditions. While Chronoa's window is open this is the in-app browser the user can watch: there it opens only http(s) pages the egress policy allows, and key, hover, drag, upload_file, tabs and evaluate are not available. Otherwise it is a headless Chromium with all actions. Requires the web sense to be enabled and privacy mode to be off. (arguments: action, url, selector, text, key, value, label, files, x, y, to_x, to_y, to_selector, delta_x, delta_y, steps, repeat, tab_id, path, wait_for, timeout, settle)"
+          "tool": "get_battery_status",
+          "desc": "get_battery_status: Get the current battery charge percentage and charging state."
         }
       ],
       "offered": [
@@ -1021,7 +1021,7 @@
         "bluetooth_call",
         "manage_triggers",
         "screenshot",
-        "browse"
+        "get_battery_status"
       ],
       "recall_hit": true
     },
@@ -2151,7 +2151,7 @@
         },
         {
           "tool": "translate_text",
-          "desc": "translate_text: Translate text into another language, using a local translation tool when one is installed and a web service otherwise. The reply says which was used, because one sends your text to a third party. (arguments: text, to_language, from_language)"
+          "desc": "translate_text: Translate text into another language, with the local model when it is running and a web service otherwise. The reply says which was used, because one sends your text to a third party. (arguments: text, to_language, from_language)"
         },
         {
           "tool": "write_text_file",
@@ -2361,6 +2361,10 @@
           "desc": "android_device: An Android phone connected with USB debugging (adb). devices: which are connected; info: model, Android version, battery, storage; screenshot: save the phone's screen as a PNG; apps: installed apps (query filters); push: copy a file to the phone (to, default /sdcard/Download); pull: copy a file from the phone; open_url: open a web link on the phone. Requires 'phone-control-enabled'. (arguments: action, serial, path, to, url, query, output)"
         },
         {
+          "tool": "look_at_image",
+          "desc": "look_at_image: Look at a picture file and say what it shows, with the local vision model: objects, scenes, charts, screenshots, UI, handwriting. Use a prompt to ask something specific about it. For the exact words printed in a picture, use read_document. Needs the vision sense. (arguments: path, prompt)"
+        },
+        {
           "tool": "notes",
           "desc": "notes: Keep your own notes in a plain list stored on this machine: 'add' one from 'text', 'list' them, 'search' by text or id, 'remove' one by 'id'. Never sent to a model. For what the assistant itself believes and uses in its replies, use remember_fact instead. (arguments: action, text, query, id)"
         },
@@ -2369,12 +2373,8 @@
           "desc": "system_info: Describe the machine Chronoa is running on: distribution, kernel, architecture, uptime, load, memory, CPU count, whether this is a desktop session or a container, and the hardware identity (make, model, board, BIOS version)."
         },
         {
-          "tool": "ui_elements",
-          "desc": "ui_elements: Use another app's controls by what they are, through the accessibility tree. apps: which apps are reachable. inspect: list a window's buttons, fields, menus and labels with ids (app = its name; query narrows by text). press: activate an element by id (a button, checkbox, link, menu item). set_text: put text in a field by id. read: an element's text or value. menu: open a menu path like 'File > Export'. drive: one turn of driving - give an action and a control number and the reply is the app's new state in the same short numbered form, which is what a small model can act on. act: click, type or key an app by name or position, with a visible cursor. state: the numbered controls an app is showing. Works on a container's app and on this desktop's own apps alike. Requires 'input-control-enabled'; drive start also runs a container, so it needs 'container-control-enabled' as well. (arguments: action, app, id, text, query, path, do, how, number, image, keys, x, y)"
-        },
-        {
-          "tool": "chart",
-          "desc": "chart: Make an SVG file from data, drawn on this computer with no install. chart: kind=bar|line|pie with data (bar/pie: [[label, number], ...]; line: [[x, y], ...], or several lines as series {name: [[x, y], ...]}), plus title, x_label, y_label. icon: a stroke icon by name (arrow-right, bell, calendar, check, clock, close, download, folder, heart, home, mail, search, settings, star, user). diagram: a top-to-bottom flow, steps=[\"Read\", \"Edit\", \"Test\"] with optional arrows [[from, to, label], ...]. output is the .svg path, e.g. '~/Pictures/sales.svg'. (arguments: action, output, kind, data, series, steps, arrows, name, title, x_label, y_label)"
+          "tool": "translate_text",
+          "desc": "translate_text: Translate text into another language, with the local model when it is running and a web service otherwise. The reply says which was used, because one sends your text to a third party. (arguments: text, to_language, from_language)"
         }
       ],
       "offered": [
@@ -2382,10 +2382,10 @@
         "install_model",
         "download_file",
         "android_device",
+        "look_at_image",
         "notes",
         "system_info",
-        "ui_elements",
-        "chart"
+        "translate_text"
       ],
       "recall_hit": true
     },
@@ -2752,16 +2752,16 @@
           "desc": "set_sleep_inhibit: Report what is currently holding the machine awake, or take a bounded hold so it does not sleep for a while, or release ours. Use for 'keep it awake while I...' - a long install, a backup, a test run. Scoped and self-lapsing; to change the machine's idle timeout permanently use set_screensaver instead. Gated by 'sleep-inhibit-enabled' consent key; reporting needs no such permission. (arguments: action, reason, seconds)"
         },
         {
-          "tool": "translate_text",
-          "desc": "translate_text: Translate text into another language, using a local translation tool when one is installed and a web service otherwise. The reply says which was used, because one sends your text to a third party. (arguments: text, to_language, from_language)"
-        },
-        {
           "tool": "read_document",
           "desc": "read_document: Read the text of a PDF (optionally a page range) or of an image (OCR), e.g. to summarise it or read it out. For a PDF it also reports whether the document embeds its fonts, since one that does not prints wrong elsewhere. (arguments: path, first_page, last_page)"
         },
         {
           "tool": "sing",
           "desc": "sing: Sing a line aloud: each syllable gets its own note, on one of five named contours (rising, falling, arch, level, wave) or the real tune from a 'midi_file'. It does NOT know any song, so never present its output as a particular tune unless a MIDI file was supplied. Needs soundtouch or rubberband. (arguments: text, shape, voice_style, midi_file)"
+        },
+        {
+          "tool": "translate_text",
+          "desc": "translate_text: Translate text into another language, with the local model when it is running and a web service otherwise. The reply says which was used, because one sends your text to a third party. (arguments: text, to_language, from_language)"
         },
         {
           "tool": "vm",
@@ -2773,9 +2773,9 @@
         "install_app",
         "install_model",
         "set_sleep_inhibit",
-        "translate_text",
         "read_document",
         "sing",
+        "translate_text",
         "vm"
       ],
       "recall_hit": true
@@ -3087,6 +3087,10 @@
           "desc": "solve_math: Maths: derivative, series (Taylor), expansion, factor, numeric integral (definite, or numeric for indefinite), numeric limit (at a point or oo), linear and quadratic solve, numeric sum of a series, evaluation to N digits, prime_factors / is_prime. Write maths plainly: 'x^2 + 3x', 'sin(x)/x', 'x^2 - 4 = 0'. (arguments: operation, expression, variable, point, lower, upper, order, digits, other)"
         },
         {
+          "tool": "look_at_image",
+          "desc": "look_at_image: Look at a picture file and say what it shows, with the local vision model: objects, scenes, charts, screenshots, UI, handwriting. Use a prompt to ask something specific about it. For the exact words printed in a picture, use read_document. Needs the vision sense. (arguments: path, prompt)"
+        },
+        {
           "tool": "create_video",
           "desc": "create_video: Create a video: a slideshow from a list of pictures (each shown for a few seconds), or a simple clip of a colour for a duration. Writes a new .mp4 next to the inputs; never overwrites. (arguments: images, seconds, color, duration, width)"
         },
@@ -3101,21 +3105,17 @@
         {
           "tool": "photo_metadata",
           "desc": "photo_metadata: Read a photo's embedded EXIF metadata: the camera and lens, the date and time it was taken, exposure, aperture, ISO, focal length, and the GPS location if one is recorded. Use for 'when was this photo taken', 'does this picture contain my location', 'which camera took it'. JPEG and TIFF. Read-only; the file is not changed. (arguments: path)"
-        },
-        {
-          "tool": "qr_code",
-          "desc": "qr_code: read: decode every QR code and barcode in a picture (path) or on the screen (screen=true, needs the vision consent). create: make a QR code PNG of text (a URL, Wi-Fi details, a note) at output. (arguments: action, path, screen, text, output)"
         }
       ],
       "offered": [
         "read_image",
         "screenshot",
         "solve_math",
+        "look_at_image",
         "create_video",
         "edit_image",
         "browse",
-        "photo_metadata",
-        "qr_code"
+        "photo_metadata"
       ],
       "recall_hit": true
     },
@@ -3393,12 +3393,12 @@
           "desc": "manage_triggers: Arm, list, or remove automatic rules that run a Chronoa action when a perception matches - for example, notify when the battery sense reports low. A rule names one already-whitelisted skill; it cannot run an arbitrary command or an LLM-authored prompt. Listing needs no permission; arming or disarming requires the 'trigger-control-enabled' consent key. (arguments: action, name, sense, match_mode, substring, keywords, actuator, arguments, cooldown_seconds, event_type, source, params, ask_first, retry_policy, debounce_seconds)"
         },
         {
-          "tool": "cleanup_apply",
-          "desc": "cleanup_apply: Actually free the disk space cleanup_report measured: empty your cache folder, or remove Flatpak runtimes no app uses. Both are recoverable or provably unused. Requires the 'cleanup-enabled' consent key. The system log is not here - that needs root, which Chronoa cannot ask for from inside a tool call. (arguments: target)"
-        },
-        {
           "tool": "lan_phone",
           "desc": "lan_phone: Find phones on the SAME Wi-Fi network, using the KDE Connect protocol directly - so it works without KDE Connect or GSConnect installed. 'devices': what announced itself on this network in the last few seconds (phones, tablets, other computers). 'announce': make this computer findable by a phone's KDE Connect app. 'status': what this computer can and cannot do on the LAN. 'pair': pair with the device 'devices' found (the phone asks its owner). Needs the 'lan-phone-enabled' consent key. (arguments: action, seconds)"
+        },
+        {
+          "tool": "cleanup_apply",
+          "desc": "cleanup_apply: Actually free the disk space cleanup_report measured: empty your cache folder, or remove Flatpak runtimes no app uses. Both are recoverable or provably unused. Requires the 'cleanup-enabled' consent key. The system log is not here - that needs root, which Chronoa cannot ask for from inside a tool call. (arguments: target)"
         }
       ],
       "offered": [
@@ -3408,8 +3408,8 @@
         "android_device",
         "default_apps",
         "manage_triggers",
-        "cleanup_apply",
-        "lan_phone"
+        "lan_phone",
+        "cleanup_apply"
       ],
       "recall_hit": true
     },
@@ -4044,7 +4044,7 @@
       "negatives": [
         {
           "tool": "translate_text",
-          "desc": "translate_text: Translate text into another language, using a local translation tool when one is installed and a web service otherwise. The reply says which was used, because one sends your text to a third party. (arguments: text, to_language, from_language)"
+          "desc": "translate_text: Translate text into another language, with the local model when it is running and a web service otherwise. The reply says which was used, because one sends your text to a third party. (arguments: text, to_language, from_language)"
         },
         {
           "tool": "undo_last_change",
@@ -4501,8 +4501,8 @@
           "desc": "generate_password: Generate a strong random password, or a passphrase of random words, and copy it to the clipboard (it is never said or shown in the reply). (arguments: kind, length, symbols)"
         },
         {
-          "tool": "notes",
-          "desc": "notes: Keep your own notes in a plain list stored on this machine: 'add' one from 'text', 'list' them, 'search' by text or id, 'remove' one by 'id'. Never sent to a model. For what the assistant itself believes and uses in its replies, use remember_fact instead. (arguments: action, text, query, id)"
+          "tool": "look_at_image",
+          "desc": "look_at_image: Look at a picture file and say what it shows, with the local vision model: objects, scenes, charts, screenshots, UI, handwriting. Use a prompt to ask something specific about it. For the exact words printed in a picture, use read_document. Needs the vision sense. (arguments: path, prompt)"
         }
       ],
       "offered": [
@@ -4513,7 +4513,7 @@
         "calendar_edit",
         "conversations",
         "generate_password",
-        "notes"
+        "look_at_image"
       ],
       "recall_hit": true
     },
@@ -4548,8 +4548,8 @@
           "desc": "device_i2c: Read a register on an I2C device, or write one with the 'i2c-write-enabled' consent key. Reading needs no permission; writing is listed as destructive because a write to the wrong register can erase an EEPROM's calibration, and register ranges that do that are refused outright. (arguments: bus, address, register, action, value)"
         },
         {
-          "tool": "dns_lookup",
-          "desc": "dns_lookup: Look a hostname or address up in DNS and report what came back: the addresses, or the mail servers, name servers, TXT records, certificate records or other records a name publishes, and whether the answer is DNSSEC-signed and valid. Distinguishes 'this name does not exist' from 'the resolver did not answer', because those have different fixes. Obeys privacy mode, since the query goes to a resolver outside this machine. Read-only. (arguments: name, type)"
+          "tool": "look_at_image",
+          "desc": "look_at_image: Look at a picture file and say what it shows, with the local vision model: objects, scenes, charts, screenshots, UI, handwriting. Use a prompt to ask something specific about it. For the exact words printed in a picture, use read_document. Needs the vision sense. (arguments: path, prompt)"
         }
       ],
       "offered": [
@@ -4560,7 +4560,7 @@
         "web_search",
         "my_ip_address",
         "device_i2c",
-        "dns_lookup"
+        "look_at_image"
       ],
       "recall_hit": true
     },
@@ -5539,8 +5539,8 @@
           "desc": "photo_metadata: Read a photo's embedded EXIF metadata: the camera and lens, the date and time it was taken, exposure, aperture, ISO, focal length, and the GPS location if one is recorded. Use for 'when was this photo taken', 'does this picture contain my location', 'which camera took it'. JPEG and TIFF. Read-only; the file is not changed. (arguments: path)"
         },
         {
-          "tool": "read_image",
-          "desc": "read_image: Read a picture's basics out loud: width by height, format, and colour type, plus file size. For what the picture says, use read_document on it. The original is never modified. (arguments: path)"
+          "tool": "look_at_image",
+          "desc": "look_at_image: Look at a picture file and say what it shows, with the local vision model: objects, scenes, charts, screenshots, UI, handwriting. Use a prompt to ask something specific about it. For the exact words printed in a picture, use read_document. Needs the vision sense. (arguments: path, prompt)"
         }
       ],
       "offered": [
@@ -5551,7 +5551,7 @@
         "edit_image",
         "generate_image",
         "photo_metadata",
-        "read_image"
+        "look_at_image"
       ],
       "recall_hit": true
     },
@@ -5843,6 +5843,10 @@
           "desc": "edit_image: Edit a picture (for faces or backgrounds use photo_video) and save the result as a new file next to it: resize (width and/or height, or percent), compress (quality, or to under a size in KB), crop, upscale (2-4x), rotate, flip, grayscale, a look (sepia, vignette, sketch, paint, enhance), strip metadata (location/camera), or convert format. Several edits can be combined in one call. For effects that depend on what is in the picture (blur faces, blur the background) use photo_video. (arguments: path, width, height, percent, upscale, quality, max_kb, crop, rotate, flip, grayscale, look, strip_metadata, format)"
         },
         {
+          "tool": "look_at_image",
+          "desc": "look_at_image: Look at a picture file and say what it shows, with the local vision model: objects, scenes, charts, screenshots, UI, handwriting. Use a prompt to ask something specific about it. For the exact words printed in a picture, use read_document. Needs the vision sense. (arguments: path, prompt)"
+        },
+        {
           "tool": "read_image",
           "desc": "read_image: Read a picture's basics out loud: width by height, format, and colour type, plus file size. For what the picture says, use read_document on it. The original is never modified. (arguments: path)"
         },
@@ -5853,10 +5857,6 @@
         {
           "tool": "routines",
           "desc": "routines: Save a routine: a short phrase (e.g. 'good morning', 'leaving work') that later runs a whole request, e.g. 'tell me the weather, my calendar today and the top news'. Also list or delete routines. Saving runs nothing; saying the phrase later runs the request. (arguments: action, name, request, phrases)"
-        },
-        {
-          "tool": "convert_media",
-          "desc": "convert_media: Convert an audio, video or image file to another format (mp3, ogg, opus, wav, flac, m4a, mp4, webm, gif, png, jpg, webp), optionally resizing to a width. Writes a new file next to the original; never overwrites. (arguments: path, to, width)"
         }
       ],
       "offered": [
@@ -5864,10 +5864,10 @@
         "generate_password",
         "get_weather",
         "edit_image",
+        "look_at_image",
         "read_image",
         "container",
-        "routines",
-        "convert_media"
+        "routines"
       ],
       "recall_hit": true
     },
@@ -5984,6 +5984,10 @@
           "desc": "android_device: An Android phone connected with USB debugging (adb). devices: which are connected; info: model, Android version, battery, storage; screenshot: save the phone's screen as a PNG; apps: installed apps (query filters); push: copy a file to the phone (to, default /sdcard/Download); pull: copy a file from the phone; open_url: open a web link on the phone. Requires 'phone-control-enabled'. (arguments: action, serial, path, to, url, query, output)"
         },
         {
+          "tool": "look_at_image",
+          "desc": "look_at_image: Look at a picture file and say what it shows, with the local vision model: objects, scenes, charts, screenshots, UI, handwriting. Use a prompt to ask something specific about it. For the exact words printed in a picture, use read_document. Needs the vision sense. (arguments: path, prompt)"
+        },
+        {
           "tool": "json_query",
           "desc": "json_query: Ask questions about the shape of a JSON document: what keys it has, what a field contains, how many entries an array has, or the sum/unique/sorted values of an array. Give either a file path or paste the document itself. (arguments: path, document, field, operation, of)"
         },
@@ -5994,10 +5998,6 @@
         {
           "tool": "resolve_conflict",
           "desc": "resolve_conflict: Work out what is conflicting in a git repository and resolve it. 'show' lists every unmerged file and prints all three sides git holds - the common ancestor, your side and theirs - so there is no guessing about which is which; 'ours' and 'theirs' take a whole side of the named files and mark them resolved; 'mark' marks files you have edited by hand; 'abort' abandons the merge, rebase or cherry-pick and leaves the commits to try again. There is no automatic merge, because deciding which line is right is a judgement about the code and only you can make it. Reading needs 'git-sense-enabled'; changing the working tree needs 'git-write-enabled'. (arguments: action, path, paths)"
-        },
-        {
-          "tool": "set_sleep_inhibit",
-          "desc": "set_sleep_inhibit: Report what is currently holding the machine awake, or take a bounded hold so it does not sleep for a while, or release ours. Use for 'keep it awake while I...' - a long install, a backup, a test run. Scoped and self-lapsing; to change the machine's idle timeout permanently use set_screensaver instead. Gated by 'sleep-inhibit-enabled' consent key; reporting needs no such permission. (arguments: action, reason, seconds)"
         }
       ],
       "offered": [
@@ -6005,10 +6005,10 @@
         "screenshot",
         "browse",
         "android_device",
+        "look_at_image",
         "json_query",
         "ping_host",
-        "resolve_conflict",
-        "set_sleep_inhibit"
+        "resolve_conflict"
       ],
       "recall_hit": true
     },
@@ -7659,7 +7659,7 @@
         },
         {
           "tool": "translate_text",
-          "desc": "translate_text: Translate text into another language, using a local translation tool when one is installed and a web service otherwise. The reply says which was used, because one sends your text to a third party. (arguments: text, to_language, from_language)"
+          "desc": "translate_text: Translate text into another language, with the local model when it is running and a web service otherwise. The reply says which was used, because one sends your text to a third party. (arguments: text, to_language, from_language)"
         },
         {
           "tool": "write_text_file",
@@ -8029,7 +8029,7 @@
         },
         {
           "tool": "translate_text",
-          "desc": "translate_text: Translate text into another language, using a local translation tool when one is installed and a web service otherwise. The reply says which was used, because one sends your text to a third party. (arguments: text, to_language, from_language)"
+          "desc": "translate_text: Translate text into another language, with the local model when it is running and a web service otherwise. The reply says which was used, because one sends your text to a third party. (arguments: text, to_language, from_language)"
         },
         {
           "tool": "write_text_file",
@@ -8070,6 +8070,10 @@
           "desc": "office_document: Word (.docx), Excel (.xlsx) and PowerPoint (.pptx) files; also reads .odt/.ods/.odp. read: text with headings, tables, one section per sheet or slide (sheet, cell_range like A1:D20, formulas=true to see formulas). create: a new file from content - for .docx Markdown-style text (# headings, - bullets, 1. lists, | tables |, **bold**); for .xlsx rows (list of lists), or sheets {name: rows}, or CSV/Markdown-table text in content, '=...' cells are formulas; for .pptx slides [{title, bullets[], subtitle}]. set_cells: values {'B12': 42, 'C1': 'Total'} in a sheet. replace_text / append: change a .docx. pdf_images: save a PDF's embedded pictures to a folder. Changing an existing file needs 'file-edit-enabled' and can be undone with undo_last_change. (arguments: action, path, content, rows, sheets, chart, slides, values, sheet, cell_range, formulas, find, replace, title, overwrite, output_dir)"
         },
         {
+          "tool": "look_at_image",
+          "desc": "look_at_image: Look at a picture file and say what it shows, with the local vision model: objects, scenes, charts, screenshots, UI, handwriting. Use a prompt to ask something specific about it. For the exact words printed in a picture, use read_document. Needs the vision sense. (arguments: path, prompt)"
+        },
+        {
           "tool": "json_query",
           "desc": "json_query: Ask questions about the shape of a JSON document: what keys it has, what a field contains, how many entries an array has, or the sum/unique/sorted values of an array. Give either a file path or paste the document itself. (arguments: path, document, field, operation, of)"
         },
@@ -8080,10 +8084,6 @@
         {
           "tool": "fingerprint_status",
           "desc": "fingerprint_status: Whether fingerprint login is set up on this machine, and which fingers are enrolled. Says which of the four real states it is in: no reader attached, reader present but nothing enrolled, fingers enrolled, or the daemon not running and the question unanswerable. Reading only - it never enrolls or deletes a fingerprint, because 'which fingers are enrolled' is a question and the other two are not. Needs no permission: it reports a machine's own login configuration, and the answer is about hardware and a per-user setting rather than anything private. (arguments: user)"
-        },
-        {
-          "tool": "list_processes",
-          "desc": "list_processes: List the processes running on this machine, with their pid, name, owner, CPU and memory use, sorted by CPU unless sort_by says otherwise. Use this to find what is using the machine - pass sort_by='memory' for the RAM question, which CPU order does not answer - or the pid of something you want to stop. (arguments: name_filter, sort_by, limit)"
         }
       ],
       "offered": [
@@ -8091,10 +8091,10 @@
         "chart",
         "ask_user",
         "office_document",
+        "look_at_image",
         "json_query",
         "dashboard",
-        "fingerprint_status",
-        "list_processes"
+        "fingerprint_status"
       ],
       "recall_hit": true
     },
@@ -8589,6 +8589,10 @@
           "desc": "list_containers: List this machine's containers: distroboxes (by name, with their image and whether they are running) and podman/docker containers, including any that exited because they ran out of memory, plus how much disk the images use. Use for 'what distroboxes do I have', 'is my container running', 'why did my container die'. The podman details use the 'containers-sense-enabled' switch. Read-only."
         },
         {
+          "tool": "look_at_image",
+          "desc": "look_at_image: Look at a picture file and say what it shows, with the local vision model: objects, scenes, charts, screenshots, UI, handwriting. Use a prompt to ask something specific about it. For the exact words printed in a picture, use read_document. Needs the vision sense. (arguments: path, prompt)"
+        },
+        {
           "tool": "print_file",
           "desc": "print_file: Print a document file on the default printer, or on a named one. Refuses directories and non-document files. Reports the job as queued, since whether it actually printed is not observable from here. (arguments: path, printer)"
         },
@@ -8603,21 +8607,17 @@
         {
           "tool": "manage_triggers",
           "desc": "manage_triggers: Arm, list, or remove automatic rules that run a Chronoa action when a perception matches - for example, notify when the battery sense reports low. A rule names one already-whitelisted skill; it cannot run an arbitrary command or an LLM-authored prompt. Listing needs no permission; arming or disarming requires the 'trigger-control-enabled' consent key. (arguments: action, name, sense, match_mode, substring, keywords, actuator, arguments, cooldown_seconds, event_type, source, params, ask_first, retry_policy, debounce_seconds)"
-        },
-        {
-          "tool": "ui_elements",
-          "desc": "ui_elements: Use another app's controls by what they are, through the accessibility tree. apps: which apps are reachable. inspect: list a window's buttons, fields, menus and labels with ids (app = its name; query narrows by text). press: activate an element by id (a button, checkbox, link, menu item). set_text: put text in a field by id. read: an element's text or value. menu: open a menu path like 'File > Export'. drive: one turn of driving - give an action and a control number and the reply is the app's new state in the same short numbered form, which is what a small model can act on. act: click, type or key an app by name or position, with a visible cursor. state: the numbered controls an app is showing. Works on a container's app and on this desktop's own apps alike. Requires 'input-control-enabled'; drive start also runs a container, so it needs 'container-control-enabled' as well. (arguments: action, app, id, text, query, path, do, how, number, image, keys, x, y)"
         }
       ],
       "offered": [
         "run_command",
         "container",
         "list_containers",
+        "look_at_image",
         "print_file",
         "print_queue",
         "explain_command",
-        "manage_triggers",
-        "ui_elements"
+        "manage_triggers"
       ],
       "recall_hit": true
     },
@@ -9402,7 +9402,7 @@
           "hindi"
         ]
       },
-      "positives_desc": "translate_text: Translate text into another language, using a local translation tool when one is installed and a web service otherwise. The reply says which was used, because one sends your text to a third party. (arguments: text, to_language, from_language)",
+      "positives_desc": "translate_text: Translate text into another language, with the local model when it is running and a web service otherwise. The reply says which was used, because one sends your text to a third party. (arguments: text, to_language, from_language)",
       "negatives": [
         {
           "tool": "routines",
