@@ -81,7 +81,7 @@ def _run(arguments: dict) -> str:
                 f"not a question - either decide the answer yourself and act, or "
                 f"phrase a question the user can actually choose between.")
 
-    if not ask_bridge.has_presenter():
+    if not ask_bridge.has_any_presenter():
         return ("There is nobody here to answer a question right now, so none was "
                 "asked and no option was chosen. Either pick the most likely "
                 "option and say which you picked, or say what you need to know "

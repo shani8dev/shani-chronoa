@@ -306,7 +306,7 @@ def confirm_outgoing(name: str, arguments, origin: str = "user"):
     text = _text(arguments, "text")
     if action == "send" and not text:
         return None                              # the child says "no text"
-    if not permissions.allows_prompting() or not ask_bridge.has_presenter():
+    if not permissions.allows_prompting() or not ask_bridge.has_any_presenter():
         return stop(f"Nothing was sent: I {verb} only after you confirm it on screen, and there is nobody "
                     f"here to confirm right now.")
     target, problem = _resolve(action, arguments, config)

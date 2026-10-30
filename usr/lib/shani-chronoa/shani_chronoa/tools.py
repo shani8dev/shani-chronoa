@@ -1224,7 +1224,7 @@ def _person_allows(question: str) -> bool:
     """Put a reaction-layer question to the person; True only on a clear yes."""
     import threading
     from shani_chronoa import ask_bridge
-    if threading.current_thread() is threading.main_thread() or not ask_bridge.has_presenter():
+    if threading.current_thread() is threading.main_thread() or not ask_bridge.has_any_presenter():
         return False
     return ask_bridge.ask(f"{question}\n\nLet it continue?", ["Let it continue", "Stop"]) == "Let it continue"
 

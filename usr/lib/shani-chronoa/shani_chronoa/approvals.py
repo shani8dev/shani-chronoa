@@ -122,7 +122,7 @@ def confirm(title: str, body: str, seconds: int = CONFIRM_SECONDS) -> "tuple[boo
     """
     try:
         from shani_chronoa import ask_bridge
-        if ask_bridge.has_presenter():
+        if ask_bridge.has_any_presenter():
             answer = ask_bridge.ask(f"{title}\n{body}", ["Yes", "No"], timeout=seconds)
             if answer == "Yes":
                 return True, ""

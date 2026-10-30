@@ -29,9 +29,11 @@ not block forever.
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import threading
-from typing import Callable, Optional
+from contextlib import contextmanager
+from typing import Callable, Iterator, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +62,51 @@ MAX_PENDING = 4
 #: threads the tool loop and the MCP server happen to use.
 _pending: "list[str]" = []
 _pending_lock = threading.Lock()
+
+#: The turn engine's approval hook, bound to one turn's context. When a turn
+#: is running, `ask()` routes its question here instead of to the GTK
+#: presenter, so a shell-side person can answer a tool's question through
+#: `dev.shani.chronoa.Agent.Approve` and the blocked tool loop resumes. Unbound
+#: in the GTK app's own turns, where the presenter answers everything.
+#:
+#: **A context variable, not a global.** `set_agent_resolver` used to install
+#: one callable process-wide, which routed a question asked by the *window's*
+#: turn to the shell - and the shell would draw an approval card for a turn it
+#: had never started, while the window waited for a click that never came. The
+#: resolver belongs to the turn that installed it: `AgentService.Turn` binds it,
+#: the coroutine and its tool threads inherit it (the assistant copies the
+#: context into the executor), and no other turn can see it.
+TurnResolver = Callable[[str, list, object, str],
+                        "Optional[tuple[threading.Event, Callable[[str], None]]]"]
+
+_turn_resolver: "contextvars.ContextVar[Optional[TurnResolver]]" = (
+    contextvars.ContextVar("chronoa_turn_resolver", default=None))
+
+
+@contextmanager
+def turn_resolver(fn: TurnResolver) -> "Iterator[None]":
+    """Bind `fn` as the approval resolver for the current turn's context."""
+    token = _turn_resolver.set(fn)
+    try:
+        yield
+    finally:
+        _turn_resolver.reset(token)
+
+
+def has_agent_resolver() -> bool:
+    """Whether the current context belongs to an agent turn."""
+    return _turn_resolver.get() is not None
+
+
+def has_any_presenter() -> bool:
+    """Whether a question can be put to someone, in the window or a shell.
+
+    The gate that used to read `has_presenter()` alone refused every question
+    in a session whose person was looking at the shell instead of the GTK
+    window - the resolver was there, and the check never asked about it.
+    """
+    return has_presenter() or has_agent_resolver()
+
 
 _presenter: Optional[Presenter] = None
 
@@ -125,6 +172,17 @@ def ask(question: str, options: list, timeout: float = DEFAULT_TIMEOUT_SECONDS,
     prompt, or when the wait times out - all three are "no answer was given",
     and the caller must not treat any of them as a choice.
     """
+    resolver = _turn_resolver.get()
+    if resolver is not None:
+        # A shell-side turn: route the question to the agent's approval
+        # channel instead of to the GTK presenter. The resolver returns the
+        # event the tool loop waits on and has already emitted the `approval`
+        # event; `Approve` sets it from whatever thread it was called on.
+        routed = resolver(question, list(options), preview, kind)
+        if routed is not None:
+            done, _resolve = routed
+            return _answer_of(done, timeout)
+        # A turn that declines to route falls through to the presenter below.
     if _presenter is None:
         return ""
     with _pending_lock:
@@ -163,7 +221,13 @@ def ask(question: str, options: list, timeout: float = DEFAULT_TIMEOUT_SECONDS,
 
 
 def _answer_of(done, timeout: float) -> str:
-    """The chosen option once `done` is set, or "" for anything else."""
+    """The chosen option once `done` is set, or "" for anything else.
+
+    A routed question gets one extra step: the event carries a
+    `chronoa_closed` callback, called however the wait ends, so the shell is
+    told to take the card down when the tool stopped waiting - and a late
+    `Approve` no longer looks like it answered anything.
+    """
     if not isinstance(done, threading.Event):
         # A presenter that returns the wrong type used to raise AttributeError
         # out of the tool call, taking the turn with it. Anything that is not a
@@ -172,10 +236,18 @@ def _answer_of(done, timeout: float) -> str:
         logger.error("ask_user presenter returned %s, not an event; treating it "
                      "as no answer", type(done).__name__)
         return ""
-    if not done.wait(timeout):
-        logger.warning("ask_user timed out after %.0fs with no answer", timeout)
-        return ""
-    return getattr(done, "chronoa_answer", "") or ""
+    try:
+        if not done.wait(timeout):
+            logger.warning("ask_user timed out after %.0fs with no answer", timeout)
+            return ""
+        return getattr(done, "chronoa_answer", "") or ""
+    finally:
+        closed = getattr(done, "chronoa_closed", None)
+        if callable(closed):
+            try:
+                closed()
+            except Exception:  # noqa: BLE001 - cleanup must not change the answer
+                logger.debug("ask_user close hook failed", exc_info=True)
 
 
 def make_event() -> "tuple[threading.Event, Callable[[str], None]]":

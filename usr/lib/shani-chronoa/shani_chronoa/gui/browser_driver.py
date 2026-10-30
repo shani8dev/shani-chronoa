@@ -712,7 +712,7 @@ def _money_ok(what: str) -> str:
     if _money_allowed.get(host, 0) > time.monotonic():
         return ""
     from shani_chronoa import ask_bridge
-    if _on_main_thread() or not ask_bridge.has_presenter():
+    if _on_main_thread() or not ask_bridge.has_any_presenter():
         return (f"{what} on {host} needs your say-so, and there is nobody here to ask - "
                 "so it was not done")
     _say(f"asking you before {what}", refused=True)

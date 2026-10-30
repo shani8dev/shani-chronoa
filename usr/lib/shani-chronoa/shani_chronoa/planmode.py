@@ -171,7 +171,7 @@ def ask_to_proceed(tool: str, arguments: "Optional[dict]" = None) -> bool:
         record_refusal(tool, arguments)
         return False
 
-    if not ask_bridge.has_presenter():
+    if not ask_bridge.has_any_presenter():
         # Nobody to ask is not permission. Same answer `ask_user` gives.
         record_refusal(tool, arguments)
         return False

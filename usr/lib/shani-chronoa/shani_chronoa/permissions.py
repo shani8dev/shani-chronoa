@@ -835,7 +835,7 @@ def can_ask() -> bool:
     user to allow anything.
     """
     from shani_chronoa import ask_bridge
-    return ask_bridge.has_presenter()
+    return ask_bridge.has_any_presenter()
 
 
 def decide(action: str, resource: "str | None", consent_key: str,
@@ -912,7 +912,7 @@ def decide(action: str, resource: "str | None", consent_key: str,
                     action, resource)
         return Decision.ALLOW_SESSION
 
-    if not ask_bridge.has_presenter():
+    if not ask_bridge.has_any_presenter():
         # Nobody to ask. Refusing is the only honest answer, and asking a
         # question that cannot be answered would hang the turn.
         return None

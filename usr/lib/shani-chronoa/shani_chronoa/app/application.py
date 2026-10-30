@@ -18,6 +18,7 @@ from gi.repository import Gtk, Gio, GLib, Adw  # type: ignore
 from shani_chronoa.assistant import Assistant
 
 from shani_chronoa.asyncbridge import AsyncBridge
+from shani_chronoa.agent_service import AgentService
 from shani_chronoa.audio import AudioPlayer, AudioRecorder, BargeInMonitor
 from shani_chronoa import pipewire, conversation_store, ask_bridge, planmode
 from shani_chronoa.config import ChronoaConfig, PrivacyManager
@@ -80,6 +81,10 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         # ever created.
         self._gateways = None
         self._gateway_owner = None
+        # The shell's turn engine. Declared here for the same reason as the
+        # gateway owner: `do_shutdown` releases it, and a shutdown after a
+        # failed startup must find None rather than raise.
+        self._agent = None
         self._gateway_entries: list = []
         self._gateway_errors: list = []
         #: The Quick Ask popup, created on first use and reused after. Declared
@@ -337,6 +342,10 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         # (bounded), so no bridge work is abandoned and the GTK app does not
         # hang on exit.
         self._async.shutdown()
+        agent = getattr(self, "_agent", None)
+        if agent is not None:
+            agent.unexport()
+            self._agent = None
         # Explicit class-qualified chain-up, matching do_startup() above -
         # this build's super().do_shutdown() has the same zero-arg vfunc
         # mismatch that crashed do_startup() before it was fixed the same way.
@@ -1768,6 +1777,20 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         # listening at all.
         self._gateways = None
         self._gateway_owner = None
+
+        # The turn engine itself, for a shell that wants a stream with approval
+        # rather than a fire-and-forget reply. `gateway.py` answers a channel
+        # with a string; this owns the turn, its id, its events and the moment
+        # the person decides. Exported always - a machine with no shell has
+        # nothing to ask, which is not the same as nothing to answer. A machine
+        # with no *session bus* (a headless daemon, some CI) must still start:
+        # the agent is an extra face, not a startup requirement.
+        self._agent = AgentService(self)
+        try:
+            self._agent.export()
+        except Exception:  # noqa: BLE001 - no bus is a deployment, not a crash
+            logger.warning("agent interface not exported; turns stay on the "
+                           "gateway", exc_info=True)
 
         # One action reaching any page of any window: `show-page` with
         # "<window>:<id>" - "settings:privacy", "setup:review", "main:quick-ask".
