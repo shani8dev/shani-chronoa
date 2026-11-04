@@ -41,22 +41,12 @@ SETTINGS_TARGETS = {
     # Consent keys are all in Privacy, whatever else the panel is about: the
     # calendar's, the phone's, memory's and the trigger gate all live there.
     "calendar": "privacy",
-    "devices": "privacy",
-    "phone": "privacy",
     "daemon": "privacy",
     "memory": "privacy",
     # Both are shut by default and both switches are Privacy rows, so a gear
     # here goes where the person can actually turn them on.
     "my_files": "privacy",
     "meetings": "privacy",
-    "phone_link": "privacy",
-    # `bluetooth-gatt-enabled` is the same privacy switch `devices.py` and
-    # `phone.py` route to, so this panel routes there too.
-    "wearables": "privacy",
-    # `phone-control-enabled`, the same switch the phone panel routes to.
-    # A phone reached over adb is not a wearable and not a Bluetooth peer,
-    # so it is its own panel - and neither desktop has one.
-    "android": "privacy",
     "triggers": "tool-activity",
     "skills": "tool-activity",
     "voice": "voice",
@@ -131,11 +121,11 @@ SURFACE_IDS = (
     # shape for a transcript somebody wants to read again.
     "my_files",
     "meetings",
-    # The phone over this computer's own LAN link (`lan_link`) and over
-    # Bluetooth both live here. The LAN one had one reachable path: a model
-    # deciding to call `lan_phone` - there was no way to see what was on the
-    # network, or to learn that pairing is specified and not written.
-    "phone_link",
+    # The device panels - Phone, Phone link, Screen share, Devices, Wearables,
+    # Android and Connect a device - moved to Shani Link (shani-link-app) on
+    # 2026-11-04 with the engines they drive: they are used by a person
+    # directly, with no assistant consent. The sidebar's "Phone and remote"
+    # group carries one "Shani Link" row that opens the app (sidebar.py).
     # And the app-driver: whether a mouse and a keyboard can reach a
     # window on *this* desktop. The answer was four measured facts kept
     # in prose, and the panel asks each of them rather than claiming one.
@@ -169,10 +159,6 @@ SURFACE_IDS = (
     # you could say "good morning" and have it work, and no screen listed the
     # ones you had, named their trigger phrases, or showed what each asks for.
     "routines",
-    # This computer's screen on a paired phone. The skill shipped the whole
-    # pipeline and reached no GUI at all - the sixth dead module the "who calls
-    # this" scan has found here.
-    "screen_share",
     # What Chronoa is, function by function. First in its section on purpose:
     # it is the answer to "what is this thing", which is the question a person
     # has before any of the others.
@@ -203,17 +189,6 @@ SURFACE_IDS = (
     "model",
     "daemon",
     "calendar",
-    "devices",
-    "phone",
-    # Paired Bluetooth LE devices and what they say about themselves. The
-    # reader existed with no panel: `bluetooth_gatt` was reachable only by a
-    # model deciding to call it, which is the wrong shape for a person who
-    # owns the strap.
-    "wearables",
-    # A USB-debugging phone over adb. `android_device` was found by the
-    # CLI matrix - both images ship adb and nothing used it - and had no
-    # panel of any kind.
-    "android",
     "desktop",
     "diagnostics",
     # Where commands run, and a probe that shows what the sandbox holds.
@@ -263,6 +238,12 @@ SECTION_ORDER = ("Remembering", "Acting", "Making", "Phone and remote", "Sensing
 #: `processes` moved the other way, into "Health and trust", beside "Background
 #: mode" and "Diagnostics": "What's running" is what the machine is holding, and
 #: it is the panel somebody opens when the machine feels slow.
+#:
+#: **2026-11-04: three of the four left for Shani Link.** `phone`, `phone_link`
+#: and `screen_share` (with Devices, Wearables and Android) are the
+#: `shani-link-app` now. The group keeps `connections` and one row that opens
+#: Shani Link (`SidebarPage._shani_link_row` in sidebar.py), so the place a person looks for the
+#: phone still leads to it.
 SECTION_PHONE = "Phone and remote"
 
 #: Where a panel that declares no `SECTION` of its own belongs. A table rather

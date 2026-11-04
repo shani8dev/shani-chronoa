@@ -2079,9 +2079,11 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
             p.get_string() if p is not None else ""))
         self.add_action(setup_page_action)
 
-        # "Connect a device" (gui/connect_device.py): Bluetooth, an Android
-        # phone over adb, a KDE Connect phone. The parameter opens one route
-        # directly ("bluetooth", "android", "kdeconnect"); "" is the chooser.
+        # "Connect a device": Bluetooth, an Android phone over adb, a KDE
+        # Connect phone. It moved to Shani Link (link_app.py) with the device
+        # panels; the action stays so the menu and palette entries open it there.
+        # The parameter opens one route ("bluetooth", "android", "kdeconnect");
+        # "" is the chooser.
         transcribe_action = Gio.SimpleAction.new("transcribe-file", None)
         transcribe_action.connect("activate", lambda *_: self.window is not None
                                   and self.window.pick_recording_to_transcribe())
@@ -2093,9 +2095,10 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         self.add_action(connect_action)
 
     def _open_connect_device(self, route: str = "") -> None:
-        from shani_chronoa.gui.connect_device import ConnectDeviceWindow
-        window = ConnectDeviceWindow(self, route, transient_for=self.window)
-        window.present()
+        from shani_chronoa import link_app
+        ok, why = link_app.open_app(connect=route)
+        if not ok:
+            self._set_status(why)
 
     def _set_status(self, message: str) -> None:
         if self.window is not None:

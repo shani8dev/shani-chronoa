@@ -235,6 +235,35 @@ def _mcp_servers_group(app: Any) -> Gtk.Widget:
     return box
 
 
+def _phone_bridge_group(app: Any) -> Gtk.Widget:
+    """The phone paired over KDE Connect, as a way to ask Chronoa.
+
+    Pairing the phone moved to Shani Link with Connect a device (2026-11-04);
+    whether that phone may *ask Chronoa* is the assistant's own switch, so it
+    stays here, beside the other channels. `lan_bridge.set_enabled` writes the
+    `phone` gateway and starts the bridge unit, so it runs off the main loop.
+    """
+    from shani_chronoa import lan_bridge
+    config = getattr(app, "config", None)
+    try:
+        on = bool(config.get_bool(lan_bridge.SETTING, False)) if config is not None else False
+    except Exception:  # noqa: BLE001 - an unreadable switch is shown off
+        on = False
+    group = common.group(
+        "Your phone",
+        "Text shared from the phone you paired in Shani Link becomes a question; "
+        "the answer comes back as a notification. It asks before doing anything.")
+
+    def changed(active: bool) -> None:
+        import threading
+        threading.Thread(target=lambda: lan_bridge.set_enabled(active, config),
+                         daemon=True, name="chronoa-lan-bridge").start()
+    _add(group, common.switch_row("Let this phone ask Chronoa",
+                                  "Pair the phone in Shani Link first (Devices, Phone link)",
+                                  on, changed))
+    return group
+
+
 def build(app: Any) -> Gtk.Widget:
     page, set_content = common.surface(TITLE, SUBTITLE)
     body = common.page_body()
@@ -319,6 +348,8 @@ def build(app: Any) -> Gtk.Widget:
             f"{bridge_bin} whatsapp"))
     else:
         _add(bridge_group, common.row("Bridge program", f"{BRIDGE_BINARY} is not installed"))
+
+    body.append(_phone_bridge_group(app))
 
     set_content(common.scrolled(body))
     page.status = recorder.status

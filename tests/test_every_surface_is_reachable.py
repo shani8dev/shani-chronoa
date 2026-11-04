@@ -167,6 +167,7 @@ def test_the_four_panels_added_this_session_are_among_them(broadway, tmp_path):
     """The four added here, by name, because the loop above passes on an
     empty set and a panel nobody drives is invisible to it."""
     out = _drive(broadway, tmp_path)
-    for name in ("my_files", "meetings", "phone_link", "driving"):
+    # `phone_link` was the fourth; it moved to Shani Link on 2026-11-04.
+    for name in ("my_files", "meetings", "driving"):
         assert name in out["shown"], f"{name} was not driven at all"
         assert out["shown"][name] == _title_of(name), out["shown"][name]

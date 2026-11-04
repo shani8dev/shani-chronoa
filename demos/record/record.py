@@ -38,7 +38,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
-SCENARIOS = {"real-app": "real_app.py", "voice": "voice_app.py", "devices": "devices_app.py",
+SCENARIOS = {"real-app": "real_app.py", "voice": "voice_app.py",
              "scripted-flight": "scripted_flight.py", "scripted-trip": "scripted_trip.py"}
 
 

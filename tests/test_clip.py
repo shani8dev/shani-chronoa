@@ -262,21 +262,3 @@ class TestTheCallersUseIt:
         body = summary[:-3] if summary.endswith("...") else summary
         assert not body.endswith("\u200d"), (
             f"a ZWJ cluster was cut, leaving the joiner with no emoji: {summary[-40:]!r}")
-
-    def test_the_message_preview_is_not_cut_mid_cluster(self):
-        """The same for a message body previewed in the phone panel.
-
-        Through `phone._preview`, which is the function the panel calls - and
-        which exists *because* of this test: the preview was an inline
-        `body[:80]` expression, and the only way to test that was to build the
-        whole panel.
-        """
-        pytest.importorskip("gi")
-        from shani_chronoa.gui.surfaces import phone as phone_panel
-        family = "\U0001F468\u200d\U0001F469\u200d\U0001F467\u200d\U0001F466"
-        preview = phone_panel._preview(f"see {family} " + "and a long message body " * 6)
-        assert "..." in preview, preview
-        assert preview.count("\u200d") % 3 == 0, preview
-        # A short body is untouched - no ellipsis where there was nothing to cut.
-        assert phone_panel._preview("hi there") == "hi there"
-        assert phone_panel._preview("") == "(no text)"

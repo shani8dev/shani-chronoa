@@ -641,24 +641,6 @@ def switch_row(title: str, subtitle: str = "", active: bool = False,
     return widget
 
 
-def connect_button(app: Any, route: str = "", label: str = "Connect a device") -> Gtk.Button:
-    """A button that opens Connect a device, on `route` if given.
-
-    For the empty states that used to end at "nothing is paired": the page that
-    can tell a device is missing offers the way to add one.
-    """
-    button = Gtk.Button(label=label, halign=Gtk.Align.CENTER)
-    button.add_css_class("pill")
-    button.add_css_class("suggested-action")
-
-    def clicked(*_a) -> None:
-        activate = getattr(app, "activate_action", None)
-        if callable(activate):
-            activate("connect-device", GLib.Variant("s", route))
-    button.connect("clicked", clicked)
-    return button
-
-
 def empty_state(icon: str, title: str, description: str = "",
                 child: Optional[Gtk.Widget] = None,
                 *, inline: bool = False) -> Gtk.Widget:
@@ -1066,24 +1048,6 @@ def reload_surface(app: Any, name: str) -> None:
     reload = getattr(window, "reload_surface", None)
     if callable(reload):
         reload(name)
-
-
-def gate_banner(app: Any, key: "Optional[str]", surface: str,
-                label: str, target: str) -> Gtk.Widget:
-    """The banner for a panel whose gate is shut.
-
-    A consent switch (`key`) gets `consent_banner`: its Settings name and
-    **Turn on**, then the panel rebuilds itself with the switch open. Anything
-    else - a missing package, a setup step - keeps its route to the page that
-    fixes it. Replaces "This is a setting on this machine, not a fault" over an
-    "Open Privacy settings" button, which named no switch and sent the person
-    away to find it.
-    """
-    if key:
-        return consent_banner(app, key, "Nothing on this page was read while it is off.",
-                              on_change=lambda: reload_surface(app, surface))
-    return banner("This is a setting on this machine, not a fault.", label,
-                  lambda: open_page(app, target))
 
 
 def read_banner(on_reload: Callable[[], None]) -> Gtk.Widget:

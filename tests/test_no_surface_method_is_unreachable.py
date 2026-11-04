@@ -780,7 +780,9 @@ class TestNoSurfaceMethodIsUnreachable:
         scanner that is simply broken.
         """
         index = _index()
-        for name in ("show_devices", "speaking_row",
+        # (`show_devices` was the fifth; it moved to shani-link with the Phone
+        # link panel on 2026-11-04.)
+        for name in ("speaking_row",
                      "webkit_version", "activity_text"):
             total = sum(u.get(name, 0) - d.get(name, 0)
                         for _f, u, _defined, d in index)
@@ -788,7 +790,8 @@ class TestNoSurfaceMethodIsUnreachable:
                 f"{name} is dispatched through a string and reads as dead - "
                 f"the extractor is dropping the strings it needs")
 
-    @pytest.mark.parametrize("name", ["show_devices", "_refresh_status", "find"])
+    # `show_devices` was a third; it left with the Phone link panel (shani-link).
+    @pytest.mark.parametrize("name", ["_refresh_status", "find"])
     def test_three_known_live_seams_are_not_flagged(self, name):
         """The three seams an AST scan would net. If any of these ever becomes
         genuinely dead, this file fails on the seam first, which is the honest

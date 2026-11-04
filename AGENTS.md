@@ -3,6 +3,18 @@
 This file applies to any AI coding assistant working in this repository
 (Claude Code, opencode, Kilo Code, Cursor, Aider, or similar). Read this
 
+
+## The device screens live in Shani Link (2026-11-04)
+
+Phone, Phone link, Screen share, Devices, Wearables (with the watch dashboard),
+Android and Connect a device moved to shani-link's app (`shani-link-app`,
+shani_link/app/), with their UI tests. They are used by a person directly, so
+they carry no assistant consent there. Chronoa keeps its skills, its consent
+keys (Settings, Privacy), the "Let this phone ask Chronoa" switch (Connections),
+one "Shani Link" row in the sidebar's "Phone and remote" group, and the
+`connect-device` action, which starts `shani-link-app --connect=ROUTE`
+(`link_app.py`). Do not bring a device panel back here; add it to shani-link.
+
 ## Driving the desktop on GNOME Wayland: what was measured (2026-10-15)
 
 All of this was found by running the skills against a real window in a private

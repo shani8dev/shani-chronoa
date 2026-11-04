@@ -42,7 +42,7 @@ Adw.init()
 
 from shani_chronoa import file_index, meeting
 from shani_chronoa.gui.surfaces import (meetings, my_files,  # noqa: E402
-                                     routines, screen_share)
+                                     routines)
 
 
 class Config:
@@ -280,11 +280,6 @@ elif case == "routines_empty":
     page = routines.build(App())
     say(words=texts(page), buttons=buttons(page),
         says_no_routines=any("No routines yet" in t for t in texts(page)))
-
-elif case == "screen_share_controls":
-    page = screen_share.build(App())
-    say(words=texts(page), buttons=buttons(page),
-        has_check_and_stop=all(b in buttons(page) for b in ("Check", "Start", "Stop")))
 
 elif case == "registry":
     from shani_chronoa.gui import surfaces
@@ -565,13 +560,7 @@ class TestTheNewSurfacesAreReadable:
         out = _run(broadway, "routines_empty", tmp_path)
         assert out["says_no_routines"], out["words"]
 
-    def test_screen_share_has_all_three_controls(self, broadway, tmp_path):
-        out = _run(broadway, "screen_share_controls", tmp_path)
-        assert out["has_check_and_stop"], out["buttons"]
-        words = " ".join(out["words"])
-        assert "Can this machine share?" in words
-        # The 90-second probe is the reason this panel exists in the shape it does.
-        assert "takes a while" in words, words
+    # (the Screen share panel's controls test moved to shani-link with the panel)
 
     def test_the_recording_clock_actually_moves(self, broadway, tmp_path):
         """**The timer was never scheduled.** `_tick` was written with a docstring

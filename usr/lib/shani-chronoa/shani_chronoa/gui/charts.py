@@ -17,7 +17,6 @@ light themes both work) and from `PALETTE` for data.
 from __future__ import annotations
 
 import math
-from datetime import datetime
 from typing import Optional, Sequence, Tuple
 
 import gi
@@ -304,10 +303,6 @@ class Line(Gtk.Widget):
     def set(self, points: "Sequence[Tuple[float, float]]") -> None:
         self.points = list(points)
         self.queue_draw()
-
-    def set_times(self, readings: "Sequence[Tuple[datetime, float]]") -> None:
-        """Readings across one day, x in hours."""
-        self.set([(w.hour + w.minute / 60, v) for w, v in readings])
 
     def _xy(self, x, y, w, h):
         (x0, x1), (y0, y1) = self.x_range, self.y_range

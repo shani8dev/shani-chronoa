@@ -412,6 +412,8 @@ class SidebarPage(Adw.NavigationPage):
                 _STATUS_ANNOUNCED[name] = (row, title)
             self._rows_by_title[section] = entries
 
+        self.shani_link_row = self._shani_link_row(body, groups)
+
         self._chat_row = chat_row
         self._chat_group = chat_group
         self._body = body
@@ -444,6 +446,38 @@ class SidebarPage(Adw.NavigationPage):
 
         self._filter = _filter
         search.connect("search-changed", lambda e: _filter(e.get_text()))
+
+    @staticmethod
+    def _shani_link_row(body: Gtk.Widget, groups: dict) -> Gtk.Widget:
+        """One row in "Phone and remote" that opens Shani Link.
+
+        The device panels moved to that app (`link_app.py`); a person who looks
+        for the phone where it used to be finds the way to it here instead of a
+        gap. Not a panel: activating it starts the other app.
+        """
+        from shani_chronoa import link_app
+        from shani_chronoa.gui.surfaces import SECTION_PHONE
+        installed = link_app.available()
+        row = Adw.ActionRow(title=link_app.TITLE,
+                            subtitle=link_app.SUBTITLE if installed
+                            else "Not installed (the shani-link package)")
+        row.set_title_lines(SIDEBAR_TITLE_LINES)
+        row.add_css_class("sidebar-row")
+        icon = Gtk.Image.new_from_icon_name("phone-symbolic")
+        icon.set_pixel_size(SIDEBAR_ICON_PX)
+        row.add_prefix(icon)
+        row.add_suffix(Gtk.Image.new_from_icon_name("window-new-symbolic"))
+        row.set_activatable(installed)
+        row.set_sensitive(installed)
+        row.update_property([Gtk.AccessibleProperty.LABEL], [f"Open {link_app.TITLE}"])
+        row.connect("activated", lambda _r: link_app.open_app())
+        group = groups.get(SECTION_PHONE)
+        if group is None:
+            group = common.group(SECTION_PHONE)
+            body.append(group)
+            groups[SECTION_PHONE] = group
+        group.add(row)
+        return row
 
     def set_status(self, key: Optional[str], status: Optional[str]) -> None:
         """Mark a panel's row with a health dot, or clear it.

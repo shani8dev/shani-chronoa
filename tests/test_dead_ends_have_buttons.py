@@ -33,7 +33,7 @@ from gi.repository import Adw, Gtk  # noqa: E402
 Adw.init()
 
 from shani_chronoa import pages  # noqa: E402
-from shani_chronoa.gui.surfaces import calendar, devices, model, triggers  # noqa: E402
+from shani_chronoa.gui.surfaces import calendar, model, triggers  # noqa: E402
 from shani_chronoa.gui.surfaces import voice as voice_surface  # noqa: E402
 
 
@@ -128,29 +128,6 @@ def shown(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_the_refused_phone_gate_offers_the_privacy_switch(shown):
-    """`devices` - "Grant it in Settings, under Privacy" becomes a button.
-
-    The refused gate is the one that can be undone from inside the app, so it is
-    the one that gets a button. Driven by pinning `_permission` rather than by
-    hoping the machine's phone state is convenient - the panel's answer differs on
-    a machine with GSConnect, and the assertion must not.
-    """
-    original = devices._permission
-    devices._permission = lambda cfg: devices.State(devices.STATE_REFUSED)
-    app = _App()
-    try:
-        page = devices.build(app)
-    finally:
-        devices._permission = original
-
-    # Since the 2026-10-15 redesign the way out is **Turn on, here**: the
-    # banner writes the switch instead of sending the person to find it.
-    press(page, "Turn on", shown)
-    assert app.config.written == [("phone-control-enabled", "true")], (
-        f"Turn on wrote {app.config.written!r}, not the phone switch")
-
-
 def test_the_calendar_consent_gate_offers_the_senses_switch(shown, monkeypatch):
     """`calendar` - "turn the key on in Settings" becomes a button.
 
@@ -192,94 +169,6 @@ def test_the_empty_rule_list_offers_the_gate(shown):
     press(page, "Turn on", shown)
     assert app.config.written == [("trigger-control-enabled", "true")], (
         f"Turn on wrote {app.config.written!r}, not the trigger switch")
-
-
-@pytest.mark.parametrize("state", sorted(devices.HEALTH_SUMMARY))
-def test_the_two_places_a_gate_speaks_do_not_say_the_same_thing(state):
-    """One clause above, one paragraph below - and never the same words twice.
-
-    **Found by looking at a rendered window, not by a failing test.** The status
-    row and the empty state below it are two places saying one thing, and the
-    obvious implementation - put `BODY` in both - printed the same four-line
-    paragraph twice on the same screen with the route banner wedged between. A
-    test that asserts "the panel contains the reason" passes either way, because
-    both versions contain it.
-
-    **Asserted on the built widget, not on the table.** The first version compared
-    `HEALTH_SUMMARY` against `BODY` and passed with the duplication back: it was
-    checking the data, and the duplication was in the call that reads it. Putting
-    `state.body` back where the clause goes left every assertion in this file
-    green - the fourth time in this repo that a check against the source of a
-    widget passed while the widget said the wrong thing. So this reads the row's
-    rendered subtitle off the page and compares it with the paragraph actually on
-    screen below it.
-
-    The row is read first and the paragraph is the elaboration; a person who reads
-    only the row gets the reason and the fix, and a person who reads everything
-    gets the detail once.
-    """
-    original = devices._permission
-    devices._permission = lambda cfg: devices.State(state)
-    try:
-        page = devices.build(_App())
-    finally:
-        devices._permission = original
-
-    row = _status_row_text(page)
-    assert row, f"{state}: no status row was rendered at all"
-    body = devices.State(state).body
-    assert body not in row, (
-        f"{state}: the status row repeats the empty state's paragraph "
-        f"verbatim:\n  row:  {row}\n  body: {body}")
-
-    # The row is `headline - clause`, so its word count is the sum of two
-    # sentences' worth of English, not one. What has to hold is that it is
-    # *materially* shorter than the paragraph it is an introduction to - a fixed
-    # budget was wrong twice here (14 failed at 15) and would keep being wrong on
-    # a reworded headline. Half the paragraph is the shape of the claim: the row
-    # is a summary, and if it is not much shorter than the thing it summarises,
-    # both are on screen for no reason.
-    row_words, body_words = len(row.split()), len(body.split())
-    assert row_words * 2 <= body_words, (
-        f"{state}: the status row carries {row_words} words against a paragraph "
-        f"of {body_words}. It is read first and the paragraph below is the "
-        f"elaboration; a row nearly as long as its paragraph puts the whole "
-        f"thing on screen twice.\n  row: {row}")
-
-
-def _status_row_text(page):
-    """The subtitle of the panel's status row - the clause, not the word."""
-    for widget in _walk(page):
-        classes = widget.get_css_classes() if isinstance(widget, Gtk.Widget) else []
-        if "status-row" in classes and hasattr(widget, "get_subtitle"):
-            return widget.get_subtitle()
-    return ""
-
-
-def test_a_gate_with_nothing_to_open_gets_no_button(shown, monkeypatch):
-    """The other three of `devices`' four states offer nothing.
-
-    **The negative half, and it is the half that matters.** A machine with no
-    phone link needs a package installed and a machine with nothing paired needs
-    a phone paired; neither is a page in this app. A button on those would open
-    Settings and change nothing - which is a *worse* dead end than the sentence
-    it replaced, because it looks like a way out.
-    """
-    for state in (devices.STATE_NO_LINK, devices.STATE_NONE_PAIRED):
-        original = devices._permission
-        devices._permission = lambda cfg, s=state: devices.State(s)
-        try:
-            page = devices.build(_App())
-        finally:
-            devices._permission = original
-        # Only *route* buttons are asserted, not any button: the empty state
-        # itself legitimately carries an icon button, and demanding the panel
-        # hold no buttons at all would be asserting something else entirely.
-        labels = {b.get_label() for b in _walk(page) if isinstance(b, Gtk.Button)}
-        offered = labels & {label for label, _t in devices.ROUTES.values()}
-        assert offered == set(), (
-            f"{state!r} offered {sorted(offered)}; there is nothing in this app "
-            "that fixes it, so a button here would open an unrelated page")
 
 
 # ---------------------------------------------------------------------------

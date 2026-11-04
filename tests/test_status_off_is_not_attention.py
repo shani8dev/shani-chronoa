@@ -23,7 +23,7 @@ from gi.repository import Adw  # noqa: E402
 
 Adw.init()
 
-from shani_chronoa.gui.surfaces import common, devices, machine, senses  # noqa: E402
+from shani_chronoa.gui.surfaces import common, machine, senses  # noqa: E402
 
 
 def test_off_is_a_word_with_its_own_colour():
@@ -38,10 +38,6 @@ def test_the_stylesheet_colours_the_off_dot():
     sheet = Path(style.__file__).read_text()
     assert ".status-dot.status-off" in sheet
     assert ".status-row.status-off .status-dot" in sheet
-
-
-def test_a_phone_gate_left_off_is_off_not_attention():
-    assert devices.HEALTH[devices.STATE_REFUSED] == common.STATUS_OFF
 
 
 def _status_class(widget):

@@ -394,13 +394,16 @@ def test_a_module_imported_under_another_name_resolves():
     wrong as one that resolved nothing: the alias is followed, and a plain
     function import is **not** indexed as a module.
     """
+    # **`wearables.py` moved to shani-link on 2026-11-04**, taking the `gatt`
+    # alias with it, so the alias this pins is one still in the tree:
+    # `channel_bridge.py` writes ``from shani_chronoa import gateway as gw``.
     index = _module_index()
-    assert "bluetooth_gatt" in index
-    assert "gatt" in index, (
-        "a module imported as `gatt` must resolve, or every `gatt._name` "
+    assert "gateway" in index
+    assert "gw" in index, (
+        "a module imported as `gw` must resolve, or every `gw._name` "
         "citation in the package is reported stale")
     names = lambda key: {q.name for q in index[key]}          # noqa: E731
-    assert names("gatt") == names("bluetooth_gatt") == {"bluetooth_gatt.py"}, (
+    assert names("gw") == names("gateway") == {"gateway.py"}, (
         "the alias must point at the same module the real name does")
 
 

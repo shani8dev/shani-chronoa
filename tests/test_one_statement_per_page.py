@@ -247,22 +247,3 @@ class TestOneStatementPerPage:
                 assert not elsewhere, (
                     f"{sid}: the banner says {sentence[:80]!r} and so does "
                     f"{elsewhere[0][:120]!r} - one statement per page")
-
-    def test_the_phone_panel_does_not_say_it_twice(self):
-        """**The Phone panel's status row named the switch its banner had
-        already named**, and the row's own detail repeated the banner's
-        sentence word for word."""
-        labels = _all_text("phone")
-        name = GATE_NAMES.get("phone-control-enabled")
-        assert name
-        assert sum(1 for text in labels if name in text) == 1, labels
-
-    def test_the_phone_link_panel_does_not_say_it_twice(self):
-        """**The Phone link panel's empty state pointed back at the banner**
-        - "Turn on ... above first" - while the banner was on screen
-        saying the same thing with a button to press."""
-        from shani_chronoa.gui.surfaces import phone_link
-        labels = _all_text("phone_link")
-        name = GATE_NAMES.get(phone_link.CONSENT_KEY)
-        assert name
-        assert sum(1 for text in labels if name in text) == 1, labels

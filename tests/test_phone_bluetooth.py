@@ -31,26 +31,6 @@ from shani_chronoa import phone_bluez as pb  # noqa: E402
 
 
 
-def test_the_phone_panel_asks_nothing_while_its_switch_is_off(monkeypatch):
-    pytest.importorskip("gi")
-    from shani_chronoa.gui.surfaces import phone as panel
-    monkeypatch.setattr(ph, "devices", lambda: pytest.fail("the phone was asked with the switch off"))
-
-    class Off:
-        def get_bool(self, key, default=False):
-            return False
-
-    class App:
-        config = Off()
-    page = panel.build(App())
-    status = page.status() if callable(page.status) else page.status
-    assert status == "off", status
-
-
-
-
-# --- the phone's music over AVRCP --------------------------------------------
-
 class _Run:
     """`_run` stand-in: answers get-property from a state the calls change."""
 

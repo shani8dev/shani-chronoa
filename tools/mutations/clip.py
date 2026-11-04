@@ -111,15 +111,8 @@ MUTATIONS = [
         "label": "the tool-card summary is a hard slice again",
         "expect": ["test_a_tool_card_argument_summary_is_not_cut_mid_cluster"],
     },
-    {
-        "file": "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/phone.py",
-        "old": "    line = (body or \"(no text)\").replace(\"\\n\", \" \")\n"
-               "    return markdown_lite.clip(line, width)\n",
-        "new": "    line = (body or \"(no text)\").replace(\"\\n\", \" \")\n"
-               "    return line[:width]\n",
-        "label": "the message preview is a hard slice again",
-        "expect": ["test_the_message_preview_is_not_cut_mid_cluster"],
-    },
+    # (the Phone panel's message preview moved to Shani Link on 2026-11-04,
+    # with its witness: shani-link tests/test_app_small_pages.py)
 
     # -- the honesty of the approximation --------------------------------------
     {

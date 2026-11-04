@@ -156,10 +156,12 @@ def test_the_phone_and_remote_panels_are_together():
     """
     buckets = _buckets()
     together = buckets.get("Phone and remote", [])
-    assert sorted(together) == ["connections", "phone", "phone_link",
-                                "screen_share"], (
-        f"'Phone and remote' holds {sorted(together)}, not the four panels "
-        "about reaching this computer from a phone or over the network")
+    # **2026-11-04: phone, phone_link and screen_share moved to Shani Link**
+    # (the shani-link-app); the group keeps `connections` and the sidebar's
+    # one "Shani Link" row (tests/test_shani_link_row.py).
+    assert sorted(together) == ["connections"], (
+        f"'Phone and remote' holds {sorted(together)}; the device panels live in "
+        "Shani Link now")
 
 
 @pytest.mark.parametrize("name", sorted(_modules()))

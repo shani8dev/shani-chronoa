@@ -69,28 +69,3 @@ def test_activity_insights_count_and_rate():
     assert activity.insights([]) is None
 
 
-def test_the_watch_dashboard_draws_a_full_summary():
-    """Every card filled at once - stress readings included, which recursed
-    through `Line.set_times` after the move to the shared charts."""
-    from datetime import datetime, timedelta
-    from shani_chronoa.gui.surfaces.watch_dashboard import WatchDashboard
-    now = datetime.now().replace(second=0, microsecond=0)
-    night = now - timedelta(hours=8)
-    summary = {
-        "battery": 64, "step_goal": 10000,
-        "steps_today": {"steps": 6842, "distance_m": 4920, "calories": 231},
-        "steps_yesterday": {"steps": 11204, "distance_m": 8100, "calories": 402},
-        "steps_2_days_ago": {"steps": 8310, "distance_m": 5990, "calories": 296},
-        "sleep": [{"start": night, "end": night + timedelta(minutes=90), "stage": "deep", "minutes": 90}],
-        "sleep_summary": {"asleep_minutes": 90, "deep_minutes": 90, "light_minutes": 0,
-                          "awake_minutes": 0, "from": night, "to": night},
-        "stress_today": [(now.replace(hour=9, minute=0), 40), (now.replace(hour=10, minute=0), 55)],
-        "training": [{"type": "walk", "start": now, "active_seconds": 600, "steps": 900,
-                      "calories": 40, "avg_hr": 100}],
-        "device": {"manufacturer": "MOYOUNG-V2", "software": "MOY-7OT4-2.0.1"},
-    }
-    dash = WatchDashboard("AA:BB", "Watch")
-    dash.show(summary)
-    assert dash.stress_now.get_text() == "55"
-    assert dash.spark.points == [(9.0, 40), (10.0, 55)]
-    assert "MOYOUNG-V2" in dash.synced.get_text()

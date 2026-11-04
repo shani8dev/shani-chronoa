@@ -200,8 +200,9 @@ CONTROLLED = {
 NOT_EXPOSED = {
     # **Set where the thing they control lives** (added 2026-10-15). Each has a
     # real control; it is simply not in the Settings window.
-    "lan-bridge-enabled": "a switch in Connect a device, beside the phone it "
-                          "lets ask Chronoa (gui/connect_device.py)",
+    "lan-bridge-enabled": "a switch on the Connections panel, beside the other "
+                          "channels that can ask Chronoa (gui/surfaces/connections.py; "
+                          "pairing the phone moved to Shani Link)",
     "mcp-servers": "edited on the Connections panel, where the servers it "
                    "starts are listed (gui/surfaces/connections.py)",
     "project-dir": "chosen with Build mode's project picker; the window sets "
