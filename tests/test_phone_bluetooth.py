@@ -55,8 +55,7 @@ class _Run:
 
 def test_media_control_falls_back_to_the_phone_when_no_mpris_player_runs(monkeypatch):
     from shani_chronoa.skills import media_control as mc
-    monkeypatch.setattr(mc, "players", lambda: [])
-    monkeypatch.setattr(mc.shutil, "which", lambda n: "/usr/bin/" + n)
+    monkeypatch.setattr(mc._engine, "players", lambda: [])
     monkeypatch.setattr(pb, "avrcp_players", lambda: [("/p", "acer ZX")])
     monkeypatch.setattr(pb, "_run", _Run(state="playing"))
     assert mc._run({"action": "status"}) == "acer ZX is playing: Song by Band."

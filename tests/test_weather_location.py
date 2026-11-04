@@ -159,26 +159,23 @@ def test_lookups_without_web_consent(monkeypatch):
 
 
 def test_media_with_no_player(monkeypatch):
-    monkeypatch.setattr(mc.shutil, "which", lambda b: "/usr/bin/gdbus")
-    monkeypatch.setattr(mc, "players", lambda: [])
+    monkeypatch.setattr(mc._engine, "players", lambda: [])
+    monkeypatch.setattr("shani_chronoa.phone_bluez.avrcp_players", lambda: [])
     assert mc._run({"action": "pause"}) == "No media player is running."
 
 
 def test_media_pauses_the_playing_one_by_its_own_name(monkeypatch):
+    """The players are shani_link.mpris's (its own tests drive a fake player on a
+    private bus); the skill picks the playing one and names it as it names itself."""
     calls = []
-
-    def gdbus(*args):
-        calls.append(args)
-        if "PlaybackStatus" in args:
-            return subprocess.CompletedProcess([], 0, "(<'Playing'>,)" if "org.mpris.MediaPlayer2.spotify" in args else "(<'Paused'>,)", "")
-        if "Identity" in args:
-            return subprocess.CompletedProcess([], 0, "(<'Spotify'>,)", "")
-        return subprocess.CompletedProcess([], 0, "()", "")
-    monkeypatch.setattr(mc.shutil, "which", lambda b: "/usr/bin/gdbus")
-    monkeypatch.setattr(mc, "players", lambda: ["org.mpris.MediaPlayer2.firefox", "org.mpris.MediaPlayer2.spotify"])
-    monkeypatch.setattr(mc, "_gdbus", gdbus)
+    monkeypatch.setattr(mc._engine, "players",
+                        lambda: ["org.mpris.MediaPlayer2.firefox", "org.mpris.MediaPlayer2.spotify"])
+    monkeypatch.setattr(mc._engine, "status",
+                        lambda p: "Playing" if p == "org.mpris.MediaPlayer2.spotify" else "Paused")
+    monkeypatch.setattr(mc._engine, "identity", lambda p: "Spotify" if p.endswith("spotify") else "Firefox")
+    monkeypatch.setattr(mc._engine, "call", lambda p, method: calls.append((p, method)) or (True, ""))
     assert mc._run({"action": "pause"}) == "Done: pause in Spotify."
-    assert any("org.mpris.MediaPlayer2.Player.Pause" in a for a in calls[-1])
+    assert calls == [("org.mpris.MediaPlayer2.spotify", "Pause")]
 
 
 def test_a_home_place_stands_in_when_this_computer_cannot_locate_itself(monkeypatch):

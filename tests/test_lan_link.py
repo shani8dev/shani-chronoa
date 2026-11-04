@@ -106,17 +106,14 @@ class TestTheSkillSurface:
         out = lan_phone._run({"action": "devices", "_config": self._config(False)})
         assert "turned off" in out and "lan-phone-enabled" in out
 
-    def test_a_wrong_action_is_refused_not_ignored(self):
+    def test_with_the_switch_on_the_actions_are_shani_links(self, monkeypatch):
+        """The actions and their tests are shani-link's (shani_link/lan_phone.py,
+        tests/test_lan_phone.py there); the skill is the consent in front."""
         from shani_chronoa.skills import lan_phone
-        out = lan_phone._run({"action": "share", "_config": self._config()})
-        assert "must be one of" in out and "share" in out
-
-    def test_status_names_what_works_and_what_does_not(self):
-        from shani_chronoa.skills import lan_phone
-        out = lan_phone._run({"action": "status", "_config": self._config()})
-        assert str(lan_link.UDP_PORT) in out
-        state, _why = lan_link.pairing_status()
-        assert f"Pairing: {state}" in out, "status must report the stored pairing"
+        seen = []
+        monkeypatch.setattr(lan_phone._engine, "_run", lambda arguments: seen.append(arguments["action"]) or "ok")
+        assert lan_phone._run({"action": "announce", "_config": self._config()}) == "ok"
+        assert seen == ["announce"]
 
 
 

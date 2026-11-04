@@ -22,3 +22,16 @@ contract's approval path, and whether it is wired is that work's question.
 tests/test_question_presenter.py::TestNobodyToAskSaysNobodyIsThere::test_how_many_gated_refusals_still_name_the_raw_key
   "look_at_image has no probe in this sweep". Fails identically on a clean HEAD worktree
   (2026-11-04), so it predates the shani-link move.
+
+PRE-EXISTING RED TESTS (2026-11-04, not from moving android_device/phone_remote/media_control/lan_phone
+engines to shani-link). Each fails identically on a clean HEAD worktree (`git worktree add --detach`, no stash):
+tests/test_stale_cross_references.py::test_no_prose_cites_a_symbol_that_does_not_exist
+  cites `lan_link._link` (lan_bridge.py:206, and skills/lan_phone.py:14 before that skill became a thin
+  wrapper - only lan_bridge.py is left). lan_link is an alias of shani_link.lan_link now, which the source
+  scan does not follow.
+tests/test_skill_gates_are_enforced.py::TestEveryDeclaredGateIsEnforced::test_no_declared_gate_is_advertised_without_a_check
+  "look_at_image declares the gate 'vision-sense-enabled' but this test does not know which module implements it".
+tests/test_mutation_harness_can_fail.py::TestTheHarnessCanFail::test_the_runner_lists_its_sets
+  tests/test_fm_radio_stereo.py does not exist (moved to shani-link with the FM engine); tools/mutations/fm_radio.py
+  still names it.
+(test_question_presenter's two, above, now fail only on look_at_image; the four moved skills pass that sweep.)

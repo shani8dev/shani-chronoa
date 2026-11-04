@@ -1,18 +1,23 @@
 """Skill: press keys on the paired phone - camera shutter, media, volume, typing.
 
-This computer is "Chronoa Remote", a Bluetooth keyboard the phone paired with
-(`ble_peripheral.py`, HID over GATT - no app on the phone). The peripheral runs
-in the app; this skill asks it through its socket. Gated on
-`phone-remote-enabled`, the same switch that makes this computer advertise.
+The skill: the assistant's consent and its tool schema. The client is
+shani-link's (shani_link/phone_remote.py, beside its ble_peripheral.py) - the
+Shani Link app's Phone page presses the same keys with no consent step - and
+every name it has is reachable here. Gated on `phone-remote-enabled`, the same
+switch that makes this computer advertise as "Chronoa Remote".
 """
 
 from __future__ import annotations
 
+from shani_chronoa import _link
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
 
+_engine = _link.module("phone_remote")
+globals().update({k: v for k, v in vars(_engine).items() if not k.startswith("__")})
+
 _CONSENT_KEY = "phone-remote-enabled"
-KEYS = ("shutter", "play_pause", "next", "previous", "stop", "volume_up", "volume_down", "mute")
+KEYS = _engine.KEYS
 
 
 def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
@@ -23,45 +28,13 @@ def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
 
 
 def _run(arguments: dict) -> str:
+    """The assistant's way in: its consent first, then shani-link's client."""
     if not isinstance(arguments, dict):
-        return "phone_remote needs an action, e.g. {\"action\": \"press\", \"key\": \"shutter\"}."
+        return _engine._run(arguments)
     allowed, refusal = _consent(ChronoaConfig())
     if not allowed:
         return refusal
-    from shani_chronoa import ble_peripheral as bp
-    action = str(arguments.get("action") or "status").strip().lower()
-    try:
-        status = bp.ask("status")
-    except OSError:
-        return "The phone remote is not running here - it starts with the Chronoa app."
-    if status.get("error"):
-        return f"The phone remote could not start: {status['error']}."
-    if action == "status":
-        return ("The phone is connected to Chronoa Remote and listening for keys." if status.get("subscribed")
-                else "Chronoa Remote is advertising, but no phone is connected to it. Pair 'Chronoa Remote' "
-                     "from the phone's Bluetooth settings.")
-    if not status.get("subscribed"):
-        return "No phone is connected to Chronoa Remote, so nothing was pressed."
-    if action == "press":
-        key = str(arguments.get("key") or "").strip().lower().replace(" ", "_")
-        if key not in KEYS:
-            return f"key must be one of {', '.join(KEYS)}, not {key!r}."
-        r = bp.ask("press", key=key)
-        if r.get("error"):
-            return f"Not pressed: {r['error']}."
-        hint = " (in the phone's camera app this takes the photo)" if key == "shutter" else ""
-        return f"Pressed {key.replace('_', ' ')} on the phone{hint}."
-    if action == "type":
-        text = str(arguments.get("text") or "")
-        if not text:
-            return "type needs text. Nothing was typed."
-        r = bp.ask("type", text=text)
-        if r.get("error"):
-            return f"Not typed: {r['error']}."
-        missing = r.get("missing") or ""
-        return (f"Typed {len(text) - len(missing)} characters into the phone's focused field."
-                + (f" Could not type {missing!r}: a US keyboard has no keys for them." if missing else ""))
-    return f"action must be status, press or type, not {action!r}."
+    return _engine._run(arguments)
 
 
 SCHEMA = {

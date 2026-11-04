@@ -91,10 +91,10 @@ def private_bus(tmp_path, monkeypatch):
         proc = subprocess.Popen([sys.executable, str(script), str(log)], env=full)
         started.append(proc)
         for _ in range(100):
-            if mc.players():
+            if mc._engine.players():
                 break
             time.sleep(0.05)
-        assert mc.players() == ["org.mpris.MediaPlayer2.fakeplayer"]
+        assert mc._engine.players() == ["org.mpris.MediaPlayer2.fakeplayer"]
         return lambda: log.read_text().splitlines() if log.exists() else []
 
     yield start_player
