@@ -222,20 +222,9 @@ def inventory(app: Any) -> Inventory:
     # 3. the memory
     _model_row(add)
 
-    # 4. the phones and the watch. Every one of these *has* a stop() and nothing
-    #    in the tree calls it, which is the finding this module was written
-    #    about - so each becomes a row with a real button.
-    for key, name, attr in (
-        ("incoming-calls", "Incoming-call watcher", "incoming_calls"),
-        ("messages", "Message watcher", "message_watcher"),
-        ("obex", "File sharing receiver", "obex_receiver"),
-        ("watch", "Watch companion", "watch_companion"),
-        ("remote", "Chronoa Remote (phone keyboard)", "phone_remote"),
-        ("avrcp", "Bluetooth music remote", "avrcp_target"),
-    ):
-        component = _attr(app, attr)
-        add(key, name, getattr(component, "stop", None) if component else None,
-            running=component is not None)
+    # 4. the phones and the watch run in shani-link's service now (its own
+    #    switches, its own app), not in Chronoa: they are not listed here, where a
+    #    row would say "not running" about things that are.
 
     # 5. the pollers
     scheduler = _attr(app, "sense_scheduler")

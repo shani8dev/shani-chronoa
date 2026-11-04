@@ -888,7 +888,7 @@ stackswitcher button {
         # first line - it needs no phone and no Bluetooth (landline/__init__.py).
         if self._landline_ready():
             from shani_chronoa import landline
-            from shani_chronoa.landline.ua import dial_user
+            from shani_chronoa.landline import dial_user
             try:
                 landline.dial(number)
                 self.call_note.set_text(f"Calling {dial_user(number)} on your landline. "
@@ -959,7 +959,8 @@ stackswitcher button {
         # in progress is answered and ended on the landline; otherwise the
         # paired phone, as before.
         from shani_chronoa import landline
-        current = landline.line()
+        # the line is shani-link's: what it says about calls, not its engine object
+        has_call, up = bool(landline.calls()) or landline.in_call(), landline.ready()
         if action in ("hold", "swap", "merge"):
             # Hold and Swap are landline-only: the paired phone's route toggle
             # is a different control and there is no far-end call to hold here.
@@ -990,8 +991,7 @@ stackswitcher button {
                 self.call_note.set_text(str(exc))
             self._refresh_call_controls()
             return
-        if current is not None and (current.call is not None
-                                    or (action == "answer" and current.registered)):
+        if has_call or (action == "answer" and up):
             try:
                 landline.answer() if action == "answer" else landline.hangup()
                 self.call_note.set_text("Answered." if action == "answer" else "Hung up.")

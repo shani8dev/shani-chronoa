@@ -76,31 +76,24 @@ def _app() -> type:
     return type("A", (), {
         "wakeword": _Waker(),
         "barge_in_monitor": _Barger(),
-        "incoming_calls": _Stopper(),
-        "message_watcher": _Stopper(),
-        "obex_receiver": _Stopper(),
-        "watch_companion": _Stopper(),
-        "phone_remote": _Stopper(),
-        "avrcp_target": _Stopper(),
         "sense_scheduler": _Sched(),
     })()
 
 
 class TestTheStopThatExistedAndNothingCalled:
-    def test_all_six_watchers_get_a_stop(self):
-        """**The finding.** Each of the six has a stop() in the component, so the
-        inventory must reach it - a row with a dead button is the dead-control
-        class this file exists to prevent.
+    def test_the_phone_and_the_watch_are_not_chronoas(self):
+        """The six device watchers moved to shani-link's service (they run with
+        every window closed now). A row here would say "not running" about
+        things that are, so even an app that still carried the names lists none.
         """
-        inv = background.inventory(_app())
-        for key in ("incoming-calls", "messages", "obex", "watch", "remote",
-                    "avrcp"):
-            row = inv.by_key(key)
-            assert row is not None, f"{key} is missing from the inventory"
-            assert row.stop is not None, (
-                f"{row.label} has a stop() in its own component and the inventory "
-                f"did not reach it, so the panel would show a dead button")
-        assert len(inv.stoppable()) >= 9, (
+        app = _app()
+        for attr in ("incoming_calls", "message_watcher", "obex_receiver",
+                     "watch_companion", "phone_remote", "avrcp_target"):
+            setattr(app, attr, _Stopper())
+        inv = background.inventory(app)
+        for key in ("incoming-calls", "messages", "obex", "watch", "remote", "avrcp"):
+            assert inv.by_key(key) is None, f"{key} is listed as Chronoa's"
+        assert len(inv.stoppable()) >= 3, (
             f"only {len(inv.stoppable())} of the started things can be stopped")
 
     def test_the_microphone_comes_first(self):
@@ -173,16 +166,16 @@ class TestTheStopReportsWhatItObserved:
         """
         app = _app()
         inv = background.inventory(app)
-        for key in ("watch", "remote"):
+        total = len(inv.stoppable())
+        for key in ("wake-word", "senses"):
             inv.by_key(key).stop = None
-            inv.by_key(key).why_not = "held by the watch's own app"
+            inv.by_key(key).why_not = "held by something else"
         before = len(inv.stoppable())
         said, refused = inv.force_stop_all()
-        assert before == 8, before
+        assert before == total - 2, before
         assert len(refused) == 2, [r.label for r in refused]
-        assert {r.label for r in refused} == {"Watch companion",
-                                             "Chronoa Remote (phone keyboard)"}
-        assert len(said) == 8, said
+        assert {r.label for r in refused} == {"Wake-word listening", "Sense polling"}
+        assert len(said) == before, said
         assert all(not r.running for r in inv.items if r.stop), (
             "a stop that succeeded left its row reading running")
 
@@ -246,13 +239,14 @@ class TestTheStopReportsWhatItObserved:
         def angry():
             raise RuntimeError("systemctl said no")
 
-        app.message_watcher = type("Angry", (), {"stop": staticmethod(angry)})()
+        app.sense_scheduler = type("Angry", (), {"stop": staticmethod(angry)})()
         inv = background.inventory(app)
+        running = [item for item in inv.items if item.running and item.stop is not None]
         said, refused = inv.force_stop_all()
-        # Ten things run here - the nine on the app plus the local model server,
-        # which is genuinely answering on this box - and one of them fails.
-        assert len(said) == 9, [each for each in said]
-        assert [r.label for r in refused] == ["Message watcher"], (
+        # everything that runs here (the model server only when one is really
+        # answering on this machine) - and one of them fails
+        assert len(refused) == 1 and len(said) >= 2, [each for each in said]
+        assert [r.label for r in refused] == ["Sense polling"], (
             f"a stop that failed was reported as one that worked: {refused}")
 
     def test_the_summary_names_the_negative_half(self):
@@ -266,13 +260,12 @@ class TestTheStopReportsWhatItObserved:
         against a change it never made.
         """
         app = _app()
-        # A companion that is connected and cannot be stopped from here.
-        app.watch_companion = type("NoStop", (), {})()
-        app.phone_remote = type("NoStop", (), {})()
+        # something running that cannot be stopped from here
+        app.sense_scheduler = type("NoStop", (), {})()
         text = background.summary(app)
         assert "no way to stop" in text, (
             f"the summary does not name what it could not stop: {text!r}")
-        assert "Watch companion" in text, (
+        assert "Sense polling" in text, (
             f"the summary says something is unstoppable without saying what: "
             f"{text!r}")
 
@@ -282,7 +275,7 @@ class TestTheStopReportsWhatItObserved:
         drops the second half to make the sentence tidier.
         """
         app = _app()
-        app.watch_companion = type("NoStop", (), {})()
+        app.sense_scheduler = type("NoStop", (), {})()
         inv = background.inventory(app)
         stuck = [item.label for item in inv.items
                  if item.running and item.stop is None]

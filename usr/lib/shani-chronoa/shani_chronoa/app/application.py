@@ -190,34 +190,34 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         # Create actions
         self._create_actions()
 
-        # A call ringing on the paired phone, shown with Answer / Decline.
-        from shani_chronoa.incoming_call import IncomingCallWatcher
-        self.incoming_calls = IncomingCallWatcher(self.config)
-        self.incoming_calls.start()
-        # Files a phone shares to this computer over Bluetooth, asked about one by one.
-        from shani_chronoa.obex_receive import ObexReceiver
-        self.obex_receiver = ObexReceiver(self.config)
-        self.obex_receiver.start()
-        # A MoYoung watch kept connected, when its own switch is on.
-        from shani_chronoa.watch_companion import WatchCompanion
-        self.watch_companion = WatchCompanion(self.config, on_voice=self._watch_voice)
-        self.watch_companion.start()
-        # This computer as "Chronoa Remote", a Bluetooth keyboard for the phone, when its switch is on.
-        from shani_chronoa.ble_peripheral import RemoteService
-        self.phone_remote = RemoteService(self.config)
-        self.phone_remote.start()
-        # New texts on the paired phone, announced as they arrive (MAP notifications).
-        from shani_chronoa.map_notify import MessageWatcher
-        self.message_watcher = MessageWatcher(self.config)
-        self.message_watcher.start()
-        # This computer's music, for Bluetooth remotes (AVRCP target), when its switch is on.
-        self.avrcp_target = None
-        if self.config.get_bool("bluetooth-media-remote-enabled", True):
-            from shani_chronoa.avrcp_target import AvrcpTarget
-            self.avrcp_target = AvrcpTarget()
-            self.avrcp_target.start()
+        # The phone, the watch and the Bluetooth roles (calls ringing, files from a
+        # phone, the watch kept connected, the remote, texts, music control) run in
+        # shani-link's service now - with every window closed, on any desktop. The
+        # names stay None so what reads them (background.py, processes) says "not here".
+        self.incoming_calls = self.obex_receiver = self.watch_companion = None
+        self.phone_remote = self.message_watcher = self.avrcp_target = None
+        # the watch's voice button is still the assistant's: shani-link reports it
+        self._link_events = self._listen_to_link()
 
         logger.info("Shani Chronoa startup complete")
+
+    def _listen_to_link(self):
+        """shani-link's DeviceEvent: the watch's voice button starts and stops
+        listening here, as it did when the watch companion ran inside Chronoa."""
+        try:
+            from gi.repository import Gio
+            bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+
+            def on_event(_c, _s, _p, _i, _n, params):
+                import json
+                source, kind, info = params.unpack()
+                if source == "watch" and kind == "voice":
+                    GLib.idle_add(self._watch_voice, bool(json.loads(info or "{}").get("start")))
+            return bus.signal_subscribe("dev.shani.Link", "dev.shani.Link", "DeviceEvent", "/dev/shani/Link",
+                                        None, Gio.DBusSignalFlags.NONE, on_event)
+        except Exception:  # noqa: BLE001 - no session bus is no watch button
+            logger.debug("shani-link events not subscribed", exc_info=True)
+            return None
 
     def _watch_voice(self, start: bool) -> None:
         """The watch's AI-voice button: start Chronoa listening, or end the turn.

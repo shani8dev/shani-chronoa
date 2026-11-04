@@ -12,3 +12,13 @@ NOT fixed here: it is another session's in-flight work, and fixing it blind
 risks the same class the repo warns about (patching a test to agree with a
 half-finished change). Recording so it is not read as a regression from this
 session's NUT/trigger/hand-kept-list work.
+
+PRE-EXISTING RED TEST (2026-11-04, not from the shani-link move):
+tests/test_no_enforcement_control_is_unwired.py::TestNoEnforcementControlIsSilentlyUnwired::test_every_unwired_one_says_so
+  [('shani_chronoa/agent_service.py', 'Approve')] reads as an unwired enforcement control.
+Fails identically on a clean HEAD worktree (checked with `git worktree add --detach`, no stash),
+so it predates the landline moving to shani-link. Not fixed here: Approve is the Agent
+contract's approval path, and whether it is wired is that work's question.
+tests/test_question_presenter.py::TestNobodyToAskSaysNobodyIsThere::test_how_many_gated_refusals_still_name_the_raw_key
+  "look_at_image has no probe in this sweep". Fails identically on a clean HEAD worktree
+  (2026-11-04), so it predates the shani-link move.

@@ -75,7 +75,7 @@ def _run(arguments: dict) -> str:
         if not landline.ready():
             return ("The landline is not connected to the router right now, so there is nothing to "
                     "call through. Nothing was dialled.")
-        from shani_chronoa.landline.ua import dial_user
+        from shani_chronoa.landline import dial_user
         who = dial_user(number)
         ok, why = approvals.confirm(
             "Call on your landline?",
