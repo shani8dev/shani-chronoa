@@ -2372,6 +2372,14 @@ def type_text(app: str, title: str, text: str,
         tried = []
         delivered_by = None
         unreadable = False
+        # **The next route is tried only when the window is provably unchanged.**
+        # A route whose text arrived but could not be read back (no editable
+        # node, OCR that missed it, a field that reformats what it is given) was
+        # followed by the next route typing it all *again* - the text twice, in
+        # a message. So the window is read before anything is sent, and a route
+        # is given up on only when the window afterwards reads exactly as it did:
+        # nothing arrived, so another route cannot double it.
+        before = _read_back(app, text)
         for name, send in _typing_routes(app):
             try:
                 send(text)
@@ -2387,18 +2395,24 @@ def type_text(app: str, title: str, text: str,
                 seen = _read_back(app, text)
             except Exception:  # noqa: BLE001 - unreadable is not undelivered
                 unreadable = True
-                continue
+                break
             if _matches(text, seen):
                 delivered_by = name
+                break
+            if not before or seen != before:
+                # something changed, or nothing could be seen either time: the
+                # keys may well have landed, and typing them again would double them
+                unreadable = True
                 break
         if delivered_by:
             return (f"Typed {len(text)} character(s) into {app} and read them "
                     f"back, through {delivered_by}.")
-        if unreadable and len(tried) == 1:
-            # every route ran and the only thing that failed was the reading
+        if unreadable:
+            # sent, and not retyped: the only thing that failed was the reading
             return (f"Asked {app} to take {len(text)} character(s) through "
-                    f"{tried[0]}. The keys were sent, but this window could not "
-                    f"be read back to confirm it - look at the app's window.")
+                    f"{tried[-1]}. The keys were sent, but it could not be confirmed "
+                    f"that they arrived: this window could not be read back, so "
+                    f"they were not sent again - look at the app's window.")
         # **rc=0 is not evidence, and this file is where that has to be said.**
         # Nothing was confirmed, so nothing is claimed - what is claimed instead
         # is the shape of the failure, because "it did not work" is not

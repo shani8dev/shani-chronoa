@@ -483,6 +483,51 @@ def test_delivery_is_only_claimed_when_it_is_read_back(monkeypatch) -> None:
     assert sent == ["no route at all"]
 
 
+def _typing_setup(monkeypatch, routes, reads):
+    sent = []
+
+    def route(name):
+        def send(text):
+            sent.append(name)
+        return name, send
+
+    it = iter(reads)
+    monkeypatch.setattr(ui_driver, "_typing_routes", lambda app: [route(n) for n in routes])
+    monkeypatch.setattr(ui_driver, "_read_back", lambda app, text: next(it))
+    monkeypatch.setattr(ui_driver, "find_window", lambda title, app="": "6291460")
+    monkeypatch.setattr(ui_driver, "_focus_the_window", lambda w, t="": "")
+    monkeypatch.setattr(ui_driver, "_comms_app", lambda app: "")
+    monkeypatch.setattr(ui_driver, "_comms_surface", lambda w: "")
+    monkeypatch.setattr(ui_driver, "window_box", lambda w: None)
+    monkeypatch.setattr(ui_driver, "start_cue", lambda app: (None, ""))
+    monkeypatch.setattr(ui_driver, "_stop_cue", lambda cue: None)
+    return sent
+
+
+def test_text_that_cannot_be_read_back_is_not_typed_twice(monkeypatch) -> None:
+    """A window that cannot be read gives no proof nothing arrived, so the next
+    route would double the text: the first route's keys are the only ones sent."""
+    sent = _typing_setup(monkeypatch, ["portal", "xdotool"], ["", ""])
+    reply = ui_driver.type_text("slack", "Slack", "hello there")
+    assert sent == ["portal"]
+    assert "not sent again" in reply and "read them back" not in reply
+
+
+def test_a_window_that_changed_without_the_text_is_not_retyped(monkeypatch) -> None:
+    sent = _typing_setup(monkeypatch, ["portal", "xdotool"], ["Inbox", "Inbox hel"])
+    ui_driver.type_text("slack", "Slack", "hello there")
+    assert sent == ["portal"]
+
+
+def test_an_unchanged_window_gets_the_next_route(monkeypatch) -> None:
+    """Read before and after, and the same: nothing arrived, so the next route
+    cannot double it - and the one that is read back is the one named."""
+    sent = _typing_setup(monkeypatch, ["portal", "xdotool"], ["Inbox", "Inbox", "Inbox hello there"])
+    reply = ui_driver.type_text("slack", "Slack", "hello there")
+    assert sent == ["portal", "xdotool"]
+    assert "through xdotool" in reply
+
+
 # --- and the guard has to work where this desktop actually runs: Wayland -------
 #
 # The first version of this guard read an X window id, which `xdotool` gives
