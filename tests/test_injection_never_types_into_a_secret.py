@@ -44,6 +44,13 @@ sys.path.insert(0, "usr/lib/shani-chronoa")
 from shani_chronoa import ui_driver  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _never_this_niri_session(monkeypatch):
+    """The typing and key routes take niri's path (real `niri msg`, real wtype)
+    whenever NIRI_SOCKET is set, so a run inside a niri session would reach it."""
+    monkeypatch.delenv("NIRI_SOCKET", raising=False)
+
+
 class _StateSet:
     def __init__(self, states):
         self._states = list(states)

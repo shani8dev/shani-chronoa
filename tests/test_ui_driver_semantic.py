@@ -99,6 +99,7 @@ def _grab(node):
 def _fake_bus(monkeypatch, tmp_path):
     """Every seam to AT-SPI answered from the fakes; no screen read, no OCR."""
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.delenv("NIRI_SOCKET", raising=False)
     monkeypatch.setattr(ui_driver, "_secure_field", lambda: ("clear", ""))
     monkeypatch.setattr(ui_driver, "screen_text",
                         lambda app: (_ for _ in ()).throw(ui_driver.GuiUnavailable("no")))

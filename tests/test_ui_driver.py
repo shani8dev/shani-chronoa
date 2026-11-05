@@ -73,6 +73,10 @@ def _no_real_accessibility_bus(monkeypatch):
     every test after it never ran (2026-10-15). Answered "an ordinary field"
     here; a test about the password guard sets its own verdict."""
     monkeypatch.setattr(ui_driver, "_secure_field", lambda: ("clear", ""))
+    # A suite run inside a niri session must not reach that session: the
+    # typing and key routes take niri's path (real `niri msg`, real wtype)
+    # whenever NIRI_SOCKET is set.
+    monkeypatch.delenv("NIRI_SOCKET", raising=False)
 
 def test_a_control_this_deep_is_found() -> None:
     """Depth 17, measured: gnome-text-editor's own buttons."""

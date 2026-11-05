@@ -1284,6 +1284,202 @@ def act_on(app: str, node, verb: str, text: str = "", title: str = "") -> str:
 
 
 
+# --- niri: focus by window id, confirmed ------------------------------------------
+#
+# Measured in a nested niri 26.04 (shani-shell's dev session), not assumed:
+# `niri msg action focus-window --id N` moved focus 30 times out of 30 across a
+# GTK4, a second GTK4 and a Qt window, with `focused-window` agreeing at once.
+# An id that does not exist also exits 0 and leaves focus where it was - so the
+# action's exit status says nothing, and `focused-window` is what is believed.
+# wtype (zwp_virtual_keyboard_v1) reached only the focused window: "kA" landed
+# in A's entry and nowhere else, four switches out of four - and it reached a
+# focused password entry just as readily, which is why `_secure_gate` still runs.
+
+
+def _niri_session() -> bool:
+    """A niri session: its IPC socket is set and its client is installed."""
+    return bool(os.environ.get("NIRI_SOCKET")) and shutil.which("niri") is not None
+
+
+def _niri_json(*args: str):
+    import json
+
+    from shani_chronoa.windows import WindowError
+    from shani_chronoa.windows.niri import _niri
+    try:
+        return json.loads(_niri("-j", *args) or "null")
+    except (WindowError, ValueError) as exc:
+        raise GuiUnavailable(f"niri could not be asked for {' '.join(args)}: {exc}") from exc
+
+
+def _niri_action(*args: str) -> None:
+    from shani_chronoa.windows import WindowError
+    from shani_chronoa.windows.niri import _niri
+    try:
+        _niri("action", *args)
+    except WindowError as exc:
+        raise GuiUnavailable(f"niri refused {args[0]}: {exc}") from exc
+
+
+def niri_window(app: str) -> dict:
+    """niri's window for `app`, matched by process id, then by frame title.
+
+    The accessibility bus knows the app's pid and its frames' titles; niri knows
+    each window's pid and title. A pid with one window is that window; a pid
+    with several is narrowed by the titles the app's frames carry, and the
+    active frame's title wins a tie. More than one left is refused - the keys
+    would be aimed at a guess.
+    """
+    application = _application(app)
+    try:
+        pid = int(application.get_process_id() or 0)
+    except Exception:  # noqa: BLE001 - no pid is not pid 0's window
+        pid = 0
+    titles, active = [], ""
+    for index in range(application.get_child_count()):
+        frame = application.get_child_at_index(index)
+        if frame is None:
+            continue
+        titles.append(_name(frame))
+        if "active" in _ax_states(frame):
+            active = _name(frame)
+    windows = _niri_json("windows") or []
+    mine = [w for w in windows if pid and w.get("pid") == pid]
+    if not mine:
+        mine = [w for w in windows if w.get("title") and w.get("title") in titles]
+    if len(mine) > 1:
+        narrowed = [w for w in mine if w.get("title") in titles] or mine
+        if len(narrowed) > 1 and active:
+            narrowed = [w for w in narrowed if w.get("title") == active] or narrowed
+        mine = narrowed
+    if not mine:
+        raise GuiUnavailable(f"niri lists no window for {app}")
+    if len(mine) > 1:
+        raise GuiUnavailable(
+            f"{app} has {len(mine)} windows niri cannot tell apart "
+            f"({', '.join(repr(w.get('title')) for w in mine)}); close one, or "
+            f"give each a different title")
+    return mine[0]
+
+
+def niri_focus(window: dict, patience: float = 1.0) -> str:
+    """Focus `window` by its niri id and confirm it. "" when it took.
+
+    Asked of niri's own `focused-window`, never inferred from the action's exit
+    status - a stale id exits 0 too (measured).
+    """
+    wid = window.get("id")
+    try:
+        _niri_action("focus-window", "--id", str(wid))
+    except GuiUnavailable as exc:
+        return str(exc)
+    deadline = time.monotonic() + patience
+    while True:
+        try:
+            focused = _niri_json("focused-window") or {}
+        except GuiUnavailable as exc:
+            return str(exc)
+        if focused.get("id") == wid:
+            return ""
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(0.1)
+    if not focused:
+        return f"niri reports no focused window after focusing {window.get('title')!r}"
+    return (f"niri focused {focused.get('title')!r} (window {focused.get('id')}) "
+            f"instead of {window.get('title')!r} (window {wid}), so keys would "
+            f"land in the wrong window")
+
+
+def _niri_typing_routes(app: str):
+    """wtype first (measured on niri: only the focused window receives it), then
+    ydotool where its daemon runs. No portal - niri offers no RemoteDesktop -
+    and no XTEST, which reaches only X clients."""
+    routes = []
+
+    def via_wtype(value):
+        # From stdin ("-"), so text beginning with a dash is text, not an option.
+        proc = subprocess.run(["wtype", "-d", "12", "-"], input=value,
+                              capture_output=True, text=True, timeout=120,
+                              check=False)
+        if proc.returncode != 0:
+            raise GuiUnavailable((proc.stderr or "wtype failed").strip())
+        return proc
+
+    def via_uinput(value):
+        return subprocess.run(["ydotool", "type", "-d", "80", "-H", "60", "--", value],
+                              capture_output=True, text=True, timeout=120,
+                              check=False)
+
+    if shutil.which("wtype"):
+        routes.append(("wtype (virtual keyboard)", via_wtype))
+    if shutil.which("ydotool"):
+        routes.append(("ydotool (uinput)", via_uinput))
+    return routes
+
+
+def _focus_on_niri(app: str) -> dict:
+    """Find `app`'s niri window, focus it, confirm it, or refuse saying why."""
+    window = niri_window(app)
+    problem = niri_focus(window)
+    if problem:
+        raise GuiUnavailable(
+            f"not sending keys to {app}: {problem}. The keys would land in "
+            f"whatever is focused, which is not necessarily this app.")
+    return window
+
+
+def _type_on_niri(app: str, text: str, surface: str) -> str:
+    _focus_on_niri(app)
+    # After the focus, for the reason `type_text` gives: only now is what holds
+    # focus what the keys will land in.
+    secure_note = _secure_gate(app)
+    routes = _niri_typing_routes(app)
+    if not routes:
+        raise GuiUnavailable("neither wtype nor ydotool is installed, so no keys "
+                             "can be sent on this niri desktop")
+    return _send_and_confirm(app, text, routes, surface, secure_note)
+
+
+#: Modifier names a chord may use, as wtype's -M/-m spell them.
+_WTYPE_MODIFIERS = {"ctrl": "ctrl", "control": "ctrl", "alt": "alt",
+                    "shift": "shift", "super": "logo", "logo": "logo",
+                    "meta": "logo", "win": "logo", "altgr": "altgr"}
+
+
+def _wtype_chord(keys: str) -> "list[str]":
+    """`ctrl+shift+t` as wtype arguments: press modifiers, tap, release."""
+    parts = [p for p in re.split(r"[+]", keys.strip()) if p]
+    if not parts:
+        raise GuiUnavailable("key needs a combination, e.g. Down or ctrl+l")
+    *mods, last = parts
+    args = []
+    for mod in mods:
+        name = _WTYPE_MODIFIERS.get(mod.lower())
+        if name is None:
+            raise GuiUnavailable(f"{mod!r} is not a modifier; use ctrl, alt, shift or super")
+        args += ["-M", name]
+    args += ["-k", last]
+    for mod in reversed(mods):
+        args += ["-m", _WTYPE_MODIFIERS[mod.lower()]]
+    return args
+
+
+def _key_on_niri(app: str, keys: str) -> str:
+    _focus_on_niri(app)
+    secure_note = _secure_gate(app)
+    if not shutil.which("wtype"):
+        raise GuiUnavailable("wtype is not installed, so no key can be sent on "
+                             "this niri desktop")
+    proc = subprocess.run(["wtype", *_wtype_chord(keys)], capture_output=True,
+                          text=True, timeout=30, check=False)
+    if proc.returncode != 0:
+        raise GuiUnavailable(f"the app would not take {keys!r}: "
+                             f"{(proc.stderr or '').strip()}")
+    return f"Sent {keys} to {app}.{secure_note}"
+
+
+
 def _target(app: str, number, ref: str):
     """The element a turn names - by reference, or by its number in the list.
 
@@ -2706,6 +2902,11 @@ def type_text(app: str, title: str, text: str,
                 f"refusing to type into {app}: {surface}. A keystroke here "
                 f"leaves the machine, so a driver aiming at a text field must "
                 f"never be able to send a message in a chat or mail window.")
+        if window_id is None and _niri_session():
+            # niri: its own window ids, focus confirmed by niri, keys by wtype -
+            # never `find_window`, which waits 30 s for an X window niri's
+            # native clients do not have.
+            return _type_on_niri(app, text, surface)
         if window_id is None:
             window_id = find_window(title, app=app)
         if window_id is None:
@@ -2765,64 +2966,78 @@ def type_text(app: str, title: str, text: str,
         # into one measurement: whichever route actually delivers is the one
         # named, and a machine where none does says so instead of claiming the
         # last one tried.
-        seen = ""
-        tried = []
-        delivered_by = None
-        unreadable = False
-        # **The next route is tried only when the window is provably unchanged.**
-        # A route whose text arrived but could not be read back (no editable
-        # node, OCR that missed it, a field that reformats what it is given) was
-        # followed by the next route typing it all *again* - the text twice, in
-        # a message. So the window is read before anything is sent, and a route
-        # is given up on only when the window afterwards reads exactly as it did:
-        # nothing arrived, so another route cannot double it.
-        before = _read_back(app, text)
-        for name, send in _typing_routes(app):
-            try:
-                send(text)
-            except Exception as exc:  # noqa: BLE001 - a route that cannot run
-                tried.append(f"{name} ({type(exc).__name__})")
-                continue
-            tried.append(name)
-            # A reader that cannot read is not a route that failed, and conflating
-            # the two is what made a working portal look broken: the text arrived,
-            # the read-back raised, and every route was blamed in turn. So a failed
-            # read is recorded separately and the routes still get their turn.
-            try:
-                seen = _read_back(app, text)
-            except Exception:  # noqa: BLE001 - unreadable is not undelivered
-                unreadable = True
-                break
-            if _matches(text, seen):
-                delivered_by = name
-                break
-            if not before or seen != before:
-                # something changed, or nothing could be seen either time: the
-                # keys may well have landed, and typing them again would double them
-                unreadable = True
-                break
-        if delivered_by:
-            return (f"Typed {len(text)} character(s) into {app} and read them "
-                    f"back, through {delivered_by}.")
-        if unreadable:
-            # sent, and not retyped: the only thing that failed was the reading
-            return (f"Asked {app} to take {len(text)} character(s) through "
-                    f"{tried[-1]}. The keys were sent, but it could not be confirmed "
-                    f"that they arrived: this window could not be read back, so "
-                    f"they were not sent again - look at the app's window.")
-        # **rc=0 is not evidence, and this file is where that has to be said.**
-        # Nothing was confirmed, so nothing is claimed - what is claimed instead
-        # is the shape of the failure, because "it did not work" is not
-        # actionable and "these three routes were tried and none was confirmed"
-        # says whether to suspect focus, the compositor, or the app.
-        return (f"Asked {app} to take {len(text)} character(s); it could not be "
-                f"confirmed that any arrived. Tried {', '.join(tried)}. On a "
-                f"Wayland window the compositor owns input, so keys reach only "
-                f"the window it has focused - look at its window.") + (
-            "" if not surface else
-            f" ({surface}, which '{_COMMS_CONSENT_KEY}' allows.)") + secure_note
+        return _send_and_confirm(app, text, _typing_routes(app), surface,
+                                 secure_note)
     finally:
         _stop_cue(cue)
+
+
+def _send_and_confirm(app: str, text: str, routes, surface: str = "",
+                      secure_note: str = "") -> str:
+    """Send `text` by the first route that is read back as delivered.
+
+    Each route is tried and then *read back*, and the first one confirmed wins;
+    the next one is tried only while the window reads exactly as it did before
+    (nothing arrived), so a route whose text landed unseen is never followed by
+    a second copy. Why each of those rules exists is measured, and recorded in
+    the comments below and in `type_text`.
+    """
+    seen = ""
+    tried = []
+    delivered_by = None
+    unreadable = False
+    # **The next route is tried only when the window is provably unchanged.**
+    # A route whose text arrived but could not be read back (no editable
+    # node, OCR that missed it, a field that reformats what it is given) was
+    # followed by the next route typing it all *again* - the text twice, in
+    # a message. So the window is read before anything is sent, and a route
+    # is given up on only when the window afterwards reads exactly as it did:
+    # nothing arrived, so another route cannot double it.
+    before = _read_back(app, text)
+    for name, send in routes:
+        try:
+            send(text)
+        except Exception as exc:  # noqa: BLE001 - a route that cannot run
+            tried.append(f"{name} ({type(exc).__name__})")
+            continue
+        tried.append(name)
+        # A reader that cannot read is not a route that failed, and conflating
+        # the two is what made a working portal look broken: the text arrived,
+        # the read-back raised, and every route was blamed in turn. So a failed
+        # read is recorded separately and the routes still get their turn.
+        try:
+            seen = _read_back(app, text)
+        except Exception:  # noqa: BLE001 - unreadable is not undelivered
+            unreadable = True
+            break
+        if _matches(text, seen):
+            delivered_by = name
+            break
+        if not before or seen != before:
+            # something changed, or nothing could be seen either time: the
+            # keys may well have landed, and typing them again would double them
+            unreadable = True
+            break
+    if delivered_by:
+        return (f"Typed {len(text)} character(s) into {app} and read them "
+                f"back, through {delivered_by}.")
+    if unreadable:
+        # sent, and not retyped: the only thing that failed was the reading
+        return (f"Asked {app} to take {len(text)} character(s) through "
+                f"{tried[-1]}. The keys were sent, but it could not be confirmed "
+                f"that they arrived: this window could not be read back, so "
+                f"they were not sent again - look at the app's window.")
+    # **rc=0 is not evidence, and this file is where that has to be said.**
+    # Nothing was confirmed, so nothing is claimed - what is claimed instead
+    # is the shape of the failure, because "it did not work" is not
+    # actionable and "these three routes were tried and none was confirmed"
+    # says whether to suspect focus, the compositor, or the app.
+    return (f"Asked {app} to take {len(text)} character(s); it could not be "
+            f"confirmed that any arrived. Tried {', '.join(tried)}. On a "
+            f"Wayland window the compositor owns input, so keys reach only "
+            f"the window it has focused - look at its window.") + (
+        "" if not surface else
+        f" ({surface}, which '{_COMMS_CONSENT_KEY}' allows.)") + secure_note
 
 
 def _read_back(app: str, text: str) -> str:
@@ -2885,6 +3100,13 @@ def _matches(text: str, seen: str) -> bool:
 
 def key(app: str, title: str, keys: str) -> str:
     """Send a key combination to a container's GUI app, with the window marked."""
+    if _niri_session():
+        surface = _comms_app(app)
+        if surface and not _comms_override():
+            raise GuiUnavailable(
+                f"refusing to send {keys} to {app}: {surface}. A key combination "
+                f"here leaves the machine.")
+        return _key_on_niri(app, keys)
     _require_xtest()
     _which("xdotool", "given a key")
     window_id = find_window(title, app=app, timeout=10)
