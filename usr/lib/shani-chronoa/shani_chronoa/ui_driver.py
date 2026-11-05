@@ -38,7 +38,10 @@ key).
 
 from __future__ import annotations
 
+import contextlib
+import functools
 import glob
+import inspect
 import logging
 import os
 import re
@@ -46,6 +49,7 @@ import shutil
 import socket
 import tempfile
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 
@@ -67,6 +71,136 @@ _GLIDE_BUDGET = 1.5
 
 class GuiUnavailable(Exception):
     """Why this cannot be driven; the caller turns it into one sentence."""
+
+
+# --- every action counted, capped per request, and written down -----------------
+
+#: How many actions (presses, typing, keys, scrolls) one request may take. A
+#: model in a loop that does not converge would otherwise keep clicking for as
+#: long as its turn lasts; past this a person should look at what happened.
+MAX_ACTIONS_PER_REQUEST = 30
+#: With no turn label (a caller outside the assistant), actions this close
+#: together are counted as one request.
+_UNLABELLED_GAP_S = 120.0
+_ACTION_DEPTH = [0]
+
+
+def _request_label() -> str:
+    """The turn this action belongs to: the child's CHRONOA_TURN, or the
+    assistant's own label when the driver runs in its process."""
+    label = os.environ.get("CHRONOA_TURN", "").strip()
+    if not label:
+        tools = sys.modules.get("shani_chronoa.tools")
+        try:
+            label = (tools.current_turn() if tools is not None else "") or ""
+        except Exception:  # noqa: BLE001 - no label is not an error
+            label = ""
+    return label
+
+
+def _driver_state_dir() -> str:
+    from shani_chronoa.files import data_home
+    return os.path.join(str(data_home()), "shani-chronoa")
+
+
+def _spend_action(verb: str, app: str) -> int:
+    """Count one action against this request; raise past the cap. Returns the count."""
+    import json
+
+    path = os.path.join(_driver_state_dir(), "ui_action_budget.json")
+    label, now = _request_label(), time.time()
+    try:
+        with open(path, encoding="utf-8") as handle:
+            ledger = json.load(handle)
+    except (OSError, ValueError):
+        ledger = {}
+    same = ledger.get("turn") == label and (
+        label or now - float(ledger.get("at") or 0) < _UNLABELLED_GAP_S)
+    count = int(ledger.get("count") or 0) if same else 0
+    if count >= MAX_ACTIONS_PER_REQUEST:
+        raise GuiUnavailable(
+            f"refusing to {verb} in {app}: this request has already taken "
+            f"{count} actions, the most one request may take. Look at what "
+            f"has happened before asking for more")
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path + ".tmp", "w", encoding="utf-8") as handle:
+            json.dump({"turn": label, "count": count + 1, "at": now}, handle)
+        os.replace(path + ".tmp", path)
+    except OSError as exc:
+        # A ledger that cannot be written cannot enforce the cap, and an
+        # uncapped driver is the thing this exists to prevent.
+        raise GuiUnavailable(f"refusing to {verb} in {app}: the action count "
+                             f"could not be recorded ({exc})") from exc
+    return count + 1
+
+
+def _log_action(record: dict) -> None:
+    """Append one action to `ui_actions.log` (JSON lines), and to the logger.
+
+    What was typed is never written - only how many characters - because the
+    log outlives the request and the text may be anything.
+    """
+    import json
+
+    logger.info("ui action: %s", record)
+    path = os.path.join(_driver_state_dir(), "logs", "ui_actions.log")
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        logger.warning("could not write the ui action log: %s", exc)
+
+
+@contextlib.contextmanager
+def _action(verb: str, app: str, target: str = "", chars: int = 0, keys: str = ""):
+    """Count, run and log one action. Nested calls (a press that falls back to
+    a click, a click that falls back to the portal) are one action."""
+    if _ACTION_DEPTH[0]:
+        yield {}
+        return
+    _ACTION_DEPTH[0] += 1
+    record = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "turn": _request_label(),
+              "verb": verb, "app": app}
+    if target:
+        record["target"] = target
+    if chars:
+        record["chars"] = chars
+    if keys:
+        record["keys"] = keys
+    try:
+        record["n"] = _spend_action(verb, app)
+        yield record
+        record.setdefault("outcome", "done")
+    except GuiUnavailable as exc:
+        record["outcome"] = f"refused: {exc}"[:300]
+        raise
+    except Exception as exc:  # noqa: BLE001 - recorded, then raised as it was
+        record["outcome"] = f"failed: {type(exc).__name__}: {exc}"[:300]
+        raise
+    finally:
+        _ACTION_DEPTH[0] -= 1
+        _log_action(record)
+
+
+def _counted(verb: str):
+    """Run the decorated action inside `_action`, reading app/target/text by name."""
+    def wrap(fn):
+        @functools.wraps(fn)
+        def inner(*args, **kwargs):
+            bound = inspect.signature(fn).bind_partial(*args, **kwargs).arguments
+            with _action(verb, str(bound.get("app") or ""),
+                         target=str(bound.get("target") or ""),
+                         chars=len(str(bound.get("text") or "")),
+                         keys=str(bound.get("keys") or "")) as record:
+                result = fn(*args, **kwargs)
+                if record is not None and isinstance(result, str):
+                    record["outcome"] = result.strip().splitlines()[0][:200] if result.strip() else "done"
+                return result
+        return inner
+    return wrap
+
 
 
 def _portal_input():
@@ -114,6 +248,7 @@ def _portal_sentence() -> str:
         "window instead, and XTEST can drive it without a dialog.")
 
 
+@_counted("key")
 def portal_key(app: str, keys: str) -> str:
     """Send keys through the portal, for a window XTEST cannot reach.
 
@@ -162,6 +297,7 @@ def portal_key(app: str, keys: str) -> str:
             f"observe.")
 
 
+@_counted("click")
 def portal_click(app: str, x_percent: float, y_percent: float) -> str:
     """A click through the portal, for a window XTEST cannot reach.
 
@@ -177,6 +313,7 @@ def portal_click(app: str, x_percent: float, y_percent: float) -> str:
         "knowable, or drive it by keyboard through the portal instead.")
 
 
+@_counted("type")
 def portal_type(app: str, text: str) -> str:
     """Type through the portal, for a window XTEST cannot reach."""
     # **The secure-field check lives in here, not only in `type_text`.**
@@ -1238,7 +1375,30 @@ def act_on(app: str, node, verb: str, text: str = "", title: str = "") -> str:
     this file spends its comments on. Synthesized input is the fallback, for an
     element that offers neither.
     """
+    with _action(verb, app, target=_name(node), chars=len(text or "")) as record:
+        said = _act_on(app, node, verb, text, title)
+        if record is not None:
+            record["outcome"] = said.strip().splitlines()[0][:200] if said.strip() else "done"
+        return said
+
+
+def _act_on(app: str, node, verb: str, text: str, title: str) -> str:
     role, name = _role(node), _name(node)
+    if verb == "type":
+        # **Never into a secret field**, whatever route would carry the text:
+        # EditableText would put a password in as surely as keys would. The
+        # role is the AT-SPI one both toolkits use (GTK 4.24 and Qt 6.12 both
+        # report "password text", measured; Qt's has no name at all).
+        if role.lower() in _SECURE_ROLES:
+            raise GuiUnavailable(
+                f"refusing to type into {app}: the field is a {role}. Its "
+                f"contents are meant to be hidden, and no switch makes that safe.")
+        surface = _comms_app(app)
+        if surface and not _comms_override():
+            raise GuiUnavailable(
+                f"refusing to type into {app}: {surface}. A keystroke here "
+                f"leaves the machine, so a driver aiming at a text field must "
+                f"never be able to send a message in a chat or mail window.")
     reason = unactionable(node, verb)
     if reason:
         raise GuiUnavailable(
@@ -2490,6 +2650,7 @@ def _is_an_ending(target: str) -> bool:
                 or ({"sign", "log"} & words) and "out" in words)
 
 
+@_counted("click")
 def click(app: str, title: str, target: "str | None" = None,
           x_percent: "float | None" = None, y_percent: "float | None" = None,
           window_id: "str | None" = None, button: str = "left",
@@ -2658,6 +2819,7 @@ def click(app: str, title: str, target: "str | None" = None,
         _stop_cue(cue)
 
 
+@_counted("scroll")
 def scroll(app: str, title: str, direction: str = "down", amount: int = 3,
            x_percent: "float | None" = None, y_percent: "float | None" = None,
            window_id: "str | None" = None) -> str:
@@ -3027,6 +3189,7 @@ def portal_available() -> bool:
         return False
     finally:
         client.close()
+@_counted("type")
 def type_text(app: str, title: str, text: str,
               window_id: "str | None" = None) -> str:
     """Type into a container's GUI app, with the cursor shown where it lands."""
@@ -3252,6 +3415,7 @@ def _matches(text: str, seen: str) -> bool:
     return False
 
 
+@_counted("key")
 def key(app: str, title: str, keys: str) -> str:
     """Send a key combination to a container's GUI app, with the window marked."""
     if _niri_session():

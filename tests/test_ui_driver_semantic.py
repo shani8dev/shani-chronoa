@@ -111,6 +111,7 @@ def _fake_bus(monkeypatch, tmp_path):
     monkeypatch.setattr(ui_driver, "_ax_text", lambda n: n.text)
     monkeypatch.setattr(ui_driver, "_ax_insert", _insert)
     monkeypatch.setattr(ui_driver, "_ax_focus", _grab)
+    monkeypatch.setattr(ui_driver, "_frame_title", lambda app: "")
     return apps
 
 
@@ -340,3 +341,121 @@ def test_a_label_is_not_an_editable_field(synthesized) -> None:
     with pytest.raises(ui_driver.GuiUnavailable, match="not an editable field"):
         ui_driver.act_on("editor", label, "type", text="x")
     assert label.text == "count 0"
+
+
+# --- 6. safety ------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("role, name", [
+    ("password text", "Password"),  # GTK 4.24's PasswordEntry
+    ("password text", ""),           # Qt 6.12's: the same role, and no name
+])
+def test_a_password_field_is_never_typed_into_by_any_route(role, name, synthesized) -> None:
+    field = FakeNode(role, name, states=ON | {"editable", "focused"}, text="")
+    _app(field)
+    with pytest.raises(ui_driver.GuiUnavailable, match="password text"):
+        ui_driver.act_on("editor", field, "type", text="hunter2")
+    assert field.text == "" and synthesized == []
+
+
+def test_a_password_reference_is_refused_too(_fake_bus, synthesized) -> None:
+    """It is never listed (`_actionable`), but a ref can still name it."""
+    field = FakeNode("password text", "Password", states=ON | {"editable"}, text="")
+    _fake_bus.append(_app(field))
+    with pytest.raises(ui_driver.GuiUnavailable, match="password text"):
+        ui_driver.drive("type", app="editor", ref="0.0:password text:Password", text="x")
+    assert field.text == ""
+
+
+def test_typing_into_a_chat_app_is_refused_through_editable_text(synthesized, monkeypatch) -> None:
+    monkeypatch.setattr(ui_driver, "_comms_override", lambda: False)
+    field = _entry("Message")
+    _app(field, name="slack")
+    with pytest.raises(ui_driver.GuiUnavailable, match="communication surface"):
+        ui_driver.act_on("slack", field, "type", text="hello")
+    assert field.text == ""
+
+
+def test_the_chat_refusal_lifts_only_behind_its_own_key(synthesized, monkeypatch) -> None:
+    monkeypatch.setattr(ui_driver, "_comms_override", lambda: True)
+    field = _entry("Message")
+    _app(field, name="slack")
+    ui_driver.act_on("slack", field, "type", text="hello")
+    assert field.text == "hello"
+
+
+def _log(tmp_path):
+    path = tmp_path / "data" / "shani-chronoa" / "logs" / "ui_actions.log"
+    return [json.loads(line) for line in path.read_text().splitlines()]
+
+
+def test_every_action_is_written_down_without_the_text(synthesized, tmp_path) -> None:
+    button, field = _button("Save"), _entry()
+    _app(button, field)
+    ui_driver.act_on("editor", button, "click")
+    ui_driver.act_on("editor", field, "type", text="my secret note")
+    log = _log(tmp_path)
+    assert [(r["verb"], r["target"]) for r in log] == [("click", "Save"), ("type", "Name")]
+    assert log[1]["chars"] == len("my secret note")
+    assert "my secret note" not in json.dumps(log)
+    assert log[0]["outcome"].startswith("Pressed")
+
+
+def test_a_refused_action_is_written_down_as_refused(synthesized, tmp_path) -> None:
+    off = _button("Off", states=ON - {"sensitive", "enabled"})
+    _app(off)
+    with pytest.raises(ui_driver.GuiUnavailable):
+        ui_driver.act_on("editor", off, "click")
+    assert _log(tmp_path)[-1]["outcome"].startswith("refused: not pressing")
+
+
+def test_a_fallback_inside_an_action_is_one_action(_fake_bus, tmp_path, monkeypatch) -> None:
+    calls = []
+
+    @ui_driver._counted("click")
+    def click(app, title, target=None):
+        calls.append(target)
+        return "clicked"
+
+    monkeypatch.setattr(ui_driver, "click", click)
+    label = _button("Odd", actions=[])
+    _app(label)
+    ui_driver.act_on("editor", label, "click")
+    assert calls == ["Odd"]
+    assert len(_log(tmp_path)) == 1
+
+
+def test_the_actions_of_one_request_are_capped(synthesized, tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("CHRONOA_TURN", "turn-7")
+    monkeypatch.setattr(ui_driver, "MAX_ACTIONS_PER_REQUEST", 3)
+    button = _button("Next")
+    _app(button)
+    for _ in range(3):
+        ui_driver.act_on("editor", button, "click")
+    with pytest.raises(ui_driver.GuiUnavailable, match="already taken 3 actions"):
+        ui_driver.act_on("editor", button, "click")
+    assert len(button.done) == 3
+
+
+def test_the_next_request_starts_a_new_count(synthesized, monkeypatch) -> None:
+    monkeypatch.setattr(ui_driver, "MAX_ACTIONS_PER_REQUEST", 2)
+    button = _button("Next")
+    _app(button)
+    monkeypatch.setenv("CHRONOA_TURN", "turn-1")
+    ui_driver.act_on("editor", button, "click")
+    ui_driver.act_on("editor", button, "click")
+    monkeypatch.setenv("CHRONOA_TURN", "turn-2")
+    ui_driver.act_on("editor", button, "click")
+    assert len(button.done) == 3
+
+
+def test_the_synthesized_routes_count_against_the_same_cap(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("CHRONOA_TURN", "turn-9")
+    monkeypatch.setattr(ui_driver, "MAX_ACTIONS_PER_REQUEST", 1)
+    monkeypatch.setattr(ui_driver, "_comms_app", lambda app: "")
+    monkeypatch.setattr(ui_driver, "start_cue", lambda app: (None, ""))
+    monkeypatch.setattr(ui_driver, "find_window", lambda *a, **k: None)
+    monkeypatch.setattr(ui_driver, "portal_type", lambda app, text: "typed")
+    ui_driver.type_text(app="editor", title="Untitled", text="a")
+    with pytest.raises(ui_driver.GuiUnavailable, match="already taken 1 actions"):
+        ui_driver.key(app="editor", title="Untitled", keys="Return")
