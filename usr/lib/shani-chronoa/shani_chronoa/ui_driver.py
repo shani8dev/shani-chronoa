@@ -1097,6 +1097,138 @@ def control_by_number(app: str, number: int):
     return resolve_ref(app, listed[int(number) - 1])
 
 
+# --- acting through the element itself ------------------------------------------
+#
+# Thin seams over AT-SPI, so the decisions above them can be tested with fakes
+# and the gi calls stay in one place.
+
+
+def _ax_states(node) -> frozenset:
+    """The element's states by their AT-SPI nicknames ("showing", "sensitive")."""
+    try:
+        return frozenset(s.value_nick for s in node.get_state_set().get_states())
+    except Exception:  # noqa: BLE001 - a vanishing node has no states
+        return frozenset()
+
+
+def _ax_actions(node) -> "list[str]":
+    """The element's action names, in index order; [] when it offers none."""
+    try:
+        import warnings
+
+        from gi.repository import Atspi
+        if node.get_action_iface() is None:
+            return []
+        with warnings.catch_warnings():
+            # get_action_name is marked deprecated, and the name it would be
+            # replaced by is shadowed by Accessible.get_name in Python.
+            warnings.simplefilter("ignore")
+            return [Atspi.Action.get_action_name(node, i) or ""
+                    for i in range(Atspi.Action.get_n_actions(node))]
+    except Exception:  # noqa: BLE001 - no Action interface
+        return []
+
+
+def _ax_do(node, index: int) -> bool:
+    from gi.repository import Atspi
+    return bool(Atspi.Action.do_action(node, index))
+
+
+def _ax_text(node) -> "str | None":
+    """What a text element holds, or None when it publishes no Text."""
+    try:
+        from gi.repository import Atspi
+        if node.get_text_iface() is None:
+            return None
+        return Atspi.Text.get_text(node, 0, Atspi.Text.get_character_count(node)) or ""
+    except Exception:  # noqa: BLE001 - unreadable is not empty
+        return None
+
+
+def _ax_insert(node, text: str) -> bool:
+    """Append `text` through EditableText, as typing at the end would."""
+    try:
+        from gi.repository import Atspi
+        if node.get_editable_text_iface() is None:
+            return False
+        end = Atspi.Text.get_character_count(node) if node.get_text_iface() else 0
+        return bool(Atspi.EditableText.insert_text(node, end, text, len(text)))
+    except Exception:  # noqa: BLE001 - an element that refuses the call
+        return False
+
+
+def _ax_focus(node) -> bool:
+    try:
+        from gi.repository import Atspi
+        return bool(Atspi.Component.grab_focus(node))
+    except Exception:  # noqa: BLE001 - GTK4 raises atspi_error here (measured)
+        return False
+
+
+#: Action names that mean "press it", in the order they are preferred. GTK4
+#: names a button's `click`, Qt its `Press` (measured on niri, GTK 4.24 and
+#: Qt 6.12); `activate` and `toggle` cover rows, switches and check boxes.
+_PRESS_ACTIONS = ("click", "press", "activate", "toggle", "jump", "open")
+
+
+def _press_action(node) -> "tuple[int, str] | None":
+    names = [n.strip().lower() for n in _ax_actions(node)]
+    for wanted in _PRESS_ACTIONS:
+        if wanted in names:
+            return names.index(wanted), wanted
+    return None
+
+
+def act_on(app: str, node, verb: str, text: str = "", title: str = "") -> str:
+    """Press or type into `node` through AT-SPI, before any synthesized input.
+
+    The element's own action presses it without moving the pointer or changing
+    focus, and EditableText inserts text without a keystroke - so neither can
+    land in the wrong window, which is the failure every synthesized route in
+    this file spends its comments on. Synthesized input is the fallback, for an
+    element that offers neither.
+    """
+    role, name = _role(node), _name(node)
+    if verb == "click":
+        found = _press_action(node)
+        if found is not None and _ax_do(node, found[0]):
+            return (f"Pressed the {role} {name!r} in {app} through its own "
+                    f"'{found[1]}' action; the pointer was not moved.")
+        return click(app=app, title=title or app, target=name)
+    if verb != "type":
+        raise GuiUnavailable(f"verb must be click or type, not {verb!r}")
+    if not text:
+        raise GuiUnavailable("type needs the text to send")
+    before = _ax_text(node)
+    if _ax_insert(node, text):
+        after = _ax_text(node)
+        if after is not None and before is not None and after != before:
+            if text in after:
+                return (f"Typed {len(text)} character(s) into the {role} {name!r} "
+                        f"in {app} through its editable text, and read them back.")
+            return (f"Asked the {role} {name!r} in {app} to take {len(text)} "
+                    f"character(s); it changed, but does not read back as "
+                    f"the text sent - look at the field.")
+        if after is None or before is None:
+            return (f"Asked the {role} {name!r} in {app} to take {len(text)} "
+                    f"character(s) through its editable text; it cannot be read "
+                    f"back, so they were not sent again.")
+    # Nothing arrived through the tree: keys, but only into this field.
+    if "focused" not in _ax_states(node):
+        found = next((i for i, n in enumerate(_ax_actions(node))
+                      if n.strip().lower() in ("set focus", "setfocus", "focus")), None)
+        if found is not None:
+            _ax_do(node, found)
+        else:
+            _ax_focus(node)
+    if "focused" not in _ax_states(node):
+        raise GuiUnavailable(
+            f"the {role} {name!r} in {app} took no editable text and could not be "
+            f"given focus, so typed keys would land somewhere else")
+    return type_text(app=app, title=title or app, text=text)
+
+
+
 def _target(app: str, number, ref: str):
     """The element a turn names - by reference, or by its number in the list.
 
@@ -1194,12 +1326,14 @@ def drive(action: str, app: str = "", image: str = "", title: str = "",
             raise GuiUnavailable(
                 "click needs the number from the controls list - the reply "
                 "always ends with one, so use the number shown there")
-        return after(click(app=app, title=title,
-                           target=(accessor.get_name() or "")))
+        return after(act_on(app, accessor, "click", title=title))
 
     if action == "type":
         if not text:
             raise GuiUnavailable("type needs the text to send")
+        field = _target(app, number, ref)
+        if field is not None:
+            return after(act_on(app, field, "type", text=text, title=title))
         return after(type_text(app=app, title=title or app, text=text))
 
     if action == "key":

@@ -47,6 +47,13 @@ class FakeNode:
         self.pid = pid
         self.done = []
         self.insert_ok = True
+        self.focus_ok = False
+        self._parent = None
+        for child in self._children:
+            child._parent = self
+
+    def get_parent(self):
+        return self._parent
 
     def get_role_name(self):
         return self._role
@@ -64,7 +71,28 @@ class FakeNode:
         return self.pid
 
     def insert(self, index, node):
+        node._parent = self
         self._children.insert(index, node)
+
+
+def _do(node, index):
+    node.done.append(node.actions[index])
+    if node.actions[index] == "Set Focus":
+        node.states.add("focused")
+    return True
+
+
+def _insert(node, text):
+    if node.text is None or not node.insert_ok:
+        return False
+    node.text += text
+    return True
+
+
+def _grab(node):
+    if node.focus_ok:
+        node.states.add("focused")
+    return node.focus_ok
 
 
 @pytest.fixture(autouse=True)
@@ -76,7 +104,22 @@ def _fake_bus(monkeypatch, tmp_path):
                         lambda app: (_ for _ in ()).throw(ui_driver.GuiUnavailable("no")))
     apps = []
     monkeypatch.setattr(ui_driver, "_desktop_apps", lambda: list(apps))
+    monkeypatch.setattr(ui_driver, "_ax_states", lambda n: frozenset(n.states))
+    monkeypatch.setattr(ui_driver, "_ax_actions", lambda n: list(n.actions))
+    monkeypatch.setattr(ui_driver, "_ax_do", _do)
+    monkeypatch.setattr(ui_driver, "_ax_text", lambda n: n.text)
+    monkeypatch.setattr(ui_driver, "_ax_insert", _insert)
+    monkeypatch.setattr(ui_driver, "_ax_focus", _grab)
     return apps
+
+
+@pytest.fixture
+def synthesized(monkeypatch):
+    """Records every fall-back to synthesized input instead of sending it."""
+    sent = []
+    monkeypatch.setattr(ui_driver, "click", lambda **kw: sent.append(("click", kw)) or "clicked")
+    monkeypatch.setattr(ui_driver, "type_text", lambda **kw: sent.append(("type", kw)) or "typed")
+    return sent
 
 
 def _app(*children, name="editor", pid=4242):
@@ -151,9 +194,94 @@ def test_the_saved_list_is_written_where_the_test_said(_fake_bus, tmp_path) -> N
 def test_drive_takes_a_reference_and_resolves_it(_fake_bus, monkeypatch) -> None:
     _fake_bus.append(_app(_button("New"), _button("Delete")))
     pressed = []
-    monkeypatch.setattr(ui_driver, "act_on", raising=False, value=lambda app, node, verb, text="":
+    monkeypatch.setattr(ui_driver, "act_on", lambda app, node, verb, text="", title="":
                         pressed.append(node.get_name()) or "pressed")
     monkeypatch.setattr(ui_driver, "click", lambda **kw:
                         pressed.append(kw["target"]) or "clicked")
     ui_driver.drive("click", app="editor", ref="0.1:button:Delete")
     assert pressed == ["Delete"]
+
+
+# --- 2. the element's own action before any synthesized input --------------------
+
+
+def _entry(name="Name", text="", **kw):
+    states = kw.pop("states", ON | {"editable"})
+    return FakeNode(kw.pop("role", "text"), name, states=states, text=text,
+                    actions=kw.pop("actions", ["activate"]), **kw)
+
+
+@pytest.mark.parametrize("toolkit_action", ["click", "Press"])
+def test_a_button_is_pressed_by_its_own_action(toolkit_action, synthesized) -> None:
+    """GTK4 calls it `click`, Qt `Press` - both measured on niri."""
+    button = _button("Increment", actions=["Set Focus", toolkit_action])
+    _app(button)
+    said = ui_driver.act_on("editor", button, "click")
+    assert button.done == [toolkit_action]
+    assert synthesized == []
+    assert "pointer was not moved" in said
+
+
+def test_set_focus_alone_is_not_a_press(synthesized) -> None:
+    """Qt offers `Set Focus` on a label; doing it would report a press that
+    never happened."""
+    label = _button("count 0", actions=["Set Focus"])
+    _app(label)
+    ui_driver.act_on("editor", label, "click")
+    assert label.done == []
+    assert [verb for verb, _ in synthesized] == ["click"]
+
+
+def test_text_goes_in_through_editable_text_not_keys(synthesized) -> None:
+    field = _entry(text="ab")
+    _app(field)
+    said = ui_driver.act_on("editor", field, "type", text="cd")
+    assert field.text == "abcd"
+    assert synthesized == []
+    assert "read them back" in said
+
+
+def test_a_field_that_takes_no_editable_text_is_focused_by_its_own_action_first(synthesized) -> None:
+    """Qt's entries offer `Set Focus`; GTK4's grab_focus raises (measured)."""
+    field = _entry(text="", actions=["Set Focus"])
+    field.insert_ok = False
+    _app(field)
+    ui_driver.act_on("editor", field, "type", text="x")
+    assert field.done == ["Set Focus"]
+    assert [verb for verb, _ in synthesized] == ["type"]
+
+
+def test_keys_are_sent_after_focus_is_seen(synthesized) -> None:
+    field = _entry(text="", actions=[])
+    field.insert_ok = False
+    field.focus_ok = True
+    _app(field)
+    ui_driver.act_on("editor", field, "type", text="x")
+    assert [verb for verb, _ in synthesized] == ["type"]
+
+
+def test_a_field_that_cannot_be_focused_is_refused_not_typed_blind(synthesized) -> None:
+    field = _entry(text="", actions=[])
+    field.insert_ok = False
+    _app(field)
+    with pytest.raises(ui_driver.GuiUnavailable, match="could not be given focus"):
+        ui_driver.act_on("editor", field, "type", text="x")
+    assert synthesized == []
+
+
+def test_an_unreadable_field_is_not_typed_into_twice(synthesized, monkeypatch) -> None:
+    field = _entry(text=None)
+    _app(field)
+    # the insert is accepted, and nothing can be read back: no second route
+    monkeypatch.setattr(ui_driver, "_ax_insert", lambda n, t: True)
+    said = ui_driver.act_on("editor", field, "type", text="x")
+    assert "not sent again" in said
+    assert synthesized == []
+
+
+def test_drive_type_with_a_number_targets_that_field(_fake_bus, synthesized) -> None:
+    field = _entry()
+    _fake_bus.append(_app(_button("Go"), field))
+    ui_driver.observation("editor")
+    ui_driver.drive("type", app="editor", number=2, text="hi")
+    assert field.text == "hi"

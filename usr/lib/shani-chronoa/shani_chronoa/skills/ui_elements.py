@@ -68,7 +68,7 @@ SCHEMA = {
             "path": {"type": "string", "description": "menu: e.g. 'File > Export'."},
             "do": {"type": "string", "description": "For drive: start, read, click, type or key - what this turn does."},
             "how": {"type": "string", "description": "For act: click, type or key."},
-            "number": {"type": "integer", "description": "For drive click: the control's number from the last state."},
+            "number": {"type": "integer", "description": "For drive click or type: the control's number from the last state."},
             "image": {"type": "string", "description": "For drive start: the container image to run, e.g. localhost/gtk4-probe2."},
             "keys": {"type": "string", "description": "For act/drive: a combination like Down or ctrl-alt-f2."},
             "x": {"type": "number", "description": "For act click: percentage across the window."},
