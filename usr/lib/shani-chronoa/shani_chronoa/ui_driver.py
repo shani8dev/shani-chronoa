@@ -47,6 +47,7 @@ import socket
 import tempfile
 import subprocess
 import time
+from dataclasses import dataclass
 
 from shani_chronoa import automation_overlay as ao
 
@@ -690,15 +691,36 @@ def _walk_all(node, depth: int = 0, out=None):
     """
     if out is None:
         out = []
-    if node is None or depth > _MAX_DEPTH or len(out) >= _MAX_NODES:
-        return out
-    out.append(node)
-    try:
-        for index in range(node.get_child_count()):
-            _walk_all(node.get_child_at_index(index), depth + 1, out)
-    except (AttributeError, TypeError, KeyError):
-        pass
+    for _path, found in _walk_paths(node, max_depth=_MAX_DEPTH - depth):
+        if len(out) >= _MAX_NODES:
+            break
+        out.append(found)
     return out
+
+
+def _walk_paths(node, path: tuple = (), max_depth: int = _MAX_DEPTH, seen=None):
+    """`(path, node)` for every element under `node`, in `_walk_all`'s order.
+
+    The path is the child indices from `node` down - what makes an element
+    nameable again after the call that saw it has returned (`ElementRef`). One
+    walker for both, so the order a number was given in and the order it is
+    looked up in cannot drift apart.
+    """
+    seen = [0] if seen is None else seen
+    if node is None or len(path) > max_depth or seen[0] >= _MAX_NODES:
+        return
+    seen[0] += 1
+    yield path, node
+    try:
+        count = node.get_child_count()
+    except Exception:  # noqa: BLE001 - a vanishing node has no children
+        return
+    for index in range(count):
+        try:
+            child = node.get_child_at_index(index)
+        except Exception:  # noqa: BLE001 - nor does one that cannot be asked
+            continue
+        yield from _walk_paths(child, path + (index,), max_depth, seen)
 
 
 def _selected(application) -> str:
@@ -783,22 +805,10 @@ def observation(app: str, max_controls: int = 12, max_screen: int = 160) -> str:
     3" mean the same control in a later call. A control whose window changed
     since the last read is renumbered, which the reply says.
     """
-    _a11y_env()
     lines = [f"app {app}"]
     box = None
     try:
-        import gi
-
-        gi.require_version("Atspi", "2.0")
-        from gi.repository import Atspi
-        Atspi.init()
-        application = None
-        for candidate in Atspi.get_desktop(0):
-            if candidate is not None and candidate.get_name() == app:
-                application = candidate
-                break
-        if application is None:
-            raise GuiUnavailable(f"{app} is not on the accessibility bus")
+        application = _application(app)
         frame = _frame_of(application)
         box = _screen_box(frame) if frame is not None else None
         if box:
@@ -811,17 +821,20 @@ def observation(app: str, max_controls: int = 12, max_screen: int = 160) -> str:
             lines.append(f"focused {focus!r}")
         lines.append("controls:")
         shown = 0
-        for node in _walk_all(application):
+        listed = []
+        for path, node in _walk_paths(application):
             if shown >= max_controls:
                 break
             if not _actionable(node):
                 continue
             shown += 1
+            listed.append(ElementRef(path, _role(node), _name(node)))
             role = (node.get_role_name() or "").replace("push button", "button")
             name = (node.get_name() or "").strip()
             if not name:
                 continue
             lines.append(f"  {shown} {role} {name[:44]}")
+        _save_refs(app, listed)
         if shown == 0:
             lines.append("  (none this window can act on by name)")
     except GuiUnavailable:
@@ -875,40 +888,240 @@ def _focused_name(application) -> str:
     return ""
 
 
-def control_by_number(app: str, number: int):
-    """The Nth actionable control, numbered exactly as `observation` numbers it.
+# --- stable element references ------------------------------------------------
 
-    Reproducible by construction: both walk the tree in the same order with the
-    same filter, so the number the model was shown is the number that comes back
-    - without any state kept between two calls, which cannot exist across a
-    subprocess anyway.
+
+class StaleRef(GuiUnavailable):
+    """The element a reference named is gone, or is no longer one element."""
+
+
+@dataclass(frozen=True)
+class ElementRef:
+    """An element named the way it can be found again: path, role and name.
+
+    A number in the controls list is a position in a walk, and a position is
+    the first thing to change - a row added above a button renumbers it, and
+    "click 3" then presses whatever is third now. agent-desktop's Linux skill
+    states the rule this follows: *"Position, size and value never count as
+    identity ... Zero live matches is STALE_REF, two or more is
+    AMBIGUOUS_TARGET."* The path is kept because it is the cheap first try and
+    the only thing that tells two identical buttons apart; role and name are
+    what the element *is*, and they are checked every time before it is used.
     """
-    _a11y_env()
-    try:
-        import gi
 
-        gi.require_version("Atspi", "2.0")
-        from gi.repository import Atspi
-        Atspi.init()
-        for application in Atspi.get_desktop(0):
-            if application is None or application.get_name() != app:
-                continue
-            count = 0
-            for node in _walk_all(application):
-                if not _actionable(node):
-                    continue
-                count += 1
-                if count == number:
-                    return node
-            return None
-    except (AttributeError, TypeError, KeyError) as exc:
-        logger.debug("control %d of %s could not be read: %s", number, app, exc)
+    path: tuple
+    role: str
+    name: str
+
+    def token(self) -> str:
+        return ".".join(str(i) for i in self.path) + ":" + self.role + ":" + self.name
+
+    @classmethod
+    def parse(cls, token: str) -> "ElementRef":
+        path, sep, rest = str(token or "").partition(":")
+        role, sep2, name = rest.partition(":")
+        try:
+            indices = tuple(int(i) for i in path.split(".")) if path else ()
+        except ValueError:
+            indices = None
+        if not sep or not sep2 or indices is None or not role:
+            raise GuiUnavailable(
+                f"{token!r} is not an element reference; it reads "
+                f"'path:role:name', e.g. '0.2.1:button:Save'")
+        return cls(indices, role, name)
+
+
+def _desktop_apps():
+    """The applications on the accessibility bus. One seam, so tests can fake it."""
+    _a11y_env()
+    import gi
+
+    gi.require_version("Atspi", "2.0")
+    from gi.repository import Atspi
+    Atspi.init()
+    return [a for a in Atspi.get_desktop(0) if a is not None]
+
+
+def _application(app: str):
+    """The accessibility node of the app called `app`, or a refusal saying so."""
+    try:
+        for application in _desktop_apps():
+            if (application.get_name() or "") == app:
+                return application
+    except GuiUnavailable:
+        raise
+    except Exception as exc:  # noqa: BLE001 - no gi, no bus
+        raise GuiUnavailable(f"the accessibility bus could not be read: {exc}") from exc
+    raise GuiUnavailable(f"{app} is not on the accessibility bus")
+
+
+def _role(node) -> str:
+    try:
+        return (node.get_role_name() or "").strip()
+    except Exception:  # noqa: BLE001 - a vanishing node has no role
+        return ""
+
+
+def _name(node) -> str:
+    try:
+        return (node.get_name() or "").strip()
+    except Exception:  # noqa: BLE001 - nor a name
+        return ""
+
+
+def _follow(application, path: tuple):
+    node = application
+    try:
+        for index in path:
+            if node is None or index >= node.get_child_count():
+                return None
+            node = node.get_child_at_index(index)
+    except Exception:  # noqa: BLE001 - the tree changed under the walk
+        return None
+    return node
+
+
+def _is(node, ref: ElementRef) -> bool:
+    return node is not None and _role(node) == ref.role and _name(node) == ref.name
+
+
+def ref_of(application, node) -> "ElementRef | None":
+    """The reference for `node` under `application`, or None if it is not there."""
+    for path, found in _walk_paths(application):
+        if found is node:
+            return ElementRef(path, _role(node), _name(node))
     return None
+
+
+def resolve_ref(app: str, ref: ElementRef):
+    """The live element `ref` names, re-found now - or a refusal saying why.
+
+    The path first, and accepted only when the role and name there still match.
+    Otherwise the whole app is searched for that role and name: one match is the
+    element having moved (a row inserted above it), none is gone, and more than
+    one is refused - picking one of two identical "Delete" buttons by guess is
+    how the wrong row gets deleted.
+    """
+    application = _application(app)
+    node = _follow(application, ref.path)
+    if _is(node, ref):
+        return node
+    twins = [found for _path, found in _walk_paths(application) if _is(found, ref)]
+    if len(twins) == 1:
+        return twins[0]
+    if not twins:
+        raise StaleRef(
+            f"the {ref.role} {ref.name!r} is no longer in {app}; the window has "
+            f"changed since it was read. Read again and use the new list")
+    raise StaleRef(
+        f"{len(twins)} elements in {app} are a {ref.role} named {ref.name!r}, "
+        f"and the one that was read has moved, so which is meant cannot be "
+        f"told. Read again and use the new list")
+
+
+def _refs_path(app: str) -> str:
+    from shani_chronoa.files import data_home
+    import hashlib
+
+    digest = hashlib.sha256(app.encode("utf-8")).hexdigest()[:16]
+    return os.path.join(str(data_home()), "shani-chronoa", "ui_refs", f"{digest}.json")
+
+
+def _save_refs(app: str, refs: "list[ElementRef]") -> None:
+    """Remember what each number meant when the model was shown it.
+
+    A skill runs in a subprocess, so the list the model read is gone by the time
+    it says "click 3"; this file is how the next call learns which element 3
+    was, rather than counting again in a tree that may have changed.
+    """
+    import json
+
+    path = _refs_path(app)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as handle:
+            json.dump({"app": app, "at": time.time(),
+                       "refs": [r.token() for r in refs]}, handle)
+        os.replace(tmp, path)
+    except OSError as exc:
+        logger.debug("could not remember %s's controls: %s", app, exc)
+
+
+def _saved_ref(app: str, number: int) -> "ElementRef | None":
+    import json
+
+    try:
+        with open(_refs_path(app), encoding="utf-8") as handle:
+            saved = json.load(handle)
+        if saved.get("app") != app:
+            return None
+        tokens = saved.get("refs") or []
+    except (OSError, ValueError, AttributeError):
+        return None
+    if not 1 <= number <= len(tokens):
+        return None
+    try:
+        return ElementRef.parse(tokens[number - 1])
+    except GuiUnavailable:
+        return None
+
+
+def controls(application) -> "list[ElementRef]":
+    """The actionable controls, numbered from 1 in walk order, as references."""
+    return [ElementRef(path, _role(node), _name(node))
+            for path, node in _walk_paths(application) if _actionable(node)]
+
+
+
+def control_by_number(app: str, number: int):
+    """The element numbered `number` in the list the model was last shown.
+
+    The number is looked up in what `observation` saved, and that reference is
+    re-resolved by role and name (`resolve_ref`) - so "3" means the control
+    that was third *when it was read*, not whatever is third now. With nothing
+    saved (a list that was never shown) it is counted in the live tree, which
+    is the only meaning the number can have then.
+
+    Raises `StaleRef` when the saved element is gone or has an identical twin.
+    """
+    ref = _saved_ref(app, int(number))
+    if ref is not None:
+        return resolve_ref(app, ref)
+    try:
+        listed = controls(_application(app))
+    except GuiUnavailable:
+        return None
+    if not 1 <= int(number) <= len(listed):
+        return None
+    return resolve_ref(app, listed[int(number) - 1])
+
+
+def _target(app: str, number, ref: str):
+    """The element a turn names - by reference, or by its number in the list.
+
+    Either way it is re-resolved now (`resolve_ref`), and a reference that no
+    longer names exactly one element is refused rather than guessed at.
+    """
+    if ref:
+        return resolve_ref(app, ElementRef.parse(ref))
+    if number is None:
+        return None
+    try:
+        wanted = int(number)
+    except (TypeError, ValueError) as exc:
+        raise GuiUnavailable(f"{number!r} is not a control number") from exc
+    accessor = control_by_number(app, wanted)
+    if accessor is None:
+        raise GuiUnavailable(
+            f"control {number} is not in the list any more; the window has "
+            f"changed since it was drawn. Read again and use the new numbering")
+    return accessor
 
 
 def drive(action: str, app: str = "", image: str = "", title: str = "",
           number: "int | None" = None, text: str = "", keys: str = "",
-          program: str = "") -> str:
+          program: str = "", ref: str = "") -> str:
     """One turn of driving: an action in, a compact observation out.
 
     The whole point is the shape. A model that must call `container` four times
@@ -976,16 +1189,11 @@ def drive(action: str, app: str = "", image: str = "", title: str = "",
         return observation(app)
 
     if action == "click":
-        if number is None:
+        accessor = _target(app, number, ref)
+        if accessor is None:
             raise GuiUnavailable(
                 "click needs the number from the controls list - the reply "
                 "always ends with one, so use the number shown there")
-        accessor = control_by_number(app, int(number))
-        if accessor is None:
-            raise GuiUnavailable(
-                f"control {number} is not in the list any more; the window has "
-                f"changed since it was drawn. Read again and use the new "
-                f"numbering")
         return after(click(app=app, title=title,
                            target=(accessor.get_name() or "")))
 
