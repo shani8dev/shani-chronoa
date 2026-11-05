@@ -4,6 +4,43 @@ This file applies to any AI coding assistant working in this repository
 (Claude Code, opencode, Kilo Code, Cursor, Aider, or similar). Read this
 
 
+## Driving apps on niri 26.04: what was measured, and what ui_driver does now (2026-11-05)
+
+Measured in shani-shell's nested niri (`dev/session.sh` in `shani-shell-dev`)
+with two GTK 4.24 windows and a Qt 6.12 (qml6) one, then the new driver run
+against them. Not from reading niri's code.
+
+- **AT-SPI exposes both trees** (Qt needs `QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1`).
+  `do_action` presses (GTK `click`, Qt `Press`) and EditableText inserts text,
+  read back exactly (`héllo-ünï` too), with no focus and no pointer. **SCREEN
+  extents are window-relative in both toolkits**, so the tree cannot place an
+  element on screen. GTK4 never sets ENABLED (only SENSITIVE) and its
+  `grab_focus` raises `atspi_error`. Both toolkits report `password text`, and
+  Qt's password field has no name.
+- **`focus-window --id` was reliable** (30 of 30), **but a nonexistent id also
+  exits 0** and focus stays put. Only `focused-window` counts as evidence.
+- **`grim -o NAME` captures one output** and refuses an unknown name. The nested
+  session has one output, so the multi-monitor case is unmeasured.
+- **wtype reached only the focused window** (4 of 4), and it reached a focused
+  password entry as readily as anything else.
+- **niri 26.04 *does* capture one window**: `niri msg action screenshot-window
+  --id N --path P`. It also puts the image on the clipboard (copied text was
+  replaced), so the driver uses grim instead. Only a floating window has a
+  position (`layout.tile_pos_in_workspace_view`). A window on a hidden
+  workspace stays SHOWING in AT-SPI.
+
+What `ui_driver` does with this: numbers are backed by saved `ElementRef`s
+(path + role + name, re-resolved, stale or ambiguous refused); `act_on`
+presses or types through AT-SPI first; `unactionable` refuses hidden, disabled,
+modal-covered, unfocusable or non-editable targets; on niri, typing and keys
+focus by id, confirm with `focused-window`, then go through wtype (text on
+stdin); `window_shot` uses grim on the window's output, cropped when floating;
+password fields are refused on every route; actions are capped per request
+(`MAX_ACTIONS_PER_REQUEST`) and logged to `ui_actions.log` without the text.
+**Unverified:** the coordinate fallback for a floating niri window (ydotool
+needs `/dev/uinput`, which the container lacks). Tests are in
+`tests/test_ui_driver_semantic.py` and `tests/test_ui_driver_niri.py`.
+
 ## The device screens live in Shani Link (2026-11-04)
 
 Phone, Phone link, Screen share, Devices, Wearables (with the watch dashboard),
