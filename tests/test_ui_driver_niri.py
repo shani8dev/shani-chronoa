@@ -337,3 +337,20 @@ def test_a_floating_window_is_clicked_at_its_element_after_the_focus(niri, monke
     said = ui_driver._click_on_niri("probe-a", Node("button", "Increment"))
     assert pressed == [(3, 539 + 471, 80 + 63 + 17)]
     assert "through ydotool" in said
+
+
+def test_text_read_off_a_whole_output_says_it_is_not_only_this_app(niri, monkeypatch, tmp_path) -> None:
+    """Measured: the Qt window's observation read the GTK window beside it."""
+    monkeypatch.setattr(ui_driver.tempfile, "tempdir", str(tmp_path))
+
+    def run(argv, **kw):
+        if argv[0] == "grim":
+            open(argv[-1], "wb").write(b"png")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        return subprocess.CompletedProcess(argv, 0, "Probe B count 0", "")
+
+    monkeypatch.setattr(ui_driver.subprocess, "run", run)
+    monkeypatch.setattr(ui_driver.shutil, "which", lambda b: f"/usr/bin/{b}")
+    assert ui_driver.screen_text("probe-a").startswith("(the whole screen, not only probe-a)")
+    _floating(niri.windows[0], 10.0, 10.0)
+    assert ui_driver.screen_text("probe-a") == "Probe B count 0"

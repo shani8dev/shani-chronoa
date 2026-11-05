@@ -2496,7 +2496,7 @@ def _ocr_niri_window(app: str) -> str:
     if shutil.which("tesseract") is None:
         raise GuiUnavailable("tesseract is not installed, so an app "
                              "cannot be read from its pixels")
-    capture, _note = window_shot(app)
+    capture, note = window_shot(app)
     try:
         proc = subprocess.run(["tesseract", capture, "stdout"],
                               capture_output=True, text=True, timeout=120,
@@ -2505,6 +2505,10 @@ def _ocr_niri_window(app: str) -> str:
         if not text:
             raise GuiUnavailable(
                 f"{app}'s window was captured but nothing in it was legible")
+        if note.startswith("the whole of"):
+            # Measured: a tiled Qt window's "screen" line read the GTK window
+            # beside it. Said, so other apps' words are not taken for this one's.
+            text = f"(the whole screen, not only {app}) {text}"
         return text
     finally:
         try:
