@@ -39,6 +39,13 @@ class FakeNiri:
         self.focused = focused
         self.stubborn = stubborn  # focus-window exits 0 and does nothing
         self.calls = []
+        self.workspaces = [{"id": 1, "idx": 1, "output": "DP-1", "is_active": True},
+                           {"id": 2, "idx": 2, "output": "DP-1", "is_active": False},
+                           {"id": 5, "idx": 1, "output": "HDMI-A-1", "is_active": True}]
+        self.outputs = {
+            "DP-1": {"name": "DP-1", "logical": {"x": 0, "y": 0, "width": 1920, "height": 1080, "scale": 1.0}},
+            "HDMI-A-1": {"name": "HDMI-A-1", "logical": {"x": 1920, "y": 0, "width": 2560, "height": 1440, "scale": 1.5}},
+        }
 
     def __call__(self, *args):
         import json
@@ -53,6 +60,10 @@ class FakeNiri:
         if args == ("-j", "windows"):
             return json.dumps([dict(w, is_focused=w["id"] == self.focused)
                                for w in self.windows])
+        if args == ("-j", "workspaces"):
+            return json.dumps(self.workspaces)
+        if args == ("-j", "outputs"):
+            return json.dumps(self.outputs)
         if args == ("-j", "focused-window"):
             found = [w for w in self.windows if w["id"] == self.focused]
             return json.dumps(dict(found[0], is_focused=True) if found else None)
@@ -224,3 +235,105 @@ def test_a_chat_window_is_refused_before_niri_is_asked_anything(niri, keyboard, 
     with pytest.raises(ui_driver.GuiUnavailable, match="communication surface"):
         ui_driver.key(app="slack", title="Slack", keys="Return")
     assert niri.calls == [] and keyboard == []
+
+
+# --- 5. a window's capture: grim, its own output, cropped where niri says ------
+
+
+def _floating(win, x, y, w=942, h=920):
+    win.update(is_floating=True, layout={
+        "pos_in_scrolling_layout": None, "tile_size": [w, h], "window_size": [w, h],
+        "tile_pos_in_workspace_view": [x, y], "window_offset_in_tile": [0.0, 0.0]})
+    return win
+
+
+@pytest.fixture
+def grim(monkeypatch, tmp_path):
+    runs = []
+    monkeypatch.setattr(ui_driver.tempfile, "tempdir", str(tmp_path))
+
+    def run(argv, **kw):
+        runs.append(list(argv))
+        if argv[0] == "grim":
+            with open(argv[-1], "wb") as handle:
+                handle.write(b"\x89PNG fake")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(ui_driver.subprocess, "run", run)
+    monkeypatch.setattr(ui_driver.shutil, "which", lambda b: f"/usr/bin/{b}")
+    return runs
+
+
+def test_a_tiled_window_is_its_output_and_nothing_else(niri, grim) -> None:
+    path, note = ui_driver.window_shot("probe-a")
+    assert grim[-1][:3] == ["grim", "-o", "DP-1"]
+    assert "no position for a tiled window" in note
+
+
+def test_a_floating_window_is_cropped_to_its_rectangle(niri, grim) -> None:
+    _floating(niri.windows[0], 539.0, 80.0)  # the measured layout
+    path, note = ui_driver.window_shot("probe-a")
+    assert grim[-1][:3] == ["grim", "-g", "539,80 942x920"]
+
+
+def test_the_rectangle_is_offset_by_the_outputs_own_position(niri, grim) -> None:
+    niri.windows[0]["workspace_id"] = 5  # on the monitor to the right
+    _floating(niri.windows[0], 100.0, 50.0, 400, 300)
+    ui_driver.window_shot("probe-a")
+    assert grim[-1][:3] == ["grim", "-g", "2020,50 400x300"]
+
+
+def test_a_window_on_a_workspace_not_showing_is_refused(niri, grim) -> None:
+    """niri keeps such a window's AT-SPI frame SHOWING (measured), so only
+    niri can say the capture would be of something else."""
+    niri.windows[0]["workspace_id"] = 2
+    with pytest.raises(ui_driver.GuiUnavailable, match="not the one showing"):
+        ui_driver.window_shot("probe-a")
+    assert grim == []
+
+
+def test_another_floating_window_over_it_is_said(niri, grim) -> None:
+    _floating(niri.windows[0], 100.0, 100.0, 400, 300)
+    _floating(niri.windows[1], 300.0, 200.0, 400, 300)
+    niri.focused = 4
+    _path, note = ui_driver.window_shot("probe-a")
+    assert "'Probe B'" in note
+
+
+def test_the_capture_never_goes_through_niris_own_screenshot(niri, grim) -> None:
+    """screenshot-window exists in 26.04 and replaces the clipboard (measured)."""
+    ui_driver.window_shot("probe-a")
+    assert not any("screenshot-window" in call for call in niri.calls)
+    assert not any(call[:2] == ("action", "screenshot-screen") for call in niri.calls)
+
+
+def test_a_capture_that_wrote_nothing_is_said(niri, monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(ui_driver.tempfile, "tempdir", str(tmp_path))
+    monkeypatch.setattr(ui_driver.shutil, "which", lambda b: "/usr/bin/grim")
+    monkeypatch.setattr(ui_driver.subprocess, "run", lambda argv, **kw:
+                        subprocess.CompletedProcess(argv, 1, "", "unknown output 'DP-1'"))
+    with pytest.raises(ui_driver.GuiUnavailable, match="unknown output"):
+        ui_driver.window_shot("probe-a")
+
+
+# --- the coordinate fallback on niri: only where the point is certain ---------
+
+
+def test_a_tiled_window_without_an_action_is_not_clicked_at_a_guess(niri, monkeypatch) -> None:
+    pressed = []
+    monkeypatch.setattr(ui_driver, "_press_pointer", lambda *a, **k: pressed.append(a))
+    target = Node("button", "Odd")
+    with pytest.raises(ui_driver.GuiUnavailable, match="nowhere certain to click"):
+        ui_driver._click_on_niri("probe-a", target)
+    assert pressed == []
+
+
+def test_a_floating_window_is_clicked_at_its_element_after_the_focus(niri, monkeypatch) -> None:
+    _floating(niri.windows[0], 539.0, 80.0)
+    pressed = []
+    monkeypatch.setattr(ui_driver, "_press_pointer",
+                        lambda app, x, y, button="left": pressed.append((niri.focused, x, y)) or "ydotool")
+    monkeypatch.setattr(ui_driver, "_ax_window_box", lambda n: (0, 63, 942, 34))
+    said = ui_driver._click_on_niri("probe-a", Node("button", "Increment"))
+    assert pressed == [(3, 539 + 471, 80 + 63 + 17)]
+    assert "through ydotool" in said

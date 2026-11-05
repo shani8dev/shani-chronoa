@@ -1249,6 +1249,8 @@ def act_on(app: str, node, verb: str, text: str = "", title: str = "") -> str:
         if found is not None and _ax_do(node, found[0]):
             return (f"Pressed the {role} {name!r} in {app} through its own "
                     f"'{found[1]}' action; the pointer was not moved.")
+        if _niri_session():
+            return _click_on_niri(app, node)
         return click(app=app, title=title or app, target=name)
     if verb != "type":
         raise GuiUnavailable(f"verb must be click or type, not {verb!r}")
@@ -1477,6 +1479,134 @@ def _key_on_niri(app: str, keys: str) -> str:
         raise GuiUnavailable(f"the app would not take {keys!r}: "
                              f"{(proc.stderr or '').strip()}")
     return f"Sent {keys} to {app}.{secure_note}"
+
+
+
+# --- niri: where a window is, and what it shows -------------------------------
+#
+# Measured in the same nested niri 26.04: `grim -o NAME` captured exactly that
+# output (1920x1080) and refused an unknown name (exit 1); `grim -g` captured a
+# region. niri reports a window's on-screen position only for a *floating* one
+# (`layout.tile_pos_in_workspace_view`, null for tiled, whose
+# `pos_in_scrolling_layout` is a column and row, not pixels).
+#
+# niri 26.04 *does* capture one window: `niri msg action screenshot-window --id
+# N --path P`. It is not used, because it also puts the picture on the
+# clipboard - measured: "precious text" copied before, image/png after. A
+# screenshot the driver takes to look must not replace what the person copied.
+
+
+def _niri_output_of(window: dict) -> "tuple[str, dict, bool]":
+    """`(output name, its logical rect, whether the window's workspace shows)`."""
+    spaces = _niri_json("workspaces") or []
+    space = next((w for w in spaces if w.get("id") == window.get("workspace_id")), None)
+    if space is None or not space.get("output"):
+        raise GuiUnavailable(f"niri does not say which output {window.get('title')!r} is on")
+    outputs = _niri_json("outputs") or {}
+    output = outputs.get(space["output"]) or {}
+    logical = output.get("logical")
+    if not logical:
+        raise GuiUnavailable(f"niri reports no layout for output {space['output']}")
+    return space["output"], logical, bool(space.get("is_active"))
+
+
+def niri_window_rect(window: dict, logical: dict) -> "tuple[int, int, int, int] | None":
+    """A floating window's rectangle in global logical pixels, or None (tiled)."""
+    layout = window.get("layout") or {}
+    pos = layout.get("tile_pos_in_workspace_view")
+    size = layout.get("window_size")
+    if not pos or not size:
+        return None
+    offset = layout.get("window_offset_in_tile") or (0, 0)
+    return (int(round(logical["x"] + pos[0] + offset[0])),
+            int(round(logical["y"] + pos[1] + offset[1])),
+            int(size[0]), int(size[1]))
+
+
+def _overlaps(a, b) -> bool:
+    return a[0] < b[0] + b[2] and b[0] < a[0] + a[2] and \
+        a[1] < b[1] + b[3] and b[1] < a[1] + a[3]
+
+
+def window_shot(app: str) -> "tuple[str, str]":
+    """Capture `app`'s window through grim; `(path, note)`. The caller deletes it.
+
+    Only the window's own output, never the whole desktop: cropped to the
+    window's rectangle where niri gives one (a floating window), else that
+    output whole, and the note says which. A window whose workspace is not the
+    one showing is refused - the capture would be of something else.
+    """
+    if shutil.which("grim") is None:
+        raise GuiUnavailable("grim is not installed, so this niri window cannot be captured")
+    window = niri_window(app)
+    name, logical, showing = _niri_output_of(window)
+    if not showing:
+        raise GuiUnavailable(
+            f"{app}'s window is on a workspace that is not the one showing on "
+            f"{name}, so a capture would show something else")
+    rect = niri_window_rect(window, logical)
+    note = ""
+    if rect is None:
+        argv_region = ["-o", name]
+        note = (f"the whole of {name}: niri gives no position for a tiled "
+                f"window, so it could not be cropped to {app}")
+    else:
+        argv_region = ["-g", f"{rect[0]},{rect[1]} {rect[2]}x{rect[3]}"]
+        above = [w.get("title") for w in _niri_json("windows") or []
+                 if w.get("id") != window.get("id")
+                 and w.get("workspace_id") == window.get("workspace_id")
+                 and (r := niri_window_rect(w, logical)) and _overlaps(rect, r)]
+        if above and not window.get("is_focused"):
+            note = f"it may be partly covered by {', '.join(map(repr, above))}"
+    handle, path = tempfile.mkstemp(prefix="chronoa-window-", suffix=".png")
+    os.close(handle)
+    proc = subprocess.run(["grim", *argv_region, path], capture_output=True,
+                          text=True, timeout=30, check=False)
+    if proc.returncode != 0 or not os.path.getsize(path):
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        detail = (proc.stderr or "").strip().splitlines()
+        raise GuiUnavailable("grim could not capture the window"
+                             + (f": {detail[-1]}" if detail else ""))
+    return path, note
+
+
+def _ax_window_box(node) -> "tuple[int, int, int, int] | None":
+    """The element's extents relative to its own window (what Wayland apps know)."""
+    try:
+        from gi.repository import Atspi
+        rect = Atspi.Component.get_extents(node, Atspi.CoordType.WINDOW)
+        return (rect.x, rect.y, rect.width, rect.height)
+    except Exception:  # noqa: BLE001 - no Component interface
+        return None
+
+
+def _click_on_niri(app: str, node) -> str:
+    """The coordinate fallback on niri: only where the point is certain.
+
+    A Wayland app knows its elements only relative to its own window (both GTK4
+    and Qt reported SCREEN extents equal to WINDOW ones, measured), so the
+    window's position has to come from niri - which gives it for a floating
+    window only. A tiled one is refused rather than clicked at a guess.
+    """
+    name = _name(node)
+    window = niri_window(app)
+    _out, logical, showing = _niri_output_of(window)
+    rect = niri_window_rect(window, logical)
+    if rect is None:
+        raise GuiUnavailable(
+            f"the {_role(node)} {name!r} in {app} offers no action of its own, "
+            f"and niri reports no position for a tiled window, so there is "
+            f"nowhere certain to click. Make the window floating, or use a key")
+    box = _ax_window_box(node)
+    if not box or box[2] <= 0 or box[3] <= 0:
+        raise GuiUnavailable(f"{app} publishes no position for {name!r}")
+    _focus_on_niri(app)
+    x, y = rect[0] + box[0] + box[2] / 2, rect[1] + box[1] + box[3] / 2
+    route = _press_pointer(app, x, y)
+    return f"Clicked {name!r} in {app} at ({int(x)},{int(y)}) through {route}."
 
 
 
@@ -2157,6 +2287,8 @@ def screen_text(app: str) -> str:
     window first (measured: 1920x1080 at 0,0), and OCR'ing that would be reading
     the desktop and calling it the app.
     """
+    if _niri_session():
+        return _ocr_niri_window(app)
     if shutil.which("import") is None:
         raise GuiUnavailable("ImageMagick's import is not installed, so a "
                              "container's app cannot be read from its pixels")
@@ -2188,6 +2320,28 @@ def screen_text(app: str) -> str:
             raise GuiUnavailable("OCR failed"
                                  + (f": {detail[-1]}" if detail else ""))
         text = " ".join(proc.stdout.split())
+        if not text:
+            raise GuiUnavailable(
+                f"{app}'s window was captured but nothing in it was legible")
+        return text
+    finally:
+        try:
+            os.unlink(capture)
+        except OSError:
+            pass
+
+
+def _ocr_niri_window(app: str) -> str:
+    """`screen_text` on niri: the window through grim (`window_shot`), then OCR."""
+    if shutil.which("tesseract") is None:
+        raise GuiUnavailable("tesseract is not installed, so an app "
+                             "cannot be read from its pixels")
+    capture, _note = window_shot(app)
+    try:
+        proc = subprocess.run(["tesseract", capture, "stdout"],
+                              capture_output=True, text=True, timeout=120,
+                              check=False)
+        text = " ".join((proc.stdout or "").split()) if proc.returncode == 0 else ""
         if not text:
             raise GuiUnavailable(
                 f"{app}'s window was captured but nothing in it was legible")
