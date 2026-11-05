@@ -1179,6 +1179,56 @@ def _press_action(node) -> "tuple[int, str] | None":
     return None
 
 
+def _covering_dialog(node) -> str:
+    """The name of a modal dialog over `node`'s window, or ""."""
+    frame = _frame_of(node)
+    try:
+        application = frame.get_parent()
+        count = application.get_child_count()
+    except Exception:  # noqa: BLE001 - no parent: nothing known to cover it
+        return ""
+    for index in range(count):
+        try:
+            other = application.get_child_at_index(index)
+        except Exception:  # noqa: BLE001
+            continue
+        if other is None or other is frame:
+            continue
+        states = _ax_states(other)
+        if "modal" in states and "showing" in states:
+            return _name(other) or _role(other) or "a dialog"
+    return ""
+
+
+def unactionable(node, verb: str) -> str:
+    """Why `node` cannot be `verb`ed now ("click" or "type"), or "" if it can.
+
+    Checked before anything is sent, because an action on a hidden, disabled or
+    covered control either does nothing (and the reply would say it worked) or
+    does something to a control the person cannot see. Enabled is ENABLED *or*
+    SENSITIVE: GTK4 never sets ENABLED, and a disabled GTK4 button is the one
+    without SENSITIVE (measured on niri, GTK 4.24).
+    """
+    states = _ax_states(node)
+    if not states:
+        return "publishes no state, so whether it can be used cannot be told"
+    if "defunct" in states:
+        return "has been destroyed"
+    if not {"visible", "showing"} <= states:
+        return "is not showing (hidden, collapsed, or on a page that is not open)"
+    if not states & {"enabled", "sensitive"}:
+        return "is disabled"
+    dialog = _covering_dialog(node)
+    if dialog:
+        return f"is behind the dialog {dialog!r}, which has to be answered first"
+    if "focusable" not in states:
+        return "cannot take focus, so it is not a control a person could use"
+    if verb == "type":
+        if "editable" not in states or "read_only" in states:
+            return "is not an editable field"
+    return ""
+
+
 def act_on(app: str, node, verb: str, text: str = "", title: str = "") -> str:
     """Press or type into `node` through AT-SPI, before any synthesized input.
 
@@ -1189,6 +1239,11 @@ def act_on(app: str, node, verb: str, text: str = "", title: str = "") -> str:
     element that offers neither.
     """
     role, name = _role(node), _name(node)
+    reason = unactionable(node, verb)
+    if reason:
+        raise GuiUnavailable(
+            f"not {'pressing' if verb == 'click' else 'typing into'} the {role} "
+            f"{name!r} in {app}: it {reason}")
     if verb == "click":
         found = _press_action(node)
         if found is not None and _ax_do(node, found[0]):

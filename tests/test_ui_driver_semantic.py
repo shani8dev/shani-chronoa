@@ -285,3 +285,57 @@ def test_drive_type_with_a_number_targets_that_field(_fake_bus, synthesized) -> 
     ui_driver.observation("editor")
     ui_driver.drive("type", app="editor", number=2, text="hi")
     assert field.text == "hi"
+
+
+# --- 3. actionability ---------------------------------------------------------
+
+
+@pytest.mark.parametrize("states, why", [
+    (ON - {"showing"}, "is not showing"),
+    (ON - {"visible"}, "is not showing"),
+    (ON - {"sensitive", "enabled"}, "is disabled"),
+    (ON - {"focusable"}, "cannot take focus"),
+    (ON | {"defunct"}, "destroyed"),
+    (frozenset(), "publishes no state"),
+])
+def test_a_control_that_cannot_be_used_is_refused_with_the_reason(states, why, synthesized) -> None:
+    button = _button("Save", states=states)
+    _app(button)
+    with pytest.raises(ui_driver.GuiUnavailable, match=why):
+        ui_driver.act_on("editor", button, "click")
+    assert button.done == [] and synthesized == []
+
+
+def test_gtk4s_enabled_button_has_no_enabled_state_and_is_still_enabled(synthesized) -> None:
+    """Measured: GTK 4.24 never sets ENABLED; SENSITIVE is what it means."""
+    button = _button("Increment", states={"visible", "showing", "sensitive", "focusable"})
+    _app(button)
+    ui_driver.act_on("editor", button, "click")
+    assert button.done == ["click"]
+
+
+def test_a_control_behind_a_modal_dialog_is_refused(synthesized) -> None:
+    button = _button("Delete")
+    frame = FakeNode("frame", "Files", [button])
+    dialog = FakeNode("dialog", "Unsaved changes", [_button("Discard")],
+                      states=ON | {"modal"})
+    FakeNode("application", "editor", [frame, dialog])
+    with pytest.raises(ui_driver.GuiUnavailable, match="Unsaved changes"):
+        ui_driver.act_on("editor", button, "click")
+    assert button.done == []
+
+
+def test_the_dialogs_own_buttons_are_not_covered_by_it(synthesized) -> None:
+    discard = _button("Discard")
+    dialog = FakeNode("dialog", "Unsaved changes", [discard], states=ON | {"modal"})
+    FakeNode("application", "editor", [FakeNode("frame", "Files"), dialog])
+    ui_driver.act_on("editor", discard, "click")
+    assert discard.done == ["click"]
+
+
+def test_a_label_is_not_an_editable_field(synthesized) -> None:
+    label = FakeNode("label", "count 0", states=ON, text="count 0")
+    _app(label)
+    with pytest.raises(ui_driver.GuiUnavailable, match="not an editable field"):
+        ui_driver.act_on("editor", label, "type", text="x")
+    assert label.text == "count 0"
