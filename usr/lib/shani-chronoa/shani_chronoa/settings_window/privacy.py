@@ -330,7 +330,7 @@ class PrivacyPage:
              "placing, answering or ending a call is refused while this is off"),
             ("Let Chronoa use your JioFiber landline", "landline-enabled",
              "Off: Chronoa cannot connect to your JioFiber router or place and answer calls on your "
-             "broadband landline number. On: set it up once from the Phone page - the account owner "
+             "broadband landline number. On: set it up once from the Shani Link app's Phone page - the account owner "
              "enters a one-time code Jio texts them, which tells the router to allow this computer on "
              "the line, the same way the JioJoin app is added. Nothing is recorded, Chronoa confirms "
              "before dialling, and your landline handset keeps working - the call goes through the "
@@ -344,7 +344,8 @@ class PrivacyPage:
              "reading a device is refused while this is off"),
             ("Let Bluetooth remotes control music here", "bluetooth-media-remote-enabled",
              "Off: a headset's or watch's play and skip buttons do nothing on this computer. On: "
-             "paired devices control whatever is playing here.",
+             "paired devices control whatever is playing here. (Background switch lives in the "
+             "Shani Link app's Background page.)",
              "Bluetooth media control is off while this is off"),
             ("Let my phone pair this computer as a Bluetooth keyboard", "phone-remote-enabled",
              "Off: this computer is not discoverable as a keyboard. On: it advertises as 'Chronoa "
@@ -355,17 +356,20 @@ class PrivacyPage:
              "Off: the watch is reached only when you ask something of it. On: Chronoa keeps it "
              "connected so find-my-phone rings here, its music and camera buttons work with this "
              "computer and the song playing shows on it. The watch takes one connection, so while "
-             "this is on the Da Fit app on your phone cannot reach it.",
+             "this is on the Da Fit app on your phone cannot reach it. (Background switch lives in "
+             "the Shani Link app's Background page.)",
              "the watch companion stays off while this is off"),
             ("Show what this computer is playing on my watch", "watch-nowplaying-enabled",
              "Off (the default): nothing is pushed to the watch. On: the current track is sent every "
              "five seconds so it appears on the watch's music screen. Only while the companion above "
-             "is on, and it does not affect the watch's music buttons, which keep working either way.",
+             "is on, and it does not affect the watch's music buttons, which keep working either way. "
+             "(Background switch lives in the Shani Link app's Background page.)",
              "what is playing is not pushed to the watch while this is off"),
             ("Send this computer's weather to my watch", "watch-weather-enabled",
              "Off (the default): the watch's weather request is not answered. On: the forecast for your "
              "home place is sent, including the week ahead. This reads a location and reaches a weather "
-             "service; the watch asks on every connection, so it is off until you want it.",
+             "service; the watch asks on every connection, so it is off until you want it. (Background "
+             "switch lives in the Shani Link app's Background page.)",
              "the watch's weather request is not answered while this is off"),
             ("Let Chronoa tune an FM radio", "fm-radio-enabled",
              "Off: Chronoa cannot tune a USB radio receiver (an RTL-SDR dongle), scan the FM band or "

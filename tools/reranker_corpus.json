@@ -99,7 +99,7 @@
         },
         {
           "tool": "landline_call",
-          "desc": "landline_call: Place and answer calls on the JioFiber broadband landline over Wi-Fi, through the router - the same line the JioJoin app uses, the house's own landline number. 'status' says whether the line is connected and what call is on. 'dial' places a call - 'dial number=\"+911234567890\"' - asking you to confirm first, because it rings someone. 'answer' picks up a ringing call; 'hangup' ends, cancels or declines the current call. The voice is on this computer's speaker and microphone, nothing is recorded, and the landline handset keeps working. Needs this computer added to the line on the Phone page and the 'landline-enabled' consent key. This is the landline, not a mobile over Bluetooth - that is 'bluetooth_call'. (arguments: action, number, name)"
+          "desc": "landline_call: Place and answer calls on the JioFiber broadband landline over Wi-Fi, through the router - the same line the JioJoin app uses, the house's own landline number. 'status' says whether the line is connected and what call is on. 'dial' places a call - 'dial number=\"+911234567890\"' - asking you to confirm first, because it rings someone. 'answer' picks up a ringing call; 'hangup' ends, cancels or declines the current call. The voice is on this computer's speaker and microphone, nothing is recorded, and the landline handset keeps working. Needs this computer added to the line on the Shani Link app's Phone page and the 'landline-enabled' consent key. This is the landline, not a mobile over Bluetooth - that is 'bluetooth_call'. (arguments: action, number, name)"
         }
       ],
       "offered": [
@@ -599,7 +599,7 @@
         },
         {
           "tool": "landline_call",
-          "desc": "landline_call: Place and answer calls on the JioFiber broadband landline over Wi-Fi, through the router - the same line the JioJoin app uses, the house's own landline number. 'status' says whether the line is connected and what call is on. 'dial' places a call - 'dial number=\"+911234567890\"' - asking you to confirm first, because it rings someone. 'answer' picks up a ringing call; 'hangup' ends, cancels or declines the current call. The voice is on this computer's speaker and microphone, nothing is recorded, and the landline handset keeps working. Needs this computer added to the line on the Phone page and the 'landline-enabled' consent key. This is the landline, not a mobile over Bluetooth - that is 'bluetooth_call'. (arguments: action, number, name)"
+          "desc": "landline_call: Place and answer calls on the JioFiber broadband landline over Wi-Fi, through the router - the same line the JioJoin app uses, the house's own landline number. 'status' says whether the line is connected and what call is on. 'dial' places a call - 'dial number=\"+911234567890\"' - asking you to confirm first, because it rings someone. 'answer' picks up a ringing call; 'hangup' ends, cancels or declines the current call. The voice is on this computer's speaker and microphone, nothing is recorded, and the landline handset keeps working. Needs this computer added to the line on the Shani Link app's Phone page and the 'landline-enabled' consent key. This is the landline, not a mobile over Bluetooth - that is 'bluetooth_call'. (arguments: action, number, name)"
         },
         {
           "tool": "recording",
@@ -691,6 +691,10 @@
           "desc": "solve_math: Maths: derivative, series (Taylor), expansion, factor, numeric integral (definite, or numeric for indefinite), numeric limit (at a point or oo), linear and quadratic solve, numeric sum of a series, evaluation to N digits, prime_factors / is_prime. Write maths plainly: 'x^2 + 3x', 'sin(x)/x', 'x^2 - 4 = 0'. (arguments: operation, expression, variable, point, lower, upper, order, digits, other)"
         },
         {
+          "tool": "landline_call",
+          "desc": "landline_call: Place and answer calls on the JioFiber broadband landline over Wi-Fi, through the router - the same line the JioJoin app uses, the house's own landline number. 'status' says whether the line is connected and what call is on. 'dial' places a call - 'dial number=\"+911234567890\"' - asking you to confirm first, because it rings someone. 'answer' picks up a ringing call; 'hangup' ends, cancels or declines the current call. The voice is on this computer's speaker and microphone, nothing is recorded, and the landline handset keeps working. Needs this computer added to the line on the Shani Link app's Phone page and the 'landline-enabled' consent key. This is the landline, not a mobile over Bluetooth - that is 'bluetooth_call'. (arguments: action, number, name)"
+        },
+        {
           "tool": "capture_video",
           "desc": "capture_video: Record a short video from the camera (webcam), e.g. '/dev/video0', for a few seconds. Requires the vision/camera consent. Writes a new .mp4; no camera means a clear refusal. (arguments: device, seconds, infrared)"
         },
@@ -709,21 +713,17 @@
         {
           "tool": "scan_document",
           "desc": "scan_document: Scan a page and return its text (OCR), keeping the image in ~/Documents/Scans. source: 'scanner' (default; list_only lists them), 'camera' (hold the page up to the webcam; it is found and straightened), or 'photo' (straighten and read a picture of a page at path). 'Scan this letter and read it to me.' (arguments: source, path, list_only, device)"
-        },
-        {
-          "tool": "take_photo",
-          "desc": "take_photo: Take a photo or selfie with the webcam and save it to the Pictures folder, optionally after a countdown in seconds (0-30). Requires the vision/camera consent. Not for screenshots (use screenshot) or video (use capture_video). (arguments: countdown, path, device, infrared)"
         }
       ],
       "offered": [
         "qr_code",
         "solve_math",
+        "landline_call",
         "capture_video",
         "manage_mount",
         "network_activity",
         "set_privacy",
-        "scan_document",
-        "take_photo"
+        "scan_document"
       ],
       "recall_hit": true
     },
@@ -1201,12 +1201,12 @@
           "desc": "undo_last_change: Put a file back the way Chronoa last found it, by restoring the content recorded just before Chronoa's own last edit to it. Undoes Chronoa's recent writes only - NOT git history, NOT changes you made in an editor or a shell, and only while a recorded pre-image is still held. Requires the 'file-edit-enabled' consent key. (arguments: path, list, steps)"
         },
         {
-          "tool": "phone_remote",
-          "desc": "phone_remote: Press keys on the paired phone as a Bluetooth keyboard: 'press' the camera 'shutter' (takes a photo in the camera app), play_pause, next, previous, volume_up/down, mute; or 'type' text into whatever field is focused on the phone. The phone must have paired 'Chronoa Remote'. Requires the 'phone-remote-enabled' consent key. (arguments: action, key, text)"
+          "tool": "fm_radio",
+          "desc": "fm_radio: FM and AM broadcast radio. Five actions: 'hardware' for whether this computer can receive anything at all (a laptop usually cannot, and that is a true answer rather than a failure - it needs an RTL2832U USB dongle), 'bands' for the coverage, 'tune' to a frequency, 'decode' to demodulate a recorded IQ capture, and 'scan' to look for carriers in one. A frequency is given in MHz, e.g. 98.6. rtl_fm is narrowband and retunes per channel, so it cannot scan - scanning needs a wideband recording. No station names are guessed: a carrier gives a frequency, and naming it would need a table for your region. Requires the 'fm-radio-enabled' consent key. (arguments: action, frequency, seconds, file, centre_mhz, out, deemphasis_us)"
         },
         {
-          "tool": "alarm",
-          "desc": "alarm: Alarm clock: set an alarm at a time of day (once, or repeating daily/weekdays/weekends/chosen days), list alarms, say when the next one is, change one's time or label, snooze the one that just rang, or delete one. Examples: 'set an alarm for 7am', 'alarm for 6:30 on weekdays', 'when is my next alarm?', 'change my 7am alarm to 7:30', 'snooze', 'delete the 7am alarm'. Times may be words ('7am', '7:30 pm', 'tomorrow 6:45'). It rings with a notification and the alarm sound even if the assistant is closed; it is held by systemd --user, so a reboot drops it until alarms are next listed, which re-arms it. (arguments: action, time, label, repeat, id, new_time, new_label, minutes)"
+          "tool": "phone_remote",
+          "desc": "phone_remote: Press keys on the paired phone as a Bluetooth keyboard: 'press' the camera 'shutter' (takes a photo in the camera app), play_pause, next, previous, volume_up/down, mute; or 'type' text into whatever field is focused on the phone. The phone must have paired 'Chronoa Remote'. Requires the 'phone-remote-enabled' consent key. (arguments: action, key, text)"
         }
       ],
       "offered": [
@@ -1216,8 +1216,8 @@
         "get_volume",
         "set_volume",
         "undo_last_change",
-        "phone_remote",
-        "alarm"
+        "fm_radio",
+        "phone_remote"
       ],
       "recall_hit": true
     },
@@ -1983,7 +1983,7 @@
       "negatives": [
         {
           "tool": "landline_call",
-          "desc": "landline_call: Place and answer calls on the JioFiber broadband landline over Wi-Fi, through the router - the same line the JioJoin app uses, the house's own landline number. 'status' says whether the line is connected and what call is on. 'dial' places a call - 'dial number=\"+911234567890\"' - asking you to confirm first, because it rings someone. 'answer' picks up a ringing call; 'hangup' ends, cancels or declines the current call. The voice is on this computer's speaker and microphone, nothing is recorded, and the landline handset keeps working. Needs this computer added to the line on the Phone page and the 'landline-enabled' consent key. This is the landline, not a mobile over Bluetooth - that is 'bluetooth_call'. (arguments: action, number, name)"
+          "desc": "landline_call: Place and answer calls on the JioFiber broadband landline over Wi-Fi, through the router - the same line the JioJoin app uses, the house's own landline number. 'status' says whether the line is connected and what call is on. 'dial' places a call - 'dial number=\"+911234567890\"' - asking you to confirm first, because it rings someone. 'answer' picks up a ringing call; 'hangup' ends, cancels or declines the current call. The voice is on this computer's speaker and microphone, nothing is recorded, and the landline handset keeps working. Needs this computer added to the line on the Shani Link app's Phone page and the 'landline-enabled' consent key. This is the landline, not a mobile over Bluetooth - that is 'bluetooth_call'. (arguments: action, number, name)"
         },
         {
           "tool": "phone",
@@ -2312,6 +2312,10 @@
           "desc": "set_mic_mute: Mute or unmute the default microphone input, or report whether it is currently muted. Output volume is a separate skill. Requires the 'mic-control-enabled' consent key; reporting needs no such permission. (arguments: action)"
         },
         {
+          "tool": "fm_radio",
+          "desc": "fm_radio: FM and AM broadcast radio. Five actions: 'hardware' for whether this computer can receive anything at all (a laptop usually cannot, and that is a true answer rather than a failure - it needs an RTL2832U USB dongle), 'bands' for the coverage, 'tune' to a frequency, 'decode' to demodulate a recorded IQ capture, and 'scan' to look for carriers in one. A frequency is given in MHz, e.g. 98.6. rtl_fm is narrowband and retunes per channel, so it cannot scan - scanning needs a wideband recording. No station names are guessed: a carrier gives a frequency, and naming it would need a table for your region. Requires the 'fm-radio-enabled' consent key. (arguments: action, frequency, seconds, file, centre_mhz, out, deemphasis_us)"
+        },
+        {
           "tool": "phone_remote",
           "desc": "phone_remote: Press keys on the paired phone as a Bluetooth keyboard: 'press' the camera 'shutter' (takes a photo in the camera app), play_pause, next, previous, volume_up/down, mute; or 'type' text into whatever field is focused on the phone. The phone must have paired 'Chronoa Remote'. Requires the 'phone-remote-enabled' consent key. (arguments: action, key, text)"
         },
@@ -2322,10 +2326,6 @@
         {
           "tool": "set_clipboard",
           "desc": "set_clipboard: Write text to the system clipboard. (arguments: text)"
-        },
-        {
-          "tool": "desktop_setting",
-          "desc": "desktop_setting: Read or change one desktop setting from a fixed list: animations (window and menu animations); cursor_size (mouse pointer size in pixels (24 is normal; 32, 48, 64 are larger)); single_click (open files and folders with a single click); clock_24h (show the top-bar clock in 24-hour format); clock_seconds (show seconds in the top-bar clock); battery_percentage (show the battery percentage in the top bar); hot_corner (open the overview when the pointer hits the top-left corner); natural_scroll (touchpad natural (reverse) scrolling); tap_to_click (tap the touchpad to click). Changing requires the 'appearance-control-enabled' consent key. (arguments: setting, value)"
         }
       ],
       "offered": [
@@ -2333,10 +2333,10 @@
         "set_volume",
         "get_volume",
         "set_mic_mute",
+        "fm_radio",
         "phone_remote",
         "set_brightness",
-        "set_clipboard",
-        "desktop_setting"
+        "set_clipboard"
       ],
       "recall_hit": true
     },
@@ -3246,7 +3246,7 @@
         },
         {
           "tool": "landline_call",
-          "desc": "landline_call: Place and answer calls on the JioFiber broadband landline over Wi-Fi, through the router - the same line the JioJoin app uses, the house's own landline number. 'status' says whether the line is connected and what call is on. 'dial' places a call - 'dial number=\"+911234567890\"' - asking you to confirm first, because it rings someone. 'answer' picks up a ringing call; 'hangup' ends, cancels or declines the current call. The voice is on this computer's speaker and microphone, nothing is recorded, and the landline handset keeps working. Needs this computer added to the line on the Phone page and the 'landline-enabled' consent key. This is the landline, not a mobile over Bluetooth - that is 'bluetooth_call'. (arguments: action, number, name)"
+          "desc": "landline_call: Place and answer calls on the JioFiber broadband landline over Wi-Fi, through the router - the same line the JioJoin app uses, the house's own landline number. 'status' says whether the line is connected and what call is on. 'dial' places a call - 'dial number=\"+911234567890\"' - asking you to confirm first, because it rings someone. 'answer' picks up a ringing call; 'hangup' ends, cancels or declines the current call. The voice is on this computer's speaker and microphone, nothing is recorded, and the landline handset keeps working. Needs this computer added to the line on the Shani Link app's Phone page and the 'landline-enabled' consent key. This is the landline, not a mobile over Bluetooth - that is 'bluetooth_call'. (arguments: action, number, name)"
         },
         {
           "tool": "read_video",
@@ -4629,7 +4629,7 @@
         },
         {
           "tool": "landline_call",
-          "desc": "landline_call: Place and answer calls on the JioFiber broadband landline over Wi-Fi, through the router - the same line the JioJoin app uses, the house's own landline number. 'status' says whether the line is connected and what call is on. 'dial' places a call - 'dial number=\"+911234567890\"' - asking you to confirm first, because it rings someone. 'answer' picks up a ringing call; 'hangup' ends, cancels or declines the current call. The voice is on this computer's speaker and microphone, nothing is recorded, and the landline handset keeps working. Needs this computer added to the line on the Phone page and the 'landline-enabled' consent key. This is the landline, not a mobile over Bluetooth - that is 'bluetooth_call'. (arguments: action, number, name)"
+          "desc": "landline_call: Place and answer calls on the JioFiber broadband landline over Wi-Fi, through the router - the same line the JioJoin app uses, the house's own landline number. 'status' says whether the line is connected and what call is on. 'dial' places a call - 'dial number=\"+911234567890\"' - asking you to confirm first, because it rings someone. 'answer' picks up a ringing call; 'hangup' ends, cancels or declines the current call. The voice is on this computer's speaker and microphone, nothing is recorded, and the landline handset keeps working. Needs this computer added to the line on the Shani Link app's Phone page and the 'landline-enabled' consent key. This is the landline, not a mobile over Bluetooth - that is 'bluetooth_call'. (arguments: action, number, name)"
         },
         {
           "tool": "alarm",
@@ -6066,6 +6066,10 @@
       "positives_desc": "neighbour_table: Show the neighbour (ARP) table for this machine: which addresses on this link have answered, which have never answered and are holding packets instead of sending them, and which have gone stale. That distinction is the one layer 3 cannot make - an unresolved neighbour and a switched-off host both look like 'no reply', and they have opposite fixes. Read from /proc, so no privileges are needed. One network namespace. (arguments: device)",
       "negatives": [
         {
+          "tool": "landline_call",
+          "desc": "landline_call: Place and answer calls on the JioFiber broadband landline over Wi-Fi, through the router - the same line the JioJoin app uses, the house's own landline number. 'status' says whether the line is connected and what call is on. 'dial' places a call - 'dial number=\"+911234567890\"' - asking you to confirm first, because it rings someone. 'answer' picks up a ringing call; 'hangup' ends, cancels or declines the current call. The voice is on this computer's speaker and microphone, nothing is recorded, and the landline handset keeps working. Needs this computer added to the line on the Shani Link app's Phone page and the 'landline-enabled' consent key. This is the landline, not a mobile over Bluetooth - that is 'bluetooth_call'. (arguments: action, number, name)"
+        },
+        {
           "tool": "dns_lookup",
           "desc": "dns_lookup: Look a hostname or address up in DNS and report what came back: the addresses, or the mail servers, name servers, TXT records, certificate records or other records a name publishes, and whether the answer is DNSSEC-signed and valid. Distinguishes 'this name does not exist' from 'the resolver did not answer', because those have different fixes. Obeys privacy mode, since the query goes to a resolver outside this machine. Read-only. (arguments: name, type)"
         },
@@ -6076,10 +6080,6 @@
         {
           "tool": "scan_network",
           "desc": "scan_network: Find which devices are on the local network, with their names, addresses and hardware vendors. Local addresses only. Requires the network sense to be enabled. (arguments: range, resolve_names)"
-        },
-        {
-          "tool": "landline_call",
-          "desc": "landline_call: Place and answer calls on the JioFiber broadband landline over Wi-Fi, through the router - the same line the JioJoin app uses, the house's own landline number. 'status' says whether the line is connected and what call is on. 'dial' places a call - 'dial number=\"+911234567890\"' - asking you to confirm first, because it rings someone. 'answer' picks up a ringing call; 'hangup' ends, cancels or declines the current call. The voice is on this computer's speaker and microphone, nothing is recorded, and the landline handset keeps working. Needs this computer added to the line on the Phone page and the 'landline-enabled' consent key. This is the landline, not a mobile over Bluetooth - that is 'bluetooth_call'. (arguments: action, number, name)"
         },
         {
           "tool": "discover_hosts",
@@ -6096,10 +6096,10 @@
       ],
       "offered": [
         "neighbour_table",
+        "landline_call",
         "dns_lookup",
         "nfc",
         "scan_network",
-        "landline_call",
         "discover_hosts",
         "phone",
         "broken_symlinks"
@@ -6275,7 +6275,7 @@
         },
         {
           "tool": "landline_call",
-          "desc": "landline_call: Place and answer calls on the JioFiber broadband landline over Wi-Fi, through the router - the same line the JioJoin app uses, the house's own landline number. 'status' says whether the line is connected and what call is on. 'dial' places a call - 'dial number=\"+911234567890\"' - asking you to confirm first, because it rings someone. 'answer' picks up a ringing call; 'hangup' ends, cancels or declines the current call. The voice is on this computer's speaker and microphone, nothing is recorded, and the landline handset keeps working. Needs this computer added to the line on the Phone page and the 'landline-enabled' consent key. This is the landline, not a mobile over Bluetooth - that is 'bluetooth_call'. (arguments: action, number, name)"
+          "desc": "landline_call: Place and answer calls on the JioFiber broadband landline over Wi-Fi, through the router - the same line the JioJoin app uses, the house's own landline number. 'status' says whether the line is connected and what call is on. 'dial' places a call - 'dial number=\"+911234567890\"' - asking you to confirm first, because it rings someone. 'answer' picks up a ringing call; 'hangup' ends, cancels or declines the current call. The voice is on this computer's speaker and microphone, nothing is recorded, and the landline handset keeps working. Needs this computer added to the line on the Shani Link app's Phone page and the 'landline-enabled' consent key. This is the landline, not a mobile over Bluetooth - that is 'bluetooth_call'. (arguments: action, number, name)"
         },
         {
           "tool": "phone",
@@ -8464,7 +8464,7 @@
         },
         {
           "tool": "landline_call",
-          "desc": "landline_call: Place and answer calls on the JioFiber broadband landline over Wi-Fi, through the router - the same line the JioJoin app uses, the house's own landline number. 'status' says whether the line is connected and what call is on. 'dial' places a call - 'dial number=\"+911234567890\"' - asking you to confirm first, because it rings someone. 'answer' picks up a ringing call; 'hangup' ends, cancels or declines the current call. The voice is on this computer's speaker and microphone, nothing is recorded, and the landline handset keeps working. Needs this computer added to the line on the Phone page and the 'landline-enabled' consent key. This is the landline, not a mobile over Bluetooth - that is 'bluetooth_call'. (arguments: action, number, name)"
+          "desc": "landline_call: Place and answer calls on the JioFiber broadband landline over Wi-Fi, through the router - the same line the JioJoin app uses, the house's own landline number. 'status' says whether the line is connected and what call is on. 'dial' places a call - 'dial number=\"+911234567890\"' - asking you to confirm first, because it rings someone. 'answer' picks up a ringing call; 'hangup' ends, cancels or declines the current call. The voice is on this computer's speaker and microphone, nothing is recorded, and the landline handset keeps working. Needs this computer added to the line on the Shani Link app's Phone page and the 'landline-enabled' consent key. This is the landline, not a mobile over Bluetooth - that is 'bluetooth_call'. (arguments: action, number, name)"
         },
         {
           "tool": "process_cost",
@@ -9059,7 +9059,7 @@
         },
         {
           "tool": "landline_call",
-          "desc": "landline_call: Place and answer calls on the JioFiber broadband landline over Wi-Fi, through the router - the same line the JioJoin app uses, the house's own landline number. 'status' says whether the line is connected and what call is on. 'dial' places a call - 'dial number=\"+911234567890\"' - asking you to confirm first, because it rings someone. 'answer' picks up a ringing call; 'hangup' ends, cancels or declines the current call. The voice is on this computer's speaker and microphone, nothing is recorded, and the landline handset keeps working. Needs this computer added to the line on the Phone page and the 'landline-enabled' consent key. This is the landline, not a mobile over Bluetooth - that is 'bluetooth_call'. (arguments: action, number, name)"
+          "desc": "landline_call: Place and answer calls on the JioFiber broadband landline over Wi-Fi, through the router - the same line the JioJoin app uses, the house's own landline number. 'status' says whether the line is connected and what call is on. 'dial' places a call - 'dial number=\"+911234567890\"' - asking you to confirm first, because it rings someone. 'answer' picks up a ringing call; 'hangup' ends, cancels or declines the current call. The voice is on this computer's speaker and microphone, nothing is recorded, and the landline handset keeps working. Needs this computer added to the line on the Shani Link app's Phone page and the 'landline-enabled' consent key. This is the landline, not a mobile over Bluetooth - that is 'bluetooth_call'. (arguments: action, number, name)"
         },
         {
           "tool": "phone",
@@ -9441,6 +9441,10 @@
           "desc": "extract_archive: Unpack a .tar/.tar.gz/.tgz/.zip archive, or any format 7z reads (.7z, .rar, .cab ...), into a directory. Every member is checked first and the archive is refused whole if any entry would be written outside the destination or is a link, a device or a FIFO. Will not overwrite existing files unless asked. (arguments: archive, destination, overwrite)"
         },
         {
+          "tool": "landline_call",
+          "desc": "landline_call: Place and answer calls on the JioFiber broadband landline over Wi-Fi, through the router - the same line the JioJoin app uses, the house's own landline number. 'status' says whether the line is connected and what call is on. 'dial' places a call - 'dial number=\"+911234567890\"' - asking you to confirm first, because it rings someone. 'answer' picks up a ringing call; 'hangup' ends, cancels or declines the current call. The voice is on this computer's speaker and microphone, nothing is recorded, and the landline handset keeps working. Needs this computer added to the line on the Shani Link app's Phone page and the 'landline-enabled' consent key. This is the landline, not a mobile over Bluetooth - that is 'bluetooth_call'. (arguments: action, number, name)"
+        },
+        {
           "tool": "neighbour_table",
           "desc": "neighbour_table: Show the neighbour (ARP) table for this machine: which addresses on this link have answered, which have never answered and are holding packets instead of sending them, and which have gone stale. That distinction is the one layer 3 cannot make - an unresolved neighbour and a switched-off host both look like 'no reply', and they have opposite fixes. Read from /proc, so no privileges are needed. One network namespace. (arguments: device)"
         },
@@ -9451,10 +9455,6 @@
         {
           "tool": "ui_elements",
           "desc": "ui_elements: Use another app's controls by what they are, through the accessibility tree. apps: which apps are reachable. inspect: list a window's buttons, fields, menus and labels with ids (app = its name; query narrows by text). press: activate an element by id (a button, checkbox, link, menu item). set_text: put text in a field by id. read: an element's text or value. menu: open a menu path like 'File > Export'. drive: one turn of driving - give an action and a control number and the reply is the app's new state in the same short numbered form, which is what a small model can act on. act: click, type or key an app by name or position, with a visible cursor. state: the numbered controls an app is showing. Works on a container's app and on this desktop's own apps alike. Requires 'input-control-enabled'; drive start also runs a container, so it needs 'container-control-enabled' as well. (arguments: action, app, id, text, query, path, do, how, number, image, keys, x, y)"
-        },
-        {
-          "tool": "find_device",
-          "desc": "find_device: Make a paired Bluetooth watch, band or tag buzz or ring so the person can find it - 'where is my watch', 'find my band'. Works on devices with the standard Immediate Alert service and on MoYoung (Da Fit) watches; anything else is refused rather than sent an unknown command. The device must be in range. Requires the 'bluetooth-gatt-enabled' consent key. (arguments: device)"
         }
       ],
       "offered": [
@@ -9462,10 +9462,10 @@
         "write_text_file",
         "bluetooth_gatt",
         "extract_archive",
+        "landline_call",
         "neighbour_table",
         "phone",
-        "ui_elements",
-        "find_device"
+        "ui_elements"
       ],
       "recall_hit": true
     },

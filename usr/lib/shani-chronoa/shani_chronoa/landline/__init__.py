@@ -3,7 +3,7 @@
 The line itself - provisioning, SIP, the call's audio and video - is shani-link's
 (dev.shani.Link on the session bus, /dev/shani/Link/Landline): device plumbing
 that rings with every window closed, on any desktop, with one owner. This module
-keeps the names Chronoa's Phone page, the `landline_call` skill and the mascot
+keeps the names in Chronoa's landline skill, the `landline_call` skill and the mascot
 always used, so none of them changed when the engine moved:
 
     dial(number), answer(), hangup(), dtmf(digit), status(), listen(cb), ...

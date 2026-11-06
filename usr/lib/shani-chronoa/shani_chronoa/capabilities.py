@@ -1669,7 +1669,7 @@ ACTION_CONSENT_KEYS = tuple(sorted(
 #: this machine: it registers with the ISP's service and it **rings another
 #: person**, which is the one thing a switch on this computer should not be
 #: able to do without being set up for it first. Its schema default is off and
-#: it is set up once from the Phone page; the preset's rule would otherwise
+#: it is set up once from the Shani Link app's Phone page; the preset's rule would otherwise
 #: have enabled it, because it is not destructive and not a standing
 #: intrusion, and a rule that derives a default cannot know about a third
 #: party.
@@ -1692,7 +1692,7 @@ NEVER_DEFAULTED_ON = frozenset({
     # inbox - personal messages nobody agreed to share with this computer - and
     # `phone-control` dials and acts on the phone. That is the "captures people
     # who never agreed" case, not a dead end hit by asking for something, so
-    # like the others here it is off until turned on from the Phone page. (It
+    # like the others here it is off until turned on from Chronoa's Settings -> Privacy. (It
     # also made a fresh install with a paired phone log an OBEX error every
     # retry, because the session was attempted before anyone asked for it.)
     "phone-control-enabled",

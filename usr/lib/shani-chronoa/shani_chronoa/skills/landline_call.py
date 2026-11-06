@@ -1,7 +1,7 @@
 """Place and answer calls on the JioFiber landline, over Wi-Fi through the router.
 
 The landline is the broadband line's own number, the one JioJoin uses. This
-computer is added to it once from the Phone page (a one-time code the owner
+computer is added to it once from the Shani Link app's Phone page (a one-time code the owner
 gets by text); after that, with `landline-enabled` on, Chronoa registers with
 the router and can:
 
@@ -37,7 +37,7 @@ def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
     from shani_chronoa.capabilities import gate_label
     return False, (f"Using the JioFiber landline is off. Turn on "
                    f"“{gate_label(CONSENT_KEY)}” in Settings, and set the "
-                   f"line up on the Phone page first. Nothing was done.")
+                   f"line up on the Shani Link app's Phone page first. Nothing was done.")
 
 
 def _run(arguments: dict) -> str:
@@ -51,7 +51,7 @@ def _run(arguments: dict) -> str:
 
     action = str(arguments.get("action") or "status").strip().lower()
     if not landline.is_set_up():
-        return ("The landline is not set up on this computer yet. Open the Phone page and add "
+        return ("The landline is not set up on this computer yet. Open the Shani Link app's Phone page and add "
                 "this computer to the line - you will need the code Jio texts you. Nothing was done.")
 
     if action == "status":
@@ -64,7 +64,7 @@ def _run(arguments: dict) -> str:
             number = landline.resolve_name(name)
             if not number:
                 return (f"No contact matching '{name}' is known for the landline. Say the number, "
-                        "or open the Phone page once with your phone connected so contacts are read. "
+                        "or open the Shani Link app's Phone page once with your phone connected so contacts are read. "
                         "Nothing was dialled.")
         if not number:
             return ("Dial what? Pass number, e.g. number='+911234567890', or name='Amma'. "
@@ -118,7 +118,7 @@ SCHEMA = {
             "rings someone. 'answer' picks up a ringing call; 'hangup' ends, cancels or declines "
             "the current call. The voice is on this computer's speaker and microphone, nothing is "
             "recorded, and the landline handset keeps working. Needs this computer added to the "
-            "line on the Phone page and the 'landline-enabled' consent key. This is the landline, "
+            "line on the Shani Link app's Phone page and the 'landline-enabled' consent key. This is the landline, "
             "not a mobile over Bluetooth - that is 'bluetooth_call'."
         ),
         "parameters": {

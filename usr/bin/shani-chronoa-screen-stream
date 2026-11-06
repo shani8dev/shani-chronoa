@@ -9,7 +9,7 @@ server binds the Bluetooth address and nothing else.
 It is a separate process for the reason `usr/bin/shani-chronoa-overlay` is one:
 the ScreenCast portal's Request/Response round trip is a GLib main loop, and a
 skill runs in a sandboxed child with no main loop of its own. The implementing
-module is `shani_chronoa/screen_stream.py`.
+module is `shani_link/screen_stream.py` (Chronoa imports it via _link).
 
 Runs standalone. `--check` reports whether this machine could do it at all
 without starting anything, which is what the skill asks first.

@@ -56,7 +56,7 @@ def test_the_checker_actually_fails_when_it_should():
     import shutil
     import tempfile
 
-    work = Path(tempfile.mkdtemp(prefix="readme-numbers-", dir="/tmp/opencode"))
+    work = Path(tempfile.mkdtemp(prefix="readme-numbers-"))
     try:
         for name in ("tests", "usr", "tools", "README.md"):
             source = REPO / name
@@ -85,9 +85,16 @@ def test_the_checker_actually_fails_when_it_should():
         readme.write_text(text.replace(claimed.group(0),
                                        f"**{wrong} callable\n  skills**"),
                           encoding="utf-8")
+        # shani-link lives beside this checkout on a real machine and is found
+        # by `_link` the same way. Point SHANI_LINK_PATH at it, so the copied
+        # tree counts the same skills the real tree does.
+        import os
+        env = dict(os.environ)
+        env["SHANI_LINK_PATH"] = str(REPO.parent / "shani-link")
         out = subprocess.run(
             [sys.executable, str(work / "tests" / "check_readme_numbers.py")],
-            capture_output=True, text=True, cwd=str(work), timeout=300)
+            capture_output=True, text=True, cwd=str(work), timeout=300,
+            env=env)
         assert out.returncode != 0, (
             f"a README claiming {wrong} skills did not fail the checker, so the "
             f"test above would pass on a drifted file:\n" + out.stdout)

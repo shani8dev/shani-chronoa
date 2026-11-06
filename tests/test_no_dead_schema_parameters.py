@@ -150,7 +150,24 @@ class TestEveryAdvertisedParameterIsRead:
                 if path is None or not path.exists():
                     unchecked.append(name)
                     continue
-                read = read_identifiers(path.read_text(errors="replace"))
+                source = path.read_text(errors="replace")
+                # Skills that moved their engine to shani-link read their
+                # parameters there, through `_engine.run(arguments)` - this
+                # skill's wrapper only holds consent and the schema, so reading
+                # it alone reports every parameter as dead. Follow the engine
+                # the wrapper delegates to, the same way `_link.module` does,
+                # so the audit sees the real reads.
+                import re as _re
+                _engine_match = _re.search(
+                    r'_engine\s*=\s*_link\.module\("([^"]+)"\)', source)
+                if _engine_match:
+                    _engine_name = _engine_match.group(1)
+                    _engine_path = (path.resolve().parents[6] / "shani-link"
+                                    / "shani_link" / (_engine_name + ".py"))
+                    # parents[4]: usr/lib/shani-chronoa/shani_chronoa/skills -> ... -> repo root
+                    if _engine_path.is_file():
+                        source += "\n" + _engine_path.read_text(errors="replace")
+                read = read_identifiers(source)
             for prop in properties:
                 if prop not in read:
                     dead.append(f"{name}.{prop}")

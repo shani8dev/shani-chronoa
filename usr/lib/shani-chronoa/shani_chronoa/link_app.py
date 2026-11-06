@@ -24,22 +24,30 @@ def available() -> bool:
     return shutil.which(COMMAND) is not None
 
 
-def argv(page: str = "", connect: "str | None" = None) -> "list[str]":
+def argv(page: str = "", connect: "str | None" = None,
+        dial: "str | None" = None,
+        message: "str | None" = None) -> "list[str]":
     out = [COMMAND]
     if page:
         out.append(f"--page={page}")
     if connect is not None:
         out.append(f"--connect={connect}" if connect else "--connect")
+    if dial is not None:
+        out.append(f"--dial={dial}" if dial else "--dial")
+    if message is not None:
+        out.append(f"--message={message}" if message else "--message")
     return out
 
 
-def open_app(page: str = "", connect: "str | None" = None) -> "tuple[bool, str]":
+def open_app(page: str = "", connect: "str | None" = None,
+             dial: "str | None" = None,
+             message: "str | None" = None) -> "tuple[bool, str]":
     """Start (or raise) Shani Link; `(True, "")` or `(False, why)`."""
     if not available():
         return False, "Shani Link is not installed (the shani-link package)."
     try:
         from gi.repository import Gio
-        Gio.Subprocess.new(argv(page, connect), Gio.SubprocessFlags.NONE)
+        Gio.Subprocess.new(argv(page, connect, dial, message), Gio.SubprocessFlags.NONE)
     except Exception as exc:  # noqa: BLE001 - said, not raised into a click handler
         logger.warning("could not start %s", COMMAND, exc_info=True)
         return False, f"Shani Link would not start ({exc})."

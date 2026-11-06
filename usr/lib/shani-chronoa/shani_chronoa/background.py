@@ -61,12 +61,10 @@ _MEMORY = ("your RAM", "the local model server")
 _HOLDS = {
     "wake-word": _MICROPHONE,
     "barge-in": (_MICROPHONE[0], "watching for you to talk over the reply"),
-    "incoming-calls": ("Bluetooth", "watching the paired phone for a ringing call"),
-    "messages": ("Bluetooth", "watching for new texts on the paired phone"),
-    "obex": ("Bluetooth", "accepting files a phone shares to this computer"),
-    "watch": ("the watch", "keeping the MoYoung watch connected"),
-    "remote": ("Bluetooth", "being a keyboard for the phone, as Chronoa Remote"),
-    "avrcp": ("Bluetooth", "serving this computer's music to Bluetooth remotes"),
+    # The device watchers below moved to shani-link's background service
+    # (shani_link/settings.py + service.py) on 2026-11-04; Chronoa no longer
+    # starts them, so they have no row here. Kept as a comment so the
+    # history of the split is visible next to the survivors.
     "senses": _MEMORY,
     "model": _MEMORY,
 }

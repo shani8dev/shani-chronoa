@@ -46,7 +46,7 @@ def _run(arguments: dict) -> str:
     action = arguments.get("action")
     if action == "list":
         if not devs:
-            return "No Bluetooth devices are paired. Use Connect a device (in the Devices panel, or Ctrl+K) to pair one."
+            return "No Bluetooth devices are paired. Use Connect a device in the Shani Link app (Ctrl+K) to pair one."
         return "Paired: " + "; ".join(f"{n} ({'connected' if c else 'not connected'})" for _m, n, c in devs) + "."
     want = (arguments.get("name") or "").strip().lower()
     match = [d for d in devs if want and want in d[1].lower()] or (devs if len(devs) == 1 and not want else [])

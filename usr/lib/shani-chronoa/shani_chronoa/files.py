@@ -664,6 +664,12 @@ _PACKAGE_HINTS = {
     # database - which is the honest provenance, and why they say so.
     "qemu-system-x86_64": "qemu-system-x86",
     "podman": "podman",
+    # Niri is the compositor the Niri profile depends on and is a package in
+    # Arch's own repositories; the binary and package share the name.
+    "niri": "niri",
+    # ShaniOS ships the Shani Link app in its own `shani-link` package:
+    # shani-pkgbuilds/shani-link/PKGBUILD installs `bin/shani-link-app`.
+    "shani-link-app": "shani-link",
     "wpctl": "wireplumber",
     "pactl": "libpulse",
     "df": "coreutils",

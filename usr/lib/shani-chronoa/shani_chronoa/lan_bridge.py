@@ -203,8 +203,8 @@ def main(argv: "Optional[list[str]]" = None) -> int:
 
     from shani_chronoa import lan_link
     # The paired phone, not the first thing that answers a broadcast: every
-    # link is pinned to it anyway (`lan_link._link`), so another device here
-    # could only ever be refused.
+    # link is pinned to it anyway (lan_link's _link in shani-link), so another
+    # device here could only ever be refused.
     if not host:
         host = lan_link.paired_device().get("address", "")
     if not host:

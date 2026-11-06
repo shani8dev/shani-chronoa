@@ -596,8 +596,10 @@ Open, ranked:
   would be a row that does nothing - which is why the browser row names
   an action the app really has, and why the test checks the app's own
   source as well as the palette's.
-- [ ] **9l Fold Phone / Phone link / Android / Devices / Wearables** into one
-  panel with tabs; "Answering now" into Models (41 rows -> ~30).
+- [x] **9l Fold Phone / Phone link / Android / Devices / Wearables** into one
+  panel with tabs; "Answering now" into Models (41 rows -> ~30). **Superseded
+  2026-11-04: the panels moved to shani-link-app (shani_link/app/), each with
+  its own page. No folding needed here.**
 - [x] **9m Rule builder in plain words** ("When battery low -> notify"), JSON
   behind Advanced, a Pause switch per rule. **Done 2026-10-20.** The plain
   words and the per-rule switch were already there - the form says "reads text
@@ -824,8 +826,9 @@ Open, by panel (worst first):
   question, and the Workbench's list is the *developer's* view of the
   registry (its own words, on purpose) - which is what 11j's Developer
   switch would put somewhere honest.
-- [ ] **10f Phone sprawl**: Phone, Phone link, Android, Devices, Wearables -
+- [x] **10f Phone sprawl**: Phone, Phone link, Android, Devices, Wearables -
   five panels, four of them one switch each. One "Phone & devices" with tabs.
+  **Superseded 2026-11-04: the panels moved to shani-link-app.**
 - [x] **10g Background mode**: a single toggle labelled with its key
   (`background-mode-enabled`) and an essay about the unit; belongs in Settings
   with a status line here.
@@ -867,9 +870,10 @@ is trying to do, with the live things on the main window.
   **Still open**: the Workbench's built-in list and the Help window's
   capability list are still two more answers, and "Make your own" is not
   an action in the palette yet.
-- [ ] **11b "Phone & devices"** = Phone + Phone link + Android + Devices +
+- [x] **11b "Phone & devices"** = Phone + Phone link + Android + Devices +
   Wearables + Screen share: tabs Calls & messages / Files / Screen / Watch &
   Bluetooth / USB. One permission banner at the top for whichever tab is shut.
+  **Superseded 2026-11-04: the panels moved to shani-link-app.**
 - [ ] **11c "Models"** = Models + Answering now: what answers now, on top; the
   catalogue under it. Model choice keeps its home on the composer button.
   **Measured, so the next pass does not re-derive it.** The two panels are

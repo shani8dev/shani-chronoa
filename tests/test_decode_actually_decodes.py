@@ -210,9 +210,13 @@ def test_a_capture_too_short_is_still_a_sentence(tmp_path):
 
 
 def test_write_wav_now_has_a_caller():
-    """The smallest claim that was false."""
-    source = (ROOT / "usr/lib/shani-chronoa/shani_chronoa/skills/fm_radio.py").read_text(
-        encoding="utf-8")
+    """The smallest claim that was false.
+
+    The engine moved to shani-link (`shani_chronoa._link.module("fm_radio")`),
+    so the source to read is the engine's file, not the skill wrapper's - which
+    is now nothing but consent plus `Skill(...)`.
+    """
+    source = Path(F._engine.__file__).read_text(encoding="utf-8")
     assert "write_wav(target" in source, (
         "fm_radio.write_wav is unreached again; the decoded audio would be "
         "discarded, which is the dead end this file exists to close")
