@@ -35,8 +35,12 @@ MUTATIONS = [
     # -- 1. embedded, not looked up ------------------------------------------
     {
         "file": _W,
-        "old": "    svg = Gtk.Svg.new_from_bytes(GLib.Bytes.new(_ORB_MARK_SVG))\n",
-        "new": "    svg = None\n",
+        "old": "    except Exception:  # noqa: BLE001 - the flat mark is a fine fallback\n"
+               "        svg_bytes = _ORB_MARK_SVG\n"
+               "    svg = Gtk.Svg.new_from_bytes(GLib.Bytes.new(svg_bytes))\n",
+        "new": "    except Exception:  # noqa: BLE001 - the flat mark is a fine fallback\n"
+               "        svg_bytes = _ORB_MARK_SVG\n"
+               "    svg = None\n",
         "label": "**the gear, restored**: the mark is not built from the "
                  "embedded bytes",
         "expect": ["test_the_mark_is_rendered_from_embedded_bytes"],

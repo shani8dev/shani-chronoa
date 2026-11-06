@@ -27,14 +27,17 @@ MUTATIONS = [
     # -- 1. the stop that existed and nothing called -------------------------
     {
         "file": _BG,
-        "old": "        add(key, name, getattr(component, \"stop\", None) if component else None,\n"
-               "            running=component is not None)\n",
-        "new": "        add(key, name, None, running=component is not None)\n",
-        "label": "the six watchers' rows have no stop at all, so the panel shows "
+        "old": "    add(\"wake-word\", \"Wake-word listening\",\n"
+               "        getattr(wake, \"stop\", None) if wake else None,\n",
+        "new": "    add(\"wake-word\", \"Wake-word listening\",\n"
+               "        None,\n",
+        "label": "the microphone's row has no stop at all, so the panel shows "
                  "a dead button",
         # **The finding, restored.** This is the shipped behaviour: the stop
-        # existed in the component and was never reached.
-        "expect": ["test_all_six_watchers_get_a_stop"],
+        # existed in the component and was never reached. The six device
+        # watchers moved to shani-link's service; the microphone is the row
+        # somebody came to turn off, so it is the one pinned here.
+        "expect": ["test_the_microphone_row_can_be_stopped"],
     },
     {
         "file": _BG,

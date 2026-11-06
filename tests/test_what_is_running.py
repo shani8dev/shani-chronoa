@@ -105,6 +105,16 @@ class TestTheStopThatExistedAndNothingCalled:
             "talk-over-the-reply holds the microphone a second time and must be "
             "next to it, not four rows down")
 
+    def test_the_microphone_row_can_be_stopped(self):
+        """The row somebody came to turn off must be able to turn off: its
+        stop is the wake-word listener's own, reached through the inventory
+        (the dead-button class this file exists to prevent)."""
+        inv = background.inventory(_app())
+        row = inv.by_key("wake-word")
+        assert row is not None and row.stop is not None, (
+            "the microphone row has no stop, so its button would be dead")
+        assert row.request_stop() == "stopped quietly"
+
     def test_the_model_server_is_in_the_inventory(self):
         """The 1.09 GB `llama-server` measured on this box, up 7h36m."""
         assert background.inventory(_app()).by_key("model") is not None

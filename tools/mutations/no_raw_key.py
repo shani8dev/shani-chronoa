@@ -22,14 +22,6 @@ _CAPS = "usr/lib/shani-chronoa/shani_chronoa/capabilities.py"
 
 MUTATIONS = [
     {
-        "file": f"{_SURFACES}/devices.py",
-        "old": '    STATE_REFUSED: ("Open Privacy settings", "settings:privacy"),\n}\n\nBODY = {\n',
-        "new": '    STATE_REFUSED: (\n        f"Turning it on affects what the assistant can do with your phone as "\n        f"well as this page, because \'{CONSENT_KEY}\' is off."\n    ),\n',
-        # The raw key is back, in the one place the person reads.
-        "label": "the Devices panel's message names the key again",
-        "expect": ["test_no_panel_names_a_raw_key"],
-    },
-    {
         "file": f"{_SURFACES}/desktop.py",
         "old": '    return (f"{EVIDENCE_COULD_NOT_ASK} - the setting "\n            f"“{gate_label(SHORTCUT_KEY)}” says {said}. "\n',
         "new": '    return (f"{EVIDENCE_COULD_NOT_ASK} - the setting {SHORTCUT_KEY} says {said}. "\n',

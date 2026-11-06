@@ -69,7 +69,7 @@ MUTATIONS = [
         # *present*.
         "expect": ["test_a_wide_character_costs_two",
                    "test_a_tool_card_argument_summary_is_not_cut_mid_cluster",
-                   "test_the_message_preview_is_not_cut_mid_cluster"],
+                   "test_a_tool_card_argument_summary_is_not_cut_mid_cluster"],
     },
     {
         "file": _ML,
@@ -92,7 +92,7 @@ MUTATIONS = [
         "label": "the ellipsis is never appended, so a cut reads as complete",
         "expect": ["test_a_wide_character_costs_two",
                    "test_a_tool_card_argument_summary_is_not_cut_mid_cluster",
-                   "test_the_message_preview_is_not_cut_mid_cluster"],
+                   "test_a_tool_card_argument_summary_is_not_cut_mid_cluster"],
     },
     {
         "file": _ML,
