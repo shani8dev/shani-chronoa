@@ -1122,14 +1122,6 @@ def _is(node, ref: ElementRef) -> bool:
     return node is not None and _role(node) == ref.role and _name(node) == ref.name
 
 
-def ref_of(application, node) -> "ElementRef | None":
-    """The reference for `node` under `application`, or None if it is not there."""
-    for path, found in _walk_paths(application):
-        if found is node:
-            return ElementRef(path, _role(node), _name(node))
-    return None
-
-
 def resolve_ref(app: str, ref: ElementRef):
     """The live element `ref` names, re-found now - or a refusal saying why.
 

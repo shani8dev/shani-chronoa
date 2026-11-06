@@ -263,16 +263,6 @@ def _abs_ref(sheet: str, ref: str) -> str:
     return f"{name}!{':'.join(parts)}"
 
 
-def _str_cache(rows, cells) -> str:
-    pts = "".join(f'<c:pt idx="{i}"><c:v>{escape(str(_cell_at(rows, r, c)))}</c:v></c:pt>'
-                  for i, (r, c) in enumerate(cells))
-    return f'<c:strCache><c:ptCount val="{len(cells)}"/>{pts}</c:strCache>'
-
-
-def _num_cache(rows, cells) -> str:
-    return _num_cache_vals([_cell_at(rows, r, c) for r, c in cells])
-
-
 def _str_cache_vals(values) -> str:
     pts = "".join(f'<c:pt idx="{i}"><c:v>{escape(str(v))}</c:v></c:pt>' for i, v in enumerate(values))
     return f'<c:strCache><c:ptCount val="{len(values)}"/>{pts}</c:strCache>'
