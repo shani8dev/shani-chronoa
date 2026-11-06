@@ -97,6 +97,13 @@ def _run(arguments: dict) -> str:
     return f"What {src.name} shows, described by {model}:\n{said}"
 
 
+def _consent(config):
+    """Consent gate, in the shape question_presenter probes for."""
+    if not config.sense_allowed(vision.CONSENT_SENSE):
+        return False, config.sense_allowed_reason(vision.CONSENT_SENSE)
+    return True, ""
+
+
 POST_CONDITION = None
 
 SKILLS = [Skill(name="look_at_image", schema=_SCHEMA, run=_run)]

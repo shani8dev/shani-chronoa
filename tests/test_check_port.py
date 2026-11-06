@@ -23,6 +23,7 @@ one port, one connection, nothing sent down it.
 from __future__ import annotations
 
 import pathlib
+import shutil
 import socket
 import subprocess
 import sys
@@ -32,6 +33,10 @@ import pytest
 
 _REPO = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
+
+_NC = shutil.which("nc")
+if not _NC:
+    pytestmark = pytest.mark.skipif(True, reason="nc is not installed here, so the real check-port paths cannot run")
 
 from shani_chronoa.skills import check_port as CP  # noqa: E402
 

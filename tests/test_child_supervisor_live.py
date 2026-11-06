@@ -56,6 +56,12 @@ from shani_chronoa.child_supervisor import (  # noqa: E402
 
 _PW_PLAY = shutil.which("pw-play")
 _PW_RECORD = shutil.which("pw-record")
+_PW_DAEMON = False
+try:
+    _PW_DAEMON = subprocess.run(["pw-cli", "info", "0"], capture_output=True,
+                                 timeout=5).returncode == 0
+except (FileNotFoundError, subprocess.TimeoutExpired):
+    _PW_DAEMON = False
 
 # A stand-in capture child. Takes a comma-separated list of per-frame amplitudes and
 # then one of the three endings, because the three endings are the three things being
@@ -525,7 +531,8 @@ class TestACaptureChildIsSupervised:
         assert recorder.capture_failure() is None
 
 
-@pytest.mark.skipif(not _PW_RECORD, reason="pw-record is not installed here")
+@pytest.mark.skipif(not _PW_RECORD or not _PW_DAEMON,
+                    reason="pw-record is not installed, or no PipeWire daemon is reachable here")
 class TestAgainstTheRealRecorderBinary:
     """The genuine `pw-record`, on this machine's genuine (virtual) audio source.
 
@@ -744,7 +751,8 @@ class TestRecoveryIsSafeAtTurnBoundaries:
 # ======================================================================================
 
 
-@pytest.mark.skipif(not _PW_PLAY, reason="pw-play is not installed here")
+@pytest.mark.skipif(not _PW_PLAY or not _PW_DAEMON,
+                    reason="pw-play is not installed, or no PipeWire daemon is reachable here")
 class TestPlaybackFailuresAreSurfaced:
     @pytest.fixture
     def player(self, monkeypatch) -> AudioPlayer:

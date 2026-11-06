@@ -26,6 +26,7 @@ def test_a_probe_that_cannot_run_is_unknown_not_a_clean_machine(monkeypatch) -> 
 def test_a_device_with_no_holder_is_not_a_finding(monkeypatch) -> None:
     monkeypatch.setattr(monitoring.shutil, "which", lambda name: "/usr/bin/" + name)
     monkeypatch.setattr(monitoring, "_holders", lambda node: [])
+    monkeypatch.setattr(monitoring, "_audio_streams", lambda: [])
     out = monitoring._run({})
     assert "no camera device is held open" in out
     assert "no audio stream is capturing" in out
@@ -54,6 +55,9 @@ def test_a_monitoring_agent_is_reported_by_name(monkeypatch) -> None:
 
 
 def test_an_agent_whose_connections_cannot_be_attributed_says_so(monkeypatch) -> None:
+    monkeypatch.setattr(monitoring.shutil, "which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr(monitoring, "_holders", lambda node: [])
+    monkeypatch.setattr(monitoring, "_audio_streams", lambda: [])
     monkeypatch.setattr(monitoring, "_agents", lambda: ["insightful-agent"])
     monkeypatch.setattr(monitoring, "_public_peers", lambda agents: [])
     assert "could not be attributed" in monitoring._run({})
@@ -159,6 +163,9 @@ def test_the_media_baseline_means_growth_not_a_count(monkeypatch) -> None:
 
     # a store must be found first, or the media logic is never reached - which is
     # the point: "no store" is unknown, never "nothing captured"
+    monkeypatch.setattr(monitoring.shutil, "which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr(monitoring, "_holders", lambda node: [])
+    monkeypatch.setattr(monitoring, "_audio_streams", lambda: [])
     monkeypatch.setattr(monitoring, "_agent_stores", lambda: [pathlib.Path("/tmp/none")])
     monkeypatch.setattr(monitoring, "_media_files", fake)
     monitoring._MEDIA_BASELINE[0] = None

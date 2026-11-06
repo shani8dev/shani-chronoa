@@ -153,7 +153,7 @@ class TestRangeBounds:
 class TestMissingNmap:
     def test_a_missing_binary_is_not_an_empty_network(self, monkeypatch, permitted):
         monkeypatch.setattr(scan_network.shutil, "which", lambda n: None)
-        out = scan_network._run({})
+        out = scan_network._run({"range": "192.168.1.0/24"})
         assert "`nmap` is not installed" in out
         assert "not the same as finding no devices" in out
 

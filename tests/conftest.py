@@ -76,8 +76,15 @@ def _compile_repo_schema() -> str:
     #
     # `build/` is gitignored, is per-checkout rather than per-machine, and is not
     # a directory the reclaimer scans. The pid in the name keeps two runs from
-    # compiling into the same place.
-    directory = REPO_ROOT / "build" / f"test-schema-{os.getpid()}"
+    # compiling into the same place - **and a random suffix is there because pid
+    # alone did not**: container-local pids repeat, so a directory left by an
+    # earlier run (or by a root-owned run) could be reused and its files not be
+    # writable, which surfaced as a conftest import error / `PermissionError`
+    # on `org.gnome...gschema.xml` for whichever files happened to draw that pid.
+    import uuid
+
+    directory = (REPO_ROOT / "build"
+                 / f"test-schema-{os.getpid()}-{uuid.uuid4().hex[:8]}")
     directory.mkdir(parents=True, exist_ok=True)
     for xml in SCHEMA_SRC.glob("*.xml"):
         shutil.copy2(xml, directory)
@@ -233,6 +240,12 @@ def _reclaim_the_temp_dirs_this_suite_makes():
         print(f"\n[conftest] reclaimed {removed} temp directories from /tmp")
     if kept:
         print(f"[conftest] kept {kept} still in use by this run")
+
+    # The compiled schema lives under `build/`, deliberately outside that sweep,
+    # so it needs its own removal: every pytest process builds one and a
+    # chunked run builds one per file. Measured 11,529 of them (~1.6 GB) after
+    # a few chunked runs. Each run only removes its own, uniquely named one.
+    shutil.rmtree(COMPILED_SCHEMA_DIR, ignore_errors=True)
 
 
 @pytest.fixture(scope="session", autouse=True)

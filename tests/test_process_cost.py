@@ -317,6 +317,8 @@ class TestTheAnswer:
         It is the shape of answer that reads as a broken probe if it is
         allowed to, so it is asserted rather than left to the reader.
         """
+        monkeypatch.setattr(pc.shutil, "which", lambda name: "/usr/bin/pidstat")
+        monkeypatch.setattr(pc.shutil, "which", lambda name: "/usr/bin/pidstat")
         monkeypatch.setattr(pc, "_gather",
                             lambda: ({615: pc.Cost(615, "ksoftirqd/4", 0.0, 0.0,
                                                     0.0, 0.0, 0.0, 0.0, 0.0,
@@ -330,6 +332,7 @@ class TestTheAnswer:
             1: pc.Cost(1, "hog", 99.0, 1.0, 100.0, 500000, 2.0, 0.0, 8500.0,
                        0.0, 0.0),
         }
+        monkeypatch.setattr(pc.shutil, "which", lambda name: "/usr/bin/pidstat")
         monkeypatch.setattr(pc, "_gather", lambda: (costs, ""))
         out = pc._run({})
         assert "Thrashing" in out
@@ -350,6 +353,7 @@ class TestTheAnswer:
             1: pc.Cost(1, "chatty", 20.0, 1.0, 21.0, 50000, 0.2, 0.0, 2.0,
                        0.0, 0.0),
         }
+        monkeypatch.setattr(pc.shutil, "which", lambda name: "/usr/bin/pidstat")
         monkeypatch.setattr(pc, "_gather", lambda: (costs, ""))
         out = pc._run({})
         assert "chatty" in out                      # it IS listed as busy
@@ -360,6 +364,7 @@ class TestTheAnswer:
             1: pc.Cost(1, "syncer", 5.0, 1.0, 6.0, 10000, 0.2, 0.0, 0.0,
                        0.0, 4096.0),
         }
+        monkeypatch.setattr(pc.shutil, "which", lambda name: "/usr/bin/pidstat")
         monkeypatch.setattr(pc, "_gather", lambda: (costs, ""))
         out = pc._run({})
         assert "Reading or writing over 1 MB a second" in out
@@ -368,6 +373,7 @@ class TestTheAnswer:
     def test_a_quiet_program_is_not_listed_as_a_writer(self, monkeypatch):
         costs = {1: pc.Cost(1, "chatty", 5.0, 1.0, 6.0, 10000, 0.2, 0.0, 0.0,
                             12.0, 0.4)}
+        monkeypatch.setattr(pc.shutil, "which", lambda name: "/usr/bin/pidstat")
         monkeypatch.setattr(pc, "_gather", lambda: (costs, ""))
         out = pc._run({})
         assert "Reading or writing over 1 MB a second" not in out
@@ -376,6 +382,7 @@ class TestTheAnswer:
                                                               monkeypatch):
         costs = {1: pc.Cost(1, "app", 50.0, 0.0, 50.0, 1000, 0.1, 0.0, 0.0,
                            0.0, 0.0)}
+        monkeypatch.setattr(pc.shutil, "which", lambda name: "/usr/bin/pidstat")
         monkeypatch.setattr(pc, "_gather",
                             lambda: (costs, "pidstat said 'exit 1'"))
         out = pc._run({})
@@ -384,6 +391,7 @@ class TestTheAnswer:
 
     def test_nothing_at_all_readable_is_unknown_not_an_empty_table(
             self, monkeypatch):
+        monkeypatch.setattr(pc.shutil, "which", lambda name: "/usr/bin/pidstat")
         monkeypatch.setattr(pc, "_gather", lambda: ({}, "pidstat said 'exit 1'"))
         out = pc._run({})
         assert "UNKNOWN" in out

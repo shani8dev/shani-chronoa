@@ -135,6 +135,10 @@ def test_pressing_download_is_not_consent(monkeypatch):
     monkeypatch.setattr(local_llm, "server_binary", lambda: "/usr/bin/llama-server")
     monkeypatch.setattr(local_llm, "start_service", lambda: "")
     monkeypatch.setattr(local_llm, "gpu_devices", lambda: [])
+    # The engine is already present here, so setup_brain must not try to
+    # download it; without this it hits the mock transport's 404.
+    from shani_chronoa import engines
+    monkeypatch.setattr(engines, "ensure", lambda *a, **k: "/usr/bin/llama-server")
     # Shut the gate the way a person who does not want downloads shuts it. The
     # keyfile backend is per-test, so this cannot leak into the next one.
     ChronoaConfig().set("model-download-enabled", "false")
@@ -159,6 +163,10 @@ def test_brain_step_downloads_verifies_and_links(monkeypatch):
     monkeypatch.setattr(local_llm, "start_service", lambda: "")
     monkeypatch.setattr(local_llm, "is_up", lambda timeout=1.5: True)
     monkeypatch.setattr(local_llm, "gpu_devices", lambda: [])
+    # The engine is already present here, so setup_brain must not try to
+    # download it; without this it hits the mock transport's 404.
+    from shani_chronoa import engines
+    monkeypatch.setattr(engines, "ensure", lambda *a, **k: "/usr/bin/llama-server")
     steps = []
     out = setup_wizard.setup_brain("qwen3-0.6b", report=lambda f, t: steps.append(f), transport=_serve({"tiny.gguf": data}))
     assert out.startswith("Chronoa now thinks on this computer (qwen3-0.6b, on the processor)")

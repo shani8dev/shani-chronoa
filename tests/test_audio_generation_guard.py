@@ -792,6 +792,10 @@ class TestTheInstalledPwRecordAcceptsThePin:
 
     def test_the_pinned_value_parses_and_a_broken_one_does_not(self):
         good = self._stderr_for(audio_mod._CAPTURE_LATENCY)
+        if "pw_context_connect() failed" in good or "Host is down" in good:
+            pytest.skip("no PipeWire daemon reachable, so pw-record fails before "
+                        "it parses --latency; the argument shape is still "
+                        "asserted by the non-binary tests above")
         assert "unrecognized option" not in good, good
         assert "bad latency value" not in good, good
 

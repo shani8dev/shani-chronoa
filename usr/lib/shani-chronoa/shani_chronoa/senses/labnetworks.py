@@ -245,9 +245,9 @@ def _run(_config: Optional[ChronoaConfig] = None) -> Union[Percept, str]:
             f"still says."
         )
     lines.append(
-        f"{len(present)} namespace(s) exist in total"
-        + ("" if present is not None else " (count UNKNOWN)")
-        + ". This reads only; it does not change any network."
+        (f"{len(present)} namespace(s) exist in total."
+         if present is not None else "Namespace count UNKNOWN.")
+        + " This reads only; it does not change any network."
     )
 
     return _SENSE.to_percept(

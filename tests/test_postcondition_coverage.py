@@ -123,7 +123,7 @@ def test_a_declared_post_condition_is_actually_found():
     )
 
 
-def test_a_check_returns_a_verdict_and_its_evidence():
+def test_a_check_returns_a_verdict_and_its_evidence(monkeypatch):
     """A check that returns only True/False cannot say *why*, and the evidence
     string is what makes a failed verdict actionable."""
     modules = dict(_mutating_handlers())
@@ -131,6 +131,8 @@ def test_a_check_returns_a_verdict_and_its_evidence():
     if module is None:
         pytest.skip("set_privacy is not a mutating skill in this build")
     declared = verification.post_condition_for(module)
+    monkeypatch.setattr("shani_chronoa.skills.privacy._audio_targets",
+                        lambda: [{"id": 1, "name": "Mic", "muted": False}])
     outcome = declared({"action": "mute_mic"})
     assert outcome is not None, "a mutating action produced no verdict at all"
     ok, evidence = outcome

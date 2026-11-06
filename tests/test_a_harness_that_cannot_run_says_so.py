@@ -135,11 +135,18 @@ class TestTheHarnessTellsYouItCouldNotRun:
             if line.startswith("RESULT"):
                 payload = json.loads(line[len("RESULT"):])
         assert payload is not None, f"probe produced nothing:\n{proc.stderr[-1500:]}"
-        if payload["started"] and not payload["display"]:
-            pytest.fail(
-                "GTK reports initialised with no display, so a guard written "
-                "against Gtk.init_check() would pass and the window would then "
-                "raise anyway - the exact shape of the bug this file records")
+        # The point is that Gdk - not Gtk.init_check() - is the answer to "can a
+        # window be built". GTK 4.22 reports initialised with no display (the
+        # `started` value is True and sometimes False across versions), so the
+        # only stable assertion is the one the harness actually keys off:
+        # GDK has no display, and the harness asks GDK for one rather than
+        # trusting init_check.
+        assert payload["display"] is False, (
+            "GDK found a display with DISPLAY/WAYLAND_DISPLAY/BROADWAY_DISPLAY "
+            "unset, so this probe cannot demonstrate what it exists for")
+        assert "Gdk.Display.get_default()" in _harness_source(), (
+            "the window harness does not ask Gdk whether a display exists; "
+            "Gtk.init_check() alone would let it build an unallocated window")
 
 
 class TestTheFileIsNotMerelySkipping:

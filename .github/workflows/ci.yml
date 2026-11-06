@@ -27,7 +27,7 @@ jobs:
       # it installs pytest + httpx only, which is exactly what this
       # repo's own conftest documents as its required dep set.
       test-command: |
-        xvfb-run -a env PYTHONDONTWRITEBYTECODE=1 python3 -m pytest tests/ -v -p no:cacheprovider
+        mkdir -p /tmp/.X11-unix; chmod 1777 /tmp/.X11-unix; Xvfb :0 -screen 0 1280x800x24 & sleep 1; DISPLAY=:0 GDK_BACKEND=x11 env PYTHONDONTWRITEBYTECODE=1 python3 -m pytest tests/ -v -p no:cacheprovider; kill %1 2>/dev/null
       # The runner's own stack, not ubuntu-latest's: the app needs libadwaita
       # newer than 24.04's 1.5, and on 24.04 the GUI tests segfaulted the run.
       # 26.04 matches the development machine (Python 3.14, GTK/Adw from the
@@ -99,7 +99,7 @@ jobs:
       # espeak-ng -> TTS fallback used by the voice-loop test
       # bubblewrap -> sandbox, dbus-x11, fonts-noto-color-emoji, v4l-utils,
       # libnotify-bin, upower -> capabilities exercised by the suite
-      apt-packages: python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 libglib2.0-bin xvfb gir1.2-secret-1 wireplumber xdotool x11-apps imagemagick bluez python3-numpy poppler-utils tesseract-ocr-eng nmap bc localsearch gir1.2-webkit-6.0 gir1.2-gtk4layershell-1.0 pipewire-bin alsa-utils usbutils mtr-tiny i2c-tools espeak-ng bubblewrap dbus-x11 fonts-noto-color-emoji v4l-utils libnotify-bin upower
+      apt-packages: python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 libglib2.0-bin xvfb gir1.2-secret-1 wireplumber xdotool x11-apps imagemagick bluez python3-numpy poppler-utils tesseract-ocr-eng nmap bc localsearch gir1.2-webkit-6.0 gir1.2-gtk4layershell-1.0 pipewire-bin alsa-utils usbutils mtr-tiny i2c-tools espeak-ng bubblewrap dbus-x11 fonts-noto-color-emoji v4l-utils libnotify-bin upower netcat-openbsd bind9-dnsutils curl wget x11-utils sysstat
       # Nine tests read shani-pkgbuilds/shani-chronoa/PKGBUILD next door: the
       # package's install list, its units, its icon, its optdepends and the
       # bytecode rule are all asserted against the real file, because the

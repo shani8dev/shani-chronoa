@@ -91,7 +91,7 @@ def test_the_gate_actually_fails_when_the_document_drifts():
     import tempfile
 
     generated = _generated_part_3()
-    work = pathlib.Path(tempfile.mkdtemp(prefix="organism-doc-", dir="/tmp/opencode"))
+    work = pathlib.Path(tempfile.mkdtemp(prefix="organism-doc-"))
     try:
         doctored = work / "ARCHITECTURE-TARGET.md"
         text = DOC.read_text(encoding="utf-8")

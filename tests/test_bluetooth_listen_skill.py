@@ -111,7 +111,7 @@ class TestBothPathsProduceTheSameShapeOfValue:
     """
 
     def test_a_read_returns_the_payload_with_no_spaces_in_it(self, monkeypatch):
-        monkeypatch.setattr(bg, "_gatttool",
+        monkeypatch.setattr(bg._engine, "_gatttool",
                             lambda mac, *a: "Characteristic value/descriptor: 06 4a 00")
         raw, _problem = bg.read_value("AA:BB:CC:DD:EE:FF", 0x22, "Heart Rate Measurement", "")
         assert raw == "064a00", f"a read left formatting in the payload: {raw!r}"
@@ -156,9 +156,9 @@ class TestBothPathsProduceTheSameShapeOfValue:
         monkeypatch.setattr(bg.os, "killpg", lambda pgid, sig: None)
         # No such device on this bus, so the bluez route is skipped rather than
         # reached through the patched Popen.
-        monkeypatch.setattr(bg, "_bluez_char_paths", lambda mac: {})
+        monkeypatch.setattr(bg._engine, "_bluez_char_paths", lambda mac: {})
 
-        monkeypatch.setattr(bg, "_gatttool",
+        monkeypatch.setattr(bg._engine, "_gatttool",
                             lambda mac, *a: CHAR_DESC if "--char-desc" in a
                             else "Characteristic value/descriptor: 06 4a 00")
         read_raw, _p = bg.read_value("AA:BB:CC:DD:EE:FF", 0x22, "Heart Rate Measurement", "")
@@ -238,9 +238,9 @@ class TestListenCollectsFromARealStream:
         # Force the gatttool route. On a machine with bluez installed the bluez
         # route is tried first, so a test that meant to exercise gatttool would
         # otherwise depend on whether `AA:BB:CC:DD:EE:FF` happens to be paired.
-        monkeypatch.setattr(bg, "_listen_over_bluez", lambda *a: None)
+        monkeypatch.setattr(bg._engine, "_listen_over_bluez", lambda *a: None)
         # The CCCD lookup that precedes subscribing (`gatttool --char-desc`).
-        monkeypatch.setattr(bg, "_gatttool", lambda mac, *a: CHAR_DESC)
+        monkeypatch.setattr(bg._engine, "_gatttool", lambda mac, *a: CHAR_DESC)
 
         class _Proc:
             def __init__(self):
@@ -297,7 +297,7 @@ class TestListenCollectsFromARealStream:
         assert values == [] and problem == ""
 
     def test_a_missing_gatttool_is_reported_rather_than_guessed_at(self, monkeypatch):
-        monkeypatch.setattr(bg, "_listen_over_bluez", lambda *a: None)
+        monkeypatch.setattr(bg._engine, "_listen_over_bluez", lambda *a: None)
         monkeypatch.setattr(bg.shutil, "which", lambda name: None)
         with pytest.raises(bg.GattUnavailable) as exc:
             bg.notifications("AA:BB:CC:DD:EE:FF", 0x22, 1)
@@ -351,7 +351,7 @@ class TestTheBluezRoute:
             assert bg._parse_bluez_value(text) is None
 
     def test_it_falls_back_to_gatttool_when_bluez_has_no_such_characteristic(self, monkeypatch):
-        monkeypatch.setattr(bg, "_bluez_char_paths", lambda mac: {})
+        monkeypatch.setattr(bg._engine, "_bluez_char_paths", lambda mac: {})
         called: list[int] = []
 
         class _Proc:
@@ -377,7 +377,7 @@ class TestTheBluezRoute:
         monkeypatch.setattr(bg.shutil, "which", lambda name: "/usr/bin/gatttool")
         monkeypatch.setattr(bg.subprocess, "Popen", fake_popen)
         monkeypatch.setattr(bg.os, "killpg", lambda pgid, sig: None)
-        monkeypatch.setattr(bg, "_gatttool", lambda mac, *a: CHAR_DESC)
+        monkeypatch.setattr(bg._engine, "_gatttool", lambda mac, *a: CHAR_DESC)
         values, _problem = bg.notifications("AA:BB:CC:DD:EE:FF", 0x22, 1)
         assert called and values == ["064a00"], (called, values)
 
@@ -401,7 +401,7 @@ class TestTheBluezRoute:
             seen.append(a)
             return subprocess.CompletedProcess(a, 0, "ay 1 06", "")
 
-        monkeypatch.setattr(bg, "_system_busctl", fake)
+        monkeypatch.setattr(bg._engine, "_system_busctl", fake)
         assert bg._bluez_property("/org/bluez/hci0/dev_X/service0001/char0002", "Value") \
             == "ay 1 06"
         args = seen[0]
@@ -438,7 +438,7 @@ class TestTheBluezRoute:
                     args, 0, "ay 1 06" if args[-1] == "Value" else "34", "")
             return subprocess.CompletedProcess(args, 0, "", "")
 
-        monkeypatch.setattr(bg, "_system_busctl", fake)
+        monkeypatch.setattr(bg._engine, "_system_busctl", fake)
         monkeypatch.setattr(bg.shutil, "which", lambda name: "/usr/bin/gatttool")
         # The window has to close; the clock is the only thing that stops the loop.
         ticks = iter([0.0, 0.1, 0.2, 99.0])
@@ -452,19 +452,19 @@ class TestTheBluezRoute:
         assert problem == ""
 
     def test_a_bluez_start_that_fails_falls_back_rather_than_claiming_success(self, monkeypatch):
-        monkeypatch.setattr(bg, "_bluez_char_paths", lambda mac: {0x22: "/some/char0022"})
+        monkeypatch.setattr(bg._engine, "_bluez_char_paths", lambda mac: {0x22: "/some/char0022"})
 
         def fake(*args, **kwargs):
             if args[0] == "call" and args[4] == "StartNotify":
                 return subprocess.CompletedProcess(args, 1, "", "No such method")
             return subprocess.CompletedProcess(args, 0, "", "")
 
-        monkeypatch.setattr(bg, "_system_busctl", fake)
+        monkeypatch.setattr(bg._engine, "_system_busctl", fake)
         assert bg._listen_over_bluez("AA:BB:CC:DD:EE:FF", 0x22, 1, lambda v: None) is None
 
     def test_a_bluez_device_absent_from_the_tree_is_a_fallback_not_a_failure(self, monkeypatch):
-        monkeypatch.setattr(bg, "_bluez_char_paths", lambda mac: {})
-        monkeypatch.setattr(bg, "_system_busctl",
+        monkeypatch.setattr(bg._engine, "_bluez_char_paths", lambda mac: {})
+        monkeypatch.setattr(bg._engine, "_system_busctl",
                             lambda *a, **k: subprocess.CompletedProcess(a, 0, "", ""))
         assert bg._listen_over_bluez("AA:BB:CC:DD:EE:FF", 0x22, 1, lambda v: None) is None
 
@@ -479,8 +479,8 @@ class TestTheListenActionThroughTheRealDispatcher:
     HR = "Heart Rate Measurement"
 
     def _device(self, monkeypatch):
-        monkeypatch.setattr(bg, "paired", lambda: [("B3:69:73:62:B2:B6", "FB BGS002")])
-        monkeypatch.setattr(bg, "attributes", lambda mac: [
+        monkeypatch.setattr(bg._engine, "paired", lambda: [("B3:69:73:62:B2:B6", "FB BGS002")])
+        monkeypatch.setattr(bg._engine, "attributes", lambda mac: [
             (0x22, "00002a37-0000-1000-8000-00805f9b34fb", "Characteristic"),
             (0x19, "00002a19-0000-1000-8000-00805f9b34fb", "Characteristic"),
         ])
@@ -527,7 +527,7 @@ class TestTheListenActionThroughTheRealDispatcher:
         and "nothing arrived" is a true answer, not a failure to hide behind."""
         self._device(monkeypatch)
         self._granted(monkeypatch)
-        monkeypatch.setattr(bg, "notifications", lambda mac, h, s: ([], ""))
+        monkeypatch.setattr(bg._engine, "notifications", lambda mac, h, s: ([], ""))
         out = bg._run({"action": "listen", "device": "FB",
                        "characteristic": self.HR, "seconds": 5})
         assert f"sent no {self.HR}" in out, out
@@ -536,7 +536,7 @@ class TestTheListenActionThroughTheRealDispatcher:
     def test_the_readings_are_reported_as_a_series_and_decoded(self, monkeypatch):
         self._device(monkeypatch)
         self._granted(monkeypatch)
-        monkeypatch.setattr(bg, "notifications",
+        monkeypatch.setattr(bg._engine, "notifications",
                             lambda mac, h, s: (["064a00", "064c00"], ""))
         out = bg._run({"action": "listen", "device": "FB",
                        "characteristic": self.HR, "seconds": 5})
@@ -548,7 +548,7 @@ class TestTheListenActionThroughTheRealDispatcher:
         so the refusal has to name the thing that can."""
         self._device(monkeypatch)
         self._granted(monkeypatch)
-        monkeypatch.setattr(bg, "read_value",
+        monkeypatch.setattr(bg._engine, "read_value",
                             lambda mac, h, label, exp: ("", bg._NOTIFY_ONLY.get(label, "nope")))
         out = bg._run({"action": "read", "device": "FB", "characteristic": self.HR})
         assert "listen" in out, out

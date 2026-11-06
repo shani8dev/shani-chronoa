@@ -216,6 +216,7 @@ def test_the_page_builds_and_asks_for_everything_it_needs():
 
 
 def _quiet_prereqs(monkeypatch, listening):
+    monkeypatch.setattr("shani_chronoa.pipewire.is_available", lambda: True)
     monkeypatch.setattr(listening, "_can_transcribe", lambda: ("whisper.cpp", True))
     monkeypatch.setattr(listening, "_consent", lambda: ("Allowed", True))
 

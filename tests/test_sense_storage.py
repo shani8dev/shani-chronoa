@@ -183,6 +183,8 @@ class TestEndToEnd:
         _block(root, "dm-0", slaves=("nvme0n1p3",))
         monkeypatch.setattr(storage.ChronoaConfig, "sense_allowed",
                             lambda self, s: True)
+        monkeypatch.setattr(storage.shutil, "which",
+                            lambda name: "/usr/sbin/smartctl" if name == "smartctl" else None)
         monkeypatch.setattr(
             storage, "_run_smartctl",
             lambda device: subprocess.CompletedProcess(

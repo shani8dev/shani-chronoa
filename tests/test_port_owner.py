@@ -33,6 +33,22 @@ UDP = """  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retr
 """
 
 
+@pytest.fixture(autouse=True)
+def _a_listening_socket():
+    """Bind one real listening TCP socket for the live-kernel assertion.
+
+    The test compares the parser against /proc/net/tcp, which is empty on a
+    container with nothing listening. Binding a socket here gives the parser
+    something to agree with, without touching a real device or a real service.
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(("127.0.0.1", 0))
+    sock.listen(1)
+    yield
+    sock.close()
+
+
 @pytest.fixture
 def fake_proc(tmp_path, monkeypatch):
     """A /proc-shaped tree, and this test session's own listening socket."""

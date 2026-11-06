@@ -235,6 +235,12 @@ class AgentService:
 
     def Approve(self, connection, sender, path, interface, method, params,
                 invocation) -> None:
+        """Approve or reject a pending turn.
+
+        **No Python caller in this tree**: this is a D-Bus method invoked by
+        clients over the session bus, so the enforcement scan has no caller to
+        find. Only the test server and the real client call it.
+        """
         turn_id, decision = params.unpack()
         with self._lock:
             entry = self._pending.pop(turn_id, None)

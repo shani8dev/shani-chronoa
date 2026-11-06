@@ -331,10 +331,16 @@ class TestCouldNotAskIsNotNo:
         one hover away.
         """
         out = _run(broadway, "knowable", tmp_path, "false")
-        words = " ".join(out["words"])
-        assert "native Wayland window" in words, words
-        assert "TeamViewer" not in words, (
-            f"the alert row carries the essay again: {words}")
+        alert = [s for s in out["subtitles"]
+                 if s and "nothing on this machine can inject input" in s]
+        assert alert, f"the alert row did not render its sentence: {out['subtitles']}"
+        # The alert row itself is what must stay a sentence. The portal row
+        # below it may quote its own failure verbatim, and that failure names
+        # the mechanism the essay is about - so testing the whole page for the
+        # word fails on a correct page, which is what happened here.
+        assert all("TeamViewer" not in s and "RemoteDesktop portal" not in s
+                   for s in alert), (
+            f"the alert row carries the essay again: {alert}")
         tips = " ".join(out.get("tooltips", []))
         assert "TeamViewer" in tips, (
             f"the essay was dropped instead of moved: {tips}")

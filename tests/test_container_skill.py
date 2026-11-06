@@ -86,6 +86,7 @@ def test_gate_refuses_then_opens(tmp_path, monkeypatch) -> None:
 
 def test_the_unit_execs_podman_not_the_bare_subcommand(monkeypatch) -> None:
     """Regression: the first version built the unit command without the binary."""
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/" + name)
     monkeypatch.setattr(subprocess, "run", _recorded_run)
     proc, why = container._podman(["ps", "--format", "{{.Names}}"])
     assert proc is not None, why
@@ -101,6 +102,7 @@ def test_the_unit_execs_podman_not_the_bare_subcommand(monkeypatch) -> None:
 
 def test_a_detached_run_does_not_hold_a_pipe_open(monkeypatch) -> None:
     """Regression: `--pipe` killed conmon by SIGPIPE when the client exited."""
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/" + name)
     monkeypatch.setattr(subprocess, "run", _recorded_run)
     container._podman(["run", "-d", "nginx"], keep_output=True)
     unit_argv = recorded[-1]
@@ -123,6 +125,7 @@ def test_output_files_are_read_back_and_removed(monkeypatch, tmp_path) -> None:
             h.write("a warning\n")
         return subprocess.CompletedProcess(argv, 0, "", "")
 
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/" + name)
     monkeypatch.setattr(subprocess, "run", fake_run)
     proc, why = container._podman(["run", "-d", "nginx"], keep_output=True)
     assert proc is not None, why
@@ -170,6 +173,7 @@ def test_a_string_command_is_split_into_argv(monkeypatch) -> None:
     from shani_chronoa.config import ChronoaConfig
 
     ChronoaConfig().set("container-control-enabled", "true")
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/" + name)
     monkeypatch.setattr(subprocess, "run", _recorded_run)
     container._run({"action": "run", "image": "alpine", "command": "echo hello world"})
     assert recorded, "no command was run"

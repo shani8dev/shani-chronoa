@@ -146,10 +146,7 @@ def _cloud_stt_gate(enabled: bool):
     return original
 
 
-def _page_report(window, tag):
-    view = _view(window)
-    view.push_by_tag(tag)
-    page = view.get_visible_page()
+def _report(page):
     rows = [w for w in _walk(page) if isinstance(w, Adw.ActionRow)]
     return {
         "tag": page.get_tag(),
@@ -166,6 +163,40 @@ def _page_report(window, tag):
         "buttons": [w.get_label() for w in _walk(page)
                     if isinstance(w, Gtk.Button) and w.get_label()],
     }
+
+
+def _page_report(window, tag):
+    view = _view(window)
+    view.push_by_tag(tag)
+    return _report(view.get_visible_page())
+
+
+def _report_when_visible(window, tag, done, want_rows=False, timeout_s=10.0):
+    """Push `tag`, then poll until it is the *visible* page.
+
+    `push_by_tag()` is animated, so `get_visible_page()` right after it can
+    still be the page being left - whose rows are empty. A fixed 1.2 s sleep
+    passed alone and failed in a chunked run under load, reporting "the Ears
+    page lists no models" about a page that had not been reached yet. Poll for
+    the tag (and, where it matters, for rows) instead of guessing at a delay.
+    """
+    import time
+
+    view = _view(window)
+    view.push_by_tag(tag)
+    deadline = time.monotonic() + timeout_s
+
+    def poll():
+        page = view.get_visible_page()
+        report = _report(page)
+        if ((page.get_tag() == tag and (not want_rows or report["rows"]))
+                or time.monotonic() >= deadline):
+            done(report)
+            return False
+        GLib.timeout_add(100, poll)
+        return False
+
+    GLib.timeout_add(50, poll)
 
 
 def test_the_ears_page_shows_a_model_before_it_charges_for_one(cloud_config):

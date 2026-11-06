@@ -120,6 +120,9 @@ def test_the_rest_of_home_cannot_be_read(project):
     assert code != 0 and "TOP SECRET" not in out, out
 
 
+@pytest.mark.skipif(os.geteuid() != 0,
+                    reason="the sandbox's network isolation needs CAP_SYS_ADMIN, "
+                           "which an unprivileged runner does not have")
 def test_the_network_is_cut_unless_asked_for(project):
     proj, _ = project
     code, out, _ = _run(_confined_executor(), proj,

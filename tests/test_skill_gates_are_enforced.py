@@ -99,6 +99,7 @@ _IMPL = {
     # `list_containers` follows. (These two rows were once entered twice, the
     # second copy's comment about `*-control-enabled` sitting on entries the
     # interpreter had already discarded; both notes are kept on the surviving row.)
+    "look_at_image": "shani_chronoa.skills.look_at_image",
     "container": "shani_chronoa.skills.container",
     "vm": "shani_chronoa.skills.vm",
     "click_pointer": "shani_chronoa.skills.input_control",

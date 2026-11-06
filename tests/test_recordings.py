@@ -303,6 +303,7 @@ def test_a_quiet_machine_reports_itself_quiet(monkeypatch):
     from shani_chronoa.skills import recording
 
     monkeypatch.setattr("shani_chronoa.config.ChronoaConfig", lambda: _Config())
+    monkeypatch.setattr("shani_chronoa.pipewire.is_available", lambda: True)
     monkeypatch.setattr("shani_chronoa.pipewire.list_streams", lambda: [])
 
     said = recording._run({"action": "streams"})
@@ -317,6 +318,7 @@ def test_a_playing_application_is_listed_with_its_capture_name(monkeypatch):
     from shani_chronoa.skills import recording
 
     monkeypatch.setattr("shani_chronoa.config.ChronoaConfig", lambda: _Config())
+    monkeypatch.setattr("shani_chronoa.pipewire.is_available", lambda: True)
     monkeypatch.setattr("shani_chronoa.pipewire.list_streams",
                         lambda: [_Stream("pw-play", "/tmp/tone.wav", True)])
 
@@ -332,6 +334,7 @@ def test_an_applications_microphone_is_not_offered_as_capture_target(monkeypatch
     from shani_chronoa.skills import recording
 
     monkeypatch.setattr("shani_chronoa.config.ChronoaConfig", lambda: _Config())
+    monkeypatch.setattr("shani_chronoa.pipewire.is_available", lambda: True)
     monkeypatch.setattr("shani_chronoa.pipewire.list_streams",
                         lambda: [_Stream("chromium", "Audio input", False)])
 

@@ -93,6 +93,10 @@ def test_eyes_step_downloads_both_files_and_points_the_server_at_them(monkeypatc
     monkeypatch.setattr(local_vision, "TIERS", (m,))
     monkeypatch.setattr(local_llm, "server_binary", lambda: "/usr/bin/llama-server")
     monkeypatch.setattr(local_llm, "gpu_devices", lambda: [])
+    # The engine is already present here, so setup_eyes must not try to
+    # download it; without this it hits the mock transport's 404.
+    from shani_chronoa import engines
+    monkeypatch.setattr(engines, "ensure", lambda *a, **k: "/usr/bin/llama-server")
     started = []
     monkeypatch.setattr(model_service, "start", lambda instance: started.append(instance) or "")
     out = setup_wizard.setup_eyes("smolvlm2-500m", wait_seconds=0,
@@ -243,6 +247,10 @@ def test_memory_step_writes_an_embedding_server(monkeypatch):
     data = b"GGUF" + os.urandom(500)
     monkeypatch.setattr(local_embed, "MODEL", _spec("nomic", "e.gguf", data))
     monkeypatch.setattr(local_llm, "server_binary", lambda: "/usr/bin/llama-server")
+    # The engine is already present here, so setup_memory must not try to
+    # download it; without this it hits the mock transport's 404.
+    from shani_chronoa import engines
+    monkeypatch.setattr(engines, "ensure", lambda *a, **k: "/usr/bin/llama-server")
     monkeypatch.setattr(model_service, "start", lambda instance: "")
     out = setup_wizard.setup_memory(wait_seconds=0, transport=_serve({"/e.gguf": data}))
     assert "by what they meant" in out and local_embed.configured()

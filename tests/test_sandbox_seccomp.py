@@ -45,6 +45,22 @@ import pytest
 _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
+
+def _seccomp_active() -> bool:
+    """Whether this process already runs under a seccomp filter.
+
+    A container runtime applies one of its own, in which case a child cannot
+    report SECCOMP 0 no matter what the gate does.
+    """
+    try:
+        for line in Path("/proc/self/status").read_text().splitlines():
+            if line.startswith("Seccomp:"):
+                return line.split()[1] != "0"
+    except OSError:
+        return False
+    return False
+
+
 from shani_chronoa.sandbox import executor as executor_mod  # noqa: E402
 from shani_chronoa.sandbox import seccomp as seccomp_mod  # noqa: E402
 from shani_chronoa.sandbox.executor import SandboxExecutor  # noqa: E402
@@ -190,6 +206,10 @@ class TestTheGate:
             f"the schema default is {match.group(1)!r}; this control ships off"
         )
 
+    @pytest.mark.skipif(
+        _seccomp_active(),
+        reason="the host already applies a seccomp filter to this process "
+               "(container runtime), so a child cannot report SECCOMP 0")
     def test_with_the_gate_off_the_child_reports_itself_unfiltered(self, executor):
         code, out, _ = executor.execute(
             _python("""

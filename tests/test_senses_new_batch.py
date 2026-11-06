@@ -130,7 +130,25 @@ def granted(chronoa_config):
         f"test below would read a refusal instead of the sense's own output: "
         f"{ungranted}"
     )
-    return reread
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _a_listening_socket():
+    """Bind one real listening TCP socket for the live socket-table control.
+
+    The control compares the sense's parser against /proc/net/tcp, which is
+    empty on a container with nothing listening. Binding a socket here gives
+    the parser something to agree with, without touching a real device or a
+    real service.
+    """
+    import socket
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(("127.0.0.1", 0))
+    sock.listen(1)
+    yield
+    sock.close()
 
 
 def _no_runtime(monkeypatch) -> None:
@@ -260,20 +278,20 @@ class TestKernel:
         assert "not a claim about the kernel" in text, text
 
     def test_no_container_marker_is_not_physical_hardware(
-        self, granted, monkeypatch
+        self, granted, monkeypatch, tmp_path
     ):
         # The marker *paths* are the dict's keys, so the whole dict is replaced.
         # Patching the values would leave the real `/.dockerenv` being read and
         # make this control pass for the wrong reason - which is exactly the
         # shape of ineffective control AGENTS.md warns about.
+        # The paths point at an empty tmp dir rather than / and /run: a
+        # container's own /.dockerenv is real, so "no marker" cannot be produced
+        # from the real paths (which is why this previously asserted their
+        # absence instead of just pointing elsewhere).
         monkeypatch.setattr(kernel_mod, "_CONTAINER_MARKERS", {
-            "/.dockerenv": "docker",
-            "/run/.containerenv": "podman",
+            str(tmp_path / ".dockerenv"): "docker",
+            str(tmp_path / ".containerenv"): "podman",
         })
-        assert not Path("/.dockerenv").exists(), (
-            "this machine really is in a docker container, so 'no marker' cannot "
-            "be produced by replacing the paths - the control cannot run here"
-        )
         result = kernel_mod.read_virtualisation()
         assert result["state"] == kernel_mod.VIRT_NO_MARKER
         assert result["state"] != kernel_mod.VIRT_UNKNOWN, (

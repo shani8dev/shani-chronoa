@@ -318,6 +318,18 @@ class TestInfraredVideo:
         monkeypatch.setattr(skill.shutil, "which", lambda n: "/x/ffmpeg")
         monkeypatch.setattr(skill.files, "data_home",
                             lambda: tmp_path / "data")
+        # **The device existence check is not what this test is about**, and
+        # `/dev/video0` is not on a CI runner or in a container. A blanket
+        # `Path.exists = lambda self: True` is what broke the filename-collision
+        # loop into an eight-minute spin (see this docstring), so only the
+        # camera node paths answer True; everything else (including the
+        # collision-loop target in data_home) keeps the real answer.
+        _real_exists = Path.exists
+
+        def _exists(self):
+            return True if str(self).startswith("/dev/video") else _real_exists(self)
+
+        monkeypatch.setattr(Path, "exists", _exists)
         chosen = {}
 
         class _Run:
