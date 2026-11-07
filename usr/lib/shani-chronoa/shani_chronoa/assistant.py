@@ -461,6 +461,18 @@ class Assistant:
         validation failure waiting for one strict provider to find.
         """
         self._history.append(message)
+        self._save(message, source)
+
+    def _save(self, message: dict, source: "str | None" = None) -> None:
+        """Write one message to the saved transcript, not to `_history`.
+
+        Split from `_record` for `close_interrupted_turn`: a repair can insert
+        a synthesized result *before* a message that was already recorded (the
+        duplicate-result nudge is appended after the last result), so the
+        repaired list is not always the old history plus a suffix. The caller
+        takes the repaired list as the new history and saves only the messages
+        that are new.
+        """
         if self._session_path is not None and message.get("role") != "system":
             # **The fence is for the model, not for the transcript.**
             # `provenance.strip_fences` removes its markers before the message
@@ -637,9 +649,21 @@ class Assistant:
         Returns the repair messages, for the caller to log or assert on.
         """
         repaired = history_repair.repair_orphans(self._history, reason)
-        added = repaired[len(self._history):]
+        # **The repair can insert, not only append.** `repair_orphans` puts a
+        # synthesized result directly behind the results that already exist,
+        # and a run of identical results has already recorded a nudge *after*
+        # the last of them - so the repaired list can differ from the history in
+        # the middle. `repaired[len(history):]` then names the nudge as "added":
+        # the repair is never recorded at all and the nudge is recorded twice.
+        # Measured 2026-11-07 in `test_tool_loop_continuity`: the transcript held
+        # three results and two nudges for four calls. Identity, not equality, is
+        # the test here because the repair reuses the very dicts it was given.
+        known = {id(message) for message in self._history}
+        added = [message for message in repaired if id(message) not in known]
+        if added:
+            self._history = repaired
         for message in added:
-            self._record(message)
+            self._save(message)
         if added:
             self._continue_notice = (
                 history_repair.CONTINUE_PROMPT
