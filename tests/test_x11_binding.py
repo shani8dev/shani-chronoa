@@ -6,10 +6,11 @@ wrong, and each one found by running rather than by reading.
 
 Those three, so nobody re-derives them:
 
-- **`_NET_CLIENT_LIST` is format 32 here**, so a window id is **4 bytes**, not
-  the 8 that `sizeof(unsigned long)` suggests. Reading it as 8 reads half as many
-  windows and reports an **empty list** - measured, on a server that had one
-  window in it.
+- **`_NET_CLIENT_LIST` is format 32, and Xlib hands format-32 data back as an
+  array of C `long`s - 8 bytes an entry here, not 4.** `nitems` counts
+  elements, so reading `nitems * 4` reads **half the buffer**: measured
+  2026-11-07, `xprop` listed 25 windows and `window_ids()` returned 25 values
+  alternating real ids and zeros (this file failed on the first zero).
 - **`XQueryTree`'s children return is a `Window **`**, so the local is a
   `POINTER(c_ulong)` passed *directly*. Passing `byref()` of it raises
   `expected LP_c_ulong instance instead of pointer to LP_c_ulong`, and iterating
@@ -55,7 +56,10 @@ def test_the_window_list_is_read_at_the_servers_own_format():
         # and the ids really are what the raw property holds
         _kind, fmt, raw = d._property(d.root(), "_NET_CLIENT_LIST", "WINDOW")
         if raw:
-            expected = list(struct.unpack_from("<%dL" % (len(raw) // (fmt // 8)), raw))
+            width = x11._item_width(fmt)
+            code = {1: "B", 2: "H", 4: "L", 8: "Q"}[width]
+            expected = list(struct.unpack_from(
+                "<%d%s" % (len(raw) // width, code), raw))
             assert d.window_ids() == expected
 
 
@@ -78,15 +82,25 @@ def test_geometry_is_translated_into_root_coordinates():
     is the decoration frame. Using them as screen coordinates puts every click
     in the wrong place - which is the 37px/74px failure this repo measured."""
     with _display() as d:
+        width, height = d.size()
+        on_screen = 0
         for wid in d.window_ids():
             geo = d.geometry(wid)
             if geo is None:
                 continue
             x, y, w, h = geo
             assert w > 0 and h > 0, (x, y, w, h)
-            width, height = d.size()
-            assert 0 <= x <= width and 0 <= y <= height, (
-                "window %d at (%d,%d) is outside a %dx%d screen" % (wid, x, y, width, height))
+            if 0 <= x <= width and 0 <= y <= height:
+                on_screen += 1
+                continue
+            # **A window can legitimately sit outside the root's own size.**
+            # Measured 2026-11-07: Xfce's bottom panel is at y=1149 on a
+            # 1080-tall Xwayland root, and `xwininfo` reports the same absolute
+            # position - so that is the desktop's shape, not a translation bug,
+            # and it is skipped rather than asserted either way.
+        assert on_screen, (
+            "no window was on the %dx%d screen, so this checked nothing: %r"
+            % (width, height, [d.geometry(w) for w in d.window_ids()]))
 
 
 def test_the_pointer_is_asked_of_the_server():

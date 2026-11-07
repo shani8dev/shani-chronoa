@@ -99,6 +99,17 @@ def _declare() -> None:
     X11.XInternAtom.restype = ctypes.c_ulong
     X11.XInternAtom.argtypes = [c_void_p, ctypes.c_char_p, ctypes.c_int]
 
+    # **Xlib's default error handler calls `exit(1)`.** A window id from
+    # `_NET_CLIENT_LIST` is a snapshot: the window can be gone by the time its
+    # class or geometry is read, and the server answers `BadWindow`. With the
+    # default handler that is not an exception and not even a traceback - the
+    # interpreter exits mid-test with rc=1 and no summary, which is how this was
+    # found (tests/test_x11_binding.py died on its fifth test, after `WM_CLASS`).
+    # Installing our own handler turns the same reply into the `status == 0` /
+    # `None` every caller here already handles.
+    X11.XSetErrorHandler.restype = c_void_p
+    X11.XSetErrorHandler.argtypes = [c_void_p]
+
     X11.XRootWindow.restype = ctypes.c_ulong
     X11.XRootWindow.argtypes = [c_void_p, ctypes.c_int]
 
@@ -167,6 +178,30 @@ class XError(RuntimeError):
     """The X server refused, or the call could not be made at all."""
 
 
+def _item_width(fmt: int) -> int:
+    """Bytes each returned item occupies in `_property`'s buffer.
+
+    **The protocol format is not the in-memory width.** `XGetWindowProperty`
+    reports the property's format (8, 16 or 32), but Xlib widens format-32 data
+    to one C `long` per item before handing it back, so a `WINDOW` array is 8
+    bytes an entry on this platform even though the format says 32.
+    """
+    if fmt == 32:
+        return ctypes.sizeof(ctypes.c_long)
+    if fmt == 16:
+        return 2
+    return 1
+
+
+#: Xlib's error handler takes `(Display *, XErrorEvent *)` and returns an int.
+#: The event is not inspected: every caller here learns the same thing from the
+#: call's own failure return, and this exists only to stop the *default* handler,
+#: whose final act is `exit(1)`. Kept at module scope so ctypes never collects
+#: the callback while Xlib still holds the pointer.
+_X_ERROR_HANDLER = ctypes.CFUNCTYPE(ctypes.c_int, c_void_p, c_void_p)(
+    lambda _display, _event: 0)
+
+
 #: An `XEvent` is a union of every event type. Only `XClientMessageEvent` is
 #: built here, so the rest of the union is declared as raw bytes - the size is
 #: what matters, because `XSendEvent` copies the whole thing and a buffer that is
@@ -208,6 +243,9 @@ class Display:
         if not self._d:
             raise XError("no X server at %s" % (name or os.environ.get("DISPLAY")
                                                 or "the default display"))
+        # Process-global, and idempotent: every `Display` installs the same
+        # handler, so the last one opened still leaves it in place.
+        X11.XSetErrorHandler(ctypes.cast(_X_ERROR_HANDLER, c_void_p))
 
     def __enter__(self) -> "Display":
         return self
@@ -260,13 +298,15 @@ class Display:
             if blob:
                 X11.XFree(blob)
             return 0, 0, b""
-        # **The item width comes from the format, not from an assumption.** A
-        # `WINDOW` array is format 32 here - 4 bytes per id, measured - and the
-        # obvious `sizeof(unsigned long)` (8) reads half as many windows as the
-        # server sent and reports the list as empty.
+        # **Format 32 is an array of C `long`s in memory, not 4-byte ints.**
+        # Xlib widens it, and `nitems` counts elements - so `nitems * 4` reads
+        # half the buffer and every other window id comes back as 0. Measured
+        # 2026-11-07: `xprop -root _NET_CLIENT_LIST` listed 25 windows, and
+        # `window_ids()` returned 25 values alternating real ids and zeros,
+        # which is what `tests/test_x11_binding.py` failed on. The width is
+        # `sizeof(long)` here for exactly the reason the old comment denied.
         try:
-            width = fmt.value // 8 if fmt.value in (8, 16, 32) else 1
-            nbytes = nitems.value * width
+            nbytes = nitems.value * _item_width(fmt.value)
             raw = bytes(bytearray(blob[:nbytes]))
         finally:
             X11.XFree(blob)
@@ -287,12 +327,13 @@ class Display:
             return []
         import struct
 
-        width = fmt // 8
+        width = _item_width(fmt)
         if width not in (1, 2, 4, 8) or len(raw) % width:
             logger.warning("window list of %d bytes at format %d is not a list of ids", len(raw), fmt)
             return []
         count = len(raw) // width
-        return list(struct.unpack_from("<%dL" % count, raw))
+        code = {1: "B", 2: "H", 4: "L", 8: "Q"}[width]
+        return list(struct.unpack_from("<%d%s" % (count, code), raw))
 
     def name(self, window: int) -> str:
         """A window's title. `_NET_WM_NAME` first, then `WM_NAME`.
