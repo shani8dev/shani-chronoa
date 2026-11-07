@@ -81,9 +81,12 @@ CHAT_TAG = "chronoa-chat"
 #: So two lines is not a compromise between two costs - it costs the same 33px
 #: whether the refusal is 150 characters or 1200, and the extra 16px arrives
 #: **only** for text that needs it. That matters because the window's chrome has
-#: **zero slack**: `set_size_request(380, 487)` is 367 of chrome plus exactly
+#: **zero slack**: `set_size_request(380, 490)` is 370 of chrome plus exactly
 #: 120 of transcript, so a permanent extra line would have to be paid for out of
-#: the conversation. A bound that only costs when it wraps is not that.
+#: the conversation. A bound that only costs when it wraps is not that. (The
+#: chrome measured 367 on 2026-10-19 and 370 on 2026-11-07; the minimum is kept
+#: at chrome + 120 rather than a remembered number, because 3px of growth with
+#: the minimum left behind is a conversation under the promised 120.)
 DETAIL_MAX_LINES = 2
 
 
@@ -1879,7 +1882,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # 88px is a quarter of it. A minimum that is honest beats a minimum
         # that promises a window with nothing in it; the chrome is the next thing
         # to shrink.
-        self.set_size_request(380, 487)
+        self.set_size_request(380, 490)
         self.set_decorated(True)
         self._apply_css()
         self._apply_motion_preference()

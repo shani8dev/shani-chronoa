@@ -31,7 +31,14 @@ STATE=/tmp/opencode/suite-chunks
 # Overridable so the staleness rule below can be tested with a fabricated log
 # rather than asserted about in prose. The default is unchanged.
 LOGS=${LOGS:-/tmp/opencode/suite-chunk-logs}
-mkdir -p "$STATE" "$LOGS"
+# Manifests in their own directory. They used to live straight in
+# /tmp/opencode as `chunk_aa`..`chunk_<NN>`, and the loop globbed every
+# `chunk_*` entry there - so any unrelated *directory* with that prefix (a
+# `chunk_out/` from an earlier experiment, measured 2026-11-07) was iterated as
+# a manifest and `CHUNKS=2` ran three chunks. `rm -f` cannot remove a directory,
+# so the previous run's cleanup could not fix it either.
+MANIFESTS=${MANIFESTS:-/tmp/opencode/suite-manifests}
+mkdir -p "$STATE" "$LOGS" "$MANIFESTS"
 
 # `test_setup_button_is_reachable` aborts the interpreter (AGENTS.md: pre-existing,
 # unexplained, and it passes alone). Run it separately, not in a chunk.
@@ -45,8 +52,8 @@ ls tests/test_*.py | grep -v "$SOLO" > "$list"
 # them the older, larger split - and would have run a file list that no longer
 # matched the requested chunking. A chunking parameter that does not change the
 # chunks is a parameter that lies.
-rm -f /tmp/opencode/chunk_*
-split -n "l/$CHUNKS" "$list" /tmp/opencode/chunk_
+rm -f "$MANIFESTS"/chunk_*
+split -n "l/$CHUNKS" "$list" "$MANIFESTS/chunk_"
 
 # **A log is "already done" only if it is newer than the code it measured.**
 #
@@ -75,7 +82,7 @@ newest_source=$(find usr/lib/shani-chronoa/shani_chronoa tests \
                     -type f -name 'gschemas.compiled' 2>/dev/null \
                 | xargs -r ls -t 2>/dev/null | head -1)
 
-for manifest in /tmp/opencode/chunk_*; do
+for manifest in "$MANIFESTS"/chunk_*; do
     name=$(basename "$manifest")
     log="$LOGS/$name.log"
     if [ -s "$log" ] && grep -qE 'passed|failed|error' "$log"; then

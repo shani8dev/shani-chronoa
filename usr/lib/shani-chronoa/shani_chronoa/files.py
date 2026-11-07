@@ -613,6 +613,12 @@ _PACKAGE_HINTS = {
         "kreadconfig6": "kconfig",
         "plasma-apply-colorscheme": "plasma-workspace",
     "nmcli": "networkmanager",
+    # `grim` is the Wayland screenshot tool `ui_driver.window_shot` captures a
+    # niri window with. Added 2026-11-07: the lookup landed in cb4378e after
+    # the package-name gate (e4ff91a), so the gate found it with no hint and
+    # the refusal named no package. On Arch the binary and the package share
+    # the name; read out of `pacman -F grim`.
+    "grim": "grim",
     # **binutils, not elfutils.** Both exist on Arch, and `elfutils` is
     # what this file's own package list already pulls in - but the binary
     # called `readelf` ships in `binutils`; elfutils provides the

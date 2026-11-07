@@ -40,11 +40,11 @@ _SRC = _REPO / "usr" / "lib" / "shani-chronoa"
 #: that quietly stops being true.
 COVERED = ["airplane_mode", "click_pointer", "close_window", "container",
            "control_service", "conversations", "default_apps", "delete_file",
-           "desktop_setting", "driver_build", "edit_file",
+           "desktop_setting", "drag", "driver_build", "edit_file",
            "find_and_replace", "git_branch", "git_commit", "git_push",
            "kill_process", "manage_mount", "manage_triggers",
            "move_pointer", "office_document", "power_action", "print_queue",
-           "set_hostname", "set_locale", "take_photo", "toggle_wifi",
+           "scroll", "set_hostname", "set_locale", "take_photo", "toggle_wifi",
            "type_text", "vm"]
 #: Kept by hand, deliberately, because the whole point of this list is to be a
 #: **claim** about coverage rather than a re-derivation of it: if it were
@@ -56,6 +56,8 @@ COVERED = ["airplane_mode", "click_pointer", "close_window", "container",
 #
 # **`driver_build`, `container` and `vm` were added by three separate sessions'
 # work and none updated this list**, so the guard went red on all three at once.
+# `drag` and `scroll` arrived the same way on 2026-11-07 (the pointer skills
+# gained post-conditions) and this list said 28 of 81 where the registry said 30.
 # `ir_remote` is deliberately *not* here: it has no post-condition, because an
 # infrared blast cannot be verified by reading anything back, and the AGENTS.md
 # note about the 50 unprotected tools covers it.

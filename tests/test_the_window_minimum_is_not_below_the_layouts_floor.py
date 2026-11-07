@@ -7,7 +7,7 @@ minimums bind:
 
 | window width | chrome | transcript                          |
 |--------------|--------|-------------------------------------|
-| any width     | 367px  | `max(120, height - 367)`            |
+| any width     | 370px  | `max(120, height - 370)`            |
 
 The 37px between the two is the **organ strip compacting** - eight status
 lights that stop needing a row of their own once there is width for them.
@@ -58,12 +58,13 @@ from shani_chronoa.gui import window as W  # noqa: E402
 #: **Every row here is a window the product will actually produce.** The rows
 #: this file used to carry at 480-560 tall are gone because `set_size_request`
 #: will not let a window be shorter than its minimum: asked for 480 tall, the
-#: window measures 487 and the transcript reads 120. A row recorded as
+#: window measures 490 and the transcript reads 120. A row recorded as
 #: `(380, 480, 58)` was the floor of the law, not a measurement of anything.
 #:
-#: Re-measured 2026-10-19, one process per window. The chrome is **367 at every
-#: one of them**: 580-367=213, 600-367=233, 640-367=273, 700-367=333,
-#: 768-367=401.
+#: Re-measured 2026-11-07, one process per window. The chrome is **370 at every
+#: one of them**: 580-370=210, 600-370=230, 640-370=270, 700-370=330,
+#: 768-370=398. It was 367 on 2026-10-19; the three pixels are the product's
+#: own chrome growing, which this file re-measures rather than remembers.
 #:
 #: **It was 451 on 2026-10-14, and the strip's own row is why.** The mode
 #: chips and the organ lights share one line now, so a strip that wraps to two
@@ -71,32 +72,32 @@ from shani_chronoa.gui import window as W  # noqa: E402
 #: one. So the wrapping costs nothing, and the chrome is the same at every
 #: width as well as every height.
 NARROW = [
-    (380, 580, 213),
-    (380, 600, 233),
-    (380, 640, 273),
-    (380, 700, 333),
-    (380, 768, 401),
+    (380, 580, 210),
+    (380, 600, 230),
+    (380, 640, 270),
+    (380, 700, 330),
+    (380, 768, 398),
 ]
 
 #: Wide layout: **the same chrome as the narrow one**, because the strip no
 #: longer has a row of its own to give up. It used to be 36px less - exactly
 #: the second row the strip stopped needing (74 - 38).
 WIDE = [
-    (700, 640, 273),
-    (760, 640, 273),
-    (760, 700, 333),
-    (760, 768, 401),
+    (700, 640, 270),
+    (760, 640, 270),
+    (760, 700, 330),
+    (760, 768, 398),
 ]
 
 #: Width is free **everywhere** now, across the breakpoint as well as within a
 #: layout. Measured at 640 tall, one process per width: 380, 460, 520 and 560
-#: all give **273**. It used to be 189 below the breakpoint and 225 above it -
+#: all give **270**. It used to be 189 below the breakpoint and 225 above it -
 #: the step was the strip's own row, and the strip shares a row with the chips
 #: now, so there is no step left.
-WIDTH_IS_FREE = [(380, 273), (460, 273), (520, 273), (560, 273)]
+WIDTH_IS_FREE = [(380, 270), (460, 270), (520, 270), (560, 270)]
 
-CHROME_NARROW = 367
-CHROME_WIDE = 367
+CHROME_NARROW = 370
+CHROME_WIDE = 370
 
 #: **The width at which the strip stops wrapping, measured.**
 #:
@@ -109,7 +110,7 @@ CHROME_WIDE = 367
 #:
 #: **It no longer moves the chrome.** A wrapped strip makes the *shared* line
 #: taller, and the mode chips already made that line the tall one - so the
-#: chrome is 367 at every width. The number is kept because it is still where
+#: chrome is 370 at every width. The number is kept because it is still where
 #: the strip's own layout changes, and because the tables below are read
 #: against it.
 WIDTH_BREAKPOINT = 495
@@ -117,8 +118,8 @@ WIDTH_BREAKPOINT = 495
 FLOOR_NARROW = 120
 FLOOR_WIDE = 120
 
-#: Where the law's linear part overtakes the floor: `367 + 120 + 1`.
-LINE_FROM = 488
+#: Where the law's linear part overtakes the floor: `370 + 120 + 1`.
+LINE_FROM = 491
 
 #: The smallest conversation this file will call a conversation. Below roughly
 #: six lines the transcript is a peephole rather than a place a reply is read.
@@ -176,7 +177,7 @@ class TestTheMeasurementsAreTheCurveTheyClaimToBe:
         **The strip has no row of its own now.** The mode chips and the organ
         lights share one line, so a strip that wraps to two rows makes *that*
         line taller - and the chips' line was already the tall one. The
-        wrapping therefore costs nothing, and the chrome is 367 at every width
+        wrapping therefore costs nothing, and the chrome is 370 at every width
         as well as at every height.
 
         **So the whole "width is a lever with a step in it" story is over**,
@@ -250,7 +251,7 @@ class TestTheMinimumLeavesNoConversation:
         480 - 448 = 32, and the chrome's own minimum answered 58. That was
         the height of roughly two lines, in a window the app chose to permit -
         which is not a small window, it is a window with no conversation in
-        it. The chrome is 367 now, so the same promise - 120px of
+        it. The chrome is 370 now, so the same promise - 120px of
         conversation - fits in a window 84px shorter.
         """
         width, height = declared_minimum()
@@ -313,7 +314,7 @@ class TestWidthIsNotTheLever:
 
         The first version compared 380 with 760, which straddle *both*
         breakpoints, so it could only ever have shown that the conversation
-        does not shrink. Measured at 640 tall: the chrome is **367 at every
+        does not shrink. Measured at 640 tall: the chrome is **370 at every
         width from 495 upward**, across the sidebar's own collapse at 720. So
         opening the sidebar costs the conversation nothing at all, and the only
         step in the width is the strip's.

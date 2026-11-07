@@ -377,6 +377,15 @@ _SYNONYMS: Dict[str, str] = {
     "nspawn": "container image run command",
     "gui": "controls window button app",
     "window": "controls window app",
+    # Writing text into a file. The plainest phrasing of `write_text_file` is
+    # "write ... into a new file", and both document skills also say "writes a
+    # new file" - so on the generic words alone a query with no document in it
+    # (a shopping list, a note) landed on `convert_document`, which would look
+    # for a source document that isn't there. Measured 2026-11-07: this was the
+    # one case between the corpus's 190/220 floor and the 189 the document
+    # skills took it to.
+    "into a new file": "write text file content",
+    "into the file": "write text file content",
     "test my app": "drive act controls window",
     "test the app": "drive act controls window",
     "weather": "weather", "forecast": "weather", "temperature": "weather",
