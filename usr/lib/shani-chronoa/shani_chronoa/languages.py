@@ -214,6 +214,13 @@ def voice_for_text(text: str, config=None) -> "Optional[tuple[str, str]]":
     return None
 
 
+#: Languages whose ISO code espeak-ng has no voice for, mapped to one that
+#: reads their script. Measured 2026-11-08: `espeak-ng -v sa` exits 1 with
+#: "The specified espeak-ng voice does not exist", so Sanskrit fell back to
+#: English pronunciation - or to no speech at all. `as` and `sd` do exist.
+_ESPEAK_ALIAS = {"sa": "hi"}
+
+
 def espeak_language(text: str, config=None) -> str:
     """An espeak-ng language for `text` when it is in one of the person's languages' scripts; '' otherwise."""
     script = script_of(text)
@@ -221,8 +228,8 @@ def espeak_language(text: str, config=None) -> str:
         return ""
     for code in chosen(config):
         if LANGUAGES[code].script == script:
-            return code
-    return next((c for c, lang in LANGUAGES.items() if lang.script == script), "")
+            return _ESPEAK_ALIAS.get(code, code)
+    return _ESPEAK_ALIAS.get(next((c for c, lang in LANGUAGES.items() if lang.script == script), ""), "")
 
 
 def install_size(code: str, speech: bool = True) -> int:

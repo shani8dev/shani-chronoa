@@ -64,3 +64,24 @@ def test_speaks_counts_the_packaged_voice(tmp_path, monkeypatch):
     monkeypatch.setattr(voices, "SYSTEM_VOICE_DIR", tmp_path / "sys-voices")
     _plant(tmp_path / "sys-voices", "hi_IN-priyamvada-medium")
     assert languages.speaks("hi") is True
+
+
+def test_sanskrit_falls_back_to_a_voice_espeak_ng_has():
+    """`espeak-ng -v sa` exits 1, so the reply would go unspoken."""
+    from shani_chronoa import languages
+
+    class Config:
+        def get(self, key, default=""):
+            return "sa" if key == languages.SETTING else default
+
+    assert languages.espeak_language("संस्कृतम्", Config()) == "hi"
+
+
+def test_a_language_espeak_ng_has_is_left_alone():
+    from shani_chronoa import languages
+
+    class Config:
+        def get(self, key, default=""):
+            return "mr" if key == languages.SETTING else default
+
+    assert languages.espeak_language("मराठी", Config()) == "mr"
