@@ -179,6 +179,10 @@ CONTROLLED = {
     # entry rows
     "model", "vision-model", "whisper-model", "language", "wake-phrase",
     "piper-voice", "ollama-host",
+    # The screen-capture exclusion list, an EntryRow in the Privacy group
+    # beside privacy mode. It is here rather than in NOT_EXPOSED because the
+    # row exists: `screen_guard.check()` reads it on every capture.
+    "screen-capture-excluded-apps",
     # Read by `stt.build_stt`, not written by a row. Listed here rather than in
     # NOT_EXPOSED because it is *meant* to be user-settable - the whole point
     # of the Parakeet backend - and the window row for it belongs to the

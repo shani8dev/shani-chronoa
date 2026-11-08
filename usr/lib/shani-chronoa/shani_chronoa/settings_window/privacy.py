@@ -126,6 +126,19 @@ class PrivacyPage:
         self._mode_row(group)
         self._switch(group, "Privacy mode (local only)", "Master switch for leaving this machine",
                      config.privacy_mode, lambda a: self._app_toggle("toggle-privacy", a))
+        # **A refusal, not a redaction.** A password manager on screen is the
+        # case Recall broke, and the only reliable way to keep it out of a
+        # capture is for the capture to refuse while it is visible. The row is
+        # an entry rather than a switch because the list is the person's, and
+        # the subtitle says the geometry reason a blank rectangle is not the
+        # answer.
+        self._entry(
+            group, "Apps a screenshot must never contain",
+            "Comma-separated application ids, for example "
+            "org.keepassxc.KeePassXC, firefox. While one is on screen a capture "
+            "is refused rather than redacted.",
+            config.get("screen-capture-excluded-apps", ""),
+            lambda text: config.set("screen-capture-excluded-apps", text))
         self._switch(
             # Not "when Ollama is unavailable": the gate is the configured local
             # brain answering (`self.llm.is_available()`), and that is llama.cpp

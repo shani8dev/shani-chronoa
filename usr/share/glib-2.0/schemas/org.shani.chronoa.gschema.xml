@@ -433,6 +433,11 @@
       <summary>Let Chronoa read the capture devices and who is holding them</summary>
       <description>When true, Chronoa may read which capture devices this machine has - cameras and microphones - and which process currently holds each one open. Off by default because this names the applications you are running at this moment, which is about you rather than about the machine. A device that cannot be checked is reported as undetermined and never as free: a missing holder-lookup tool and a genuinely idle camera look identical from here, and only one of them means nobody is watching.</description>
     </key>
+    <key name="screen-capture-excluded-apps" type="s">
+      <default>''</default>
+      <summary>Applications that must never appear in a screen capture</summary>
+      <description>Comma-separated application ids, for example org.keepassxc.KeePassXC, firefox. While one of them is on screen, a screenshot or the vision sense is refused rather than redacted: a rectangle computed from geometry a capture cannot be trusted to match looks applied and is not. Empty by default, and with no exclusions the check costs nothing.</description>
+    </key>
     <key name="heard-sound-sense-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa listen for sounds in the room, like a doorbell</summary>

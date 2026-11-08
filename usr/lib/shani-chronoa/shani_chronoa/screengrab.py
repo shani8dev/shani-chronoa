@@ -570,6 +570,12 @@ def capture_screen(
             "there is no display to capture: neither WAYLAND_DISPLAY nor DISPLAY is set, "
             "so this is a headless session"
         )
+    # **One gate for every capture path**, because a second one would be the
+    # path that forgets. It refuses while an excluded application is on screen
+    # (a password manager, a bank tab) rather than redacting a rectangle whose
+    # geometry a capture cannot be trusted to match. See `screen_guard.py`.
+    from shani_chronoa import screen_guard
+    screen_guard.check()
     if environment == "wayland":
         return _capture_wayland(timeout, max_capture_bytes)
     return _capture_x11(timeout, max_capture_bytes, max_image_bytes)
