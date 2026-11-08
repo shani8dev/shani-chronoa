@@ -190,10 +190,37 @@ def _progress(report: Optional[Callable[[float, str], None]], cancel: threading.
     def hook(chunk: int, total: int) -> None:
         if cancel.is_set():
             raise Cancelled(what)
+        # A new FILE, not just a new chunk: `total` is fixed per file, and the
+        # same hook serves every file an item downloads (OCR data, then the
+        # voice). Accumulating across files made the second file read "68 of
+        # 56 MB", and left the bar at 100% from the first file's last chunk on.
+        if seen["bytes"] >= total or seen["bytes"] + chunk > total:
+            seen["bytes"] = 0
         seen["bytes"] += chunk
         if report:
             report(min(1.0, seen["bytes"] / max(total, 1)), f"{what}: {seen['bytes'] >> 20} of {total >> 20} MB")
     return hook
+
+
+def _language_capability(code: str) -> str:
+    """What adding `code` gives you, short enough for a row subtitle.
+
+    A language Piper has no voice for is not necessarily silent: Assamese,
+    Sindhi and Sanskrit write a script another language's voice reads, and
+    `voices.voice_for_text` already hands their reply to that voice. The row
+    names it, and says when it still has to be added - otherwise the page
+    says "text only" about a language that does speak.
+    """
+    from shani_chronoa import languages
+    if languages.LANGUAGES[code].voice:
+        return "voice and text"
+    shared = languages.shared_voice_language(code)
+    if not shared:
+        return "text only (no voice yet)"
+    name = languages.LANGUAGES[shared].label.split(" - ")[-1]
+    if languages.speaks(shared):
+        return f"text; speaks with the {name} voice"
+    return f"text; speaks with the {name} voice once it is added"
 
 
 #: Where a model's bytes come from, in the words the consent row shows. The
@@ -1415,6 +1442,11 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
                         def _report(f, t, _label=label):
                             GLib.idle_add(bar.set_fraction, f)
                             if t:
+                                # The bar's own text follows the file being
+                                # fetched ("Hindi: 30 of 60 MB"), so a long voice
+                                # download after a short OCR file does not sit
+                                # under the item's name with no sign of progress.
+                                GLib.idle_add(bar.set_text, t)
                                 GLib.idle_add(status.set_label, f"{_label}: {t}")
                         item["run"](_report)
                     except Exception as exc:                     # noqa: BLE001
@@ -2711,11 +2743,14 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
     lang_checks = {}
     for code, lang in languages.LANGUAGES.items():
         check = Gtk.CheckButton(active=code in la["chosen"])
-        has = ("voice and text" if lang.voice else "text only (no voice yet)")
+        has = _language_capability(code)
         # Through `_mb`, not a second copy of the division - the Languages page
         # carried its own `f"{... / 1e6:.0f} MB"`, and so had the same "0 MB"
         # bug the helper now cannot have.
-        subtitle = ("added" if code in la["reads"] else _mb(languages.install_size(code))) + " - " + has
+        # `install_size` counts only what is missing, so zero means "nothing
+        # to fetch" - a language whose voice and text are both here.
+        subtitle = ("added" if languages.install_size(code) == 0
+                    else _mb(languages.install_size(code))) + " - " + has
         row = Adw.ActionRow(title=lang.label, subtitle=subtitle, activatable_widget=check)
         row.add_prefix(check)
         lang_group.add(row)
@@ -2731,11 +2766,19 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
     _lang_codes = [c for c, b in lang_checks.items() if b.get_active()]
     if _lang_codes:
         def record_languages(_page=None) -> None:
-            choose("languages", f"Languages - {', '.join(_lang_codes)}",
-                   sum(languages.install_size(c) for c in _lang_codes),
-                   lambda report: setup_languages(_lang_codes, listen.get_active(),
-                                                  report, win.cancel, config),
-                   "only the ticked ones")
+            # One Review line per language, not one lump: a lump shows a single
+            # progress line for what can be 300 MB of separate files, and its
+            # Remove button drops every language at once. Re-rendering the page
+            # (unticking something) must also drop the lines that are gone.
+            for stale in [key for key in list(plan) if key.startswith("language-")]:
+                del plan[stale]
+            for code in _lang_codes:
+                lang = languages.LANGUAGES[code]
+                choose(f"language-{code}", lang.label,
+                       languages.install_size(code),
+                       lambda report, c=code: setup_languages([c], listen.get_active(),
+                                                              report, win.cancel, config),
+                       "text and voice" if lang.voice else _language_capability(code))
 
         body_page.connect("shown", record_languages)
 

@@ -134,6 +134,21 @@ def speaks(code: str) -> bool:
     return bool(voice) and voices.voice_installed(voice)
 
 
+def shared_voice_language(code: str) -> str:
+    """A language whose Piper voice reads `code`'s script, when `code` has none of its own.
+
+    Assamese writes Bengali script, Sindhi Arabic, Sanskrit Devanagari - so
+    `voice_for_text` already speaks them with Bengali, Urdu or Hindi when
+    that voice is installed. Empty when `code` has its own voice, or when no
+    language with the same script has one.
+    """
+    lang = LANGUAGES[code]
+    if lang.voice:
+        return ""
+    return next((other for other, entry in LANGUAGES.items()
+                 if other != code and entry.voice and entry.script == lang.script), "")
+
+
 def _link_system_data() -> None:
     """tesseract reads one directory, so the user's holds links to the system's English and OSD data."""
     directory = tessdata_dir()
@@ -235,14 +250,24 @@ def espeak_language(text: str, config=None) -> str:
     for code in chosen(config):
         if LANGUAGES[code].script == script:
             return _ESPEAK_ALIAS.get(code, code)
-    return _ESPEAK_ALIAS.get(next((c for c, lang in LANGUAGES.items() if lang.script == script), ""), "")
+    # The shared-script default, through the alias map: `sa` is the only
+    # entry in it, and the others must come back as themselves.
+    fallback = next((c for c, lang in LANGUAGES.items() if lang.script == script), "")
+    return _ESPEAK_ALIAS.get(fallback, fallback)
 
 
 def install_size(code: str, speech: bool = True) -> int:
+    """Bytes `install` will still fetch for `code` - what is already here is not counted.
+
+    The Languages page, the Welcome page's "if you add any" total and the
+    consent row all quote this. Counting data the machine already has (the
+    distro's tessdata, a packaged voice) made the page offer a download that
+    `install` now skips, and made "added" rows still carry a size.
+    """
     from shani_chronoa import voices
     lang = LANGUAGES[code]
-    size = lang.tess_size
-    if speech and lang.voice:
+    size = 0 if reads(code) else lang.tess_size
+    if speech and lang.voice and not voices.voice_installed(lang.voice):
         v = voices.VOICES[lang.voice]
         size += v.onnx_size + v.json_size
     return size

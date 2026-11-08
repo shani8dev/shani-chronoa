@@ -108,3 +108,35 @@ def test_installing_a_language_the_distro_already_has_downloads_nothing(tmp_path
             raise AssertionError("downloaded data the machine already had")
 
     assert languages.install("hi", speech=False, config=Config(), transport=Transport()) == ["reading"]
+
+
+def test_a_text_only_language_names_the_voice_that_reads_its_script(tmp_path, monkeypatch):
+    """Assamese has no Piper voice, but Bengali's voice reads Bengali script."""
+    from shani_chronoa import languages, setup_wizard, voices
+    monkeypatch.setattr(voices, "SYSTEM_VOICE_DIR", tmp_path / "sys")
+    monkeypatch.setattr(voices, "voice_dir", lambda: tmp_path / "user")
+    assert setup_wizard._language_capability("as") == (
+        "text; speaks with the Bengali voice once it is added")
+    _plant(tmp_path / "sys", "bn_BD-google-medium")
+    assert setup_wizard._language_capability("as") == "text; speaks with the Bengali voice"
+    # A language with its own voice says so, and Sanskrit falls back to Hindi's.
+    assert setup_wizard._language_capability("hi") == "voice and text"
+    assert setup_wizard._language_capability("sa") == (
+        "text; speaks with the Hindi voice once it is added")
+
+
+def test_the_quoted_size_is_what_is_still_missing(tmp_path, monkeypatch):
+    """The page must not quote a size for data it can already read."""
+    from shani_chronoa import languages, voices
+    system = tmp_path / "sys-tessdata"
+    system.mkdir()
+    monkeypatch.setattr(languages, "SYSTEM_TESSDATA", system)
+    monkeypatch.setattr(voices, "SYSTEM_VOICE_DIR", tmp_path / "sys-voices")
+    monkeypatch.setattr(voices, "voice_dir", lambda: tmp_path / "user")
+    monkeypatch.setattr(languages, "tessdata_dir", lambda: tmp_path / "user-tessdata")
+    hindi = languages.LANGUAGES["hi"]
+    voice = voices.VOICES[hindi.voice]
+    assert languages.install_size("hi") == hindi.tess_size + voice.onnx_size + voice.json_size
+    (system / "hin.traineddata").write_bytes(b"ocr")
+    _plant(tmp_path / "sys-voices", hindi.voice)
+    assert languages.install_size("hi") == 0
