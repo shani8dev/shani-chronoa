@@ -146,6 +146,34 @@ compositor/PipeWire truth rather than what Chronoa believes.
    `approvals.ask`; the Notices surface lists them newest first with
    why-now, outcome, and a working Dismiss.
 
+## From Omarchy (Nov 2026): what we took, and what we did not
+
+Omarchy (DHH's Arch + Hyprland + Quickshell distro, 46.5k stars) bets the OS
+should be drivable by an agent: one CLI exposing every menu function, a
+one-click agent handoff on crashes, a unified theme, and a first-boot agent
+pick. The toolkit choice (Quickshell) matches ours. What we took:
+
+- **The agent CLI.** `shani` (`shani-shell/bin/shani`, installed as
+  `/usr/bin/shani`): grouped commands over the shell IPC we already had
+  (`qs -c shani ipc call shani <fn>`), `shani state --json` for live state,
+  `shani doctor` forwarded, and a raw `shani call` for anything ungrouped.
+  Every command maps 1:1 to an IPC function verified against `shell.qml`.
+  The bet is Omarchy's; the wire is ours (local IPC, auditable, no cloud).
+- **Theme-everything** — partially done: `shani system theme-reload` drives
+  Matugen through the existing `themeReload` IPC. A one-command restyle of
+  terminal + bar + wallpaper is the remaining work.
+- **Agent on crash** — Chronoa has `crash_report` and the notices queue
+  now records every proactive ask; the one-click "diagnose this crash"
+  handoff is the next step, not yet built.
+- **First-boot agent pick** — ours is the opposite by design: the wizard
+  installs a *local* model (Qwen3.5-2B, preinstalled via `shani-llm-model`)
+  instead of picking a cloud agent. Sarvam is the BYOK cloud option for
+  Indian users. We did not take Omarchy's cloud-agent default.
+
+Not taken: Hyprland (niri stays — input-method-v2, scrolling layout),
+mutable pacman (immutable image stays), TUI-first app set (shell-native
+QML surfaces instead).
+
 ## How to know it's working
 
 Ship these as acceptance criteria, not aspirations:
