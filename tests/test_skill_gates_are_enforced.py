@@ -83,6 +83,8 @@ _IMPL = {
     # what the scan below looks for.
     "driver_build": "shani_chronoa.skills.driver_dev",
     "device_i2c": "shani_chronoa.skills.user_driver",
+    # device_serial writes share device_i2c's i2c-write-enabled gate.
+    "device_serial": "shani_chronoa.skills.user_driver",
     # Sense-gated through `config.sense_allowed("filesystems")`, like
     # snapshot_status; the reader needs to know where to look for the check.
     "compression_savings": "shani_chronoa.skills.compression_savings",

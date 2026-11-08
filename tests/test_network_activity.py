@@ -443,3 +443,38 @@ class TestItIsReachable:
         assert match is not None
         local, remote = na._split_pair(match.group("pair"))
         assert f"{local}-{remote}" == expected
+
+def test_bandwhich_is_the_first_per_program_source(monkeypatch):
+    """bandwhich names processes itself; nethogs needs the join."""
+    from shani_chronoa.skills import network_activity as NA
+    entries = [{"process": {"name": "firefox"}, "remote_ip": "1.2.3.4",
+                "up": 1024, "down": 2048}]
+    monkeypatch.setattr(NA.shutil, "which", lambda name: "/usr/bin/bandwhich")
+    monkeypatch.setattr(NA.subprocess, "run", lambda *a, **k: _Done(0, __import__("json").dumps(entries)))
+    rows, why = NA._bandwhich()
+    assert why == ""
+    assert rows[0][0] == "firefox" and rows[0][3] == 2.0
+
+
+def test_bandwhich_idle_says_so_not_zero(monkeypatch):
+    from shani_chronoa.skills import network_activity as NA
+    monkeypatch.setattr(NA.shutil, "which", lambda name: "/usr/bin/bandwhich")
+    monkeypatch.setattr(NA.subprocess, "run", lambda *a, **k: _Done(0, "[]"))
+    rows, why = NA._bandwhich()
+    assert rows == [] and "no traffic" in why
+
+
+def test_iftop_totals_are_parsed(monkeypatch):
+    from shani_chronoa.skills import network_activity as NA
+    monkeypatch.setattr(NA.shutil, "which", lambda name: "/usr/bin/iftop")
+    monkeypatch.setattr(NA.subprocess, "run",
+                        lambda *a, **k: _Done(0, "12:00:01.123  total send: 1.5Kb  total receive: 3.0Kb\n"))
+    rates, why = NA._iftop_rates()
+    assert why == "" and rates["iftop"] == (3072, 1536)
+
+
+class _Done:
+    def __init__(self, code, out):
+        self.returncode = code
+        self.stdout = out
+        self.stderr = ""

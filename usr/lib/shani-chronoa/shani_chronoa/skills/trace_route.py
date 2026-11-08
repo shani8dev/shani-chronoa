@@ -237,6 +237,52 @@ def _verdict(hops: List[Hop]) -> str:
     )
 
 
+def _summarise_traceroute(stdout: str, host: str) -> str:
+    """A traceroute trace in the same honest shape as the mtr summary.
+
+    traceroute prints `traceroute to HOST (IP), N hops max, ...` then one
+    line per hop: hop number, one or more addresses with RTTs, or `***`.
+    What it does not print is a loss percentage, so none is invented: a hop
+    that answered shows its times, a hop that did not is `did not respond`,
+    and the destination's own answer (or silence) is the last line, named as
+    such.
+    """
+    lines = [ln.strip() for ln in (stdout or "").splitlines() if ln.strip()]
+    if not lines or "traceroute to" not in lines[0]:
+        detail = lines[-1] if lines else "no output"
+        return (f"No trace came back for {host}: {detail}. That is traceroute "
+                f"reporting nothing, not a finding that the host is "
+                f"unreachable.")
+    hops = []
+    for line in lines[1:]:
+        match = re.match(r"^(\d+)\s+(.*)$", line)
+        if not match:
+            continue
+        body = match.group(2)
+        if body.startswith("***"):
+            hops.append((int(match.group(1)), "", "did not respond"))
+        else:
+            times = re.findall(r"([\d.]+) ms", body)
+            hops.append((int(match.group(1)), body.split()[0],
+                         f"{', '.join(times)} ms" if times else body))
+    if not hops:
+        return f"No hops answered on the way to {host}."
+    shown, withheld = files.cap_list(hops, _MAX_ROWS)
+    out = [f"Path to {host} (traced with traceroute; mtr is not installed):"]
+    for entry in shown:
+        number, address, what = entry[0], entry[1], entry[2]
+        where = address or "??? "
+        out.append(f"  {number}. {where} {what}")
+    if withheld:
+        out.append(files.withheld_note("hop", withheld))
+    last = hops[-1]
+    if "did not respond" in last[2]:
+        out.append(f"The destination itself did not answer by hop "
+                   f"{last[0]} - it may be down, filtered, or the probe "
+                   f"type may be blocked on this network.")
+    return "\n".join(out)
+
+
 def _run(arguments: dict) -> str:
     host = (arguments.get("host") or "").strip()
     if not host:
@@ -258,9 +304,10 @@ def _run(arguments: dict) -> str:
         return (f"'probes' must be a whole number between {_MIN_PROBES} and "
                 f"{_MAX_PROBES}, not {probes!r}.")
 
-    if shutil.which("mtr") is None:
+    if shutil.which("mtr") is None and shutil.which("traceroute") is None:
         return files.tool_missing(
             "mtr", f"trace the network path to {host}")
+    use_traceroute = shutil.which("mtr") is None
 
     # mtr sends probes past this machine's own network, exactly as the public
     # steps of `check_internet` do, so it obeys the same switch.
@@ -271,18 +318,27 @@ def _run(arguments: dict) -> str:
             f"use `check_internet`, which stays local."
         )
 
+    # mtr is the default (its per-hop loss percentages are what the summary
+    # reads); traceroute is the fallback when mtr is absent. traceroute
+    # prints one line per hop with RTTs and no loss percentage, so the
+    # summary for a traceroute trace reports times, not loss.
     try:
+        if use_traceroute:
+            argv = ["traceroute", "-n", "-w", "1", "-q", str(probes), host]
+        else:
+            argv = ["mtr", "-r", "-w", "-n", "-c", str(probes), host]
         done = subprocess.run(
-            ["mtr", "-r", "-w", "-n", "-c", str(probes), host],
-            capture_output=True, text=True, timeout=_TIMEOUT)
+            argv, capture_output=True, text=True, timeout=_TIMEOUT)
     except subprocess.TimeoutExpired:
         return (f"Tracing to {host} did not finish within {_TIMEOUT} seconds, so "
                 f"no result is reported. Fewer probes may complete.")
     except OSError as exc:
-        return f"Could not run mtr: {exc}."
+        return f"Could not run {'traceroute' if use_traceroute else 'mtr'}: {exc}."
 
     egress.record("skill:trace_route", host, method="ICMP", privacy_mode=False)
 
+    if use_traceroute:
+        return _summarise_traceroute(done.stdout, host)
     hops, traced = parse(done.stdout)
     if not hops:
         detail = (done.stderr or done.stdout or "").strip().splitlines()

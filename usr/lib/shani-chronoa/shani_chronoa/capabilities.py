@@ -436,6 +436,8 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "disk_usage": ("System", "Report filesystem and directory space use"),
     "system_info": ("System", "Describe this machine"),
     "scan_network": ("System", "Find other devices on the local network"),
+    "network_watch": ("System", "Watch for new devices on one interface"),
+    "content_discovery": ("System", "Which paths a local web server answers on"),
     "toggle_bluetooth": ("Devices", "Turn the Bluetooth adapter on or off"),
     # Reading what a device says about itself, one layer under `bluetooth_devices`
     # which lists and connects them. Its own switch: on a wearable the values are
@@ -690,6 +692,7 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "driver_build": ("Devices", "Compile a kernel module with Kbuild"),
     "device_probe": ("Devices", "User-space driver routes: I2C buses, video, FUSE"),
     "device_i2c": ("Devices", "Read or write an I2C device register"),
+    "device_serial": ("Devices", "Read from or write to a serial device"),
     "list_fonts": ("Appearance", "Installed fonts, and which one is used"),
     "photo_metadata": ("Photos and video", "When, where and with what camera a photo was taken"),
     "crash_report": ("Services and logs", "What crashed recently"),
@@ -1415,6 +1418,9 @@ READ_ONLY_TOOLS = frozenset({
     # `device_i2c` reads by default; its write half is the gated direction, and
     # being in this set is what stops `EXPLORE` mode from reaching it.
     "device_i2c",
+    # device_serial is the serial half of the same shape: reads by default,
+    # writes gated by the same key.
+    "device_serial",
     "driver_status",
     "project_outline",
     "calendar_events",

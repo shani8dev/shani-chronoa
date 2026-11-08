@@ -177,11 +177,16 @@ def _run(arguments: dict) -> str:
     if problem:
         return problem
 
-    problem = _missing()
+    iface, problem = _iface(arguments)
     if problem:
         return problem
 
-    iface, problem = _iface(arguments)
+    engine = str(arguments.get("engine") or "tcpdump").strip().lower()
+    if engine == "ngrep":
+        return _run_ngrep(arguments, iface, filt, packets, seconds)
+    if engine != "tcpdump":
+        return "Engine must be tcpdump or ngrep."
+    problem = _missing()
     if problem:
         return problem
 
@@ -273,6 +278,61 @@ def _run(arguments: dict) -> str:
     return "\n".join(out)
 
 
+def _run_ngrep(arguments: dict, iface, filt, packets: int, seconds: int) -> str:
+    """Grep live traffic with `ngrep`, tcpdump's pattern-matching twin.
+
+    ngrep reads packets *and* payloads and prints matches - which is why this
+    needs the same `packet-capture-enabled` gate and why the pattern is
+    validated like a filter: a pattern that matches everything is a payload
+    dump, so the pattern must be at least two characters and is passed as one
+    argv element, never a shell line. ngrep has no packet ceiling of its own,
+    so the wall-clock ceiling plus a row cap are the bounds here.
+    """
+    pattern = str(arguments.get("pattern") or arguments.get("filter") or "").strip()
+    if len(pattern) < 2:
+        return ("For the ngrep engine I need a `pattern` of at least two "
+                "characters to grep the traffic for (e.g. 'SYN' or a hostname).")
+    if shutil.which("ngrep") is None:
+        return files.tool_missing("ngrep", "grep live network traffic")
+
+    argv = ["ngrep", "-n", "-q", pattern]
+    if iface:
+        argv += ["-d", iface]
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True,
+                              timeout=seconds, check=False)
+    except subprocess.TimeoutExpired as exc:
+        partial = (exc.stdout or b"").decode("utf-8", "replace") \
+            if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+        return _summarise_ngrep(partial, pattern, f"{seconds}s (timed out)",
+                               packets)
+    except OSError as exc:
+        return f"Not done: ngrep could not be run ({exc})."
+    return _summarise_ngrep(proc.stdout or "", pattern, f"{seconds}s",
+                            packets)
+
+
+def _summarise_ngrep(stdout: str, pattern: str, window: str,
+                     packets: int) -> str:
+    """What ngrep matched, capped - never the payloads beyond the match."""
+    lines = [ln for ln in stdout.splitlines() if ln.strip()]
+    if not lines:
+        return (
+            f"Nothing matched {pattern!r} within {window}. That is a "
+            f"measurement of what crossed, not a claim the network is idle.")
+    shown = lines[:_MAX_ROWS]
+    out = [
+        f"{len(lines)} match(es) for {pattern!r} within {window}, "
+        f"showing at most {packets} packets.",
+        "These are ngrep's match lines; full payload dumps are not shown.",
+        "",
+    ]
+    out.extend(shown)
+    if len(lines) > len(shown):
+        out.append(f"... {len(lines) - len(shown)} more match(es) not shown.")
+    return "\n".join(out)
+
+
 SCHEMA = {
     "type": "function",
     "function": {
@@ -309,6 +369,17 @@ SCHEMA = {
                     "description": ("A tcpdump filter expression, e.g. 'tcp port "
                                     "53' or 'host 10.0.0.5'. Passed as one "
                                     "argument, never through a shell."),
+                },
+                "engine": {
+                    "type": "string",
+                    "description": ("tcpdump (default) or ngrep - ngrep greps "
+                                    "the traffic for a pattern instead of "
+                                    "summarising packets."),
+                },
+                "pattern": {
+                    "type": "string",
+                    "description": ("For the ngrep engine: text to grep the "
+                                    "traffic for (at least two characters)."),
                 },
             },
         },

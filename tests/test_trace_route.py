@@ -282,3 +282,30 @@ def test_traces_a_real_host():
     assert "The destination" in out or "No trace came back" in out
     # Whatever the machine's shape, a hop row must never claim a silent hop is up.
     assert "down" not in out.lower()
+
+# --- traceroute fallback ----------------------------------------------------
+
+TRACEROUTE_OUT = """traceroute to example.com (93.184.216.34), 30 hops max, 60 byte packets
+ 1  gateway.local (192.168.1.1)  0.912 ms
+ 2  10.0.0.1  3.104 ms
+ 3  ***
+ 4  93.184.216.34  28.441 ms
+"""
+
+
+def test_traceroute_summary_names_silent_hops_without_loss():
+    said = tr._summarise_traceroute(TRACEROUTE_OUT, "example.com")
+    assert "did not respond" in said
+    assert "28.441 ms" in said
+    assert "traceroute" in said
+
+
+def test_traceroute_summary_says_when_the_destination_is_silent():
+    out = TRACEROUTE_OUT.replace(" 4  93.184.216.34  28.441 ms", " 4  ***")
+    said = tr._summarise_traceroute(out, "example.com")
+    assert "destination itself did not answer" in said
+
+
+def test_traceroute_empty_output_is_not_a_trace():
+    said = tr._summarise_traceroute("", "example.com")
+    assert "No trace came back" in said
