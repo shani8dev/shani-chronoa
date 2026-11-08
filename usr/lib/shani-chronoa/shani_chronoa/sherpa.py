@@ -23,9 +23,13 @@ from typing import Callable, Optional
 from shani_chronoa import files
 from shani_chronoa.stt_provision import ModelSpec, _install, unpack_tar
 
-VERSION = "v1.13.8"
-RELEASE = ModelSpec("sherpa-onnx", f"sherpa-onnx-{VERSION}-linux-x64-shared.tar.bz2", 28_156_791,
-                    "c0bdb7907d3a74bba1d55d22bf4d9fa75586cf1530614ebe88a27b9118e015c4",
+# v2.0.1: the latest release. The bump is not free: sherpa-onnx v2 dropped
+# espeak-ng for Kokoro (its --kokoro-data-dir became deprecated/ignored),
+# so the Kokoro model moves v0.19 -> v1.0 with it (voices._KOKORO_MODEL) -
+# one version's flag change is another version's model change.
+VERSION = "v2.0.1"
+RELEASE = ModelSpec("sherpa-onnx", f"sherpa-onnx-{VERSION}-linux-x64-shared.tar.bz2", 28_003_506,
+                    "2e823376987c3b6960d50726b6560155e2ad92da0b8b3886325773225ec6bdec",
                     f"sherpa-onnx {VERSION}",
                     f"https://github.com/k2-fsa/sherpa-onnx/releases/download/{VERSION}")
 MODELS_URL = "https://github.com/k2-fsa/sherpa-onnx/releases/download"

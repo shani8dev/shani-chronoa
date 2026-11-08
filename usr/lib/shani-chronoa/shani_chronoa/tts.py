@@ -491,7 +491,7 @@ class PiperTTS:
     def _kokoro_command(self, text: str, output_file: str) -> "list[str]":
         from shani_chronoa import voices
         cmd = [voices.kokoro_binary()]
-        cmd += [f"{option}={path}" for option, path in voices.kokoro_files().items()]
+        cmd += [f"{option}={path}" for option, path in voices.kokoro_files(self.kokoro_voice()).items()]
         cmd += [f"--sid={voices.KOKORO_VOICES[self.kokoro_voice()].sid}",
                 f"--kokoro-length-scale={1.0 / self.rate:.3f}",
                 # Up to 4 threads. Measured 2026-10-08 on an 8-thread laptop CPU:

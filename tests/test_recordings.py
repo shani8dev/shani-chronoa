@@ -1,6 +1,6 @@
 """Recordings: subtitles, who said what, the sound and speaker parsers, and a cleaned copy.
 
-The parsers are checked against the exact lines sherpa-onnx v1.13.8 printed on
+The parsers are checked against the exact lines sherpa-onnx v2.0.1 printed on
 this machine (2026-10-02). The clean-up runs the real ffmpeg on a real file;
 whisper and the sherpa programs themselves are shani-testbed's chronoa-extras.
 """

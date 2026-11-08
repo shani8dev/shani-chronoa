@@ -204,10 +204,10 @@ def install_voice(voice: str, progress: Optional[Callable[[int, int], None]] = N
 # to produce 6.4 s of speech on a CPU (RTF 1.2, the same with 2 or 4 threads),
 # which is why Kokoro stays opt-in (`kokoro-tts-enabled`) - see tts.py.
 
-_KOKORO_MODEL_DIR = "kokoro-int8-en-v0_19"
-_KOKORO_MODEL = ModelSpec("kokoro", f"{_KOKORO_MODEL_DIR}.tar.bz2", 103_248_205,
-                          "c9f0dd393615805b0bab050c340834d5e684e732aec91c0e860cd30e982c08bd",
-                          "Kokoro 82M v0.19 (int8, English)",
+_KOKORO_MODEL_DIR = "kokoro-int8-multi-lang-v1_0"
+_KOKORO_MODEL = ModelSpec("kokoro", f"{_KOKORO_MODEL_DIR}.tar.bz2", 132_353_410,
+                          "72c347230107ef8a31098ec4d468a605244beef5f1ed00db97efa13518800653",
+                          "Kokoro 82M v1.0 (int8, multi-lang)",
                           "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models")
 
 
@@ -250,12 +250,17 @@ def kokoro_model_dir() -> Path:
 SYSTEM_KOKORO_DIR = Path("/usr/share/kokoro") / _KOKORO_MODEL_DIR
 
 
-def kokoro_files() -> "dict[str, Path]":
+def kokoro_files(voice: str | None = None) -> "dict[str, Path]":
     """The files sherpa-onnx is given, by the option that names each."""
     user = kokoro_model_dir()
     d = user if (user / "model.int8.onnx").is_file() else SYSTEM_KOKORO_DIR
+    # v1.0 replaced espeak-ng with a lexicon file (sherpa-onnx v2 ignores
+    # --kokoro-data-dir); British voices get the British lexicon, as with
+    # the pre-v2 per-language data.
+    gb = voice is not None and voice.startswith("bf_")
     return {"--kokoro-model": d / "model.int8.onnx", "--kokoro-voices": d / "voices.bin",
-            "--kokoro-tokens": d / "tokens.txt", "--kokoro-data-dir": d / "espeak-ng-data"}
+            "--kokoro-tokens": d / "tokens.txt",
+            "--kokoro-lexicon": d / ("lexicon-gb-en.txt" if gb else "lexicon-us-en.txt")}
 
 
 def kokoro_installed(voice: str = KOKORO_DEFAULT_VOICE) -> bool:
