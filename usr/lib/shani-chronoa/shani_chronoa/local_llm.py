@@ -92,6 +92,23 @@ def model_dir() -> Path:
     return files.data_home() / "shani-chronoa" / "llm"
 
 
+#: The distro-packaged model location: a model that ships in a package
+#: (baked into the image, or installed as a package) is a model the machine
+#: has. `installed()`, `verify()` and `use()` answer from here exactly as
+#: `stt_provision.model_path` answers for the whisper model, so shipping a
+#: model means setup never re-downloads it.
+SYSTEM_MODEL_DIR = Path("/usr/share/shani-chronoa/llm")
+
+
+def model_path(key: str) -> Path:
+    """Where `key` lives, or would live: the user's copy first, the distro's after."""
+    spec = SPECS[key]
+    user = model_dir() / spec.filename
+    if user.is_file():
+        return user
+    return SYSTEM_MODEL_DIR / spec.filename
+
+
 def current_link() -> Path:
     """The file the service loads; a symlink to the chosen model, so switching models is one rename."""
     return model_dir() / "current.gguf"
@@ -287,7 +304,7 @@ def recommended(ram: Optional[float] = None) -> str:
 
 
 def installed() -> "list[str]":
-    return [key for key, spec in SPECS.items() if (model_dir() / spec.filename).is_file()]
+    return [key for key in SPECS if model_path(key).is_file()]
 
 
 def _key_for_file(name: str) -> str:
@@ -408,7 +425,7 @@ def server_binary() -> str:
 def verify(key: str) -> bool:
     """Whether the downloaded file for `key` still has its pinned size and sha256 (about a second per GB)."""
     from shani_chronoa.stt_provision import file_matches
-    return file_matches(model_dir() / SPECS[key].filename, SPECS[key])
+    return file_matches(model_path(key), SPECS[key])
 
 
 def provision(key: str, progress: Optional[Callable[[int, int], None]] = None, config=None, transport=None) -> Path:
@@ -418,11 +435,16 @@ def provision(key: str, progress: Optional[Callable[[int, int], None]] = None, c
     copied-in, truncated or altered model is removed and fetched again.
     """
     spec = SPECS[key]
-    present = model_dir() / spec.filename
+    present = model_path(key)
     if present.is_file() and not verify(key):
         logger.warning("%s does not match its pinned digest; fetching it again", present)
-        present.unlink()
-    path = _install(spec, user_dir=model_dir(), system_dir=Path("/usr/share/shani-chronoa/llm"),
+        # Only a user copy can be removed. A bad system file lives on a
+        # read-only filesystem (and is the distro's bug, not the person's):
+        # leave it, and download a good copy beside it.
+        if present.parent == model_dir():
+            present.unlink()
+        present = model_dir() / spec.filename
+    path = _install(spec, user_dir=model_dir(), system_dir=SYSTEM_MODEL_DIR,
                     existing=present if present.is_file() else None,
                     config=config, progress=progress, transport=transport, label="llm")
     use(key)
@@ -1090,7 +1112,7 @@ def use(key: str, gate: bool = True) -> Dict[str, object]:
     """
     spec = SPECS[key]
     link = current_link()
-    target = model_dir() / spec.filename
+    target = model_path(key)
     verdict: Dict[str, object] = {"promote": True, "measured": False,
                                    "why": "quality gate not run"}
     if gate:
@@ -1106,7 +1128,13 @@ def use(key: str, gate: bool = True) -> Dict[str, object]:
             return verdict
     tmp = link.with_suffix(".tmp")
     tmp.unlink(missing_ok=True)
-    tmp.symlink_to(spec.filename)
+    # A user copy keeps the relative link it always had; a packaged model
+    # lives elsewhere, so the link must name it absolutely (the server reads
+    # through whichever link was written).
+    if target.parent == model_dir():
+        tmp.symlink_to(spec.filename)
+    else:
+        tmp.symlink_to(str(target))
     os.replace(tmp, link)
     return verdict
 

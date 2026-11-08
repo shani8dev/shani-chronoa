@@ -86,9 +86,32 @@ def model_dir() -> Path:
     return files.data_home() / "shani-chronoa" / "vision"
 
 
+#: The distro-packaged model location. A vision model baked into the image
+#: is a model the machine has; `installed()` and `server_args()` answer from
+#: here exactly as the whisper model path answers for STT, so the setup
+#: wizard never re-downloads what the image already carries.
+SYSTEM_MODEL_DIR = Path("/usr/share/shani-chronoa/vision")
+
+
+def _model_path(filename: str) -> Path:
+    """One file, user copy first, the distro's after - `stt_provision.model_path`'s shape."""
+    user = model_dir() / filename
+    if user.is_file():
+        return user
+    return SYSTEM_MODEL_DIR / filename
+
+
+def model_path(key: str) -> Path:
+    return _model_path(MODELS[key].model.filename)
+
+
+def mmproj_path(key: str) -> Path:
+    return _model_path(MODELS[key].mmproj.filename)
+
+
 def installed() -> "list[str]":
     return [m.key for m in TIERS
-            if (model_dir() / m.model.filename).is_file() and (model_dir() / m.mmproj.filename).is_file()]
+            if model_path(m.key).is_file() and mmproj_path(m.key).is_file()]
 
 
 def active() -> str:
@@ -115,14 +138,14 @@ def recommended_for_machine() -> str:
 
 def verify(key: str) -> bool:
     m = MODELS[key]
-    return file_matches(model_dir() / m.model.filename, m.model) and file_matches(model_dir() / m.mmproj.filename, m.mmproj)
+    return file_matches(model_path(key), m.model) and file_matches(mmproj_path(key), m.mmproj)
 
 
 def server_args(key: str, devices: "Optional[list[str]]" = None) -> "list[str]":
     from shani_chronoa import local_llm
     devices = local_llm.gpu_devices() if devices is None else devices
     m = MODELS[key]
-    args = ["-m", str(model_dir() / m.model.filename), "--mmproj", str(model_dir() / m.mmproj.filename),
+    args = ["-m", str(model_path(key)), "--mmproj", str(mmproj_path(key)),
             "--host", model_service.HOST, "--port", str(model_service.PORTS[INSTANCE]),
             "-c", str(CONTEXT), "--no-webui", "--sleep-idle-seconds", str(IDLE_SECONDS)]
     args += ["-ngl", "99"] if devices else ["-ngl", "0", "-t", str(hardware_profile.physical_cores())]

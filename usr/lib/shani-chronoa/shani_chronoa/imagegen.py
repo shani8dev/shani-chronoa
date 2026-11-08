@@ -62,17 +62,45 @@ def engine_dir() -> Path:
     return files.data_home() / "shani-chronoa" / "sdcpp"
 
 
+#: The distro-packaged locations. A picture engine and model baked into the
+#: image are a picture engine and model the machine has; every reader and
+#: checker below answers from here exactly as the whisper model path answers
+#: for STT.
+SYSTEM_ENGINE_DIR = Path("/usr/share/shani-chronoa/sdcpp")
+SYSTEM_MODEL_DIR = Path("/usr/share/shani-chronoa/imagine")
+
+
+def _system_marker_matches(spec) -> bool:
+    marker = SYSTEM_ENGINE_DIR / ".release"
+    return marker.is_file() and marker.read_text().strip() == spec.filename
+
+
+def engine_binary() -> str:
+    """`sd-server`, the user's copy first, the distro's after."""
+    for root in (engine_dir(), SYSTEM_ENGINE_DIR):
+        path = root / "sd-server"
+        if os.access(path, os.X_OK):
+            return str(path)
+    return ""
+
+
+def model_path() -> Path:
+    user = model_dir() / MODEL.filename
+    if user.is_file():
+        return user
+    return SYSTEM_MODEL_DIR / MODEL.filename
+
+
 def model_dir() -> Path:
     return files.data_home() / "shani-chronoa" / "imagine"
 
 
 def server_binary() -> str:
-    path = engine_dir() / "sd-server"
-    return str(path) if os.access(path, os.X_OK) else ""
+    return engine_binary()
 
 
 def installed() -> bool:
-    return bool(server_binary()) and (model_dir() / MODEL.filename).is_file()
+    return bool(server_binary()) and model_path().is_file()
 
 
 def available() -> bool:
@@ -89,7 +117,16 @@ def install_engine(gpu: bool, progress=None, config=None, transport=None) -> str
     marker = engine_dir() / ".release"
     if server_binary() and marker.is_file() and marker.read_text().strip() == spec.filename:
         return server_binary()
-    archive = _install(spec, user_dir=engine_dir(), system_dir=Path("/usr/share/shani-chronoa/sdcpp"),
+    # A packaged engine needs no download: its presence is the distro's
+    # choice of build. On the CPU path it is always the right answer; on the
+    # GPU path it is only the right answer when the packaging said which
+    # build it shipped (the `.release` marker a packaged engine can carry),
+    # because a CPU binary passed off as the Vulkan build would just be
+    # slower.
+    system_binary = engine_binary()
+    if system_binary and (not gpu or _system_marker_matches(spec)):
+        return system_binary
+    archive = _install(spec, user_dir=engine_dir(), system_dir=SYSTEM_ENGINE_DIR,
                        existing=None, config=config, progress=progress, transport=transport, label="imagine")
     try:
         unpack(archive, engine_dir())
@@ -126,7 +163,7 @@ def unpack(archive: Path, destination: Path) -> None:
 
 def server_args() -> "list[str]":
     # the Vulkan build picks the GPU by itself; the CPU build has nothing to pick
-    return ["-m", str(model_dir() / MODEL.filename), "--listen-ip", model_service.HOST,
+    return ["-m", str(model_path()), "--listen-ip", model_service.HOST,
             "--listen-port", str(model_service.PORTS[INSTANCE]), "--mmap",
             "-t", str(hardware_profile.physical_cores())]
 
@@ -139,7 +176,7 @@ def provision(gpu: bool, progress: Optional[Callable[[int, int], None]] = None, 
 
 
 def verify() -> bool:
-    return file_matches(model_dir() / MODEL.filename, MODEL)
+    return file_matches(model_path(), MODEL)
 
 
 class ImageError(RuntimeError):

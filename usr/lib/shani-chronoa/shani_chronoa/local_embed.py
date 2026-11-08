@@ -48,8 +48,20 @@ def model_dir() -> Path:
     return files.data_home() / "shani-chronoa" / "embed"
 
 
+#: The distro-packaged model location, as for every other backend:
+#: `stt_provision.model_path`'s shape, for the embedding model.
+SYSTEM_MODEL_DIR = Path("/usr/share/shani-chronoa/embed")
+
+
+def model_path() -> Path:
+    user = model_dir() / MODEL.filename
+    if user.is_file():
+        return user
+    return SYSTEM_MODEL_DIR / MODEL.filename
+
+
 def installed() -> bool:
-    return (model_dir() / MODEL.filename).is_file()
+    return model_path().is_file()
 
 
 def configured() -> bool:
@@ -57,11 +69,11 @@ def configured() -> bool:
 
 
 def verify() -> bool:
-    return file_matches(model_dir() / MODEL.filename, MODEL)
+    return file_matches(model_path(), MODEL)
 
 
 def server_args() -> "list[str]":
-    return ["-m", str(model_dir() / MODEL.filename), "--embedding", "--pooling", "mean",
+    return ["-m", str(model_path()), "--embedding", "--pooling", "mean",
             "--host", model_service.HOST, "--port", str(model_service.PORTS[INSTANCE]),
             "-c", str(CONTEXT), "-b", str(CONTEXT), "-ub", str(CONTEXT), "--no-webui",
             "-ngl", "0", "-t", str(hardware_profile.physical_cores())]

@@ -35,3 +35,11 @@ tests/test_mutation_harness_can_fail.py::TestTheHarnessCanFail::test_the_runner_
   tests/test_fm_radio_stereo.py does not exist (moved to shani-link with the FM engine); tools/mutations/fm_radio.py
   still names it.
 (test_question_presenter's two, above, now fail only on look_at_image; the four moved skills pass that sweep.)
+
+PRE-EXISTING RED TEST (2026-11-08, found while fixing packaged-model detection):
+tests/test_vision_sense.py::TestCaptureIsBoundedAndRefusesRatherThanHangs::test_a_capture_tool_that_hangs_is_stopped_at_the_timeout
+  "DID NOT RAISE ScreenCaptureError" - the fake xwd that sleeps 30s did not
+  stop the capture at the timeout. Fails identically on a clean HEAD worktree
+  (/tmp/opencode/chronoa-clean3, no stash), so it predates the packaged-model
+  detection work (local_llm/local_vision/local_embed/imagegen/sherpa/voices).
+  Not fixed here: screengrab is unrelated to model paths.

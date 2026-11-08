@@ -245,9 +245,15 @@ def kokoro_model_dir() -> Path:
     return kokoro_dir() / _KOKORO_MODEL_DIR
 
 
+#: The distro-packaged Kokoro model location, beside the packaged Piper
+#: voices: a model baked into the image is a model the machine has.
+SYSTEM_KOKORO_DIR = Path("/usr/share/kokoro") / _KOKORO_MODEL_DIR
+
+
 def kokoro_files() -> "dict[str, Path]":
     """The files sherpa-onnx is given, by the option that names each."""
-    d = kokoro_model_dir()
+    user = kokoro_model_dir()
+    d = user if (user / "model.int8.onnx").is_file() else SYSTEM_KOKORO_DIR
     return {"--kokoro-model": d / "model.int8.onnx", "--kokoro-voices": d / "voices.bin",
             "--kokoro-tokens": d / "tokens.txt", "--kokoro-data-dir": d / "espeak-ng-data"}
 

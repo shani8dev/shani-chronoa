@@ -35,10 +35,19 @@ def install_dir() -> Path:
     return files.data_home() / "shani-chronoa" / "sherpa-onnx"
 
 
+#: The distro-packaged runtime location: a sherpa-onnx installed as a package
+#: (or baked into the image) is a runtime the machine has, and `binary()` —
+#: the one answer every caller asks — must say so.
+SYSTEM_BIN_DIR = Path("/usr/share/sherpa-onnx/bin")
+
+
 def binary(name: str) -> str:
     """The path of one of the release's programs, or '' when the release is not installed."""
     path = install_dir() / f"sherpa-onnx-{VERSION}-linux-x64-shared" / "bin" / name
-    return str(path) if os.access(path, os.X_OK) else ""
+    if os.access(path, os.X_OK):
+        return str(path)
+    system = SYSTEM_BIN_DIR / name
+    return str(system) if os.access(system, os.X_OK) else ""
 
 
 def install(progress: Optional[Callable[[int, int], None]] = None, config=None, transport=None,
