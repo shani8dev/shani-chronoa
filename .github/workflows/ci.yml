@@ -109,7 +109,7 @@ jobs:
       # lives in shani-pkgbuilds. Checked out beside it here rather than
       # skipped, because a skipped install-list assertion is exactly the
       # thing that lets a binary go missing from a package unnoticed.
-      extra-repositories: '[{"repo": "shani8dev/shani-pkgbuilds", "path": "../shani-pkgbuilds"}]'
+      extra-repositories: '[{"repo": "shani8dev/shani-pkgbuilds", "path": "../shani-pkgbuilds"}, {"repo": "shani8dev/shani-link", "path": "../shani-link"}]'
       system-site-packages: true
     needs: lint
 
