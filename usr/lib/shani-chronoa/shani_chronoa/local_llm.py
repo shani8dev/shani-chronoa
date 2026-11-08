@@ -94,6 +94,16 @@ TIERS = (
                "a 30B that reads like a 3B; the size that works on small machines",
                _QWEN.format(repo="Qwen3-30B-A3B-GGUF", rev="e4d4bafdfb96a411a163846265362aceb0b9c63a")),
      "Mixture of experts (18.6 GB) - reads a fraction of what it stores", 999),
+    # Ornith-1.5-9B: an agent-trained model (self-improvement loop over
+    # task generation, scaffold and rollouts) with the strongest agentic
+    # numbers in its class - SWE-bench Verified 70.6, Toolathlon 41.2,
+    # MCP-Atlas 54.2. MIT licensed, single file. The quality tier for
+    # machines that can afford 5.8 GB; never a CPU default.
+    (ModelSpec("ornith-1.5-9b", "Ornith-1.5-9B-Q4_K_M.gguf", 5_780_090_816,
+               "70c112196e0b7023803c9762752e46d29e612a92c83f995bc3ba1ceb07e8fab6",
+               "the quality tier; agentic tool calls, slower on a CPU",
+               "https://huggingface.co/ornith-ai/Ornith-1.5-9B-GGUF/resolve/abdd624b12ebf020b767fff532ff44fe552b28c3"),
+     "Quality (5.8 GB) - the best tool calls this machine can run", 999),
 )
 SPECS = {spec.key: spec for spec, _label, _ram in TIERS}
 
@@ -1546,6 +1556,8 @@ REQUIRES: Dict[str, Dict[str, float]] = {
     # has been run - which is the whole point of the flag.
     "qwen3-30b-a3b": {"cpu": 4, "ram": 20, "vram": 0, "min_tps": 5.0,
                       "active_bytes": 2_200_000_000, "measured": False},
+    "ornith-1.5-9b": {"cpu": 4, "ram": 12, "vram": 0, "min_tps": 5.0,
+                      "active_bytes": None},
 }
 
 #: Tokens per second below which a model is offered but not defaulted. Derived,

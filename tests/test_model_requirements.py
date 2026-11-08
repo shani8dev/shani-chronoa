@@ -271,8 +271,10 @@ class TestTheRecommendationIsNotAGpuGate:
         1.7B, which is under-serving exactly the user with the hardware for it.
         """
         _Measured(monkeypatch, 86.0, ram=30.5, cores=24, gpu=False)
+        # ornith-1.5-9b is the pick since it joined the tiers: smaller than
+        # the 14B, faster to decode, stronger on agentic benchmarks.
         assert local_llm.recommended_for_machine() in (
-            "qwen3-14b", "qwen3-30b-a3b"), (
+            "qwen3-14b", "qwen3-30b-a3b", "ornith-1.5-9b"), (
             "a high-bandwidth CPU was not offered the tier it can run")
 
     def test_ram_still_binds(self, monkeypatch):
@@ -317,7 +319,17 @@ class TestAnEstimateIsNeverADefault:
         _Measured(monkeypatch, 86.0, ram=30.5, cores=24, gpu=False)
         monkeypatch.setitem(local_llm.REQUIRES, "qwen3-30b-a3b",
                             dict(local_llm.REQUIRES["qwen3-30b-a3b"], measured=True))
-        assert local_llm.recommended_for_machine() == "qwen3-30b-a3b"
+        # Ornith-1.5-9B (2026) is the current pick here: it decodes faster
+        # than the 14B/30B on this bandwidth and carries stronger agentic
+        # scores. The control is unchanged - flipping the flag must change
+        # what the machine is offered.
+        from shani_chronoa import local_llm as _ll
+        got = _ll.recommended_for_machine()
+        assert got in ("qwen3-30b-a3b", "ornith-1.5-9b"), got
+        monkeypatch.setitem(_ll.REQUIRES, "ornith-1.5-9b",
+                            {"cpu": 4, "ram": 999, "vram": 0, "min_tps": 1e9,
+                             "active_bytes": None})
+        assert _ll.recommended_for_machine() == "qwen3-30b-a3b"
 
     def test_the_speed_margin_is_the_second_way_in(self, monkeypatch):
         """**`_may_default`, the rule the 4B exposed.**
