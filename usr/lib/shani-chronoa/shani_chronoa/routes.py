@@ -84,9 +84,9 @@ ROUTES: Dict[str, Tuple[Route, ...]] = {
         Route("generate the QR in Python with 'qrcode' or 'segno' if installed",
               ("python:qrcode", "python:segno")),
     ),
-    "piper": (
+    "piper-tts": (
         Route("install 'piper-tts' and a voice model, or use the "
-              "setup wizard's Speech page", ("piper",), "install"),
+              "setup wizard's Speech page", ("piper-tts",), "install"),
         Route("use 'espeak-ng', which is present and needs no model file",
               ("espeak-ng",)),
         Route("speak with the browser's own speech synthesis through D-Bus, if "

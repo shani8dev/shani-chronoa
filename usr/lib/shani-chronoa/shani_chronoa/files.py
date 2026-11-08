@@ -619,6 +619,11 @@ _PACKAGE_HINTS = {
     # the refusal named no package. On Arch the binary and the package share
     # the name; read out of `pacman -F grim`.
     "grim": "grim",
+    # The TTS binary is `piper-tts`, shipped by the shani-piper-tts package
+    # (the AUR's piper-tts* builds the same binary). The routes table once
+    # keyed this as "piper", which no binary is named, so Piper capability
+    # checks always failed; capability.py and learning.py had the same name.
+    "piper-tts": "shani-piper-tts",
     # **binutils, not elfutils.** Both exist on Arch, and `elfutils` is
     # what this file's own package list already pulls in - but the binary
     # called `readelf` ships in `binutils`; elfutils provides the

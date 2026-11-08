@@ -98,7 +98,7 @@ _ALL_NAMES: Tuple[str, ...] = (
     "magick", "convert", "identify", "zbarimg", "qrencode", "tesseract",
     "scanimage", "pdftoppm", "tesseract",
     # audio / models
-    "piper", "espeak-ng", "espeak", "whisper-cli", "whisper-cpp",
+    "piper-tts", "espeak-ng", "espeak", "whisper-cli", "whisper-cpp",
     # documents
     "libreoffice", "pandoc", "pdftotext", "qpdf", "sqlite3", "duckdb",
     # network
@@ -191,7 +191,7 @@ def describe(cap: Optional[Capabilities] = None) -> str:
     groups = {
         "media": ("ffmpeg", "ffprobe", "sox", "pw-play", "mpv"),
         "images": ("magick", "zbarimg", "qrencode", "tesseract", "scanimage"),
-        "speech": ("piper", "espeak-ng", "espeak", "whisper-cli"),
+        "speech": ("piper-tts", "espeak-ng", "espeak", "whisper-cli"),
         "documents": ("libreoffice", "pdftotext", "pandoc", "sqlite3"),
         "network": ("ip", "ss", "curl", "wget", "nmcli", "iw"),
         "virtualisation": ("podman", "docker", "qemu-system-x86_64", "virsh"),
