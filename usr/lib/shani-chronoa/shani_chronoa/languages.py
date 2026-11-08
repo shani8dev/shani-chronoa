@@ -118,10 +118,11 @@ def chosen(config=None) -> "list[str]":
 def reads(code: str) -> bool:
     """Whether OCR data for `code` is on disk - the user's, or the distro's.
 
-    Ships in /usr/share/tessdata via packages (shani-tessdata-*). The reader
-    (`ocr.find_tessdata_dir`) already falls back to the system directory;
-    this predicate is what the wizard asks, so it must agree or setup offers
-    to download OCR data the machine already has.
+    Arch's tesseract-data-<code> packages install the standard models to
+    /usr/share/tessdata, and an image may bake one in. The reader
+    (`ocr.find_tessdata_dir`) already falls back to that directory; this
+    predicate is what the wizard asks, so it must agree or setup offers to
+    download OCR data the machine already has.
     """
     name = f"{LANGUAGES[code].tesseract}.traineddata"
     return (tessdata_dir() / name).is_file() or (SYSTEM_TESSDATA / name).is_file()
