@@ -149,6 +149,12 @@ PARAKEET_MODELS: Dict[str, ModelSpec] = {
 
 PARAKEET_DEFAULT_MODEL = "parakeet-q4_0"
 
+#: The wire prefix for Parakeet catalogue keys (`parakeet:parakeet-q4_0`),
+#: so a whisper key and a Parakeet key cannot collide and a caller can tell
+#: which backend a bare key belongs to. `gui.surfaces.models` and the setup
+#: wizard both use it; define it once, here, next to the models it names.
+PARAKEET_KEY_PREFIX = "parakeet:"
+
 # `ParakeetSTT`'s default model is the bare `tdt-0.6b-v3`; the quantized
 # filenames above are what this backend downloads. Mapping one onto the other
 # is what stops the provisioner writing a file the reader never looks for.

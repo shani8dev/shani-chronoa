@@ -110,7 +110,8 @@ def state(config=None) -> dict:
     # the `which()` pair could not, so setup reported no speech program on a
     # machine that had just fetched one.
     whisper = engines.has("whisper-cli")
-    stt_model = any(stt_provision.is_provisioned(k) for k in stt_provision.MODELS)
+    stt_model = (any(stt_provision.is_provisioned(k) for k in stt_provision.MODELS)
+                 or any(stt_provision.is_parakeet_provisioned(k) for k in stt_provision.PARAKEET_MODELS))
     voice = config.piper_voice
     from shani_chronoa import imagegen, languages, local_embed, local_vision
     gpu = local_llm.gpu_devices()
@@ -247,19 +248,60 @@ def setup_brain(key: str, report=None, cancel: Optional[threading.Event] = None,
     return "The model is downloaded and starting; it is taking a while - Chronoa will use it once it answers."
 
 
+def stt_catalogue() -> "list[tuple]":
+    """Every speech model setup can install: `(key, label, subtitle, engine)`.
+
+    Both backends, from their own catalogues - a new tier or a new Parakeet
+    quant shows up here without this page knowing: the choice of what is
+    offered is a fact about the catalogues, and hardcoding it in the wizard
+    is how Parakeet was invisible at first boot for its whole first life.
+
+    Parakeet keys carry the `parakeet:` prefix `gui.surfaces.models` uses,
+    so `setup_ears` and the Ears page share one spelling.
+    """
+    from shani_chronoa import stt_provision
+    out = []
+    for key, spec in stt_provision.MODELS.items():
+        out.append((key, f"{key.split('-')[0].title()}",
+                    f"{spec.size_bytes / 1e6:.0f} MB - {spec.note}", "whisper-cli"))
+    for key, spec in stt_provision.PARAKEET_MODELS.items():
+        out.append((f"parakeet:{key}", f"Parakeet ({key})",
+                    f"{spec.size_bytes / 1e6:.0f} MB - {spec.note}", "parakeet-cli"))
+    return out
+
+
 def setup_ears(key: str, report=None, cancel: Optional[threading.Event] = None, config=None, transport=None) -> str:
+    """Install `key` from the STT catalogue, and record which backend it is.
+
+    A Parakeet card selects the backend, not a whisper model - the same
+    sentence the Models panel lives by: choosing one sets `stt-backend`, and
+    choosing a Whisper one sets it back. `setup_ears` used to know only the
+    Whisper half, so a Parakeet pick would have downloaded a whisper model
+    under its name and left the backend on whisper.
+    """
     from shani_chronoa import engines, stt_provision
     from shani_chronoa.config import ChronoaConfig
     config = config or ChronoaConfig()
     cancel = cancel or threading.Event()
+    parakeet = key.startswith(stt_provision.PARAKEET_KEY_PREFIX)
+    program = "parakeet-cli" if parakeet else "whisper-cli"
     try:
-        engines.ensure("whisper-cli", progress=_progress(report, cancel, "whisper.cpp"),
+        engines.ensure(program, progress=_progress(report, cancel, program),
                        config=config, transport=transport)
     except engines.EngineMissing as why:
         return f"{why} Typing works in the meantime."
-    spec = stt_provision.MODELS[key]
-    stt_provision.provision(key, config=config, progress=_progress(report, cancel, spec.filename), transport=transport)
-    config.set("whisper-model", key.split("-")[0])
+    if parakeet:
+        bare = key[len(stt_provision.PARAKEET_KEY_PREFIX):]
+        spec = stt_provision.PARAKEET_MODELS[bare]
+        stt_provision.provision_parakeet(bare, config=config,
+                                         progress=_progress(report, cancel, spec.filename),
+                                         transport=transport)
+        config.set("stt-backend", "parakeet")
+    else:
+        spec = stt_provision.MODELS[key]
+        stt_provision.provision(key, config=config, progress=_progress(report, cancel, spec.filename), transport=transport)
+        config.set("whisper-model", key.split("-")[0])
+        config.set("stt-backend", "whisper")
     return "Chronoa can now hear you."
 
 
@@ -2325,11 +2367,27 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         box.append(_cloud_speech_switch(
             "Listen in the cloud", _cloud_voice.STT_SWITCH, _cloud_voice.STT_ROUTES,
             "Your recordings are uploaded to be transcribed"))
-    items = [(k, f"{k.split('-')[0].title()}" + (" - recommended" if k == e["recommended"] else ""),
-              f"{spec.size_bytes / 1e6:.0f} MB - {spec.note}") for k, spec in stt_provision.MODELS.items()]
+    # **Both backends, from the one catalogue function**: Whisper (the
+    # default) and Parakeet, so a new tier or quant is offered on its own.
+    # The recommended mark stays on the Whisper default - Parakeet is the
+    # opt-in alternative, offered like every other choice here, not nudged.
+    catalogue = stt_catalogue()
+    items = [(k, label + (" - recommended" if k == e["recommended"] else ""), subtitle)
+             for k, label, subtitle, _program in catalogue]
+    catalogue_meta = {k: (label, subtitle, program) for k, label, subtitle, program in catalogue}
     group, chosen_stt = choice_group("Choose how well it listens", items, e["recommended"])
     if e["model"]:
         have = [k for k in stt_provision.MODELS if stt_provision.is_provisioned(k)]
+        have += [f"{stt_provision.PARAKEET_KEY_PREFIX}{k}"
+                 for k in stt_provision.PARAKEET_MODELS if stt_provision.is_parakeet_provisioned(k)]
+        # The sentence below promises Chronoa will use what is here. With
+        # only a Parakeet model on disk and the backend still on the whisper
+        # default, that promise would be false, so an unchosen backend is
+        # recorded against the first available model. A backend the person
+        # already chose is theirs and stays.
+        if have and not config.get("stt-backend"):
+            config.set("stt-backend",
+                       "parakeet" if have[0].startswith(stt_provision.PARAKEET_KEY_PREFIX) else "whisper")
         already_there(
             "A speech model is already downloaded and checked ("
             + ", ".join(have) + "). Chronoa will use it.", "voice",
@@ -2354,11 +2412,16 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         box.append(group)
         # Re-recorded on every toggle, for the same reason as the brain page.
         def record_ears(*_a) -> None:
-            _espec = stt_provision.MODELS[chosen_stt()]
-            choose("ears", f"Listening - whisper.cpp {chosen_stt()}",
-                   with_engine("whisper-cli", _espec.size_bytes),
-                   lambda report: setup_ears(chosen_stt(), report, win.cancel, config),
-                   _espec.note)
+            key = chosen_stt()
+            label, subtitle, program = catalogue_meta[key]
+            spec = (stt_provision.PARAKEET_MODELS[key[len(stt_provision.PARAKEET_KEY_PREFIX):]]
+                    if key.startswith(stt_provision.PARAKEET_KEY_PREFIX)
+                    else stt_provision.MODELS[key])
+            backend = "Parakeet" if program == "parakeet-cli" else "whisper.cpp"
+            choose("ears", f"Listening - {backend} {key}",
+                   with_engine(program, spec.size_bytes),
+                   lambda report: setup_ears(key, report, win.cancel, config),
+                   spec.note)
         for _check in _choice_rows[id(group)].values():
             _check.connect("toggled", record_ears)
         record_ears()
