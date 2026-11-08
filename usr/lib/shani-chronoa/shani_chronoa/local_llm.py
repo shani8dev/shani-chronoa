@@ -48,16 +48,26 @@ UNIT = "shani-chronoa-llm.service"
 # revision, read from the HF API on 2026-10-02 - not from a download.
 _QWEN = "https://huggingface.co/Qwen/{repo}/resolve/{rev}"
 TIERS = (
+    (ModelSpec("qwen3.5-0.8b", "Qwen3.5-0.8B-Q4_K_M.gguf", 532_517_120,
+               "bd258782e35f7f458f8aced1adc053e6e92e89bc735ba3be89d38a06121dc517",
+               "tiny and quick; simple requests",
+               "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/6ab461498e2023f6e3c1baea90a8f0fe38ab64d0"),
+     "Small (0.5 GB) - quick on any computer, for simple requests", 0),
     (ModelSpec("qwen3-0.6b", "Qwen3-0.6B-Q8_0.gguf", 639_446_688,
                "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031",
                "tiny and quick; simple requests",
                _QWEN.format(repo="Qwen3-0.6B-GGUF", rev="23749fefcc72300e3a2ad315e1317431b06b590a")),
-     "Small (0.6 GB) - quick on any computer, for simple requests", 0),
+     "Small (0.6 GB) - quick on any computer, for simple requests", 999),
+    (ModelSpec("qwen3.5-2b", "Qwen3.5-2B-Q4_K_M.gguf", 1_280_835_840,
+               "aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223",
+               "the default; reliable tool calls on a CPU",
+               "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/f6d5376be1edb4d416d56da11e5397a961aca8ae"),
+     "Medium (1.3 GB) - the best fit for most computers", 6),
     (ModelSpec("qwen3-1.7b", "Qwen3-1.7B-Q4_K_M.gguf", 1_107_409_472,
                "b139949c5bd74937ad8ed8c8cf3d9ffb1e99c866c823204dc42c0d91fa181897",
-               "the default; reliable tool calls on a CPU",
+               "the previous default; reliable tool calls on a CPU",
                "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/d7f544eead698dbd1f15126ef60b45a1e1933222"),
-     "Medium (1.1 GB) - the best fit for most computers", 6),
+     "Medium (1.1 GB) - the best fit for most computers", 999),
     (ModelSpec("qwen3-4b", "Qwen3-4B-Q4_K_M.gguf", 2_497_280_256,
                "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
                "smarter, slower on a CPU",
@@ -1514,8 +1524,12 @@ def recommended_for_machine() -> str:
 #: measured, on a speed figure. The speed figure was the excuse; the eval is the
 #: evidence, and only one of the two had been measured.
 REQUIRES: Dict[str, Dict[str, float]] = {
+    "qwen3.5-0.8b": {"cpu": 2, "ram": 0, "vram": 0, "min_tps": 5.0,
+                   "active_bytes": None},
     "qwen3-0.6b": {"cpu": 2, "ram": 0, "vram": 0, "min_tps": 5.0,
                    "active_bytes": None, "eval": "44/62"},
+    "qwen3.5-2b": {"cpu": 2, "ram": 6, "vram": 0, "min_tps": 5.0,
+                   "active_bytes": None},
     "qwen3-1.7b": {"cpu": 2, "ram": 0, "vram": 0, "min_tps": 5.0,
                    "active_bytes": None, "eval": "56/62"},
     "qwen3-4b": {"cpu": 2, "ram": 8, "vram": 0, "min_tps": 5.0, "active_bytes": None},
