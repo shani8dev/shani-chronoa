@@ -85,3 +85,26 @@ def test_a_language_espeak_ng_has_is_left_alone():
             return "mr" if key == languages.SETTING else default
 
     assert languages.espeak_language("मराठी", Config()) == "mr"
+
+
+def test_installing_a_language_the_distro_already_has_downloads_nothing(tmp_path, monkeypatch):
+    """Arch's tesseract-data-hin installs /usr/share/tessdata/hin.traineddata."""
+    from shani_chronoa import languages
+    system = tmp_path / "sys-tessdata"
+    system.mkdir()
+    (system / "hin.traineddata").write_bytes(b"ocr")
+    monkeypatch.setattr(languages, "SYSTEM_TESSDATA", system)
+    monkeypatch.setattr(languages, "tessdata_dir", lambda: tmp_path / "user-tessdata")
+
+    class Config:
+        def get(self, key, default=""):
+            return default
+
+        def set(self, key, value):
+            pass
+
+    class Transport:
+        def __call__(self, *a, **k):
+            raise AssertionError("downloaded data the machine already had")
+
+    assert languages.install("hi", speech=False, config=Config(), transport=Transport()) == ["reading"]

@@ -155,8 +155,13 @@ def install(code: str, *, speech: bool = True, progress: Optional[Callable[[int,
     lang = LANGUAGES[code]
     done = []
     _link_system_data()
-    install_verified(tess_spec(lang), tessdata_dir(), config=config, progress=progress, transport=transport,
-                     label="tessdata")
+    if not reads(code):
+        # Already on the machine - the user's own copy, or the distro's
+        # (Arch's tesseract-data-hin and friends install the standard models
+        # to /usr/share/tessdata). Downloading a second copy of what `reads`
+        # just answered "yes" to is the wizard re-fetching what it has.
+        install_verified(tess_spec(lang), tessdata_dir(), config=config, progress=progress, transport=transport,
+                         label="tessdata")
     done.append("reading")
     if speech and lang.voice:
         voices.install_piper(progress=progress, config=config, transport=transport)
