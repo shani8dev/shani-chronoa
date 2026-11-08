@@ -129,6 +129,19 @@ def model_path(key: str) -> Path:
     return SYSTEM_MODEL_DIR / spec.filename
 
 
+def model_path_by_filename(filename: str) -> "Path | None":
+    """Where `filename` lives, if any tier ships it.
+
+    One lookup for shared artifacts: a multimodal model's language weights
+    are the same file whether the caller wants the brain or the eyes, so the
+    vision side asks here instead of keeping a second copy of the answer.
+    """
+    for spec in SPECS.values():
+        if spec.filename == filename:
+            return model_path(spec.key)
+    return None
+
+
 def current_link() -> Path:
     """The file the service loads; a symlink to the chosen model, so switching models is one rename."""
     return model_dir() / "current.gguf"

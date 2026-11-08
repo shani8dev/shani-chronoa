@@ -71,6 +71,20 @@ TIERS = (
                        "mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf", 445_053_216,
                        "f9a68fabba69c3b81e153367b2c7521030b0fa8bb0de400c9599c8e6725f9c82", "Qwen3-VL 2B"),
                 8),
+    # Qwen3.5-2B is the default brain too (local_llm), so its language
+    # weights are looked up in the llm dirs (see _model_path) - only the
+    # 668 MB projector is vision's own file. It beats qwen3-vl-2b on every
+    # vision benchmark measured (RealWorldQA 74.5 vs 69.5, OCRBench 85.4 vs
+    # 79.2, ScreenSpot Pro 54.5), so it is listed after it in TIERS order
+    # and recommended() picks it at >=6 GB.
+    VisionModel("qwen3.5-2b", "Medium (1.9 GB with the brain) - the default brain, with eyes",
+                *_pair("qwen3.5-2b", "unsloth/Qwen3.5-2B-GGUF",
+                       "f6d5376be1edb4d416d56da11e5397a961aca8ae",
+                       "Qwen3.5-2B-Q4_K_M.gguf", 1_280_835_840,
+                       "aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223",
+                       "mmproj-F16.gguf", 668_227_264,
+                       "7035e9cb8d7c6a9681d07eef9a364783e86ea4cd73faab2eabb4f43a101830c7", "Qwen3.5-2B"),
+                6),
     VisionModel("qwen3-vl-4b", "Large (3.0 GB) - the most detail; slow without a graphics card",
                 *_pair("qwen3-vl-4b", "Qwen/Qwen3-VL-4B-Instruct-GGUF", "1cd86afb9a95c410a6038ab3b40d8b578c892266",
                        "Qwen3VL-4B-Instruct-Q4_K_M.gguf", 2_497_281_664,
@@ -94,10 +108,26 @@ SYSTEM_MODEL_DIR = Path("/usr/share/shani-chronoa/vision")
 
 
 def _model_path(filename: str) -> Path:
-    """One file, user copy first, the distro's after - `stt_provision.model_path`'s shape."""
+    """One file, user copy first, the distro's after - `stt_provision.model_path`'s shape.
+
+    **A multimodal model is one artifact with two jobs.** Qwen3.5-2B is both
+    the default brain (`local_llm`) and a vision tier here: the language
+    weights are identical, only the projector differs. So the language file
+    is looked up wherever the brain keeps it too - the llm user dir and the
+    packaged llm dir - and only the projector lives in the vision dirs.
+    Without this, enabling eyes would download the same 1.28 GB a second
+    time into a second directory.
+    """
     user = model_dir() / filename
     if user.is_file():
         return user
+    try:
+        from shani_chronoa import local_llm
+        shared = local_llm.model_path_by_filename(filename)
+    except Exception:
+        shared = None
+    if shared is not None and shared.is_file():
+        return shared
     return SYSTEM_MODEL_DIR / filename
 
 
@@ -153,10 +183,26 @@ def server_args(key: str, devices: "Optional[list[str]]" = None) -> "list[str]":
 
 
 def provision(key: str, progress: Optional[Callable[[int, int], None]] = None, config=None, transport=None) -> Path:
-    """Download and verify both files for `key`, then point the server at them."""
+    """Download and verify both files for `key`, then point the server at them.
+
+    A shared language file (one the brain already has) is not re-downloaded:
+    it is verified where it lives and symlinked into the vision dir, so the
+    projector is the only file vision ever fetches for such a tier.
+    """
     m = MODELS[key]
-    for spec in (m.model, m.mmproj):
-        install_verified(spec, model_dir(), config=config, progress=progress, transport=transport, label="vision")
+    existing = _model_path(m.model.filename)
+    if existing.is_file() and file_matches(existing, m.model):
+        if model_dir() != existing.parent:
+            dest = model_dir() / m.model.filename
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                dest.symlink_to(existing)
+            except OSError:
+                import shutil
+                shutil.copyfile(existing, dest)
+    else:
+        install_verified(m.model, model_dir(), config=config, progress=progress, transport=transport, label="vision")
+    install_verified(m.mmproj, model_dir(), config=config, progress=progress, transport=transport, label="vision")
     configure(key)
     return model_dir() / m.model.filename
 
