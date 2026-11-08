@@ -348,10 +348,20 @@
       <summary>Groq model Chronoa answers with</summary>
       <description>Which of Groq's models answers when this provider is used. Empty means the provider's own default, so nothing changes until a model is picked. The list is read live from the provider at setup time - every one of them speaks the OpenAI shape and answers GET /models with it.</description>
     </key>
+    <key name="sarvam-api-key" type="s">
+      <default>''</default>
+      <summary>Sarvam API key</summary>
+      <description>Required to use Sarvam as a cloud LLM fallback. Sarvam is an Indian-hosted model family with state-of-the-art performance on Indian languages (Sarvam 105B/30B, trained under the IndiaAI mission). Empty means this provider is skipped.</description>
+    </key>
     <key name="openrouter-api-key" type="s">
       <default>''</default>
       <summary>OpenRouter API key</summary>
       <description>Required to use OpenRouter as a cloud LLM fallback - OpenRouter has no anonymous access. A free account key is enough for its ':free' models, which is what Chronoa uses by default. Empty means this provider is skipped.</description>
+    </key>
+    <key name="sarvam-model" type="s">
+      <default>''</default>
+      <summary>Sarvam model Chronoa answers with</summary>
+      <description>Which Sarvam model answers when this provider is used. sarvam-30b is the conversational model; sarvam-105b is the reasoning one.</description>
     </key>
     <key name="openrouter-model" type="s">
       <default>''</default>

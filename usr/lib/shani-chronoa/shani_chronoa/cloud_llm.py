@@ -167,6 +167,13 @@ PROVIDERS: dict[str, CloudProvider] = {
     # default to choose for someone.
     "openrouter": CloudProvider("openrouter", "OpenRouter", "https://openrouter.ai/api/v1",
                                 "openrouter/free", requires_key=True),
+    # Sarvam: an Indian-hosted model family (sarvam-30b/105b, trained under
+    # the IndiaAI mission) with state-of-the-art performance on Indian
+    # languages. Keyed - the /v1 endpoint answers anonymous reads with the
+    # model list but chat completions need a key. The conversational 30B is
+    # the default, not the 105B reasoning model.
+    "sarvam": CloudProvider("sarvam", "Sarvam", "https://api.sarvam.ai/v1",
+                            "sarvam-30b", requires_key=True),
     "google": CloudProvider(
         "google", "Google Gemini", "https://generativelanguage.googleapis.com/v1beta/openai",
         "gemini-2.0-flash", requires_key=True, model_list=False,
@@ -637,7 +644,7 @@ def custom_provider(base_url: str, model: str = "") -> "CloudProvider | None":
 # BYOK-required providers, tried ahead of the free chain when a key is
 # configured for them (see app.py's cloud-fallback wiring). Anthropic is
 # handled separately (see AnthropicLLM) since it isn't OpenAI-compatible.
-BYOK_PROVIDER_ORDER = ("anthropic", "openai", "google", "groq", "openrouter", "opencode-zen")
+BYOK_PROVIDER_ORDER = ("anthropic", "openai", "google", "groq", "openrouter", "sarvam", "opencode-zen")
 
 #: **Read out of the registry, not written beside it.** This used to be a
 #: literal of its own, so adding Anthropic to `PROVIDERS` would have left two

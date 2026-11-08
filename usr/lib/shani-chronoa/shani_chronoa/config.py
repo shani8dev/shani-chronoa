@@ -1132,6 +1132,7 @@ API_KEY_SETTINGS = {
     "llm7": "llm7-api-key", "kilo": "kilo-api-key", "blockrun": "blockrun-api-key", "openai": "openai-api-key",
     "anthropic": "anthropic-api-key", "google": "google-api-key", "groq": "groq-api-key",
     "opencode-zen": "opencode-zen-api-key", "openrouter": "openrouter-api-key",
+    "sarvam": "sarvam-api-key",
     # The custom endpoint's key, so it lands in the keyring like every other one
     # rather than being the single secret in this table that is only ever
     # plaintext.
@@ -1149,6 +1150,7 @@ MODEL_SETTINGS = {
     "openai": "openai-model", "anthropic": "anthropic-model",
     "google": "google-model", "groq": "groq-model",
     "opencode-zen": "opencode-zen-model", "openrouter": "openrouter-model",
+    "sarvam": "sarvam-model",
     # **Your own server, and the one this table was silently wrong about.**
     # `set_cloud_model` returns early on an id it does not name, and it did not
     # name `custom` - measured: `set_cloud_model("custom", "m")` wrote *nothing*

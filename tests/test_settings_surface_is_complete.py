@@ -193,7 +193,7 @@ CONTROLLED = {
     # the audio device choosers
     "audio-input-device", "audio-output-device",
     # BYOK provider keys
-    "anthropic-api-key", "openai-api-key", "google-api-key", "groq-api-key", "opencode-zen-api-key", "openrouter-api-key",
+    "anthropic-api-key", "openai-api-key", "google-api-key", "groq-api-key", "opencode-zen-api-key", "openrouter-api-key", "sarvam-api-key",
     "llm7-api-key", "kilo-api-key", "blockrun-api-key",
     # custom OpenAI-compatible endpoint rows in the Privacy page
     "custom-llm-base-url", "custom-llm-model", "custom-llm-api-key",
@@ -249,6 +249,7 @@ NOT_EXPOSED = {
     "google-model": "read live from the provider at setup time, where choosing one is also where the key is entered; empty means the provider's own default, so nothing changes until a model is picked",
     "openai-model": "read live from the provider at setup time, where choosing one is also where the key is entered; empty means the provider's own default, so nothing changes until a model is picked",
     "anthropic-model": "read live from the provider at setup time, where choosing one is also where the key is entered; empty means the provider's own default, so nothing changes until a model is picked",
+    "sarvam-model": "read live from the provider at setup time, where choosing one is also where the key is entered; empty means the provider's own default (sarvam-30b), so nothing changes until a model is picked",
     "kokoro-voice": "chosen on the setup window's Voice page, in the same list as the Piper voices, "
                     "where choosing one also downloads Kokoro; Settings has the Kokoro on/off switch",
     "extra-languages": "chosen on the setup window's More page, which installs each language's "
