@@ -183,7 +183,7 @@ _SYSTEM_DIR = Path("/usr/share/whisper/models")
 # `stt_parakeet.py`'s `_get_model_path`. Separate because the two backends'
 # models are different files with different names; one shared list would let a
 # whisper lookup resolve into the parakeet directory.
-_PARAKEET_SYSTEM_DIR = Path("/usr/share/parakeet/models")
+_PARAKEET_SYSTEM_DIR = Path("/var/lib/shani-chronoa/parakeet/models")
 
 
 class ProvisionError(Exception):
@@ -200,7 +200,7 @@ class DigestMismatch(ProvisionError):
 
 def model_dir() -> Path:
     """The user model directory - the same one `stt.py` reads."""
-    return files.data_home() / "whisper" / "models"
+    return files.data_home() / "shani-chronoa" / "whisper" / "models"
 
 
 def model_path(key: str = DEFAULT_MODEL) -> Path:
@@ -214,6 +214,10 @@ def model_path(key: str = DEFAULT_MODEL) -> Path:
     user = model_dir() / spec.filename
     if user.exists():
         return user
+    for sd in ("/var/lib/shani-chronoa/whisper/models", str(_SYSTEM_DIR)):
+        p = Path(sd) / spec.filename
+        if p.is_file():
+            return p
     return _SYSTEM_DIR / spec.filename
 
 
@@ -227,7 +231,7 @@ def is_provisioned(key: str = DEFAULT_MODEL) -> bool:
 
 def parakeet_model_dir() -> Path:
     """The user Parakeet model directory - the one `stt_parakeet.py` reads."""
-    return files.data_home() / "parakeet" / "models"
+    return files.data_home() / "shani-chronoa" / "parakeet" / "models"
 
 
 def parakeet_model_path(key: str = PARAKEET_DEFAULT_MODEL) -> Path:
@@ -241,6 +245,10 @@ def parakeet_model_path(key: str = PARAKEET_DEFAULT_MODEL) -> Path:
     user = parakeet_model_dir() / spec.filename
     if user.exists():
         return user
+    for sd in ("/var/lib/shani-chronoa/parakeet/models", str(_PARAKEET_SYSTEM_DIR)):
+        p = Path(sd) / spec.filename
+        if p.is_file():
+            return p
     return _PARAKEET_SYSTEM_DIR / spec.filename
 
 
@@ -616,7 +624,7 @@ def install_verified(spec: ModelSpec, directory: Path, *, config=None, progress=
     if present.is_file() and not file_matches(present, spec):
         logger.warning("%s does not match its pinned digest; fetching it again", present)
         present.unlink()
-    return _install(spec, user_dir=directory, system_dir=Path("/usr/share/shani-chronoa") / label,
+    return _install(spec, user_dir=directory, system_dir=Path("/var/lib/shani-chronoa") / label,
                     existing=present if present.is_file() else None, config=config,
                     progress=progress, transport=transport, label=label)
 

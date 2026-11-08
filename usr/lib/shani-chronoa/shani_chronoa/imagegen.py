@@ -62,12 +62,10 @@ def engine_dir() -> Path:
     return files.data_home() / "shani-chronoa" / "sdcpp"
 
 
-#: The distro-packaged locations. A picture engine and model baked into the
-#: image are a picture engine and model the machine has; every reader and
-#: checker below answers from here exactly as the whisper model path answers
-#: for STT.
-SYSTEM_ENGINE_DIR = Path("/usr/share/shani-chronoa/sdcpp")
-SYSTEM_MODEL_DIR = Path("/usr/share/shani-chronoa/imagine")
+#: The distro-packaged locations (imagegen is not shipped, so these mirror
+#: the user dirs).
+SYSTEM_ENGINE_DIR = Path("/var/lib/shani-chronoa/sdcpp")
+SYSTEM_MODEL_DIR = Path("/var/lib/shani-chronoa/imagine")
 
 
 def _system_marker_matches(spec) -> bool:

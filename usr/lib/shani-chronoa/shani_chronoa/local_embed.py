@@ -48,9 +48,9 @@ def model_dir() -> Path:
     return files.data_home() / "shani-chronoa" / "embed"
 
 
-#: The distro-packaged model location, as for every other backend:
-#: `stt_provision.model_path`'s shape, for the embedding model.
-SYSTEM_MODEL_DIR = Path("/usr/share/shani-chronoa/embed")
+#: The distro-packaged model location (embeddings are not shipped, so this
+#: mirrors `model_dir()`).
+SYSTEM_MODEL_DIR = Path("/var/lib/shani-chronoa/embed")
 
 
 def model_path() -> Path:

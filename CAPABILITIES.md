@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**265 skills in 24 groups.** Each is a named, schema-typed module; the model
+**269 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. The whitelist *is* the design, so a new capability is a
 new named skill. The one exception is `run_command`, for running a project's
 tests and builds: off by default, sandboxed (no network, nothing outside the
@@ -37,7 +37,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**98 of 265 are consent-gated and 17 are destructive.**
+**98 of 269 are consent-gated and 17 are destructive.**
 
 ## System
 
@@ -58,6 +58,7 @@ Processes, packages, updates, containers, vms, disks, network.
 | `cloud_files` | What is in this machine's cloud storage remotes | — |
 | `compression_savings` | How much space btrfs compression is saving | needs `filesystems-sense-enabled` |
 | `connect_wifi` | Join a WiFi network | needs `wifi-connect-enabled` |
+| `content_discovery` | Which paths a local web server answers on | — |
 | `cpu_frequency` | The CPU governor, its speed, and its hardware range | — |
 | `cpu_per_core` | Which processor cores are busy right now | — |
 | `data_usage` | Data used | — |
@@ -82,6 +83,7 @@ Processes, packages, updates, containers, vms, disks, network.
 | `my_ip_address` | IP address | — |
 | `neighbour_table` | Which addresses on this link have answered, and which never have | — |
 | `network_activity` | What is using this machine's network right now, per program | — |
+| `network_watch` | Watch for new devices on one interface | — |
 | `open_files` | Which programs have a file or socket open | — |
 | `open_settings` | Open the system Settings at a page | — |
 | `permission_audit` | What other users on this machine can read or write | — |
@@ -175,6 +177,7 @@ Hardware, peripherals, sensors and their state.
 | `bluetooth_gatt` | Read a watch or band's battery, sensors and firmware | needs `bluetooth-gatt-enabled` |
 | `device_i2c` | Read or write an I2C device register | **asks first, always** · needs `i2c-write-enabled` |
 | `device_probe` | User-space driver routes: I2C buses, video, FUSE | — |
+| `device_serial` | Read from or write to a serial device | — |
 | `disk_health` | Drive health and disk encryption | needs `storage-sense-enabled` |
 | `driver_build` | Compile a kernel module with Kbuild | needs `driver-build-enabled` |
 | `driver_info` | Which driver each device uses | — |
@@ -396,6 +399,7 @@ Memory, percepts and what it has decided.
 | Skill | What it does | Before it runs |
 |---|---|---|
 | `conversations` | Search, reopen, copy or export earlier conversations | **asks first, always** · needs `file-delete-enabled` |
+| `kundali` | Read the birth chart, panchang and planetary yogas of a person | — |
 | `list_capabilities` | What it can do right now | — |
 | `list_percepts` | What it perceives | — |
 | `review_proposals` | What it noticed but did not keep | needs `memory-sense-enabled` |

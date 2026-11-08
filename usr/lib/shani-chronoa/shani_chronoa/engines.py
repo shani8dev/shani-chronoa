@@ -202,7 +202,7 @@ def install_engine(spec: ModelSpec, progress=None, config=None, transport=None) 
             and marker.read_text(encoding="utf-8").strip() == spec.filename:
         return str(_binary_dir(spec.key))
     archive = _install(spec, user_dir=engine_dir(spec.key),
-                       system_dir=Path("/usr/share/shani-chronoa/engines"), existing=None,
+                       system_dir=Path("/var/lib/shani-chronoa/engines"), existing=None,
                        config=config, progress=progress, transport=transport, label="engine")
     try:
         unpack_tar(archive, engine_dir(spec.key))

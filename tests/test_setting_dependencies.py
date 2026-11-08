@@ -79,7 +79,8 @@ MULTI_WRITE_SITES = {
     ("settings_window/privacy.py", "_build_privacy"):
         ("custom-llm-base-url",
         "custom-llm-model",
-        "home-place"),
+        "home-place",
+        "screen-capture-excluded-apps"),
     ("settings_window/voice.py", "_build_voice"):
         ("end-of-speech-pause",
         "language",
@@ -96,12 +97,16 @@ MULTI_WRITE_SITES = {
         "privacy-mode",
         "setup-complete",
         "setup-dismissed",
-        "setup-mode"),
+        "setup-mode",
+        "stt-backend"),
     ("setup_wizard.py", "pick_mode"):
         ("answer-mode",
         "cloud-fallback-enabled",
         "privacy-mode",
         "setup-mode"),
+    ("setup_wizard.py", "setup_ears"):
+        ("stt-backend",
+        "whisper-model"),
     ("setup_wizard.py", "setup_kokoro"):
         ("kokoro-tts-enabled",
         "kokoro-voice"),

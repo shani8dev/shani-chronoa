@@ -162,7 +162,7 @@ class ParakeetSTT:
         files at all; it exists so a future packaging change has somewhere
         consistent to put them rather than so something can be found today.
         """
-        dirs = (files.data_home() / "parakeet" / "models", "/usr/share/parakeet/models")
+        dirs = ("/var/lib/shani-chronoa/parakeet/models", files.data_home() / "shani-chronoa" / "parakeet" / "models", "/usr/share/parakeet/models")
         names = [f"ggml-parakeet-{model}.bin", f"parakeet-{model}.bin", f"{model}.bin"]
         names += [f"ggml-parakeet-{model}-{q}.bin" for q in _QUANTIZATIONS]
         for d in dirs:

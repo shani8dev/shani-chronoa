@@ -100,11 +100,9 @@ def model_dir() -> Path:
     return files.data_home() / "shani-chronoa" / "vision"
 
 
-#: The distro-packaged model location. A vision model baked into the image
-#: is a model the machine has; `installed()` and `server_args()` answer from
-#: here exactly as the whisper model path answers for STT, so the setup
-#: wizard never re-downloads what the image already carries.
-SYSTEM_MODEL_DIR = Path("/usr/share/shani-chronoa/vision")
+#: The distro-packaged model location. Vision shares the LLM weights and is
+#: not shipped as a package, so this mirrors `model_dir()`.
+SYSTEM_MODEL_DIR = Path("/var/lib/shani-chronoa/vision")
 
 
 def _model_path(filename: str) -> Path:

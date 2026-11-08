@@ -165,12 +165,14 @@ class PiperTTS:
 
     def _get_voice_path(self, voice: str) -> str:
         """Get the path to the Piper voice model file."""
-        voice_dir = files.data_home() / "piper" / "voices"
+        for root in ("/var/lib/shani-chronoa/piper/voices", str(files.data_home() / "shani-chronoa" / "piper" / "voices"), "/usr/share/piper/voices"):
+            voice_file = f"{voice}.onnx"
+            path = os.path.join(root, voice_file)
+            if os.path.exists(path):
+                return path
+        voice_dir = files.data_home() / "shani-chronoa" / "piper" / "voices"
         voice_file = f"{voice}.onnx"
         path = os.path.join(voice_dir, voice_file)
-        if not os.path.exists(path):
-            # Try system-wide location
-            path = f"/usr/share/piper/voices/{voice_file}"
         return path
 
     # Engines, best first.

@@ -76,9 +76,9 @@ def test_vision_pins_are_real_and_tiers_follow_ram_and_gpu():
         for spec in (m.model, m.mmproj):
             assert len(spec.sha256) == 64 and spec.size_bytes > 50_000_000 and spec.base_url.startswith("https://")
     assert local_vision.recommended(4) == "smolvlm2-500m"
-    assert local_vision.recommended(16) == "qwen3-vl-2b"
+    assert local_vision.recommended(16) == "qwen3.5-2b"
     assert local_vision.recommended(16, gpu=True) == "qwen3-vl-4b"
-    assert local_vision.recommended(8, gpu=True) == "qwen3-vl-2b", "a GPU with little RAM does not get the large one"
+    assert local_vision.recommended(8, gpu=True) == "qwen3.5-2b", "a GPU with little RAM does not get the large one"
 
 
 def test_eyes_step_downloads_both_files_and_points_the_server_at_them(monkeypatch):
@@ -144,7 +144,7 @@ def test_the_vision_sense_prefers_the_llamacpp_model_once_it_is_set_up(monkeypat
     from shani_chronoa.senses import vision
     ChronoaConfig().set("vision-sense-enabled", "true")
     monkeypatch.setattr(local_vision, "available", lambda: True)
-    monkeypatch.setattr(local_vision, "active", lambda: "qwen3-vl-2b")
+    monkeypatch.setattr(local_vision, "active", lambda: "qwen3.5-2b")
     seen = {}
 
     def fake_child(image, model, host, prompt, timeout, backend="ollama"):
@@ -158,7 +158,7 @@ def test_the_vision_sense_prefers_the_llamacpp_model_once_it_is_set_up(monkeypat
     if not hasattr(screengrab, "Capture"):
         pytest.skip("screengrab has no Capture type to stand in")
     percept = vision.run({})
-    assert seen == {"model": "qwen3-vl-2b", "host": "http://127.0.0.1:8767", "backend": "llamacpp"}
+    assert seen == {"model": "qwen3.5-2b", "host": "http://127.0.0.1:8767", "backend": "llamacpp"}
     assert percept.metadata["backend"] == "llamacpp"
     # asking for an Ollama model by name still goes to Ollama
     vision.run({"model": "qwen3-vl:4b"})

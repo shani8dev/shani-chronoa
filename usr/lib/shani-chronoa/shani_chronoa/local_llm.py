@@ -112,12 +112,10 @@ def model_dir() -> Path:
     return files.data_home() / "shani-chronoa" / "llm"
 
 
-#: The distro-packaged model location: a model that ships in a package
-#: (baked into the image, or installed as a package) is a model the machine
-#: has. `installed()`, `verify()` and `use()` answer from here exactly as
-#: `stt_provision.model_path` answers for the whisper model, so shipping a
-#: model means setup never re-downloads it.
-SYSTEM_MODEL_DIR = Path("/usr/share/shani-chronoa/llm")
+#: The distro-packaged model location. The LLM is no longer shipped as a
+#: package (too large), so this mirrors `model_dir()`; kept as an attribute
+#: so tests and readers that reference it keep working.
+SYSTEM_MODEL_DIR = Path("/var/lib/shani-chronoa/llm")
 
 
 def model_path(key: str) -> Path:

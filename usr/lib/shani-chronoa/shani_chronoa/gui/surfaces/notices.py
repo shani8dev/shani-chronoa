@@ -64,6 +64,8 @@ def build(app: Any) -> Gtk.Widget:
     body.set_margin_start(12)
     body.set_margin_end(12)
 
+    recorder = common.StatusRecorder()
+
     try:
         open_notices = notices.list_open()
     except Exception:  # noqa: BLE001 - a surface shows what it can
@@ -71,16 +73,22 @@ def build(app: Any) -> Gtk.Widget:
 
     if open_notices is None:
         group = common.group("Notices", "The queue could not be read.")
+        status_word = common.STATUS_ATTENTION
+        status_summary = "Notices could not be read"
     elif not open_notices:
         group = common.group(
             "Notices",
             "Nothing Chronoa noticed is waiting. Reflexes, rule approvals "
             "and meeting offers appear here when they happen.")
+        status_word = common.STATUS_OK
+        status_summary = "Nothing waiting"
     else:
         group = common.group(
             "Notices",
             f"{len(open_notices)} notice(s) waiting. Dismissing one stops "
             "the same thing being said again.")
+        status_word = common.STATUS_OK
+        status_summary = f"{len(open_notices)} waiting"
         for notice in open_notices:
             notice_id = str(notice.get("id") or "")
             dismiss = Gtk.Button(label="Dismiss", valign=Gtk.Align.CENTER)
@@ -99,10 +107,15 @@ def build(app: Any) -> Gtk.Widget:
                              _subtitle(notice), suffix=dismiss)
             _add(group, row)
 
+    status_row = recorder.row(status_word, "Notices", status_summary)
+    body.append(status_row)
+
     # The scroller is inside the page (activity's shape), so a long queue
     # scrolls under the toolbar instead of growing past the window.
     body.append(common.scrolled(group))
     set_content(body)
+    navigation = page
+    navigation.status = recorder.status
     return page
 
 

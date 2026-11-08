@@ -5,7 +5,7 @@ package is the GTK gaming-mouse configurator; `rhasspy/piper`'s own Linux releas
 is a 26 MB self-contained tarball (its onnxruntime and espeak-ng data included)
 that runs from any directory, so setup puts it under
 ~/.local/share/shani-chronoa/piper and a voice where `tts.PiperTTS` already looks
-(~/.local/share/piper/voices).
+(~/.local/share/shani-chronoa/piper/voices).
 
 Kokoro, the neural voice, is installed the same way (`install_kokoro`): the
 sherpa-onnx release, which runs Kokoro the way Piper's program runs Piper, and
@@ -128,7 +128,7 @@ def piper_binary() -> str:
 
 
 def voice_dir() -> Path:
-    return files.data_home() / "piper" / "voices"
+    return files.data_home() / "shani-chronoa" / "piper" / "voices"
 
 
 #: The distro-packaged voice location. `tts.PiperTTS` already reads a voice
@@ -148,7 +148,9 @@ def _voice_on_disk(voice: str, root: Path) -> bool:
 
 def voice_installed(voice: str) -> bool:
     """Whether the voice is on disk - the user's copy, or the distro's."""
-    return _voice_on_disk(voice, voice_dir()) or _voice_on_disk(voice, SYSTEM_VOICE_DIR)
+    return (_voice_on_disk(voice, voice_dir())
+            or _voice_on_disk(voice, SYSTEM_VOICE_DIR)
+            or _voice_on_disk(voice, Path("/var/lib/shani-chronoa/piper/voices")))
 
 
 def _existing_voice(voice: str, filename: str) -> "Path | None":
@@ -156,8 +158,11 @@ def _existing_voice(voice: str, filename: str) -> "Path | None":
     user = voice_dir() / filename
     if user.is_file():
         return user
-    system = SYSTEM_VOICE_DIR / filename
-    return system if system.is_file() else None
+    for sd in (SYSTEM_VOICE_DIR, Path("/var/lib/shani-chronoa/piper/voices")):
+        system = sd / filename
+        if system.is_file():
+            return system
+    return None
 
 
 def install_piper(progress: Optional[Callable[[int, int], None]] = None, config=None, transport=None) -> str:
@@ -246,7 +251,7 @@ def kokoro_binary() -> str:
 
 def kokoro_dir() -> Path:
     """The user's own Kokoro directory, beside the Piper voices."""
-    return files.data_home() / "kokoro"
+    return files.data_home() / "shani-chronoa" / "kokoro"
 
 
 def kokoro_model_dir() -> Path:
@@ -255,7 +260,7 @@ def kokoro_model_dir() -> Path:
 
 #: The distro-packaged Kokoro model location, beside the packaged Piper
 #: voices: a model baked into the image is a model the machine has.
-SYSTEM_KOKORO_DIR = Path("/usr/share/kokoro") / _KOKORO_MODEL_DIR
+SYSTEM_KOKORO_DIR = Path("/var/lib/shani-chronoa/kokoro") / _KOKORO_MODEL_DIR
 
 
 def kokoro_files(voice: str | None = None) -> "dict[str, Path]":

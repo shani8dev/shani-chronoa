@@ -279,7 +279,7 @@ class WhisperSTT:
         # model is ~57 MB, so a first-use download installs the small one. Without
         # these, `stt_provision` would report success and write a file this
         # function never looks for, leaving speech input silently dead.
-        dirs = (files.data_home() / "whisper" / "models", "/usr/share/whisper/models")
+        dirs = ("/var/lib/shani-chronoa/whisper/models", files.data_home() / "shani-chronoa" / "whisper" / "models", "/usr/share/whisper/models")
         names = (
             f"ggml-{model}.bin",
             f"{model}.bin",

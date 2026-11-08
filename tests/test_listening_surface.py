@@ -150,7 +150,7 @@ def test_the_model_found_is_named_with_its_file(monkeypatch):
     monkeypatch.setattr(
         "shani_chronoa.recordings.whisper_model",
         lambda: ("/usr/bin/whisper-cli",
-                 "/home/u/.local/share/whisper/models/ggml-base-q5_1.bin"))
+                 "/home/u/.local/share/shani-chronoa/whisper/models/ggml-base-q5_1.bin"))
 
     said, ok = listening._can_transcribe()
 

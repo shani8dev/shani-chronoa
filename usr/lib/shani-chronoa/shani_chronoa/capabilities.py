@@ -531,6 +531,10 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "manage_triggers": ("Code and git", "Arm an automatic rule"),
     "list_capabilities": ("What Chronoa knows", "What it can do right now"),
     "conversations": ("What Chronoa knows", "Search, reopen, copy or export earlier conversations"),
+    # The Vedic astrology half: birth chart, panchang, dashas, yogas, transits
+    # and the rest of the sidereal sky, all computed in-tree by the pure-Python
+    # astronomy module (no astrology binary in the image).
+    "kundali": ("What Chronoa knows", "Read the birth chart, panchang and planetary yogas of a person"),
     "office_document": ("Files", "Read, create or edit Word, Excel and PowerPoint files"),
     "analyze_table": ("Files", "Ask questions of a spreadsheet or CSV, and chart it"),
     # Beside `analyze_table` on purpose: that one answers arithmetic questions

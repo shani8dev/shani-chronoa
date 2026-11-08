@@ -43,7 +43,7 @@ _TOOLS = ("pipewire", "wireplumber", "pw-loopback", "pw-play", "pw-record", "pw-
 
 def _model() -> str:
     candidates = [os.environ.get("CHRONOA_TEST_WHISPER_MODEL", ""),
-                  str(Path.home() / ".local/share/whisper/models/ggml-base-q5_1.bin"),
+                  str(Path.home() / ".local/share/shani-chronoa/whisper/models/ggml-base-q5_1.bin"),
                   str(REPO.parent / "shani-install-media/test-env/cache/whisper-models/ggml-base-q5_1.bin")]
     return next((c for c in candidates if c and os.path.isfile(c)), "")
 
@@ -283,7 +283,7 @@ def in_that_graph(audio, monkeypatch, tmp_path):
     """This process (and so Chronoa's pw-record/pw-play) talks to the private graph."""
     for key in ("XDG_RUNTIME_DIR", "PIPEWIRE_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"):
         monkeypatch.setenv(key, audio.env[key])
-    models = tmp_path / "data" / "whisper" / "models"
+    models = tmp_path / "data" / "shani-chronoa" / "whisper" / "models"
     models.mkdir(parents=True)
     os.symlink(_MODEL, models / "ggml-base-q5_1.bin")
     # Voices installed once into the repo's git-ignored cache (`cache/data-home`,

@@ -41,9 +41,9 @@ def engine_present(monkeypatch):
 
 
 def test_default_model_follows_ram_and_gpu(monkeypatch):
-    assert local_llm.recommended(4) == "qwen3-0.6b"
-    assert local_llm.recommended(8) == "qwen3-1.7b"
-    assert local_llm.recommended(64) == "qwen3-1.7b", "4B is offered, never the CPU default"
+    assert local_llm.recommended(4) == "qwen3.5-0.8b"
+    assert local_llm.recommended(8) == "qwen3.5-2b"
+    assert local_llm.recommended(64) == "qwen3.5-2b", "4B is offered, never the CPU default"
     monkeypatch.setattr(local_llm, "ram_gb", lambda: 16.0)
     monkeypatch.setattr(local_llm, "gpu_devices", lambda: ["Vulkan0: Some GPU (8192 MiB)"])
     # **Not the GPU gate.** This line used to assert `qwen3-4b` on the strength of
@@ -60,9 +60,9 @@ def test_default_model_follows_ram_and_gpu(monkeypatch):
     # **And the pure RAM ladder is unchanged** - that half of the assertion was
     # never in dispute, and a rewrite that dropped it would lose the only part
     # that pins `recommended()` itself.
-    assert local_llm.recommended(4) == "qwen3-0.6b"
-    assert local_llm.recommended(8) == "qwen3-1.7b"
-    assert local_llm.recommended(64) == "qwen3-1.7b", "4B is offered, never the CPU default"
+    assert local_llm.recommended(4) == "qwen3.5-0.8b"
+    assert local_llm.recommended(8) == "qwen3.5-2b"
+    assert local_llm.recommended(64) == "qwen3.5-2b", "4B is offered, never the CPU default"
 
 
 def test_server_args_offload_only_with_a_gpu():

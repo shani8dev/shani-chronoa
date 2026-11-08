@@ -261,7 +261,7 @@ DEFAULT_SECTION = {
     "activity": "Remembering",
     "skills": "Acting",
     "triggers": "Acting",
-    "senses": "Sensing",
+    "notices": "Acting",    "senses": "Sensing",
     "machine": "Sensing",
     "model": "Thinking",
     "privacy": "Health and trust",

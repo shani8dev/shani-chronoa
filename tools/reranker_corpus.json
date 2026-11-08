@@ -4,7 +4,7 @@
   "seed": 20261013,
   "counts": {
     "requests": 220,
-    "pairs": 1662,
+    "pairs": 1664,
     "train": 165,
     "held_out": 55
   },
@@ -142,7 +142,7 @@
         },
         {
           "tool": "network_activity",
-          "desc": "network_activity: Report what this machine's network is doing right now, per program: which processes are sending and receiving, and how fast each interface is moving. Use for 'what is using my bandwidth', 'why is the network slow', 'what is uploading', 'is something downloading right now'. Interface rates come from /proc/net/dev and always work; per-program rates need nethogs and can only name programs this user owns. Says which half it could not measure and why, and reports an unattributed socket as unattributed rather than guessing at a program. Read-only; nothing is changed or blocked."
+          "desc": "network_activity: Report what this machine's network is doing right now, per program: which processes are sending and receiving, and how fast each interface is moving. Use for 'what is using my bandwidth', 'why is the network slow', 'what is uploading', 'is something downloading right now'. Interface rates come from /proc/net/dev and always work; per-program rates come from bandwhich or nethogs and can only name programs this user owns. Says which half it could not measure and why, and reports an unattributed socket as unattributed rather than guessing at a program. Read-only; nothing is changed or blocked."
         },
         {
           "tool": "scan_network",
@@ -408,7 +408,7 @@
         },
         {
           "tool": "network_activity",
-          "desc": "network_activity: Report what this machine's network is doing right now, per program: which processes are sending and receiving, and how fast each interface is moving. Use for 'what is using my bandwidth', 'why is the network slow', 'what is uploading', 'is something downloading right now'. Interface rates come from /proc/net/dev and always work; per-program rates need nethogs and can only name programs this user owns. Says which half it could not measure and why, and reports an unattributed socket as unattributed rather than guessing at a program. Read-only; nothing is changed or blocked."
+          "desc": "network_activity: Report what this machine's network is doing right now, per program: which processes are sending and receiving, and how fast each interface is moving. Use for 'what is using my bandwidth', 'why is the network slow', 'what is uploading', 'is something downloading right now'. Interface rates come from /proc/net/dev and always work; per-program rates come from bandwhich or nethogs and can only name programs this user owns. Says which half it could not measure and why, and reports an unattributed socket as unattributed rather than guessing at a program. Read-only; nothing is changed or blocked."
         },
         {
           "tool": "lab_network_list",
@@ -463,7 +463,7 @@
         },
         {
           "tool": "undo_last_change",
-          "desc": "undo_last_change: Put a file back the way Chronoa last found it, by restoring the content recorded just before Chronoa's own last edit to it. Undoes Chronoa's recent writes only - NOT git history, NOT changes you made in an editor or a shell, and only while a recorded pre-image is still held. Requires the 'file-edit-enabled' consent key. (arguments: path, list, steps)"
+          "desc": "undo_last_change: Put a file or a Chronoa setting back the way Chronoa last found it, by restoring the content or value recorded just before Chronoa's own last change to it. Undoes Chronoa's recent writes only - NOT git history, NOT changes you made in an editor or a shell, and only while a recorded pre-image is still held. Requires the 'file-edit-enabled' consent key. (arguments: path, list, setting, steps)"
         }
       ],
       "offered": [
@@ -514,12 +514,12 @@
           "desc": "find_and_replace: Find a string across files under a directory and optionally replace it. Reports what it would change without changing anything unless dry_run is explicitly false. Requires the 'bulk-edit-enabled' consent key. (arguments: find, replace, path, file_pattern, dry_run, case_sensitive)"
         },
         {
-          "tool": "android_device",
-          "desc": "android_device: An Android phone connected with USB debugging (adb). devices: which are connected; info: model, Android version, battery, storage; screenshot: save the phone's screen as a PNG; apps: installed apps (query filters); push: copy a file to the phone (to, default /sdcard/Download); pull: copy a file from the phone; open_url: open a web link on the phone. Requires 'phone-control-enabled'. (arguments: action, serial, path, to, url, query, output)"
-        },
-        {
           "tool": "search_documents",
           "desc": "search_documents: Search inside the user's files by their contents, using the desktop's own search index (LocalSearch on GNOME, Baloo on Plasma). Requires the 'document-search-enabled' consent key. (arguments: query, kind, limit)"
+        },
+        {
+          "tool": "search_file_contents",
+          "desc": "search_file_contents: Search inside text files under a directory for a literal string, and report which files contain it and on which lines. Skips binary files and very large files, and says how many it skipped. (arguments: text, path, file_pattern, case_sensitive, max_matches)"
         }
       ],
       "offered": [
@@ -529,8 +529,8 @@
         "conversations",
         "open_files",
         "find_and_replace",
-        "android_device",
-        "search_documents"
+        "search_documents",
+        "search_file_contents"
       ],
       "recall_hit": false
     },
@@ -563,12 +563,12 @@
           "desc": "bluetooth_gatt: Read what a paired Bluetooth Low Energy device says about itself - a watch's or headset's battery, a heart-rate strap's live reading, which services a band offers. 'list': every paired device and whether it speaks this protocol. 'services': what one exposes. 'read': one stored value. 'listen': a live reading of something the device only pushes, e.g. heart rate - 'nothing arrived' is the truthful answer when the device is not measuring. Speakers, headphones and car stereios are older Bluetooth and expose nothing here, which is a true answer, not a failure; wearables, bands, straps, smart tags and thermometers answer. Needs 'bluetooth-gatt-enabled' and the device must be connected. (arguments: action, device, seconds, characteristic)"
         },
         {
-          "tool": "manage_triggers",
-          "desc": "manage_triggers: Arm, list, or remove automatic rules that run a Chronoa action when a perception matches - for example, notify when the battery sense reports low. A rule names one already-whitelisted skill; it cannot run an arbitrary command or an LLM-authored prompt. Listing needs no permission; arming or disarming requires the 'trigger-control-enabled' consent key. (arguments: action, name, sense, match_mode, substring, keywords, actuator, arguments, cooldown_seconds, event_type, source, params, ask_first, retry_policy, debounce_seconds)"
+          "tool": "network_watch",
+          "desc": "network_watch: Listen on one network interface for a few seconds and report what changed: new devices (IP/MAC pairs), hostname changes, flips and duplicates. Use for 'did a new device join my network', 'something changed on my network'. Read-only; it listens and reports, and changes nothing. (arguments: interface, seconds)"
         },
         {
-          "tool": "set_power_profile",
-          "desc": "set_power_profile: Switch the machine between its power profiles - typically power-saver, balanced and performance - and report which one is active now. The profile list is read from the machine rather than assumed, because which profiles exist depends on the CPU driver: switching to one the machine does not have is refused with the valid names listed. Changes the CPU and platform power behaviour, not a per-application setting. (arguments: profile)"
+          "tool": "manage_triggers",
+          "desc": "manage_triggers: Arm, list, or remove automatic rules that run a Chronoa action when a perception matches - for example, notify when the battery sense reports low. A rule names one already-whitelisted skill; it cannot run an arbitrary command or an LLM-authored prompt. Listing needs no permission; arming or disarming requires the 'trigger-control-enabled' consent key. (arguments: action, name, sense, match_mode, substring, keywords, actuator, arguments, cooldown_seconds, event_type, source, params, ask_first, retry_policy, debounce_seconds)"
         }
       ],
       "offered": [
@@ -578,8 +578,8 @@
         "open_settings",
         "chart",
         "bluetooth_gatt",
-        "manage_triggers",
-        "set_power_profile"
+        "network_watch",
+        "manage_triggers"
       ],
       "recall_hit": true
     },
@@ -704,7 +704,7 @@
         },
         {
           "tool": "network_activity",
-          "desc": "network_activity: Report what this machine's network is doing right now, per program: which processes are sending and receiving, and how fast each interface is moving. Use for 'what is using my bandwidth', 'why is the network slow', 'what is uploading', 'is something downloading right now'. Interface rates come from /proc/net/dev and always work; per-program rates need nethogs and can only name programs this user owns. Says which half it could not measure and why, and reports an unattributed socket as unattributed rather than guessing at a program. Read-only; nothing is changed or blocked."
+          "desc": "network_activity: Report what this machine's network is doing right now, per program: which processes are sending and receiving, and how fast each interface is moving. Use for 'what is using my bandwidth', 'why is the network slow', 'what is uploading', 'is something downloading right now'. Interface rates come from /proc/net/dev and always work; per-program rates come from bandwhich or nethogs and can only name programs this user owns. Says which half it could not measure and why, and reports an unattributed socket as unattributed rather than guessing at a program. Read-only; nothing is changed or blocked."
         },
         {
           "tool": "set_privacy",
@@ -901,12 +901,12 @@
           "desc": "explain_command: Explain a Linux shell command (not a general topic) from the local manuals (tldr, man), e.g. 'what does tar do', 'how do I use rsync'; or find which command does something, e.g. 'which command shows disk usage'. (arguments: command, task)"
         },
         {
-          "tool": "web_search",
-          "desc": "web_search: Look something up on the web and return what the pages actually say: facts, prices, how-tos, anything no more specific tool covers. Give a search query, a specific URL, or both. For a scholarly question - a paper, a preprint, prior work, 'what does the research say' - set source=arxiv and it searches the arXiv preprint archive instead of the web. For news headlines use news; to click, fill in or book something on a site use browse. Requires the web sense to be enabled and privacy mode to be off. (arguments: query, url, source)"
-        },
-        {
           "tool": "manage_triggers",
           "desc": "manage_triggers: Arm, list, or remove automatic rules that run a Chronoa action when a perception matches - for example, notify when the battery sense reports low. A rule names one already-whitelisted skill; it cannot run an arbitrary command or an LLM-authored prompt. Listing needs no permission; arming or disarming requires the 'trigger-control-enabled' consent key. (arguments: action, name, sense, match_mode, substring, keywords, actuator, arguments, cooldown_seconds, event_type, source, params, ask_first, retry_policy, debounce_seconds)"
+        },
+        {
+          "tool": "web_search",
+          "desc": "web_search: Look something up on the web and return what the pages actually say: facts, prices, how-tos, anything no more specific tool covers. Give a search query, a specific URL, or both. For a scholarly question - a paper, a preprint, prior work, 'what does the research say' - set source=arxiv and it searches the arXiv preprint archive instead of the web. For news headlines use news; to click, fill in or book something on a site use browse. Requires the web sense to be enabled and privacy mode to be off. (arguments: query, url, source)"
         },
         {
           "tool": "ui_elements",
@@ -922,8 +922,8 @@
         "container",
         "list_containers",
         "explain_command",
-        "web_search",
         "manage_triggers",
+        "web_search",
         "ui_elements",
         "edit_image"
       ],
@@ -1198,7 +1198,7 @@
         },
         {
           "tool": "undo_last_change",
-          "desc": "undo_last_change: Put a file back the way Chronoa last found it, by restoring the content recorded just before Chronoa's own last edit to it. Undoes Chronoa's recent writes only - NOT git history, NOT changes you made in an editor or a shell, and only while a recorded pre-image is still held. Requires the 'file-edit-enabled' consent key. (arguments: path, list, steps)"
+          "desc": "undo_last_change: Put a file or a Chronoa setting back the way Chronoa last found it, by restoring the content or value recorded just before Chronoa's own last change to it. Undoes Chronoa's recent writes only - NOT git history, NOT changes you made in an editor or a shell, and only while a recorded pre-image is still held. Requires the 'file-edit-enabled' consent key. (arguments: path, list, setting, steps)"
         },
         {
           "tool": "fm_radio",
@@ -1225,7 +1225,7 @@
       "say": "Undo Chronoa's last change to a file.",
       "positive": "undo_last_change",
       "positive_args": {},
-      "positives_desc": "undo_last_change: Put a file back the way Chronoa last found it, by restoring the content recorded just before Chronoa's own last edit to it. Undoes Chronoa's recent writes only - NOT git history, NOT changes you made in an editor or a shell, and only while a recorded pre-image is still held. Requires the 'file-edit-enabled' consent key. (arguments: path, list, steps)",
+      "positives_desc": "undo_last_change: Put a file or a Chronoa setting back the way Chronoa last found it, by restoring the content or value recorded just before Chronoa's own last change to it. Undoes Chronoa's recent writes only - NOT git history, NOT changes you made in an editor or a shell, and only while a recorded pre-image is still held. Requires the 'file-edit-enabled' consent key. (arguments: path, list, setting, steps)",
       "negatives": [
         {
           "tool": "office_document",
@@ -1249,7 +1249,7 @@
         },
         {
           "tool": "download_file",
-          "desc": "download_file: Download a file from a web address and save it to disk, reporting the size and how long it took. Use for 'download that file', 'get this installer', 'save that page'. Only http and https; a site that answers with an error page reports that rather than saving the error as if it were the file. (arguments: url, destination)"
+          "desc": "download_file: Download a file from a web address and save it to disk, reporting the size and how long it took. Use for 'download that file', 'get this installer', 'save that page'. Only http and https; a site that answers with an error page reports that rather than saving the error as if it were the file. (arguments: url, destination, engine)"
         },
         {
           "tool": "file_locks",
@@ -1371,16 +1371,16 @@
           "desc": "audio_output: List the speakers/headphones (outputs) and microphones (inputs) and which one is the default, or switch the default output or input - 'play through my headphones', 'use the USB microphone', 'send sound to the HDMI monitor'. Pick a device by its number or part of its name. (arguments: action, device, kind)"
         },
         {
+          "tool": "device_serial",
+          "desc": "device_serial: Read from a serial device (USB-serial, ACM, UART) through socat for a few seconds, or write text to it with the 'i2c-write-enabled' consent key. Reading needs no permission; writing sends bytes to hardware. device_probe lists the ports. (arguments: device, action, data)"
+        },
+        {
           "tool": "get_location",
           "desc": "get_location: Where this computer is right now - latitude, longitude and accuracy - from a GPS receiver or GNOME's location service. Use for 'where am I'. Requires the location sense to be enabled and privacy mode to be off."
         },
         {
           "tool": "airplane_mode",
           "desc": "airplane_mode: Report which radios (Wi-Fi, Bluetooth, mobile broadband) are on, or turn airplane mode on (all radios off) or off. Changing requires the 'radio-control-enabled' consent key. (arguments: action)"
-        },
-        {
-          "tool": "android_device",
-          "desc": "android_device: An Android phone connected with USB debugging (adb). devices: which are connected; info: model, Android version, battery, storage; screenshot: save the phone's screen as a PNG; apps: installed apps (query filters); push: copy a file to the phone (to, default /sdcard/Download); pull: copy a file from the phone; open_url: open a web link on the phone. Requires 'phone-control-enabled'. (arguments: action, serial, path, to, url, query, output)"
         }
       ],
       "offered": [
@@ -1389,9 +1389,9 @@
         "bluetooth_gatt",
         "recording",
         "audio_output",
+        "device_serial",
         "get_location",
-        "airplane_mode",
-        "android_device"
+        "airplane_mode"
       ],
       "recall_hit": true
     },
@@ -1404,6 +1404,10 @@
         {
           "tool": "watch",
           "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'find' (make the watch ring), 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
+        },
+        {
+          "tool": "network_watch",
+          "desc": "network_watch: Listen on one network interface for a few seconds and report what changed: new devices (IP/MAC pairs), hostname changes, flips and duplicates. Use for 'did a new device join my network', 'something changed on my network'. Read-only; it listens and reports, and changes nothing. (arguments: interface, seconds)"
         },
         {
           "tool": "fm_radio",
@@ -1424,21 +1428,17 @@
         {
           "tool": "find_files",
           "desc": "find_files: Find files and folders by name under a directory, using a wildcard pattern such as '*.log' or 'report*'. Matches on the name only and never opens the files. To see what is in one folder, use list_directory. (arguments: pattern, path, include_hidden, max_results)"
-        },
-        {
-          "tool": "find_recently_modified",
-          "desc": "find_recently_modified: List files under a directory whose recorded modification time is within the last N days, newest first. Use this to answer 'what did I change today'. This is a timestamp, so a tool that preserves or sets times (tar, rsync, cp -p) can move an entry without the content changing. (arguments: path, within_days, pattern, limit)"
         }
       ],
       "offered": [
         "find_device",
         "watch",
+        "network_watch",
         "fm_radio",
         "bluetooth_gatt",
         "find_and_replace",
         "find_emoji",
-        "find_files",
-        "find_recently_modified"
+        "find_files"
       ],
       "recall_hit": true
     },
@@ -1700,7 +1700,7 @@
         },
         {
           "tool": "undo_last_change",
-          "desc": "undo_last_change: Put a file back the way Chronoa last found it, by restoring the content recorded just before Chronoa's own last edit to it. Undoes Chronoa's recent writes only - NOT git history, NOT changes you made in an editor or a shell, and only while a recorded pre-image is still held. Requires the 'file-edit-enabled' consent key. (arguments: path, list, steps)"
+          "desc": "undo_last_change: Put a file or a Chronoa setting back the way Chronoa last found it, by restoring the content or value recorded just before Chronoa's own last change to it. Undoes Chronoa's recent writes only - NOT git history, NOT changes you made in an editor or a shell, and only while a recorded pre-image is still held. Requires the 'file-edit-enabled' consent key. (arguments: path, list, setting, steps)"
         },
         {
           "tool": "default_apps",
@@ -2032,7 +2032,7 @@
       "negatives": [
         {
           "tool": "download_file",
-          "desc": "download_file: Download a file from a web address and save it to disk, reporting the size and how long it took. Use for 'download that file', 'get this installer', 'save that page'. Only http and https; a site that answers with an error page reports that rather than saving the error as if it were the file. (arguments: url, destination)"
+          "desc": "download_file: Download a file from a web address and save it to disk, reporting the size and how long it took. Use for 'download that file', 'get this installer', 'save that page'. Only http and https; a site that answers with an error page reports that rather than saving the error as if it were the file. (arguments: url, destination, engine)"
         },
         {
           "tool": "permission_audit",
@@ -2354,7 +2354,7 @@
         },
         {
           "tool": "download_file",
-          "desc": "download_file: Download a file from a web address and save it to disk, reporting the size and how long it took. Use for 'download that file', 'get this installer', 'save that page'. Only http and https; a site that answers with an error page reports that rather than saving the error as if it were the file. (arguments: url, destination)"
+          "desc": "download_file: Download a file from a web address and save it to disk, reporting the size and how long it took. Use for 'download that file', 'get this installer', 'save that page'. Only http and https; a site that answers with an error page reports that rather than saving the error as if it were the file. (arguments: url, destination, engine)"
         },
         {
           "tool": "android_device",
@@ -2792,7 +2792,7 @@
         },
         {
           "tool": "undo_last_change",
-          "desc": "undo_last_change: Put a file back the way Chronoa last found it, by restoring the content recorded just before Chronoa's own last edit to it. Undoes Chronoa's recent writes only - NOT git history, NOT changes you made in an editor or a shell, and only while a recorded pre-image is still held. Requires the 'file-edit-enabled' consent key. (arguments: path, list, steps)"
+          "desc": "undo_last_change: Put a file or a Chronoa setting back the way Chronoa last found it, by restoring the content or value recorded just before Chronoa's own last change to it. Undoes Chronoa's recent writes only - NOT git history, NOT changes you made in an editor or a shell, and only while a recorded pre-image is still held. Requires the 'file-edit-enabled' consent key. (arguments: path, list, setting, steps)"
         },
         {
           "tool": "accessibility",
@@ -3147,7 +3147,7 @@
         },
         {
           "tool": "undo_last_change",
-          "desc": "undo_last_change: Put a file back the way Chronoa last found it, by restoring the content recorded just before Chronoa's own last edit to it. Undoes Chronoa's recent writes only - NOT git history, NOT changes you made in an editor or a shell, and only while a recorded pre-image is still held. Requires the 'file-edit-enabled' consent key. (arguments: path, list, steps)"
+          "desc": "undo_last_change: Put a file or a Chronoa setting back the way Chronoa last found it, by restoring the content or value recorded just before Chronoa's own last change to it. Undoes Chronoa's recent writes only - NOT git history, NOT changes you made in an editor or a shell, and only while a recorded pre-image is still held. Requires the 'file-edit-enabled' consent key. (arguments: path, list, setting, steps)"
         },
         {
           "tool": "set_wallpaper",
@@ -3424,6 +3424,10 @@
           "desc": "ir_remote: Send and receive infrared remote-control codes, and build or read the pulse-space timings themselves. 'devices': is there IR hardware here (most machines have none, and that is a true answer). 'encode': turn an address and command into the NEC or RC-6 timings that would carry them. 'decode': turn timings into a code. 'send': transmit a code through an IR device. 'receive': capture a button press and decode it. Needs the 'ir-remote-enabled' consent key. (arguments: action, protocol, address, command, timings, seconds)"
         },
         {
+          "tool": "capture_packets",
+          "desc": "capture_packets: Watch packets crossing one network interface for a few seconds, and report tcpdump's one-line-per-packet summaries: who sent to whom, which protocol, how long, and the TCP flags. This reads packet contents on the wire - it is the one thing in this package that does - so it is gated separately and shows no payload text. Bounded by packet count, seconds and output rows. Read-only: it captures and prints, and changes nothing. (arguments: interface, packets, seconds, filter, engine, pattern)"
+        },
+        {
           "tool": "phone_remote",
           "desc": "phone_remote: Press keys on the paired phone as a Bluetooth keyboard: 'press' the camera 'shutter' (takes a photo in the camera app), play_pause, next, previous, volume_up/down, mute; or 'type' text into whatever field is focused on the phone. The phone must have paired 'Chronoa Remote'. Requires the 'phone-remote-enabled' consent key. (arguments: action, key, text)"
         },
@@ -3434,10 +3438,6 @@
         {
           "tool": "bluetooth_gatt",
           "desc": "bluetooth_gatt: Read what a paired Bluetooth Low Energy device says about itself - a watch's or headset's battery, a heart-rate strap's live reading, which services a band offers. 'list': every paired device and whether it speaks this protocol. 'services': what one exposes. 'read': one stored value. 'listen': a live reading of something the device only pushes, e.g. heart rate - 'nothing arrived' is the truthful answer when the device is not measuring. Speakers, headphones and car stereios are older Bluetooth and expose nothing here, which is a true answer, not a failure; wearables, bands, straps, smart tags and thermometers answer. Needs 'bluetooth-gatt-enabled' and the device must be connected. (arguments: action, device, seconds, characteristic)"
-        },
-        {
-          "tool": "capture_packets",
-          "desc": "capture_packets: Watch packets crossing one network interface for a few seconds, and report tcpdump's one-line-per-packet summaries: who sent to whom, which protocol, how long, and the TCP flags. This reads packet contents on the wire - it is the one thing in this package that does - so it is gated separately and shows no payload text. Bounded by packet count, seconds and output rows. Read-only: it captures and prints, and changes nothing. (arguments: interface, packets, seconds, filter)"
         },
         {
           "tool": "json_query",
@@ -3451,10 +3451,10 @@
       "offered": [
         "dissect_traffic",
         "ir_remote",
+        "capture_packets",
         "phone_remote",
         "bridge_topology",
         "bluetooth_gatt",
-        "capture_packets",
         "json_query",
         "lan_phone"
       ],
@@ -3528,10 +3528,6 @@
           "desc": "date_math: Date arithmetic: days until a date ('how many days until 25 December'), the date N days/weeks/months from a date ('what date is 45 days from now'), days between two dates, or the weekday of a date. (arguments: operation, date, other_date, amount, unit)"
         },
         {
-          "tool": "get_world_time",
-          "desc": "get_world_time: The current time and date in ANOTHER city, country or time zone, e.g. 'what time is it in Tokyo'. For the time here, use get_datetime. (arguments: place)"
-        },
-        {
           "tool": "system_history",
           "desc": "system_history: What this machine's CPU, disk, memory or paging was doing earlier, from the sysstat accounting records rather than a live reading. Use for 'was this busy last night', 'what was using the disk at lunchtime', 'why was the fan loud earlier'. Says plainly when no history has been recorded, because that is not the same as the machine having been idle. Read-only. (arguments: topic)"
         },
@@ -3540,8 +3536,12 @@
           "desc": "system_info: Describe the machine Chronoa is running on: distribution, kernel, architecture, uptime, load, memory, CPU count, whether this is a desktop session or a container, and the hardware identity (make, model, board, BIOS version)."
         },
         {
-          "tool": "open_settings",
-          "desc": "open_settings: Open the system Settings app at a specific page, e.g. 'wifi', 'bluetooth', 'display', 'sound', 'power', 'privacy', 'keyboard', 'mouse', 'touchpad', 'printers', 'users', 'about', 'date_time', 'region', 'notifications', 'background', 'accessibility'. GNOME and KDE Plasma. Use open_application for Settings without a page. (arguments: page)"
+          "tool": "kundali",
+          "desc": "kundali: Compute Vedic Kundali (birth chart), Panchang (daily almanac), transits, aspects, dignities, BaZi (Chinese Four Pillars), and Nakshatra details. Offline, no API keys, no external dependencies. panchang: Tithi, Vara, Nakshatra, Yoga, Karana. kundali: sidereal birth chart with planets, houses, Navamsha, Dasha, aspects, dignities. transit: transit positions and cross-aspects. aspects: planetary aspects. dignity: planet dignity in a sign. bazi: Chinese Four Pillars. nakshatra: nakshatra details. timelords: profections and firdaria. arabicparts: Arabic parts (lots). temperament: elemental temperament. lunarmansion: lunar mansion. charakarakas: Jaimini karakas. shadbala: planetary strength. combustion: combust planets. horary: horary chart. upagrahas: all upagrahas. arudha: Arudha padas. drishti: Vedic aspects. vishesha: special lagnas. muhurta: electional scoring. vimshopaka: Vimshopaka bala. cheshta: motion states. grahayuddha: planetary wars. upagrahas_full: all upagrahas. fullchart: complete chart JSON. ashtakavarga: Bhinna + Sarva ashtakavarga. gochara: transit analysis. bhava: house analysis. kalamana: time measurement. chinese: Chinese calendar. grahana: eclipse check. shadbala_full: complete shadbala. karakas_full: chara karakas with Rahu reflection. yogas: Vishesha yogas. nodes: lunar nodes. eclipse: eclipse details. charadasha: Chara dasha. yoginidasha: Yogini dasha. ashtottaridasha: Ashtottari dasha. (arguments: action, date, datetime, latitude, longitude, planet, sign, year, month, day, hour)"
+        },
+        {
+          "tool": "get_world_time",
+          "desc": "get_world_time: The current time and date in ANOTHER city, country or time zone, e.g. 'what time is it in Tokyo'. For the time here, use get_datetime. (arguments: place)"
         }
       ],
       "offered": [
@@ -3549,10 +3549,10 @@
         "convert_currency",
         "get_datetime",
         "date_math",
-        "get_world_time",
         "system_history",
         "system_info",
-        "open_settings"
+        "kundali",
+        "get_world_time"
       ],
       "recall_hit": true
     },
@@ -3782,8 +3782,8 @@
           "desc": "temp_files: Find junk, temporary and leftover files by NAME - editor swap and lock files (*.tmp, *.swp, *~, .#*, ~$*, .goutputstream-*), OS metadata (.DS_Store, Thumbs.db, desktop.ini), unfinished downloads (*.crdownload, *.part, *.filepart), merge leftovers (*.orig, *.rej) and core dumps. Use for 'what junk is in here', 'what can I clean up', 'what temporary files do I have'. A name is a guess and the answer says so: nothing is deleted, moved or changed, and a file this cannot read is reported rather than counted as clean. Core dumps are confirmed by reading the ELF header, because a name like `core` is usually a source directory or a JavaScript module. Read-only. (arguments: path, limit)"
         },
         {
-          "tool": "cloud_files",
-          "desc": "cloud_files: See what is in this machine's configured cloud storage remotes - which remotes rclone knows, how many objects and bytes each holds, and what is at the top level of one. Use for 'what is in my cloud drive', 'is anything in the bucket', 'how big is my remote'. Read-only: it never copies, syncs or deletes anything. A machine with no remotes says so, because that means there is nowhere off-machine for anything to go. (arguments: remote, path)"
+          "tool": "content_discovery",
+          "desc": "content_discovery: Enumerate which paths exist on a web server on the local network, using gobuster with a wordlist the person supplies. Use for 'what endpoints does my server expose', 'is /admin public on my site'. Private, loopback and local targets only, behind the network consent. Reports the paths that answered; changes nothing on the server. (arguments: url, wordlist)"
         }
       ],
       "offered": [
@@ -3794,7 +3794,7 @@
         "duplicate_files",
         "stale_files",
         "temp_files",
-        "cloud_files"
+        "content_discovery"
       ],
       "recall_hit": true
     },
@@ -3822,7 +3822,7 @@
         },
         {
           "tool": "network_activity",
-          "desc": "network_activity: Report what this machine's network is doing right now, per program: which processes are sending and receiving, and how fast each interface is moving. Use for 'what is using my bandwidth', 'why is the network slow', 'what is uploading', 'is something downloading right now'. Interface rates come from /proc/net/dev and always work; per-program rates need nethogs and can only name programs this user owns. Says which half it could not measure and why, and reports an unattributed socket as unattributed rather than guessing at a program. Read-only; nothing is changed or blocked."
+          "desc": "network_activity: Report what this machine's network is doing right now, per program: which processes are sending and receiving, and how fast each interface is moving. Use for 'what is using my bandwidth', 'why is the network slow', 'what is uploading', 'is something downloading right now'. Interface rates come from /proc/net/dev and always work; per-program rates come from bandwhich or nethogs and can only name programs this user owns. Says which half it could not measure and why, and reports an unattributed socket as unattributed rather than guessing at a program. Read-only; nothing is changed or blocked."
         },
         {
           "tool": "calculate",
@@ -4001,11 +4001,11 @@
         },
         {
           "tool": "download_file",
-          "desc": "download_file: Download a file from a web address and save it to disk, reporting the size and how long it took. Use for 'download that file', 'get this installer', 'save that page'. Only http and https; a site that answers with an error page reports that rather than saving the error as if it were the file. (arguments: url, destination)"
+          "desc": "download_file: Download a file from a web address and save it to disk, reporting the size and how long it took. Use for 'download that file', 'get this installer', 'save that page'. Only http and https; a site that answers with an error page reports that rather than saving the error as if it were the file. (arguments: url, destination, engine)"
         },
         {
           "tool": "network_activity",
-          "desc": "network_activity: Report what this machine's network is doing right now, per program: which processes are sending and receiving, and how fast each interface is moving. Use for 'what is using my bandwidth', 'why is the network slow', 'what is uploading', 'is something downloading right now'. Interface rates come from /proc/net/dev and always work; per-program rates need nethogs and can only name programs this user owns. Says which half it could not measure and why, and reports an unattributed socket as unattributed rather than guessing at a program. Read-only; nothing is changed or blocked."
+          "desc": "network_activity: Report what this machine's network is doing right now, per program: which processes are sending and receiving, and how fast each interface is moving. Use for 'what is using my bandwidth', 'why is the network slow', 'what is uploading', 'is something downloading right now'. Interface rates come from /proc/net/dev and always work; per-program rates come from bandwhich or nethogs and can only name programs this user owns. Says which half it could not measure and why, and reports an unattributed socket as unattributed rather than guessing at a program. Read-only; nothing is changed or blocked."
         },
         {
           "tool": "check_internet",
@@ -4048,7 +4048,7 @@
         },
         {
           "tool": "undo_last_change",
-          "desc": "undo_last_change: Put a file back the way Chronoa last found it, by restoring the content recorded just before Chronoa's own last edit to it. Undoes Chronoa's recent writes only - NOT git history, NOT changes you made in an editor or a shell, and only while a recorded pre-image is still held. Requires the 'file-edit-enabled' consent key. (arguments: path, list, steps)"
+          "desc": "undo_last_change: Put a file or a Chronoa setting back the way Chronoa last found it, by restoring the content or value recorded just before Chronoa's own last change to it. Undoes Chronoa's recent writes only - NOT git history, NOT changes you made in an editor or a shell, and only while a recorded pre-image is still held. Requires the 'file-edit-enabled' consent key. (arguments: path, list, setting, steps)"
         },
         {
           "tool": "phone",
@@ -4100,6 +4100,10 @@
           "desc": "alarm: Alarm clock: set an alarm at a time of day (once, or repeating daily/weekdays/weekends/chosen days), list alarms, say when the next one is, change one's time or label, snooze the one that just rang, or delete one. Examples: 'set an alarm for 7am', 'alarm for 6:30 on weekdays', 'when is my next alarm?', 'change my 7am alarm to 7:30', 'snooze', 'delete the 7am alarm'. Times may be words ('7am', '7:30 pm', 'tomorrow 6:45'). It rings with a notification and the alarm sound even if the assistant is closed; it is held by systemd --user, so a reboot drops it until alarms are next listed, which re-arms it. (arguments: action, time, label, repeat, id, new_time, new_label, minutes)"
         },
         {
+          "tool": "kundali",
+          "desc": "kundali: Compute Vedic Kundali (birth chart), Panchang (daily almanac), transits, aspects, dignities, BaZi (Chinese Four Pillars), and Nakshatra details. Offline, no API keys, no external dependencies. panchang: Tithi, Vara, Nakshatra, Yoga, Karana. kundali: sidereal birth chart with planets, houses, Navamsha, Dasha, aspects, dignities. transit: transit positions and cross-aspects. aspects: planetary aspects. dignity: planet dignity in a sign. bazi: Chinese Four Pillars. nakshatra: nakshatra details. timelords: profections and firdaria. arabicparts: Arabic parts (lots). temperament: elemental temperament. lunarmansion: lunar mansion. charakarakas: Jaimini karakas. shadbala: planetary strength. combustion: combust planets. horary: horary chart. upagrahas: all upagrahas. arudha: Arudha padas. drishti: Vedic aspects. vishesha: special lagnas. muhurta: electional scoring. vimshopaka: Vimshopaka bala. cheshta: motion states. grahayuddha: planetary wars. upagrahas_full: all upagrahas. fullchart: complete chart JSON. ashtakavarga: Bhinna + Sarva ashtakavarga. gochara: transit analysis. bhava: house analysis. kalamana: time measurement. chinese: Chinese calendar. grahana: eclipse check. shadbala_full: complete shadbala. karakas_full: chara karakas with Rahu reflection. yogas: Vishesha yogas. nodes: lunar nodes. eclipse: eclipse details. charadasha: Chara dasha. yoginidasha: Yogini dasha. ashtottaridasha: Ashtottari dasha. (arguments: action, date, datetime, latitude, longitude, planet, sign, year, month, day, hour)"
+        },
+        {
           "tool": "maps",
           "desc": "maps: OpenStreetMap maps: find where a place is ('find'), driving/walking/cycling directions ('directions') or just distance and time ('travel_time') between places, the nearest kind of place such as petrol pump, hotel, ATM or hospital ('nearby'), or open a place or route on the map in the browser ('open'). Times are typical, without live traffic. With no origin, 'here' is this computer's location. Requires the web sense and privacy mode off; 'here' also needs the location sense. (arguments: action, place, destination, origin, mode, what, near, limit)"
         },
@@ -4114,21 +4118,17 @@
         {
           "tool": "desktop_setting",
           "desc": "desktop_setting: Read or change one desktop setting from a fixed list: animations (window and menu animations); cursor_size (mouse pointer size in pixels (24 is normal; 32, 48, 64 are larger)); single_click (open files and folders with a single click); clock_24h (show the top-bar clock in 24-hour format); clock_seconds (show seconds in the top-bar clock); battery_percentage (show the battery percentage in the top bar); hot_corner (open the overview when the pointer hits the top-left corner); natural_scroll (touchpad natural (reverse) scrolling); tap_to_click (tap the touchpad to click). Changing requires the 'appearance-control-enabled' consent key. (arguments: setting, value)"
-        },
-        {
-          "tool": "boot_report",
-          "desc": "boot_report: How the last boot went: total boot time split into firmware, loader, kernel and userspace, the services that took longest to start, when the machine booted and whether it shut down cleanly before, and which EFI entry the firmware will boot by default. Use for 'why does it boot slowly', 'did it crash last time'. Boot history uses the 'boots-sense-enabled' switch. Read-only. (arguments: top)"
         }
       ],
       "offered": [
         "get_world_time",
         "get_datetime",
         "alarm",
+        "kundali",
         "maps",
         "watch",
         "chart",
-        "desktop_setting",
-        "boot_report"
+        "desktop_setting"
       ],
       "recall_hit": true
     },
@@ -4376,8 +4376,12 @@
       "say": "Watch the packets crossing an interface.",
       "positive": "capture_packets",
       "positive_args": {},
-      "positives_desc": "capture_packets: Watch packets crossing one network interface for a few seconds, and report tcpdump's one-line-per-packet summaries: who sent to whom, which protocol, how long, and the TCP flags. This reads packet contents on the wire - it is the one thing in this package that does - so it is gated separately and shows no payload text. Bounded by packet count, seconds and output rows. Read-only: it captures and prints, and changes nothing. (arguments: interface, packets, seconds, filter)",
+      "positives_desc": "capture_packets: Watch packets crossing one network interface for a few seconds, and report tcpdump's one-line-per-packet summaries: who sent to whom, which protocol, how long, and the TCP flags. This reads packet contents on the wire - it is the one thing in this package that does - so it is gated separately and shows no payload text. Bounded by packet count, seconds and output rows. Read-only: it captures and prints, and changes nothing. (arguments: interface, packets, seconds, filter, engine, pattern)",
       "negatives": [
+        {
+          "tool": "network_watch",
+          "desc": "network_watch: Listen on one network interface for a few seconds and report what changed: new devices (IP/MAC pairs), hostname changes, flips and duplicates. Use for 'did a new device join my network', 'something changed on my network'. Read-only; it listens and reports, and changes nothing. (arguments: interface, seconds)"
+        },
         {
           "tool": "interface_counters",
           "desc": "interface_counters: Report how many bytes and packets each network interface has carried, in each direction, with its error and drop counters, plus the machine's TCP retransmit and error totals. Totals are since each interface came up, and the figures are read from /proc so no daemon needs to be running. Optionally sample twice to get a rate. Read-only. Counts one network namespace: an interface inside a network namespace is not visible here. (arguments: interface, sample_seconds, limit)"
@@ -4399,23 +4403,19 @@
           "desc": "neighbour_table: Show the neighbour (ARP) table for this machine: which addresses on this link have answered, which have never answered and are holding packets instead of sending them, and which have gone stale. That distinction is the one layer 3 cannot make - an unresolved neighbour and a switched-off host both look like 'no reply', and they have opposite fixes. Read from /proc, so no privileges are needed. One network namespace. (arguments: device)"
         },
         {
-          "tool": "bluetooth_gatt",
-          "desc": "bluetooth_gatt: Read what a paired Bluetooth Low Energy device says about itself - a watch's or headset's battery, a heart-rate strap's live reading, which services a band offers. 'list': every paired device and whether it speaks this protocol. 'services': what one exposes. 'read': one stored value. 'listen': a live reading of something the device only pushes, e.g. heart rate - 'nothing arrived' is the truthful answer when the device is not measuring. Speakers, headphones and car stereios are older Bluetooth and expose nothing here, which is a true answer, not a failure; wearables, bands, straps, smart tags and thermometers answer. Needs 'bluetooth-gatt-enabled' and the device must be connected. (arguments: action, device, seconds, characteristic)"
-        },
-        {
-          "tool": "find_device",
-          "desc": "find_device: Make a paired Bluetooth watch, band or tag buzz or ring so the person can find it - 'where is my watch', 'find my band'. Works on devices with the standard Immediate Alert service and on MoYoung (Da Fit) watches; anything else is refused rather than sent an unknown command. The device must be in range. Requires the 'bluetooth-gatt-enabled' consent key. (arguments: device)"
+          "tool": "ping_host",
+          "desc": "ping_host: Ping a named host or IP address and report whether it answers, how long the replies take and how many were lost. Use this when a specific host is slow or unreachable; 'check_internet' only answers whether the internet works at all. (arguments: host, count)"
         }
       ],
       "offered": [
         "capture_packets",
+        "network_watch",
         "interface_counters",
         "watch",
         "dissect_traffic",
         "discover_hosts",
         "neighbour_table",
-        "bluetooth_gatt",
-        "find_device"
+        "ping_host"
       ],
       "recall_hit": true
     },
@@ -4436,6 +4436,10 @@
           "desc": "firmware_updates: List firmware updates fwupd knows for this machine's devices (BIOS, SSD, dock, touchpad...) and what each fixes, plus the firmware versions this machine is running. Read-only; nothing is installed."
         },
         {
+          "tool": "network_watch",
+          "desc": "network_watch: Listen on one network interface for a few seconds and report what changed: new devices (IP/MAC pairs), hostname changes, flips and duplicates. Use for 'did a new device join my network', 'something changed on my network'. Read-only; it listens and reports, and changes nothing. (arguments: interface, seconds)"
+        },
+        {
           "tool": "manage_triggers",
           "desc": "manage_triggers: Arm, list, or remove automatic rules that run a Chronoa action when a perception matches - for example, notify when the battery sense reports low. A rule names one already-whitelisted skill; it cannot run an arbitrary command or an LLM-authored prompt. Listing needs no permission; arming or disarming requires the 'trigger-control-enabled' consent key. (arguments: action, name, sense, match_mode, substring, keywords, actuator, arguments, cooldown_seconds, event_type, source, params, ask_first, retry_policy, debounce_seconds)"
         },
@@ -4450,21 +4454,17 @@
         {
           "tool": "charger_info",
           "desc": "charger_info: Report what is powering this machine: on battery or plugged in, AC adapter or USB-C, whether USB Power Delivery is in use, and the charger's wattage when the firmware reports it, plus battery charge and rate."
-        },
-        {
-          "tool": "power_action",
-          "desc": "power_action: Suspend (sleep), hibernate, restart or shut down this computer, or cancel a scheduled restart/shutdown. Restart and shutdown happen after one minute and can be cancelled. Requires the 'power-control-enabled' consent key. (arguments: action)"
         }
       ],
       "offered": [
         "bluetooth_gatt",
         "watch",
         "firmware_updates",
+        "network_watch",
         "manage_triggers",
         "set_power_profile",
         "get_battery_status",
-        "charger_info",
-        "power_action"
+        "charger_info"
       ],
       "recall_hit": true
     },
@@ -4728,6 +4728,10 @@
           "desc": "date_math: Date arithmetic: days until a date ('how many days until 25 December'), the date N days/weeks/months from a date ('what date is 45 days from now'), days between two dates, or the weekday of a date. (arguments: operation, date, other_date, amount, unit)"
         },
         {
+          "tool": "kundali",
+          "desc": "kundali: Compute Vedic Kundali (birth chart), Panchang (daily almanac), transits, aspects, dignities, BaZi (Chinese Four Pillars), and Nakshatra details. Offline, no API keys, no external dependencies. panchang: Tithi, Vara, Nakshatra, Yoga, Karana. kundali: sidereal birth chart with planets, houses, Navamsha, Dasha, aspects, dignities. transit: transit positions and cross-aspects. aspects: planetary aspects. dignity: planet dignity in a sign. bazi: Chinese Four Pillars. nakshatra: nakshatra details. timelords: profections and firdaria. arabicparts: Arabic parts (lots). temperament: elemental temperament. lunarmansion: lunar mansion. charakarakas: Jaimini karakas. shadbala: planetary strength. combustion: combust planets. horary: horary chart. upagrahas: all upagrahas. arudha: Arudha padas. drishti: Vedic aspects. vishesha: special lagnas. muhurta: electional scoring. vimshopaka: Vimshopaka bala. cheshta: motion states. grahayuddha: planetary wars. upagrahas_full: all upagrahas. fullchart: complete chart JSON. ashtakavarga: Bhinna + Sarva ashtakavarga. gochara: transit analysis. bhava: house analysis. kalamana: time measurement. chinese: Chinese calendar. grahana: eclipse check. shadbala_full: complete shadbala. karakas_full: chara karakas with Rahu reflection. yogas: Vishesha yogas. nodes: lunar nodes. eclipse: eclipse details. charadasha: Chara dasha. yoginidasha: Yogini dasha. ashtottaridasha: Ashtottari dasha. (arguments: action, date, datetime, latitude, longitude, planet, sign, year, month, day, hour)"
+        },
+        {
           "tool": "data_usage",
           "desc": "data_usage: How much internet data this computer has used today and this month, per network interface (from vnStat)."
         },
@@ -4738,10 +4742,6 @@
         {
           "tool": "chart",
           "desc": "chart: Make an SVG file from data, drawn on this computer with no install. chart: kind=bar|line|pie with data (bar/pie: [[label, number], ...]; line: [[x, y], ...], or several lines as series {name: [[x, y], ...]}), plus title, x_label, y_label. icon: a stroke icon by name (arrow-right, bell, calendar, check, clock, close, download, folder, heart, home, mail, search, settings, star, user). diagram: a top-to-bottom flow, steps=[\"Read\", \"Edit\", \"Test\"] with optional arrows [[from, to, label], ...]. output is the .svg path, e.g. '~/Pictures/sales.svg'. (arguments: action, output, kind, data, series, steps, arrows, name, title, x_label, y_label)"
-        },
-        {
-          "tool": "manage_triggers",
-          "desc": "manage_triggers: Arm, list, or remove automatic rules that run a Chronoa action when a perception matches - for example, notify when the battery sense reports low. A rule names one already-whitelisted skill; it cannot run an arbitrary command or an LLM-authored prompt. Listing needs no permission; arming or disarming requires the 'trigger-control-enabled' consent key. (arguments: action, name, sense, match_mode, substring, keywords, actuator, arguments, cooldown_seconds, event_type, source, params, ask_first, retry_policy, debounce_seconds)"
         }
       ],
       "offered": [
@@ -4749,10 +4749,10 @@
         "calendar_edit",
         "calendar_events",
         "date_math",
+        "kundali",
         "data_usage",
         "set_locale",
-        "chart",
-        "manage_triggers"
+        "chart"
       ],
       "recall_hit": true
     },
@@ -4783,12 +4783,12 @@
           "desc": "bandwidth_to_host: Measure how fast this machine can send data to another machine over the network, using a controlled iperf3 transfer. Use for 'why is my NAS slow', 'how fast is my network to the server', 'is the bottleneck the network or the disk'. Needs iperf3 running on the other machine - ask for loopback to measure this machine against itself. Read-only: it transfers data and writes nothing. (arguments: host, port, seconds)"
         },
         {
-          "tool": "tailscale_status",
-          "desc": "tailscale_status: Tailscale status: whether it is connected, this machine's Tailscale IP, and which of your other devices are online."
+          "tool": "network_watch",
+          "desc": "network_watch: Listen on one network interface for a few seconds and report what changed: new devices (IP/MAC pairs), hostname changes, flips and duplicates. Use for 'did a new device join my network', 'something changed on my network'. Read-only; it listens and reports, and changes nothing. (arguments: interface, seconds)"
         },
         {
-          "tool": "discover_hosts",
-          "desc": "discover_hosts: Find which devices are on this network right now, by asking rather than by reading the cache - so devices that have never talked to this machine are found too. Reports an address and a hardware address for each, and counts devices answering on more than one address. The range is always the private network this machine is on; pass network= for a different private range, and a public one is refused. Connects to nothing it finds and reads no packet contents. Needs raw-socket access, so unprivileged it may report that rather than a partial sweep. (arguments: interface, network)"
+          "tool": "tailscale_status",
+          "desc": "tailscale_status: Tailscale status: whether it is connected, this machine's Tailscale IP, and which of your other devices are online."
         }
       ],
       "offered": [
@@ -4798,8 +4798,8 @@
         "trace_route",
         "whois_lookup",
         "bandwidth_to_host",
-        "tailscale_status",
-        "discover_hosts"
+        "network_watch",
+        "tailscale_status"
       ],
       "recall_hit": true
     },
@@ -4899,15 +4899,7 @@
         },
         {
           "tool": "undo_last_change",
-          "desc": "undo_last_change: Put a file back the way Chronoa last found it, by restoring the content recorded just before Chronoa's own last edit to it. Undoes Chronoa's recent writes only - NOT git history, NOT changes you made in an editor or a shell, and only while a recorded pre-image is still held. Requires the 'file-edit-enabled' consent key. (arguments: path, list, steps)"
-        },
-        {
-          "tool": "calendar_events",
-          "desc": "calendar_events: List events on the user's calendars (GNOME calendars and online accounts): today, tomorrow, this week, or the next few hours. Requires the 'calendar-read-enabled' consent key. (arguments: range, hours)"
-        },
-        {
-          "tool": "date_math",
-          "desc": "date_math: Date arithmetic: days until a date ('how many days until 25 December'), the date N days/weeks/months from a date ('what date is 45 days from now'), days between two dates, or the weekday of a date. (arguments: operation, date, other_date, amount, unit)"
+          "desc": "undo_last_change: Put a file or a Chronoa setting back the way Chronoa last found it, by restoring the content or value recorded just before Chronoa's own last change to it. Undoes Chronoa's recent writes only - NOT git history, NOT changes you made in an editor or a shell, and only while a recorded pre-image is still held. Requires the 'file-edit-enabled' consent key. (arguments: path, list, setting, steps)"
         },
         {
           "tool": "search_documents",
@@ -4920,17 +4912,25 @@
         {
           "tool": "web_search",
           "desc": "web_search: Look something up on the web and return what the pages actually say: facts, prices, how-tos, anything no more specific tool covers. Give a search query, a specific URL, or both. For a scholarly question - a paper, a preprint, prior work, 'what does the research say' - set source=arxiv and it searches the arXiv preprint archive instead of the web. For news headlines use news; to click, fill in or book something on a site use browse. Requires the web sense to be enabled and privacy mode to be off. (arguments: query, url, source)"
+        },
+        {
+          "tool": "calendar_events",
+          "desc": "calendar_events: List events on the user's calendars (GNOME calendars and online accounts): today, tomorrow, this week, or the next few hours. Requires the 'calendar-read-enabled' consent key. (arguments: range, hours)"
+        },
+        {
+          "tool": "date_math",
+          "desc": "date_math: Date arithmetic: days until a date ('how many days until 25 December'), the date N days/weeks/months from a date ('what date is 45 days from now'), days between two dates, or the weekday of a date. (arguments: operation, date, other_date, amount, unit)"
         }
       ],
       "offered": [
         "conversations",
         "search_my_files",
         "undo_last_change",
-        "calendar_events",
-        "date_math",
         "search_documents",
         "search_file_contents",
-        "web_search"
+        "web_search",
+        "calendar_events",
+        "date_math"
       ],
       "recall_hit": true
     },
@@ -4953,6 +4953,10 @@
           "desc": "git_inspect: Report a git working tree: what has changed and is not committed, the diff of those changes, recent commits, or the current branch and how far it is from its upstream; also the stashed work and the reflog (the record that survives rebases and amends). Reports UNKNOWN - never 'clean tree' - when git is missing, the folder is not a repository, or git fails. Requires the 'git-sense-enabled' consent key. (arguments: path, subcommand, revision, since, context_lines)"
         },
         {
+          "tool": "kundali",
+          "desc": "kundali: Compute Vedic Kundali (birth chart), Panchang (daily almanac), transits, aspects, dignities, BaZi (Chinese Four Pillars), and Nakshatra details. Offline, no API keys, no external dependencies. panchang: Tithi, Vara, Nakshatra, Yoga, Karana. kundali: sidereal birth chart with planets, houses, Navamsha, Dasha, aspects, dignities. transit: transit positions and cross-aspects. aspects: planetary aspects. dignity: planet dignity in a sign. bazi: Chinese Four Pillars. nakshatra: nakshatra details. timelords: profections and firdaria. arabicparts: Arabic parts (lots). temperament: elemental temperament. lunarmansion: lunar mansion. charakarakas: Jaimini karakas. shadbala: planetary strength. combustion: combust planets. horary: horary chart. upagrahas: all upagrahas. arudha: Arudha padas. drishti: Vedic aspects. vishesha: special lagnas. muhurta: electional scoring. vimshopaka: Vimshopaka bala. cheshta: motion states. grahayuddha: planetary wars. upagrahas_full: all upagrahas. fullchart: complete chart JSON. ashtakavarga: Bhinna + Sarva ashtakavarga. gochara: transit analysis. bhava: house analysis. kalamana: time measurement. chinese: Chinese calendar. grahana: eclipse check. shadbala_full: complete shadbala. karakas_full: chara karakas with Rahu reflection. yogas: Vishesha yogas. nodes: lunar nodes. eclipse: eclipse details. charadasha: Chara dasha. yoginidasha: Yogini dasha. ashtottaridasha: Ashtottari dasha. (arguments: action, date, datetime, latitude, longitude, planet, sign, year, month, day, hour)"
+        },
+        {
           "tool": "get_world_time",
           "desc": "get_world_time: The current time and date in ANOTHER city, country or time zone, e.g. 'what time is it in Tokyo'. For the time here, use get_datetime. (arguments: place)"
         },
@@ -4963,10 +4967,6 @@
         {
           "tool": "convert_currency",
           "desc": "convert_currency: Convert an amount of money between currencies (rupees, dollars, euros, pounds, yen, ...) at today's ECB reference rate. Requires the web sense and privacy mode off. (arguments: amount, from_currency, to_currency)"
-        },
-        {
-          "tool": "data_usage",
-          "desc": "data_usage: How much internet data this computer has used today and this month, per network interface (from vnStat)."
         }
       ],
       "offered": [
@@ -4974,10 +4974,10 @@
         "calendar_events",
         "find_recently_modified",
         "git_inspect",
+        "kundali",
         "get_world_time",
         "calendar_month",
-        "convert_currency",
-        "data_usage"
+        "convert_currency"
       ],
       "recall_hit": true
     },
@@ -5144,7 +5144,7 @@
         },
         {
           "tool": "undo_last_change",
-          "desc": "undo_last_change: Put a file back the way Chronoa last found it, by restoring the content recorded just before Chronoa's own last edit to it. Undoes Chronoa's recent writes only - NOT git history, NOT changes you made in an editor or a shell, and only while a recorded pre-image is still held. Requires the 'file-edit-enabled' consent key. (arguments: path, list, steps)"
+          "desc": "undo_last_change: Put a file or a Chronoa setting back the way Chronoa last found it, by restoring the content or value recorded just before Chronoa's own last change to it. Undoes Chronoa's recent writes only - NOT git history, NOT changes you made in an editor or a shell, and only while a recorded pre-image is still held. Requires the 'file-edit-enabled' consent key. (arguments: path, list, setting, steps)"
         },
         {
           "tool": "cleanup_report",
@@ -5287,7 +5287,7 @@
         },
         {
           "tool": "network_activity",
-          "desc": "network_activity: Report what this machine's network is doing right now, per program: which processes are sending and receiving, and how fast each interface is moving. Use for 'what is using my bandwidth', 'why is the network slow', 'what is uploading', 'is something downloading right now'. Interface rates come from /proc/net/dev and always work; per-program rates need nethogs and can only name programs this user owns. Says which half it could not measure and why, and reports an unattributed socket as unattributed rather than guessing at a program. Read-only; nothing is changed or blocked."
+          "desc": "network_activity: Report what this machine's network is doing right now, per program: which processes are sending and receiving, and how fast each interface is moving. Use for 'what is using my bandwidth', 'why is the network slow', 'what is uploading', 'is something downloading right now'. Interface rates come from /proc/net/dev and always work; per-program rates come from bandwhich or nethogs and can only name programs this user owns. Says which half it could not measure and why, and reports an unattributed socket as unattributed rather than guessing at a program. Read-only; nothing is changed or blocked."
         },
         {
           "tool": "open_files",
@@ -5303,7 +5303,7 @@
         },
         {
           "tool": "capture_packets",
-          "desc": "capture_packets: Watch packets crossing one network interface for a few seconds, and report tcpdump's one-line-per-packet summaries: who sent to whom, which protocol, how long, and the TCP flags. This reads packet contents on the wire - it is the one thing in this package that does - so it is gated separately and shows no payload text. Bounded by packet count, seconds and output rows. Read-only: it captures and prints, and changes nothing. (arguments: interface, packets, seconds, filter)"
+          "desc": "capture_packets: Watch packets crossing one network interface for a few seconds, and report tcpdump's one-line-per-packet summaries: who sent to whom, which protocol, how long, and the TCP flags. This reads packet contents on the wire - it is the one thing in this package that does - so it is gated separately and shows no payload text. Bounded by packet count, seconds and output rows. Read-only: it captures and prints, and changes nothing. (arguments: interface, packets, seconds, filter, engine, pattern)"
         }
       ],
       "offered": [
@@ -5414,6 +5414,10 @@
           "desc": "bridge_topology: Show which network interfaces are bridges, exactly which interfaces are enslaved to each one, and which are standalone. Answers 'is this interface actually plugged into the bridge it should be', which is the usual reason a network that reported no errors carries no traffic. Read from /sys so it needs no privileges and cannot be half-applied. Reports the plumbing, not whether traffic flows. Covers this network namespace only. (arguments: bridge)"
         },
         {
+          "tool": "capture_packets",
+          "desc": "capture_packets: Watch packets crossing one network interface for a few seconds, and report tcpdump's one-line-per-packet summaries: who sent to whom, which protocol, how long, and the TCP flags. This reads packet contents on the wire - it is the one thing in this package that does - so it is gated separately and shows no payload text. Bounded by packet count, seconds and output rows. Read-only: it captures and prints, and changes nothing. (arguments: interface, packets, seconds, filter, engine, pattern)"
+        },
+        {
           "tool": "routing_table",
           "desc": "routing_table: Show this machine's routing table: which interface traffic leaves by, which router forwards it, and for IPv4 and IPv6 separately. Read-only, and changes nothing. (arguments: family, interface)"
         },
@@ -5428,21 +5432,17 @@
         {
           "tool": "discover_hosts",
           "desc": "discover_hosts: Find which devices are on this network right now, by asking rather than by reading the cache - so devices that have never talked to this machine are found too. Reports an address and a hardware address for each, and counts devices answering on more than one address. The range is always the private network this machine is on; pass network= for a different private range, and a public one is refused. Connects to nothing it finds and reads no packet contents. Needs raw-socket access, so unprivileged it may report that rather than a partial sweep. (arguments: interface, network)"
-        },
-        {
-          "tool": "network_activity",
-          "desc": "network_activity: Report what this machine's network is doing right now, per program: which processes are sending and receiving, and how fast each interface is moving. Use for 'what is using my bandwidth', 'why is the network slow', 'what is uploading', 'is something downloading right now'. Interface rates come from /proc/net/dev and always work; per-program rates need nethogs and can only name programs this user owns. Says which half it could not measure and why, and reports an unattributed socket as unattributed rather than guessing at a program. Read-only; nothing is changed or blocked."
         }
       ],
       "offered": [
         "interface_counters",
         "dissect_traffic",
         "bridge_topology",
+        "capture_packets",
         "routing_table",
         "trace_route",
         "data_usage",
-        "discover_hosts",
-        "network_activity"
+        "discover_hosts"
       ],
       "recall_hit": true
     },
@@ -5469,7 +5469,7 @@
       "negatives": [
         {
           "tool": "download_file",
-          "desc": "download_file: Download a file from a web address and save it to disk, reporting the size and how long it took. Use for 'download that file', 'get this installer', 'save that page'. Only http and https; a site that answers with an error page reports that rather than saving the error as if it were the file. (arguments: url, destination)"
+          "desc": "download_file: Download a file from a web address and save it to disk, reporting the size and how long it took. Use for 'download that file', 'get this installer', 'save that page'. Only http and https; a site that answers with an error page reports that rather than saving the error as if it were the file. (arguments: url, destination, engine)"
         },
         {
           "tool": "directory_tree",
@@ -6313,6 +6313,10 @@
           "desc": "alarm: Alarm clock: set an alarm at a time of day (once, or repeating daily/weekdays/weekends/chosen days), list alarms, say when the next one is, change one's time or label, snooze the one that just rang, or delete one. Examples: 'set an alarm for 7am', 'alarm for 6:30 on weekdays', 'when is my next alarm?', 'change my 7am alarm to 7:30', 'snooze', 'delete the 7am alarm'. Times may be words ('7am', '7:30 pm', 'tomorrow 6:45'). It rings with a notification and the alarm sound even if the assistant is closed; it is held by systemd --user, so a reboot drops it until alarms are next listed, which re-arms it. (arguments: action, time, label, repeat, id, new_time, new_label, minutes)"
         },
         {
+          "tool": "kundali",
+          "desc": "kundali: Compute Vedic Kundali (birth chart), Panchang (daily almanac), transits, aspects, dignities, BaZi (Chinese Four Pillars), and Nakshatra details. Offline, no API keys, no external dependencies. panchang: Tithi, Vara, Nakshatra, Yoga, Karana. kundali: sidereal birth chart with planets, houses, Navamsha, Dasha, aspects, dignities. transit: transit positions and cross-aspects. aspects: planetary aspects. dignity: planet dignity in a sign. bazi: Chinese Four Pillars. nakshatra: nakshatra details. timelords: profections and firdaria. arabicparts: Arabic parts (lots). temperament: elemental temperament. lunarmansion: lunar mansion. charakarakas: Jaimini karakas. shadbala: planetary strength. combustion: combust planets. horary: horary chart. upagrahas: all upagrahas. arudha: Arudha padas. drishti: Vedic aspects. vishesha: special lagnas. muhurta: electional scoring. vimshopaka: Vimshopaka bala. cheshta: motion states. grahayuddha: planetary wars. upagrahas_full: all upagrahas. fullchart: complete chart JSON. ashtakavarga: Bhinna + Sarva ashtakavarga. gochara: transit analysis. bhava: house analysis. kalamana: time measurement. chinese: Chinese calendar. grahana: eclipse check. shadbala_full: complete shadbala. karakas_full: chara karakas with Rahu reflection. yogas: Vishesha yogas. nodes: lunar nodes. eclipse: eclipse details. charadasha: Chara dasha. yoginidasha: Yogini dasha. ashtottaridasha: Ashtottari dasha. (arguments: action, date, datetime, latitude, longitude, planet, sign, year, month, day, hour)"
+        },
+        {
           "tool": "maps",
           "desc": "maps: OpenStreetMap maps: find where a place is ('find'), driving/walking/cycling directions ('directions') or just distance and time ('travel_time') between places, the nearest kind of place such as petrol pump, hotel, ATM or hospital ('nearby'), or open a place or route on the map in the browser ('open'). Times are typical, without live traffic. With no origin, 'here' is this computer's location. Requires the web sense and privacy mode off; 'here' also needs the location sense. (arguments: action, place, destination, origin, mode, what, near, limit)"
         },
@@ -6327,21 +6331,17 @@
         {
           "tool": "desktop_setting",
           "desc": "desktop_setting: Read or change one desktop setting from a fixed list: animations (window and menu animations); cursor_size (mouse pointer size in pixels (24 is normal; 32, 48, 64 are larger)); single_click (open files and folders with a single click); clock_24h (show the top-bar clock in 24-hour format); clock_seconds (show seconds in the top-bar clock); battery_percentage (show the battery percentage in the top bar); hot_corner (open the overview when the pointer hits the top-left corner); natural_scroll (touchpad natural (reverse) scrolling); tap_to_click (tap the touchpad to click). Changing requires the 'appearance-control-enabled' consent key. (arguments: setting, value)"
-        },
-        {
-          "tool": "boot_report",
-          "desc": "boot_report: How the last boot went: total boot time split into firmware, loader, kernel and userspace, the services that took longest to start, when the machine booted and whether it shut down cleanly before, and which EFI entry the firmware will boot by default. Use for 'why does it boot slowly', 'did it crash last time'. Boot history uses the 'boots-sense-enabled' switch. Read-only. (arguments: top)"
         }
       ],
       "offered": [
         "get_datetime",
         "get_world_time",
         "alarm",
+        "kundali",
         "maps",
         "watch",
         "chart",
-        "desktop_setting",
-        "boot_report"
+        "desktop_setting"
       ],
       "recall_hit": true
     },
@@ -6538,43 +6538,43 @@
       "positives_desc": "write_text_file: Write text to a file, creating it or replacing its contents. Refuses to replace a non-empty file unless asked to overwrite, and refuses binary data. (arguments: path, content, overwrite, append)",
       "negatives": [
         {
+          "tool": "create_document",
+          "desc": "create_document: Create a document from a title and body: a markdown file, a plain text file, or an HTML page. Writes a new file; never overwrites. (arguments: title, body, format, path)"
+        },
+        {
+          "tool": "search_file_contents",
+          "desc": "search_file_contents: Search inside text files under a directory for a literal string, and report which files contain it and on which lines. Skips binary files and very large files, and says how many it skipped. (arguments: text, path, file_pattern, case_sensitive, max_matches)"
+        },
+        {
           "tool": "convert_document",
           "desc": "convert_document: Convert a document between markdown, plain text, and HTML. Writes a new file next to the original; never overwrites. (arguments: path, to)"
         },
         {
-          "tool": "create_document",
-          "desc": "create_document: Create a document from a title and body: a markdown file, a plain text file, or an HTML page. Writes a new file; never overwrites. (arguments: title, body, format, path)"
+          "tool": "read_text_file",
+          "desc": "read_text_file: Read a text file and return its contents, optionally a range of lines. Use this to see what a file actually says. (arguments: path, start_line, max_lines)"
         },
         {
           "tool": "file_locks",
           "desc": "file_locks: Show who holds a file lock, and on what - the answer to \"why won't this file save\" and \"why did my write fail with EAGAIN\". A WRITE lock blocks another writer; a READ lock is shared and usually harmless. Use for 'who has this file locked', 'what is holding a lock', 'why can't I write this file', 'is this file locked'. Give a path to check one file; omit it for every lock on the machine. Reads the kernel's own lock table (/proc/locks), so it needs no binary and no privilege. Read-only; nothing is polled, changed or broken. (arguments: path)"
         },
         {
-          "tool": "move_or_copy_file",
-          "desc": "move_or_copy_file: Move or copy a file or directory to a new path. Moving a directory into itself is refused, and an existing destination is not overwritten unless asked. (arguments: source, destination, mode, overwrite)"
-        },
-        {
           "tool": "browse",
           "desc": "browse: Open a website and do things on it for the person: find information, fill in forms, click through. Drive a web browser: navigate, read the page's text (get_text), click, type, select options, scroll, move through history, take screenshots and wait for conditions. While Chronoa's window is open this is the in-app browser the user can watch: there it opens only http(s) pages the egress policy allows, and key, hover, drag, upload_file, tabs and evaluate are not available. Otherwise it is a headless Chromium with all actions. Requires the web sense to be enabled and privacy mode to be off. (arguments: action, url, selector, text, key, value, label, files, x, y, to_x, to_y, to_selector, delta_x, delta_y, steps, repeat, tab_id, path, wait_for, timeout, settle)"
         },
         {
-          "tool": "driver_scaffold",
-          "desc": "driver_scaffold: Write a real out-of-tree Linux kernel module project into a directory under your home: the C source, the Kbuild Makefile, a dkms.conf, a udev rule and a README. Creates new files and never overwrites an existing one. (arguments: name, path)"
-        },
-        {
-          "tool": "edit_file",
-          "desc": "edit_file: Replace one exact piece of text in one named file. The text to replace must appear exactly once, or nothing is written - the count and line numbers are reported instead of a guess being made. Use this to change a specific line; use find_and_replace to change a string across many files. Requires the 'file-edit-enabled' consent key. (arguments: path, old_string, new_string, preview, replace_all)"
+          "tool": "move_or_copy_file",
+          "desc": "move_or_copy_file: Move or copy a file or directory to a new path. Moving a directory into itself is refused, and an existing destination is not overwritten unless asked. (arguments: source, destination, mode, overwrite)"
         }
       ],
       "offered": [
-        "convert_document",
-        "create_document",
         "write_text_file",
+        "create_document",
+        "search_file_contents",
+        "convert_document",
+        "read_text_file",
         "file_locks",
-        "move_or_copy_file",
         "browse",
-        "driver_scaffold",
-        "edit_file"
+        "move_or_copy_file"
       ],
       "recall_hit": true
     },
@@ -6726,7 +6726,7 @@
         },
         {
           "tool": "network_activity",
-          "desc": "network_activity: Report what this machine's network is doing right now, per program: which processes are sending and receiving, and how fast each interface is moving. Use for 'what is using my bandwidth', 'why is the network slow', 'what is uploading', 'is something downloading right now'. Interface rates come from /proc/net/dev and always work; per-program rates need nethogs and can only name programs this user owns. Says which half it could not measure and why, and reports an unattributed socket as unattributed rather than guessing at a program. Read-only; nothing is changed or blocked."
+          "desc": "network_activity: Report what this machine's network is doing right now, per program: which processes are sending and receiving, and how fast each interface is moving. Use for 'what is using my bandwidth', 'why is the network slow', 'what is uploading', 'is something downloading right now'. Interface rates come from /proc/net/dev and always work; per-program rates come from bandwhich or nethogs and can only name programs this user owns. Says which half it could not measure and why, and reports an unattributed socket as unattributed rather than guessing at a program. Read-only; nothing is changed or blocked."
         }
       ],
       "offered": [
@@ -7014,8 +7014,8 @@
           "desc": "move_or_copy_file: Move or copy a file or directory to a new path. Moving a directory into itself is refused, and an existing destination is not overwritten unless asked. (arguments: source, destination, mode, overwrite)"
         },
         {
-          "tool": "date_math",
-          "desc": "date_math: Date arithmetic: days until a date ('how many days until 25 December'), the date N days/weeks/months from a date ('what date is 45 days from now'), days between two dates, or the weekday of a date. (arguments: operation, date, other_date, amount, unit)"
+          "tool": "kundali",
+          "desc": "kundali: Compute Vedic Kundali (birth chart), Panchang (daily almanac), transits, aspects, dignities, BaZi (Chinese Four Pillars), and Nakshatra details. Offline, no API keys, no external dependencies. panchang: Tithi, Vara, Nakshatra, Yoga, Karana. kundali: sidereal birth chart with planets, houses, Navamsha, Dasha, aspects, dignities. transit: transit positions and cross-aspects. aspects: planetary aspects. dignity: planet dignity in a sign. bazi: Chinese Four Pillars. nakshatra: nakshatra details. timelords: profections and firdaria. arabicparts: Arabic parts (lots). temperament: elemental temperament. lunarmansion: lunar mansion. charakarakas: Jaimini karakas. shadbala: planetary strength. combustion: combust planets. horary: horary chart. upagrahas: all upagrahas. arudha: Arudha padas. drishti: Vedic aspects. vishesha: special lagnas. muhurta: electional scoring. vimshopaka: Vimshopaka bala. cheshta: motion states. grahayuddha: planetary wars. upagrahas_full: all upagrahas. fullchart: complete chart JSON. ashtakavarga: Bhinna + Sarva ashtakavarga. gochara: transit analysis. bhava: house analysis. kalamana: time measurement. chinese: Chinese calendar. grahana: eclipse check. shadbala_full: complete shadbala. karakas_full: chara karakas with Rahu reflection. yogas: Vishesha yogas. nodes: lunar nodes. eclipse: eclipse details. charadasha: Chara dasha. yoginidasha: Yogini dasha. ashtottaridasha: Ashtottari dasha. (arguments: action, date, datetime, latitude, longitude, planet, sign, year, month, day, hour)"
         }
       ],
       "offered": [
@@ -7026,7 +7026,7 @@
         "alarm",
         "move_pointer",
         "move_or_copy_file",
-        "date_math"
+        "kundali"
       ],
       "recall_hit": true
     },
@@ -7267,6 +7267,10 @@
           "desc": "toggle_wifi: Turn the Wi-Fi radio on or off (only Wi-Fi - airplane_mode switches every radio, connect_wifi joins a network), or report whether Wi-Fi is on. Changing requires the 'radio-control-enabled' consent key; status needs no permission. (arguments: action)"
         },
         {
+          "tool": "network_watch",
+          "desc": "network_watch: Listen on one network interface for a few seconds and report what changed: new devices (IP/MAC pairs), hostname changes, flips and duplicates. Use for 'did a new device join my network', 'something changed on my network'. Read-only; it listens and reports, and changes nothing. (arguments: interface, seconds)"
+        },
+        {
           "tool": "solve_math",
           "desc": "solve_math: Maths: derivative, series (Taylor), expansion, factor, numeric integral (definite, or numeric for indefinite), numeric limit (at a point or oo), linear and quadratic solve, numeric sum of a series, evaluation to N digits, prime_factors / is_prime. Write maths plainly: 'x^2 + 3x', 'sin(x)/x', 'x^2 - 4 = 0'. (arguments: operation, expression, variable, point, lower, upper, order, digits, other)"
         },
@@ -7281,21 +7285,17 @@
         {
           "tool": "lab_network_destroy",
           "desc": "lab_network_destroy: Remove a lab network built by lab_network_create, and everything in it. Only ever removes networks this tool built. Returns the plan unless apply=true. (arguments: name, apply)"
-        },
-        {
-          "tool": "lab_network_status",
-          "desc": "lab_network_status: What a lab network can actually reach: a real ping from inside each subnet, not just what the routing table says. (arguments: name)"
         }
       ],
       "offered": [
         "connect_wifi",
         "list_wifi_networks",
         "toggle_wifi",
+        "network_watch",
         "solve_math",
         "lab_network_list",
         "lab_network_create",
-        "lab_network_destroy",
-        "lab_network_status"
+        "lab_network_destroy"
       ],
       "recall_hit": true
     },
@@ -7410,6 +7410,10 @@
           "desc": "calendar_edit: Change the user's calendar: 'create' adds an event to the default calendar (title, start, optional duration or end, location); 'move' reschedules an event found by its current time and/or title to new_start; 'cancel' deletes one. Times in words: 'tomorrow 3pm', 'friday 5 pm', '2026-10-09 14:00'. Move and cancel ask the person to confirm. Ambiguous matches are refused with the candidates. Requires the 'calendar-write-enabled' consent key (move/cancel also 'calendar-read-enabled'). No invitations are sent. (arguments: action, title, start, duration, end, new_start, location, notes)"
         },
         {
+          "tool": "kundali",
+          "desc": "kundali: Compute Vedic Kundali (birth chart), Panchang (daily almanac), transits, aspects, dignities, BaZi (Chinese Four Pillars), and Nakshatra details. Offline, no API keys, no external dependencies. panchang: Tithi, Vara, Nakshatra, Yoga, Karana. kundali: sidereal birth chart with planets, houses, Navamsha, Dasha, aspects, dignities. transit: transit positions and cross-aspects. aspects: planetary aspects. dignity: planet dignity in a sign. bazi: Chinese Four Pillars. nakshatra: nakshatra details. timelords: profections and firdaria. arabicparts: Arabic parts (lots). temperament: elemental temperament. lunarmansion: lunar mansion. charakarakas: Jaimini karakas. shadbala: planetary strength. combustion: combust planets. horary: horary chart. upagrahas: all upagrahas. arudha: Arudha padas. drishti: Vedic aspects. vishesha: special lagnas. muhurta: electional scoring. vimshopaka: Vimshopaka bala. cheshta: motion states. grahayuddha: planetary wars. upagrahas_full: all upagrahas. fullchart: complete chart JSON. ashtakavarga: Bhinna + Sarva ashtakavarga. gochara: transit analysis. bhava: house analysis. kalamana: time measurement. chinese: Chinese calendar. grahana: eclipse check. shadbala_full: complete shadbala. karakas_full: chara karakas with Rahu reflection. yogas: Vishesha yogas. nodes: lunar nodes. eclipse: eclipse details. charadasha: Chara dasha. yoginidasha: Yogini dasha. ashtottaridasha: Ashtottari dasha. (arguments: action, date, datetime, latitude, longitude, planet, sign, year, month, day, hour)"
+        },
+        {
           "tool": "chart",
           "desc": "chart: Make an SVG file from data, drawn on this computer with no install. chart: kind=bar|line|pie with data (bar/pie: [[label, number], ...]; line: [[x, y], ...], or several lines as series {name: [[x, y], ...]}), plus title, x_label, y_label. icon: a stroke icon by name (arrow-right, bell, calendar, check, clock, close, download, folder, heart, home, mail, search, settings, star, user). diagram: a top-to-bottom flow, steps=[\"Read\", \"Edit\", \"Test\"] with optional arrows [[from, to, label], ...]. output is the .svg path, e.g. '~/Pictures/sales.svg'. (arguments: action, output, kind, data, series, steps, arrows, name, title, x_label, y_label)"
         },
@@ -7424,21 +7428,17 @@
         {
           "tool": "date_math",
           "desc": "date_math: Date arithmetic: days until a date ('how many days until 25 December'), the date N days/weeks/months from a date ('what date is 45 days from now'), days between two dates, or the weekday of a date. (arguments: operation, date, other_date, amount, unit)"
-        },
-        {
-          "tool": "set_locale",
-          "desc": "set_locale: Report the system language and regional formats, list the locales available on this machine, or change one: the system language, or the date format (British day/month or American month/day order), number format (decimal comma or point), money, measurement or paper size (e.g. what='dates', locale='en_GB.UTF-8'). Takes effect at the next login. Changing requires the 'locale-control-enabled' consent key. (arguments: action, locale, what)"
         }
       ],
       "offered": [
         "calendar_month",
         "calendar_edit",
         "calendar_events",
+        "kundali",
         "chart",
         "manage_triggers",
         "data_usage",
-        "date_math",
-        "set_locale"
+        "date_math"
       ],
       "recall_hit": true
     },
@@ -7518,12 +7518,12 @@
           "desc": "ui_elements: Use another app's controls by what they are, through the accessibility tree. apps: which apps are reachable. inspect: list a window's buttons, fields, menus and labels with ids (app = its name; query narrows by text). press: activate an element by id (a button, checkbox, link, menu item). set_text: put text in a field by id. read: an element's text or value. menu: open a menu path like 'File > Export'. drive: one turn of driving - give an action and a control number and the reply is the app's new state in the same short numbered form, which is what a small model can act on. act: click, type or key an app by name or position, with a visible cursor. state: the numbered controls an app is showing. Works on a container's app and on this desktop's own apps alike. Requires 'input-control-enabled'; drive start also runs a container, so it needs 'container-control-enabled' as well. (arguments: action, app, id, text, query, path, do, how, number, image, keys, x, y)"
         },
         {
-          "tool": "set_timer",
-          "desc": "set_timer: Set a countdown timer that sends a desktop notification when it finishes; list pending timers, say how much time is left, add or take off time, pause, resume, reset to the original length, and cancel. With one timer pending, 'my timer' needs no id. The countdown is owned by systemd, so it fires even if the assistant is closed. It is refused rather than silently accepted when systemd is unavailable, because a timer recorded as pending that will never fire is the same lie as a camera reported as disabled when it is not. (arguments: action, seconds, label, id)"
+          "tool": "undo_last_change",
+          "desc": "undo_last_change: Put a file or a Chronoa setting back the way Chronoa last found it, by restoring the content or value recorded just before Chronoa's own last change to it. Undoes Chronoa's recent writes only - NOT git history, NOT changes you made in an editor or a shell, and only while a recorded pre-image is still held. Requires the 'file-edit-enabled' consent key. (arguments: path, list, setting, steps)"
         },
         {
-          "tool": "set_locale",
-          "desc": "set_locale: Report the system language and regional formats, list the locales available on this machine, or change one: the system language, or the date format (British day/month or American month/day order), number format (decimal comma or point), money, measurement or paper size (e.g. what='dates', locale='en_GB.UTF-8'). Takes effect at the next login. Changing requires the 'locale-control-enabled' consent key. (arguments: action, locale, what)"
+          "tool": "set_timer",
+          "desc": "set_timer: Set a countdown timer that sends a desktop notification when it finishes; list pending timers, say how much time is left, add or take off time, pause, resume, reset to the original length, and cancel. With one timer pending, 'my timer' needs no id. The countdown is owned by systemd, so it fires even if the assistant is closed. It is refused rather than silently accepted when systemd is unavailable, because a timer recorded as pending that will never fire is the same lie as a camera reported as disabled when it is not. (arguments: action, seconds, label, id)"
         }
       ],
       "offered": [
@@ -7533,8 +7533,8 @@
         "set_wallpaper",
         "alarm",
         "ui_elements",
-        "set_timer",
-        "set_locale"
+        "undo_last_change",
+        "set_timer"
       ],
       "recall_hit": true
     },
@@ -7743,18 +7743,23 @@
       "positives_desc": "random_pick: Flip a coin, roll dice ('2d6'), pick a random number in a range, or choose one of a list of options. (arguments: kind, dice, low, high, options)",
       "negatives": [
         {
+          "tool": "generate_password",
+          "desc": "generate_password: Generate a strong random password, or a passphrase of random words, and copy it to the clipboard (it is never said or shown in the reply). (arguments: kind, length, symbols)"
+        },
+        {
           "tool": "edit_image",
           "desc": "edit_image: Edit a picture (for faces or backgrounds use photo_video) and save the result as a new file next to it: resize (width and/or height, or percent), compress (quality, or to under a size in KB), crop, upscale (2-4x), rotate, flip, grayscale, a look (sepia, vignette, sketch, paint, enhance), strip metadata (location/camera), or convert format. Several edits can be combined in one call. For effects that depend on what is in the picture (blur faces, blur the background) use photo_video. (arguments: path, width, height, percent, upscale, quality, max_kb, crop, rotate, flip, grayscale, look, strip_metadata, format)"
         },
         {
-          "tool": "generate_password",
-          "desc": "generate_password: Generate a strong random password, or a passphrase of random words, and copy it to the clipboard (it is never said or shown in the reply). (arguments: kind, length, symbols)"
+          "tool": "network_watch",
+          "desc": "network_watch: Listen on one network interface for a few seconds and report what changed: new devices (IP/MAC pairs), hostname changes, flips and duplicates. Use for 'did a new device join my network', 'something changed on my network'. Read-only; it listens and reports, and changes nothing. (arguments: interface, seconds)"
         }
       ],
       "offered": [
         "random_pick",
+        "generate_password",
         "edit_image",
-        "generate_password"
+        "network_watch"
       ],
       "recall_hit": true
     },
@@ -7884,7 +7889,7 @@
         },
         {
           "tool": "network_activity",
-          "desc": "network_activity: Report what this machine's network is doing right now, per program: which processes are sending and receiving, and how fast each interface is moving. Use for 'what is using my bandwidth', 'why is the network slow', 'what is uploading', 'is something downloading right now'. Interface rates come from /proc/net/dev and always work; per-program rates need nethogs and can only name programs this user owns. Says which half it could not measure and why, and reports an unattributed socket as unattributed rather than guessing at a program. Read-only; nothing is changed or blocked."
+          "desc": "network_activity: Report what this machine's network is doing right now, per program: which processes are sending and receiving, and how fast each interface is moving. Use for 'what is using my bandwidth', 'why is the network slow', 'what is uploading', 'is something downloading right now'. Interface rates come from /proc/net/dev and always work; per-program rates come from bandwhich or nethogs and can only name programs this user owns. Says which half it could not measure and why, and reports an unattributed socket as unattributed rather than guessing at a program. Read-only; nothing is changed or blocked."
         },
         {
           "tool": "scan_network",
@@ -8013,7 +8018,7 @@
         },
         {
           "tool": "undo_last_change",
-          "desc": "undo_last_change: Put a file back the way Chronoa last found it, by restoring the content recorded just before Chronoa's own last edit to it. Undoes Chronoa's recent writes only - NOT git history, NOT changes you made in an editor or a shell, and only while a recorded pre-image is still held. Requires the 'file-edit-enabled' consent key. (arguments: path, list, steps)"
+          "desc": "undo_last_change: Put a file or a Chronoa setting back the way Chronoa last found it, by restoring the content or value recorded just before Chronoa's own last change to it. Undoes Chronoa's recent writes only - NOT git history, NOT changes you made in an editor or a shell, and only while a recorded pre-image is still held. Requires the 'file-edit-enabled' consent key. (arguments: path, list, setting, steps)"
         },
         {
           "tool": "encode_text",
@@ -8082,8 +8087,8 @@
           "desc": "dashboard: Build a dashboard as one self-contained HTML page (headline numbers, charts and tables), drawn on this computer with no install, no network and no scripts. Give any of: cards [{label, value, sub}], charts [{type: bar|line|pie, title, data: [[label, number], ...]}], tables [{title, rows: [[header...], [row...]]}], plus title and when (a 'as of ...' line). output is the .html path, e.g. '~/Documents/sales-dashboard.html'. Static: run again to refresh it. (arguments: output, title, when, cards, charts, tables)"
         },
         {
-          "tool": "fingerprint_status",
-          "desc": "fingerprint_status: Whether fingerprint login is set up on this machine, and which fingers are enrolled. Says which of the four real states it is in: no reader attached, reader present but nothing enrolled, fingers enrolled, or the daemon not running and the question unanswerable. Reading only - it never enrolls or deletes a fingerprint, because 'which fingers are enrolled' is a question and the other two are not. Needs no permission: it reports a machine's own login configuration, and the answer is about hardware and a per-user setting rather than anything private. (arguments: user)"
+          "tool": "kundali",
+          "desc": "kundali: Compute Vedic Kundali (birth chart), Panchang (daily almanac), transits, aspects, dignities, BaZi (Chinese Four Pillars), and Nakshatra details. Offline, no API keys, no external dependencies. panchang: Tithi, Vara, Nakshatra, Yoga, Karana. kundali: sidereal birth chart with planets, houses, Navamsha, Dasha, aspects, dignities. transit: transit positions and cross-aspects. aspects: planetary aspects. dignity: planet dignity in a sign. bazi: Chinese Four Pillars. nakshatra: nakshatra details. timelords: profections and firdaria. arabicparts: Arabic parts (lots). temperament: elemental temperament. lunarmansion: lunar mansion. charakarakas: Jaimini karakas. shadbala: planetary strength. combustion: combust planets. horary: horary chart. upagrahas: all upagrahas. arudha: Arudha padas. drishti: Vedic aspects. vishesha: special lagnas. muhurta: electional scoring. vimshopaka: Vimshopaka bala. cheshta: motion states. grahayuddha: planetary wars. upagrahas_full: all upagrahas. fullchart: complete chart JSON. ashtakavarga: Bhinna + Sarva ashtakavarga. gochara: transit analysis. bhava: house analysis. kalamana: time measurement. chinese: Chinese calendar. grahana: eclipse check. shadbala_full: complete shadbala. karakas_full: chara karakas with Rahu reflection. yogas: Vishesha yogas. nodes: lunar nodes. eclipse: eclipse details. charadasha: Chara dasha. yoginidasha: Yogini dasha. ashtottaridasha: Ashtottari dasha. (arguments: action, date, datetime, latitude, longitude, planet, sign, year, month, day, hour)"
         }
       ],
       "offered": [
@@ -8094,7 +8099,7 @@
         "look_at_image",
         "json_query",
         "dashboard",
-        "fingerprint_status"
+        "kundali"
       ],
       "recall_hit": true
     },
@@ -8302,7 +8307,7 @@
         },
         {
           "tool": "download_file",
-          "desc": "download_file: Download a file from a web address and save it to disk, reporting the size and how long it took. Use for 'download that file', 'get this installer', 'save that page'. Only http and https; a site that answers with an error page reports that rather than saving the error as if it were the file. (arguments: url, destination)"
+          "desc": "download_file: Download a file from a web address and save it to disk, reporting the size and how long it took. Use for 'download that file', 'get this installer', 'save that page'. Only http and https; a site that answers with an error page reports that rather than saving the error as if it were the file. (arguments: url, destination, engine)"
         },
         {
           "tool": "edit_file",
@@ -8784,7 +8789,7 @@
         },
         {
           "tool": "capture_packets",
-          "desc": "capture_packets: Watch packets crossing one network interface for a few seconds, and report tcpdump's one-line-per-packet summaries: who sent to whom, which protocol, how long, and the TCP flags. This reads packet contents on the wire - it is the one thing in this package that does - so it is gated separately and shows no payload text. Bounded by packet count, seconds and output rows. Read-only: it captures and prints, and changes nothing. (arguments: interface, packets, seconds, filter)"
+          "desc": "capture_packets: Watch packets crossing one network interface for a few seconds, and report tcpdump's one-line-per-packet summaries: who sent to whom, which protocol, how long, and the TCP flags. This reads packet contents on the wire - it is the one thing in this package that does - so it is gated separately and shows no payload text. Bounded by packet count, seconds and output rows. Read-only: it captures and prints, and changes nothing. (arguments: interface, packets, seconds, filter, engine, pattern)"
         },
         {
           "tool": "compute_hash",
@@ -8962,6 +8967,10 @@
           "desc": "git_inspect: Report a git working tree: what has changed and is not committed, the diff of those changes, recent commits, or the current branch and how far it is from its upstream; also the stashed work and the reflog (the record that survives rebases and amends). Reports UNKNOWN - never 'clean tree' - when git is missing, the folder is not a repository, or git fails. Requires the 'git-sense-enabled' consent key. (arguments: path, subcommand, revision, since, context_lines)"
         },
         {
+          "tool": "kundali",
+          "desc": "kundali: Compute Vedic Kundali (birth chart), Panchang (daily almanac), transits, aspects, dignities, BaZi (Chinese Four Pillars), and Nakshatra details. Offline, no API keys, no external dependencies. panchang: Tithi, Vara, Nakshatra, Yoga, Karana. kundali: sidereal birth chart with planets, houses, Navamsha, Dasha, aspects, dignities. transit: transit positions and cross-aspects. aspects: planetary aspects. dignity: planet dignity in a sign. bazi: Chinese Four Pillars. nakshatra: nakshatra details. timelords: profections and firdaria. arabicparts: Arabic parts (lots). temperament: elemental temperament. lunarmansion: lunar mansion. charakarakas: Jaimini karakas. shadbala: planetary strength. combustion: combust planets. horary: horary chart. upagrahas: all upagrahas. arudha: Arudha padas. drishti: Vedic aspects. vishesha: special lagnas. muhurta: electional scoring. vimshopaka: Vimshopaka bala. cheshta: motion states. grahayuddha: planetary wars. upagrahas_full: all upagrahas. fullchart: complete chart JSON. ashtakavarga: Bhinna + Sarva ashtakavarga. gochara: transit analysis. bhava: house analysis. kalamana: time measurement. chinese: Chinese calendar. grahana: eclipse check. shadbala_full: complete shadbala. karakas_full: chara karakas with Rahu reflection. yogas: Vishesha yogas. nodes: lunar nodes. eclipse: eclipse details. charadasha: Chara dasha. yoginidasha: Yogini dasha. ashtottaridasha: Ashtottari dasha. (arguments: action, date, datetime, latitude, longitude, planet, sign, year, month, day, hour)"
+        },
+        {
           "tool": "set_locale",
           "desc": "set_locale: Report the system language and regional formats, list the locales available on this machine, or change one: the system language, or the date format (British day/month or American month/day order), number format (decimal comma or point), money, measurement or paper size (e.g. what='dates', locale='en_GB.UTF-8'). Takes effect at the next login. Changing requires the 'locale-control-enabled' consent key. (arguments: action, locale, what)"
         },
@@ -8976,21 +8985,17 @@
         {
           "tool": "edit_image",
           "desc": "edit_image: Edit a picture (for faces or backgrounds use photo_video) and save the result as a new file next to it: resize (width and/or height, or percent), compress (quality, or to under a size in KB), crop, upscale (2-4x), rotate, flip, grayscale, a look (sepia, vignette, sketch, paint, enhance), strip metadata (location/camera), or convert format. Several edits can be combined in one call. For effects that depend on what is in the picture (blur faces, blur the background) use photo_video. (arguments: path, width, height, percent, upscale, quality, max_kb, crop, rotate, flip, grayscale, look, strip_metadata, format)"
-        },
-        {
-          "tool": "manage_goals",
-          "desc": "manage_goals: Save a multi-step goal as a plan of tool steps that can be run later from the Goals panel, list saved goals, answer one that is waiting for you, or remove one. Saving runs nothing. Each step names a tool, its arguments, and a name for its result; a later step can use an earlier result as $name in a string argument, and lists the names it depends_on. A depends_on name that no earlier step produces is a question for the user: the goal waits there until they answer it. Requires the 'goals-enabled' consent key. (arguments: action, goal, steps, id, answer)"
         }
       ],
       "offered": [
         "date_math",
         "alarm",
         "git_inspect",
+        "kundali",
         "set_locale",
         "get_weather",
         "apply_patch",
-        "edit_image",
-        "manage_goals"
+        "edit_image"
       ],
       "recall_hit": true
     },
@@ -9006,7 +9011,7 @@
         },
         {
           "tool": "download_file",
-          "desc": "download_file: Download a file from a web address and save it to disk, reporting the size and how long it took. Use for 'download that file', 'get this installer', 'save that page'. Only http and https; a site that answers with an error page reports that rather than saving the error as if it were the file. (arguments: url, destination)"
+          "desc": "download_file: Download a file from a web address and save it to disk, reporting the size and how long it took. Use for 'download that file', 'get this installer', 'save that page'. Only http and https; a site that answers with an error page reports that rather than saving the error as if it were the file. (arguments: url, destination, engine)"
         },
         {
           "tool": "edit_file",
@@ -9202,6 +9207,10 @@
           "desc": "delete_file: Delete a file or folder by moving it to the desktop trash, where it stays recoverable. This is how you clear something out. The whole folder goes as one item and can be restored from the trash - nothing in this project is deleted permanently, so there is no faster or 'real' delete to reach for instead. Requires the 'file-delete-enabled' consent key. (arguments: path)"
         },
         {
+          "tool": "undo_last_change",
+          "desc": "undo_last_change: Put a file or a Chronoa setting back the way Chronoa last found it, by restoring the content or value recorded just before Chronoa's own last change to it. Undoes Chronoa's recent writes only - NOT git history, NOT changes you made in an editor or a shell, and only while a recorded pre-image is still held. Requires the 'file-edit-enabled' consent key. (arguments: path, list, setting, steps)"
+        },
+        {
           "tool": "desktop_setting",
           "desc": "desktop_setting: Read or change one desktop setting from a fixed list: animations (window and menu animations); cursor_size (mouse pointer size in pixels (24 is normal; 32, 48, 64 are larger)); single_click (open files and folders with a single click); clock_24h (show the top-bar clock in 24-hour format); clock_seconds (show seconds in the top-bar clock); battery_percentage (show the battery percentage in the top bar); hot_corner (open the overview when the pointer hits the top-left corner); natural_scroll (touchpad natural (reverse) scrolling); tap_to_click (tap the touchpad to click). Changing requires the 'appearance-control-enabled' consent key. (arguments: setting, value)"
         },
@@ -9216,21 +9225,17 @@
         {
           "tool": "set_screensaver",
           "desc": "set_screensaver: Report or change how long the machine waits before the screen blanks, and whether it then demands a password. The two are reported separately, because blanking without locking leaves anyone who walks up to the machine able to use it. Requires the 'idle-timeout-enabled' consent key; reporting needs no such permission. (arguments: action, blank_after_minutes, lock)"
-        },
-        {
-          "tool": "set_sleep_inhibit",
-          "desc": "set_sleep_inhibit: Report what is currently holding the machine awake, or take a bounded hold so it does not sleep for a while, or release ours. Use for 'keep it awake while I...' - a long install, a backup, a test run. Scoped and self-lapsing; to change the machine's idle timeout permanently use set_screensaver instead. Gated by 'sleep-inhibit-enabled' consent key; reporting needs no such permission. (arguments: action, reason, seconds)"
         }
       ],
       "offered": [
         "alarm",
         "set_timer",
         "delete_file",
+        "undo_last_change",
         "desktop_setting",
         "set_locale",
         "set_scaling",
-        "set_screensaver",
-        "set_sleep_inhibit"
+        "set_screensaver"
       ],
       "recall_hit": true
     },
@@ -9260,7 +9265,7 @@
         },
         {
           "tool": "capture_packets",
-          "desc": "capture_packets: Watch packets crossing one network interface for a few seconds, and report tcpdump's one-line-per-packet summaries: who sent to whom, which protocol, how long, and the TCP flags. This reads packet contents on the wire - it is the one thing in this package that does - so it is gated separately and shows no payload text. Bounded by packet count, seconds and output rows. Read-only: it captures and prints, and changes nothing. (arguments: interface, packets, seconds, filter)"
+          "desc": "capture_packets: Watch packets crossing one network interface for a few seconds, and report tcpdump's one-line-per-packet summaries: who sent to whom, which protocol, how long, and the TCP flags. This reads packet contents on the wire - it is the one thing in this package that does - so it is gated separately and shows no payload text. Bounded by packet count, seconds and output rows. Read-only: it captures and prints, and changes nothing. (arguments: interface, packets, seconds, filter, engine, pattern)"
         },
         {
           "tool": "check_port",
@@ -9356,6 +9361,10 @@
           "desc": "date_math: Date arithmetic: days until a date ('how many days until 25 December'), the date N days/weeks/months from a date ('what date is 45 days from now'), days between two dates, or the weekday of a date. (arguments: operation, date, other_date, amount, unit)"
         },
         {
+          "tool": "kundali",
+          "desc": "kundali: Compute Vedic Kundali (birth chart), Panchang (daily almanac), transits, aspects, dignities, BaZi (Chinese Four Pillars), and Nakshatra details. Offline, no API keys, no external dependencies. panchang: Tithi, Vara, Nakshatra, Yoga, Karana. kundali: sidereal birth chart with planets, houses, Navamsha, Dasha, aspects, dignities. transit: transit positions and cross-aspects. aspects: planetary aspects. dignity: planet dignity in a sign. bazi: Chinese Four Pillars. nakshatra: nakshatra details. timelords: profections and firdaria. arabicparts: Arabic parts (lots). temperament: elemental temperament. lunarmansion: lunar mansion. charakarakas: Jaimini karakas. shadbala: planetary strength. combustion: combust planets. horary: horary chart. upagrahas: all upagrahas. arudha: Arudha padas. drishti: Vedic aspects. vishesha: special lagnas. muhurta: electional scoring. vimshopaka: Vimshopaka bala. cheshta: motion states. grahayuddha: planetary wars. upagrahas_full: all upagrahas. fullchart: complete chart JSON. ashtakavarga: Bhinna + Sarva ashtakavarga. gochara: transit analysis. bhava: house analysis. kalamana: time measurement. chinese: Chinese calendar. grahana: eclipse check. shadbala_full: complete shadbala. karakas_full: chara karakas with Rahu reflection. yogas: Vishesha yogas. nodes: lunar nodes. eclipse: eclipse details. charadasha: Chara dasha. yoginidasha: Yogini dasha. ashtottaridasha: Ashtottari dasha. (arguments: action, date, datetime, latitude, longitude, planet, sign, year, month, day, hour)"
+        },
+        {
           "tool": "get_world_time",
           "desc": "get_world_time: The current time and date in ANOTHER city, country or time zone, e.g. 'what time is it in Tokyo'. For the time here, use get_datetime. (arguments: place)"
         },
@@ -9374,21 +9383,17 @@
         {
           "tool": "open_settings",
           "desc": "open_settings: Open the system Settings app at a specific page, e.g. 'wifi', 'bluetooth', 'display', 'sound', 'power', 'privacy', 'keyboard', 'mouse', 'touchpad', 'printers', 'users', 'about', 'date_time', 'region', 'notifications', 'background', 'accessibility'. GNOME and KDE Plasma. Use open_application for Settings without a page. (arguments: page)"
-        },
-        {
-          "tool": "photo_metadata",
-          "desc": "photo_metadata: Read a photo's embedded EXIF metadata: the camera and lens, the date and time it was taken, exposure, aperture, ISO, focal length, and the GPS location if one is recorded. Use for 'when was this photo taken', 'does this picture contain my location', 'which camera took it'. JPEG and TIFF. Read-only; the file is not changed. (arguments: path)"
         }
       ],
       "offered": [
         "get_datetime",
         "date_math",
+        "kundali",
         "get_world_time",
         "git_inspect",
         "get_weather",
         "calendar_events",
-        "open_settings",
-        "photo_metadata"
+        "open_settings"
       ],
       "recall_hit": true
     },
@@ -9887,6 +9892,10 @@
           "desc": "find_device: Make a paired Bluetooth watch, band or tag buzz or ring so the person can find it - 'where is my watch', 'find my band'. Works on devices with the standard Immediate Alert service and on MoYoung (Da Fit) watches; anything else is refused rather than sent an unknown command. The device must be in range. Requires the 'bluetooth-gatt-enabled' consent key. (arguments: device)"
         },
         {
+          "tool": "network_watch",
+          "desc": "network_watch: Listen on one network interface for a few seconds and report what changed: new devices (IP/MAC pairs), hostname changes, flips and duplicates. Use for 'did a new device join my network', 'something changed on my network'. Read-only; it listens and reports, and changes nothing. (arguments: interface, seconds)"
+        },
+        {
           "tool": "bluetooth_devices",
           "desc": "bluetooth_devices: List paired Bluetooth devices (and which are connected), or connect / disconnect one by its name, e.g. 'connect my headphones'. (arguments: action, name)"
         },
@@ -9897,10 +9906,6 @@
         {
           "tool": "set_hostname",
           "desc": "set_hostname: Report this computer's name (hostname), or rename it - the name other devices on the network and in Bluetooth see. The name must be letters, digits and hyphens only. Renaming requires the 'hostname-control-enabled' consent key and the administrator password; reporting needs neither. (arguments: action, name)"
-        },
-        {
-          "tool": "discover_hosts",
-          "desc": "discover_hosts: Find which devices are on this network right now, by asking rather than by reading the cache - so devices that have never talked to this machine are found too. Reports an address and a hardware address for each, and counts devices answering on more than one address. The range is always the private network this machine is on; pass network= for a different private range, and a public one is refused. Connects to nothing it finds and reads no packet contents. Needs raw-socket access, so unprivileged it may report that rather than a partial sweep. (arguments: interface, network)"
         }
       ],
       "offered": [
@@ -9908,10 +9913,10 @@
         "lan_phone",
         "watch",
         "find_device",
+        "network_watch",
         "bluetooth_devices",
         "usb_devices",
-        "set_hostname",
-        "discover_hosts"
+        "set_hostname"
       ],
       "recall_hit": true
     },
@@ -10040,12 +10045,12 @@
           "desc": "alarm: Alarm clock: set an alarm at a time of day (once, or repeating daily/weekdays/weekends/chosen days), list alarms, say when the next one is, change one's time or label, snooze the one that just rang, or delete one. Examples: 'set an alarm for 7am', 'alarm for 6:30 on weekdays', 'when is my next alarm?', 'change my 7am alarm to 7:30', 'snooze', 'delete the 7am alarm'. Times may be words ('7am', '7:30 pm', 'tomorrow 6:45'). It rings with a notification and the alarm sound even if the assistant is closed; it is held by systemd --user, so a reboot drops it until alarms are next listed, which re-arms it. (arguments: action, time, label, repeat, id, new_time, new_label, minutes)"
         },
         {
-          "tool": "run_command",
-          "desc": "run_command: Run one program in the project folder and get its exit code and output - the project's tests (pytest, npm test, cargo test), its build or linter - to check that a change works. One program per call: no pipes, redirections or shell syntax. Requires the 'run-command-enabled' consent key; asks each time. (arguments: command, cwd, timeout_seconds, where, image, machine, network)"
+          "tool": "kundali",
+          "desc": "kundali: Compute Vedic Kundali (birth chart), Panchang (daily almanac), transits, aspects, dignities, BaZi (Chinese Four Pillars), and Nakshatra details. Offline, no API keys, no external dependencies. panchang: Tithi, Vara, Nakshatra, Yoga, Karana. kundali: sidereal birth chart with planets, houses, Navamsha, Dasha, aspects, dignities. transit: transit positions and cross-aspects. aspects: planetary aspects. dignity: planet dignity in a sign. bazi: Chinese Four Pillars. nakshatra: nakshatra details. timelords: profections and firdaria. arabicparts: Arabic parts (lots). temperament: elemental temperament. lunarmansion: lunar mansion. charakarakas: Jaimini karakas. shadbala: planetary strength. combustion: combust planets. horary: horary chart. upagrahas: all upagrahas. arudha: Arudha padas. drishti: Vedic aspects. vishesha: special lagnas. muhurta: electional scoring. vimshopaka: Vimshopaka bala. cheshta: motion states. grahayuddha: planetary wars. upagrahas_full: all upagrahas. fullchart: complete chart JSON. ashtakavarga: Bhinna + Sarva ashtakavarga. gochara: transit analysis. bhava: house analysis. kalamana: time measurement. chinese: Chinese calendar. grahana: eclipse check. shadbala_full: complete shadbala. karakas_full: chara karakas with Rahu reflection. yogas: Vishesha yogas. nodes: lunar nodes. eclipse: eclipse details. charadasha: Chara dasha. yoginidasha: Yogini dasha. ashtottaridasha: Ashtottari dasha. (arguments: action, date, datetime, latitude, longitude, planet, sign, year, month, day, hour)"
         },
         {
-          "tool": "list_shortcuts",
-          "desc": "list_shortcuts: List this machine's keyboard shortcuts, or find what one key does. Reads GNOME's two keybinding schemas, so it covers both window management and the hardware media keys, and reports that the scheme does not apply on a desktop that does not use it rather than listing defaults for a desktop that is not running. Reading a shortcut is not a change and needs no permission. (arguments: action, keys)"
+          "tool": "run_command",
+          "desc": "run_command: Run one program in the project folder and get its exit code and output - the project's tests (pytest, npm test, cargo test), its build or linter - to check that a change works. One program per call: no pipes, redirections or shell syntax. Requires the 'run-command-enabled' consent key; asks each time. (arguments: command, cwd, timeout_seconds, where, image, machine, network)"
         }
       ],
       "offered": [
@@ -10055,8 +10060,8 @@
         "print_queue",
         "process_cost",
         "alarm",
-        "run_command",
-        "list_shortcuts"
+        "kundali",
+        "run_command"
       ],
       "recall_hit": true
     },
@@ -10071,6 +10076,10 @@
         {
           "tool": "check_port",
           "desc": "check_port: Check whether a specific port on a specific host accepts connections from this machine, and say why it does not - refused (the host is up, nothing is listening), timed out (a firewall, or a host that is off), or the name does not resolve. Use for 'is my server reachable', 'why can nothing connect to it', 'is port 443 open on that box'. Opens exactly one connection and sends nothing; it is not a scan. (arguments: host, port)"
+        },
+        {
+          "tool": "download_file",
+          "desc": "download_file: Download a file from a web address and save it to disk, reporting the size and how long it took. Use for 'download that file', 'get this installer', 'save that page'. Only http and https; a site that answers with an error page reports that rather than saving the error as if it were the file. (arguments: url, destination, engine)"
         },
         {
           "tool": "check_internet",
@@ -10088,6 +10097,7 @@
       "offered": [
         "vpn_control",
         "check_port",
+        "download_file",
         "check_internet",
         "port_owner",
         "speed_test"
