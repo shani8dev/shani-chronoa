@@ -47,3 +47,20 @@ def test_install_voice_never_downloads_a_packaged_voice(tmp_path, monkeypatch):
     voices.install_voice("en_US-lessac-medium")
     assert len(seen) == 2, "both files must be resolved before any fetch"
     assert all(e is not None and e.parent == tmp_path / "sys" for e in seen), seen
+
+
+def test_reads_counts_packaged_tessdata_and_speaks_the_packaged_voice(tmp_path, monkeypatch):
+    from shani_chronoa import languages
+    system = tmp_path / "sys-tessdata"
+    system.mkdir()
+    (system / "hin.traineddata").write_bytes(b"ocr")
+    monkeypatch.setattr(languages, "SYSTEM_TESSDATA", system)
+    assert languages.reads("hi") is True
+    assert languages.reads("mr") is False
+
+
+def test_speaks_counts_the_packaged_voice(tmp_path, monkeypatch):
+    from shani_chronoa import languages, voices
+    monkeypatch.setattr(voices, "SYSTEM_VOICE_DIR", tmp_path / "sys-voices")
+    _plant(tmp_path / "sys-voices", "hi_IN-priyamvada-medium")
+    assert languages.speaks("hi") is True
