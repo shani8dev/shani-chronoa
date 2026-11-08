@@ -104,7 +104,27 @@ def _run(arguments: dict) -> str:
     # **`wget -q` gives an exit code and no stderr at all** - measured, so a
     # reader that quotes stderr would quote nothing. `--no-verbose` keeps the
     # diagnostics, which is what makes the failure reportable.
+    # **Engine choice.** curl is the default (its --write-out reports the
+    # transfer); wget is the fallback when curl is absent. aria2c is opt-in
+    # via `engine: "aria2c"` - parallel connections, which is the right tool
+    # for a large file from a server that accepts them, and the wrong one
+    # when it does not (aria2c cannot do http/2, and single-host servers
+    # throttle parallel ranges). Auto never picks it: parallel ranges
+    # against a server that throttles them looks like a slow download, not
+    # a fast one.
+    engine = str(arguments.get("engine") or "auto").strip().lower()
+    if engine == "aria2c":
+        if shutil.which("aria2c") is None:
+            return files.tool_missing("aria2c", "download that file with aria2c")
+        return _download_with_aria2c(url, target, parsed)
+    if engine not in ("auto", "curl", "wget"):
+        return (f"Engine must be auto, curl, wget or aria2c, not {engine!r}.")
+
     use_wget = shutil.which("curl") is None and shutil.which("wget") is not None
+    if engine == "wget":
+        if shutil.which("wget") is None:
+            return files.tool_missing("wget", "download that file")
+        use_wget = True
     if shutil.which("curl") is None and shutil.which("wget") is None:
         return files.tool_missing("curl", "download that file")
 
@@ -200,6 +220,11 @@ SCHEMA = {
                     "description": ("Where to save it. Defaults to "
                                     "~/Downloads with the filename from the "
                                     "address.")},
+                "engine": {
+                    "type": "string",
+                    "description": ("auto (default: curl, then wget), curl, "
+                                    "wget, or aria2c for a large file from a "
+                                    "server that accepts parallel connections.")},
             },
             "required": ["url"],
         },
@@ -219,6 +244,47 @@ _WGET_CODES = {
     7: "the server refused the connection",
     8: "the server returned an error status",
 }
+
+
+def _download_with_aria2c(url: str, target: Path, parsed) -> str:
+    """Fetch with `aria2c`, reporting in the same shape the curl path uses.
+
+    aria2c's contract differs from both curl and wget: it prints a summary
+    table whose last line is the byte count, and it exits non-zero on any
+    failure. `--summary-interval=0` keeps output to the final summary;
+    `--file-allocation=none` avoids a pre-allocated file whose size lies if
+    the transfer dies early. Success is verified the same way as the other
+    engines: the file exists and is not empty.
+    """
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return f"I could not make {target.parent}: {exc}. Nothing was saved."
+
+    command = ["aria2c", "--dir=%s" % target.parent, "--out=%s" % target.name,
+               "--max-download-limit=0", "--summary-interval=0",
+               "--file-allocation=none", "--timeout=%d" % _TIMEOUT,
+               "--retry-wait=0", "--max-tries=1", "--", url]
+    try:
+        done = subprocess.run(command, capture_output=True, text=True,
+                              timeout=_TIMEOUT + 15, check=False)
+    except subprocess.TimeoutExpired:
+        return (f"The download did not finish within {_TIMEOUT} seconds, so "
+                f"{target} may be incomplete. Nothing was reported as saved.")
+
+    if done.returncode != 0:
+        why = (done.stderr or done.stdout or "").strip().splitlines()
+        detail = why[-1] if why else "no message"
+        return (f"The download failed (aria2c exit {done.returncode}: {detail}). "
+                f"Nothing was reported as saved.")
+
+    if not target.is_file() or target.stat().st_size == 0:
+        return (f"aria2c reported success but {target} is empty or missing, so "
+                f"nothing is reported as saved.")
+
+    size = target.stat().st_size
+    return (f"Downloaded {target} ({files.human_size(size)}) with aria2c, "
+            f"using parallel connections.")
 
 
 def _download_with_wget(url: str, target: Path, parsed) -> str:

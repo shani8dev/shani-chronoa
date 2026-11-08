@@ -173,6 +173,27 @@ def _video_devices() -> "tuple[list[str], str]":
     return names, f"from v4l2-ctl ({len(names)} line(s))"
 
 
+def _serial_devices() -> "tuple[list[str], str]":
+    """Serial ports (USB-serial, ACM, built-in UARTs), the /dev way.
+
+    `socat` is the tool that talks to them (`device_serial`), and it needs a
+    device node to point at - so this is the same shape as `_i2c_buses`: the
+    nodes first, and a missing tool is a note, not a crash.
+    """
+    try:
+        nodes = sorted(
+            p.name for prefix in ("ttyUSB", "ttyACM", "ttyS")
+            for p in Path("/dev").glob(f"{prefix}*"))
+    except OSError as exc:
+        return [], str(exc)
+    if not nodes:
+        return [], "no serial ports on /dev (ttyUSB*, ttyACM*, ttyS*)"
+    note = f"/dev nodes present: {', '.join(nodes)}"
+    if shutil.which("socat") is None:
+        note += "; " + files.tool_missing("socat", "talk to a serial port")
+    return nodes, note
+
+
 def _fuse_state() -> "tuple[list[str], str]":
     mounts = Path("/proc/self/mountinfo")
     try:
@@ -206,6 +227,13 @@ def _run_probe(arguments: dict) -> str:
         lines.append(f"  Video: {'; '.join(video)} - {video_note}")
     else:
         lines.append(f"  Video: none listed - {video_note}")
+
+    serial, serial_note = _serial_devices()
+    if serial:
+        lines.append(f"  Serial: {', '.join(serial)} - {serial_note}")
+        lines.append("       device_serial can read from and (with the consent key) write to these")
+    else:
+        lines.append(f"  Serial: none listed - {serial_note}")
 
     fused, fuse_note = _fuse_state()
     # The empty case says what is true AND what would change it, on the same
@@ -364,7 +392,90 @@ SCHEMA_I2C = {
     },
 }
 
+#: socat's read window for one `device_serial` read. socat has no "read N
+#: bytes and stop" mode for a serial line, so the read is time-bounded:
+#: `-T <secs>` makes socat exit after that many seconds of silence, which is
+#: what a device talking at a fixed rate looks like.
+_SERIAL_READ_SECONDS = 3
+
+
+def _run_serial(arguments: dict) -> str:
+    """Read from, or write to, a serial device through `socat`.
+
+    Reading needs no consent (it is the `device_i2c` read shape: looking at
+    a device cannot change it). Writing sends bytes to hardware, so it is
+    gated by the same `_WRITE_KEY` as register writes - sending the wrong
+    bytes to a power supply is the same class of accident.
+    """
+    device = str(arguments.get("device") or "").strip()
+    if not device.startswith("/dev/"):
+        return "Give the full device path, starting with /dev/ (device_probe lists them)."
+    if not Path(device).exists():
+        return f"{device} is not on this machine. device_probe lists the serial ports."
+    if shutil.which("socat") is None:
+        return files.tool_missing("socat", "talk to a serial port")
+
+    action = str(arguments.get("action") or "read").strip().lower()
+    if action == "write":
+        allowed, reason = _consent(ChronoaConfig())
+        if not allowed:
+            return f"Refusing to write to {device}: {reason}"
+        data = str(arguments.get("data") or "")
+        if data == "":
+            return "For a write I need the text to send (the `data` argument)."
+        try:
+            proc = subprocess.run(
+                ["socat", "-", f"{device},raw,echo=0"],
+                input=data, capture_output=True, text=True,
+                timeout=_TIMEOUT, check=False)
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            return f"socat could not write to {device} ({exc})"
+        if proc.returncode != 0:
+            return (f"socat exited {proc.returncode} writing to {device}: "
+                    f"{(proc.stderr or '').strip()[:120]}")
+        return f"Wrote {len(data)} byte(s) to {device}; socat reported success."
+
+    try:
+        proc = subprocess.run(
+            ["socat", f"-T{_SERIAL_READ_SECONDS}", f"{device},raw,echo=0", "-"],
+            capture_output=True, text=True, timeout=_SERIAL_READ_SECONDS + 10,
+            check=False)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return f"socat could not read {device} ({exc})"
+    text = (proc.stdout or "").strip()
+    if not text:
+        return (f"Nothing arrived from {device} in {_SERIAL_READ_SECONDS}s "
+                f"(socat exit {proc.returncode}). The device may be silent, at "
+                f"another baud rate, or not attached.")
+    return f"From {device} ({_SERIAL_READ_SECONDS}s window):\n{text[:1000]}"
+
+
+SCHEMA_SERIAL = {
+    "type": "function",
+    "function": {
+        "name": "device_serial",
+        "description": (
+            "Read from a serial device (USB-serial, ACM, UART) through socat "
+            "for a few seconds, or write text to it with the "
+            "'i2c-write-enabled' consent key. Reading needs no permission; "
+            "writing sends bytes to hardware. device_probe lists the ports."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "device": {"type": "string",
+                           "description": "Full device path, e.g. /dev/ttyUSB0."},
+                "action": {"type": "string", "description": "read (default) or write."},
+                "data": {"type": "string",
+                         "description": "Text to send, required for a write."},
+            },
+            "required": ["device"],
+        },
+    },
+}
+
 SKILLS = [
     Skill(name="device_probe", schema=SCHEMA_PROBE, run=_run_probe),
     Skill(name="device_i2c", schema=SCHEMA_I2C, run=_run_i2c),
+    Skill(name="device_serial", schema=SCHEMA_SERIAL, run=_run_serial),
 ]
