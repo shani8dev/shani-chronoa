@@ -123,8 +123,33 @@ def voice_dir() -> Path:
     return files.data_home() / "piper" / "voices"
 
 
+#: The distro-packaged voice location. `tts.PiperTTS` already reads a voice
+#: from here when the user's own copy is absent, so a voice that ships in a
+#: package (shani-piper-voice) is a voice the person already has - and every
+#: "is it installed" answer must agree with that, or setup offers to download
+#: what is already on the machine. Measured 2026-11-08: with lessac shipped
+#: system-wide, the wizard still labelled it "63 MB, plus 26 MB" because this
+#: looked only at the user directory.
+SYSTEM_VOICE_DIR = Path("/usr/share/piper/voices")
+
+
+def _voice_on_disk(voice: str, root: Path) -> bool:
+    return ((root / f"{voice}.onnx").is_file()
+            and (root / f"{voice}.onnx.json").is_file())
+
+
 def voice_installed(voice: str) -> bool:
-    return (voice_dir() / f"{voice}.onnx").is_file() and (voice_dir() / f"{voice}.onnx.json").is_file()
+    """Whether the voice is on disk - the user's copy, or the distro's."""
+    return _voice_on_disk(voice, voice_dir()) or _voice_on_disk(voice, SYSTEM_VOICE_DIR)
+
+
+def _existing_voice(voice: str, filename: str) -> "Path | None":
+    """The file `install_voice` must not re-download, user copy first."""
+    user = voice_dir() / filename
+    if user.is_file():
+        return user
+    system = SYSTEM_VOICE_DIR / filename
+    return system if system.is_file() else None
 
 
 def install_piper(progress: Optional[Callable[[int, int], None]] = None, config=None, transport=None) -> str:
@@ -151,9 +176,11 @@ def install_voice(voice: str, progress: Optional[Callable[[int, int], None]] = N
     base = f"{_VOICES_URL}/{v.folder}"
     for spec in (ModelSpec(voice, f"{voice}.onnx", v.onnx_size, v.onnx_sha256, v.label, base),
                  ModelSpec(voice + "-config", f"{voice}.onnx.json", v.json_size, v.json_sha256, v.label, base)):
-        existing = voice_dir() / spec.filename
-        _install(spec, user_dir=voice_dir(), system_dir=Path("/usr/share/piper/voices"),
-                 existing=existing if existing.is_file() else None, config=config,
+        # `existing` is resolved user-or-system, exactly as the whisper model
+        # path does: a packaged voice makes this a no-op rather than a
+        # redundant download of bytes the machine already has.
+        _install(spec, user_dir=voice_dir(), system_dir=SYSTEM_VOICE_DIR,
+                 existing=_existing_voice(voice, spec.filename), config=config,
                  progress=progress, transport=transport, label="voice")
     return voice_dir() / f"{voice}.onnx"
 
