@@ -35,6 +35,18 @@ ALLOW, DENY, TIMEOUT, UNAVAILABLE = "allow", "deny", "timeout", "unavailable"
 
 def ask(title: str, body: str, seconds: int = APPROVAL_SECONDS) -> str:
     """Show the question and block until it is answered: allow, deny, timeout or unavailable."""
+    # The question is recorded when it is asked, and its answer is written
+    # back, so "what did Chronoa want to do on its own, and what did I say"
+    # is answerable from the Notices surface instead of from memory.
+    from shani_chronoa import notices as _notices
+    notice_id = _notices.record("approval", title, body,
+                                "an armed rule asked before acting")
+    answer = _ask(title, body, seconds)
+    _notices.set_outcome(notice_id, answer)
+    return answer
+
+
+def _ask(title: str, body: str, seconds: int) -> str:
     if shutil.which("notify-send") is None:
         return UNAVAILABLE
     argv = ["notify-send", "--app-name=Shani Chronoa", "--urgency=critical",

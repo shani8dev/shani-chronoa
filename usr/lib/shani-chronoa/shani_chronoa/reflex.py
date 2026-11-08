@@ -343,6 +343,15 @@ def notify(urgences: Sequence[Urgence], dry_run: bool = False) -> List[str]:
             ["notify-send", "--urgency=" + urge.urgency,
              "Chronoa", urge.subject, urge.detail],
             capture_output=True, text=True, timeout=10, check=False)
+        # The notification is still the interruption; this is the record of it.
+        # `notices.record` dedupes against one already open, so a condition that
+        # stays true produces one queue entry however many times it notifies.
+        try:
+            from shani_chronoa import notices
+            notices.record("reflex", urge.subject, urge.detail,
+                           f"reflex: {urge.subject}")
+        except Exception:  # noqa: BLE001 - a record must never cost the notice
+            pass
     return sent
 
 

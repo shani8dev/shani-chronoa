@@ -170,6 +170,10 @@ SURFACE_IDS = (
     # goal queue had no producer or consumer until manage_goals and this.
     "goals",
     "activity",
+    # The queue of things Chronoa noticed on its own (reflexes, rule
+    # approvals, meeting offers), with why-now and a dismiss. Until it
+    # existed each of those was its own popup and nothing kept the saying.
+    "notices",
     "workbench",
     # The editor: open a file, change it, save it. Between `code_hl` (which
     # could colour code) and `write_text_file` (which could change it) there
