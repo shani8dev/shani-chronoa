@@ -1060,6 +1060,11 @@ class Assistant:
         self._record({"role": "user", "content": text})
         self._trim_history()
         self._channel = channel
+        # **A new message is a new turn, and what the previous one read is not
+        # this one's.** Taint that outlived the person speaking would refuse a
+        # change they had just asked for, which is how a safety gate teaches
+        # people to switch it off. The read side is `tools._taint_refuses`.
+        provenance.clear_untrusted()
         self._sink = sink
         # Streamed text from the sink when no separate callback was given. The
         # app moved every turn to `sink=` and stopped passing `on_text`, and
@@ -1486,9 +1491,15 @@ class Assistant:
                 if isinstance(result, str) and len(result) > MAX_TOOL_RESULT_CHARS:
                     self._turn_withheld += len(result) - MAX_TOOL_RESULT_CHARS
                 result = clipped
+                # The model sees the fence; the dispatcher sees the note. They
+                # are two halves of one fact - "the next instruction may have
+                # come from the content" - and until now only the first half
+                # existed, so a page could still talk the model into a delete
+                # and the person would be asked a question that did not say
+                # where it came from.
+                fenced = provenance.fence_and_note(result, source)
                 self._record({"role": "tool", "tool_call_id": call.get("id", ""),
-                              "content": provenance.fence(
-                                  result, source).text},
+                              "content": fenced.text},
                              # Recorded beside the message, not inside it:
                              # `_record` stores it next to the plain text and
                              # `_fence_restored` re-applies the fence after a

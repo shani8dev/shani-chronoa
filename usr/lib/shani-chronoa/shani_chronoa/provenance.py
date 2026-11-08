@@ -39,6 +39,7 @@ too, which is the same failure in the opposite direction.
 
 from __future__ import annotations
 
+import contextvars
 import os
 import re
 import secrets
@@ -197,6 +198,61 @@ def fence(content: str, source: str) -> Fenced:
         f"[{close_marker}]\n"
     )
     return Fenced(preface + text, source, True)
+
+
+#: What this turn has read that the person did not write, source by source.
+#:
+#: **This is the other half of the fence.** `fence()` makes provenance visible
+#: to the model; this records it where the dispatcher can read it, so a tool
+#: call a page talked the model into can require a person's answer instead of
+#: relying only on a consent key the person granted for a different reason.
+#:
+#: A context variable, not a module global: turns run concurrently in tests and
+#: a subagent's turn has its own context, so a global would let one turn's
+#: reading authorise another turn's change. `assistant.handle` clears it at the
+#: start of every user turn, which is the unit that matters - "since the person
+#: last spoke" - because taint that outlived the message would gate a request
+#: the person themselves made afterwards.
+_TAINT: "contextvars.ContextVar[tuple]" = contextvars.ContextVar(
+    "chronoa_untrusted_since_user", default=())
+
+
+def note_untrusted(source: str) -> None:
+    """Record that this turn has read content from `source` (web, file, tool)."""
+    current = _TAINT.get()
+    if source not in current:
+        _TAINT.set(current + (source,))
+
+
+def clear_untrusted() -> None:
+    """Forget what an earlier turn read. Called once, when the person speaks."""
+    _TAINT.set(())
+
+
+def untrusted_since_user() -> tuple:
+    """The sources this turn has read, oldest first; empty when it has read none."""
+    return _TAINT.get()
+
+
+def turn_is_tainted() -> bool:
+    """Whether this turn has read anything the person did not write."""
+    return bool(_TAINT.get())
+
+
+def fence_and_note(content: str, source: str) -> Fenced:
+    """`fence`, and record the read for the dispatcher's taint gate.
+
+    The one call site that enters a tool result into the conversation uses this
+    rather than `fence`, so "the model was told" and "the dispatcher knows" are
+    one act and cannot drift apart. `fence` stays pure for callers that only
+    want the text (history reloads, tests).
+    """
+    fenced = fence(content, source)
+    if fenced.fenced:
+        note_untrusted(source)
+    return fenced
+
+
 def strip_fences(text: str) -> str:
     """Remove our markers from text that is being persisted rather than sent.
 
