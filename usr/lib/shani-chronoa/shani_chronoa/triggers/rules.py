@@ -461,6 +461,16 @@ class RuleStore:
             indent=2,
             sort_keys=True,
         )
+        # The armed-rule set is exactly the kind of change a person wants to
+        # take back ("Chronoa armed a rule that fires every night"). Journal
+        # the current file first, so undo_last_change can restore it; best
+        # effort, because a journal failure must not cost the write.
+        try:
+            if self._path.exists():
+                from shani_chronoa import undo_ring
+                undo_ring.record_file(self._path, self._path.read_bytes())
+        except Exception:  # noqa: BLE001
+            pass
         try:
             tmp.write_text(payload, encoding="utf-8")
             _restrict_file(tmp)

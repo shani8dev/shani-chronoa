@@ -650,12 +650,18 @@ class ChronoaConfig:
         value = self._settings.get_value(key)
         return value.get_double() if value.get_type_string() == "d" else default
 
-    def set(self, key: str, value: str) -> None:
+    def set(self, key: str, value: str, record: bool = True) -> None:
         """Set a configuration value. Boolean keys accept "true"/"false" strings.
 
         The value is never logged (API keys in particular must not leak into
         logs) and never passed through a subprocess - Gio.Settings writes
         directly to the backend.
+
+        `record` journals the change in the undo ring (`undo_ring.py`) so a
+        settings change can be put back like a file edit can. A restore passes
+        `record=False`: journaling the restore itself would make "undo" a new
+        change and the ring would grow by one entry for every entry it spent.
+        Secret keys are never journalled.
         """
         if self._settings is None or key not in self._valid_keys:
             logger.error("Unknown or unavailable setting key: %s", key)
@@ -664,9 +670,13 @@ class ChronoaConfig:
             logger.debug("Set %s (keyring)", key)
             return
         current = self._settings.get_value(key)
-        if current.get_type_string() == "b":
+        kind = current.get_type_string()
+        before = (str(current.get_boolean()).lower() if kind == "b"
+                  else str(current.get_double()) if kind == "d"
+                  else current.get_string())
+        if kind == "b":
             self._settings.set_boolean(key, value == "true")
-        elif current.get_type_string() == "d":
+        elif kind == "d":
             try:
                 number = float(value)
             except (TypeError, ValueError):
@@ -679,6 +689,12 @@ class ChronoaConfig:
             self._settings.set_double(key, min(high, max(low, number)))
         else:
             self._settings.set_string(key, value)
+        if record:
+            try:
+                from shani_chronoa import undo_ring
+                undo_ring.record_setting(key, before, str(value))
+            except Exception:  # noqa: BLE001 - journaling must never fail a set
+                logger.debug("could not journal setting %s", key, exc_info=True)
         logger.debug("Set %s", key)
 
     @property

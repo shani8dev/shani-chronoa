@@ -1,4 +1,4 @@
-"""Skill: put a file back the way Chronoa last found it.
+"""Skill: put a file or a setting back the way Chronoa last found it.
 
 **This undoes Chronoa's own recent writes. It is not a version control system.**
 It restores a file from a pre-image ring that *this project's write skills*
@@ -56,47 +56,27 @@ import os
 import time
 from pathlib import Path
 
-from shani_chronoa import files
+from shani_chronoa import files, undo_ring
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
 
 _CONSENT_KEY = "file-edit-enabled"
 
-#: How many pre-images are kept. Bounded on purpose: this is a safety net for
-#: "undo that", not an archive, and an unbounded ring of full file contents in
-#: the state directory is a disk-usage problem the user never asked for.
-RING_SIZE = 20
+#: How many pre-images are kept per kind. Kept here as the name callers know;
+#: the bound itself lives in `undo_ring`, which owns the journal now.
+RING_SIZE = undo_ring.MAX_PER_KIND
 
-#: A pre-image larger than this is not stored. Restoring a 400 MB file from a
-#: ring that itself costs 400 MB is a bad trade, and the honest answer is to
-#: say the change was too large to record rather than to keep it anyway.
-MAX_PREIMAGE_BYTES = 2 * 1024 * 1024
+#: A pre-image larger than this is not stored (see `undo_ring`).
+MAX_PREIMAGE_BYTES = undo_ring.MAX_PREIMAGE_BYTES
 
 
 def _ring_path() -> Path:
-    """Where the ring lives, resolved per call and never at import time.
-
-    `$XDG_STATE_HOME` is honoured with the `~/.local/state` fallback, and it
-    is read *here* rather than captured at module scope. Both halves are this
-    repo's own recorded lesson: a module-level constant resolved from `$HOME`
-    at import has already twice contaminated a real user's directories, and
-    `tests/conftest.py` carries an autouse fixture per store for exactly that.
-    Resolving late is also what lets a test point `XDG_STATE_HOME` at a temp
-    dir instead of writing into the developer's real state.
-    """
-    base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
-    return Path(base) / "shani-chronoa" / "preimages.json"
+    return undo_ring.ring_path()
 
 
 def _consume(entry: dict) -> bool:
     """Drop a ring entry that has just been restored. True if it was found."""
-    entries = _load()
-    for i, existing in enumerate(entries):
-        if existing.get("path") == entry.get("path") and existing.get("at") == entry.get("at"):
-            del entries[i]
-            _save(entries)
-            return True
-    return False
+    return undo_ring.consume(entry)
 
 
 def recent_changes() -> "list[tuple[Path, str, str]]":
@@ -128,127 +108,46 @@ def recent_changes() -> "list[tuple[Path, str, str]]":
     return out
 
 
-#: Set on the child by `tools.execute_tool`, beside the consent grant, so the
-#: skill process knows which turn asked it to write. **The only channel there
-#: is**: a skill runs as `python3 -c`, so anything the app holds in memory is a
-#: different process's memory. The consent grant already travels this way, which
-#: is why this is an `env` entry beside it rather than an argument.
-TURN_ENV = "CHRONOA_TURN"
+#: The environment variable `tools.execute_tool` sets on the skill child so it
+#: knows which turn asked it to write. **The only channel there is**: a skill
+#: runs as `python3 -c`, so anything the app holds in memory is a different
+#: process's memory.
+TURN_ENV = undo_ring.TURN_ENV
 
-#: How long a `turn` value may be before it is refused. The value is written
-#: into a file a person may read, so an unbounded one is a way to put arbitrary
-#: bytes into the ring; 64 characters is far more than any turn label needs.
-MAX_TURN_CHARS = 64
+MAX_TURN_CHARS = undo_ring.MAX_TURN_CHARS
 
 
 def current_turn() -> str:
-    """The turn this skill is running inside, or "" when none was set.
-
-    **Normalised, and refused rather than trusted.** The value arrives from the
-    environment, so it is treated as text to be checked rather than as an
-    identifier: a newline would put a second line in the ring file, and an
-    unbounded value would let a caller put anything there.
-    """
-    raw = os.environ.get(TURN_ENV, "")
-    if not isinstance(raw, str):
-        return ""
-    cleaned = " ".join(raw.split())
-    return cleaned[:MAX_TURN_CHARS]
+    """The turn this skill is running inside, or "" when none was set."""
+    return undo_ring.current_turn()
 
 
 def changes_for_turn(turn: str) -> "list[str]":
-    """Paths this turn changed, newest last, without duplicates.
+    """What this turn changed, newest last, without duplicates.
 
     **Attribution is only ever as good as the label, so an unattributed change
-    is not claimed by anybody.** Entries with no `turn` - written by a skill
-    called directly, or by a build before this existed - are simply not
-    returned, rather than being folded into whichever turn asked. A file listed
-    as changed by a turn that did not change it is worse than no list.
+    is not claimed by anybody.** Entries with no `turn` are not returned
+    rather than being folded into whichever turn asked.
     """
-    want = " ".join(str(turn or "").split())[:MAX_TURN_CHARS]
-    if not want:
-        return []
-    out: "list[str]" = []
-    for entry in _load():
-        if str(entry.get("turn") or "") != want:
-            continue
-        path = str(entry.get("path") or "")
-        if path and path not in out:
-            out.append(path)
-    return out
+    return undo_ring.changes_for_turn(turn)
 
 
 def record_preimage(path: Path, content: bytes) -> str:
     """Store `content` as the pre-image of `path`. Returns a note for the user.
 
-    A file too large to keep, or one whose bytes could not be encoded, is
-    skipped with an explanation rather than stored partially - a pre-image
-    that is a truncated file is a pre-image that restores corruption.
-
-    **`turn` is read from the environment, not passed in.** The caller is
-    usually a skill running in a child process, which has no other way to learn
-    which turn is asking - and an argument would have to be threaded through
-    every writing skill to reach here, which is a change to a dozen files and a
-    default for each.
+    Delegates to `undo_ring.record_file`: the journal is shared with settings
+    and trigger stores now, and keeping a second copy of the ring here is how
+    the two trim rules would have drifted apart.
     """
-    turn = current_turn()
-    if len(content) > MAX_PREIMAGE_BYTES:
-        return (
-            f"Too large to record a pre-image of "
-            f"{files.human_size(MAX_PREIMAGE_BYTES)} and over; undo will not "
-            f"cover this change."
-        )
-    try:
-        entry = {"path": str(path), "at": time.time(), "content": content.decode("utf-8")}
-        if turn:
-            entry["turn"] = turn
-    except UnicodeDecodeError:
-        # A binary file (a .docx, .xlsx, an image) is kept as base64, so the
-        # office and image skills' edits are as undoable as a text edit.
-        entry = {"path": str(path), "at": time.time(),
-                 "content_b64": base64.b64encode(content).decode("ascii")}
-        if turn:
-            entry["turn"] = turn
-    entries = _load()
-    entries.append(entry)
-    del entries[:-RING_SIZE]
-    note = _save(entries)
-    if len(entries) > 1:
-        oldest = entries[0]["at"]
-        note += (
-            f" The ring holds the last {len(entries)} change(s); the oldest is "
-            f"from {time.strftime('%Y-%m-%d %H:%M', time.localtime(oldest))}."
-        )
-    return note
+    return undo_ring.record_file(path, content)
 
 
 def _load() -> list:
-    try:
-        parsed = json.loads(_ring_path().read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return []
-    except (OSError, ValueError):
-        # A corrupt ring is reported, not silently replaced: a store that
-        # quietly becomes empty turns "I can undo that" into "I cannot", with
-        # no indication that anything was lost.
-        return []
-    return parsed if isinstance(parsed, list) else []
+    return undo_ring.load()
 
 
 def _save(entries: list) -> str:
-    path = _ring_path()
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        # mkdir(mode=...) is masked by the umask, so create then restrict.
-        try:
-            path.parent.chmod(0o700)
-        except OSError:
-            pass
-        path.write_text(json.dumps(entries), encoding="utf-8")
-        path.chmod(0o600)
-    except OSError as exc:
-        return f" Could not record a pre-image ({files.describe(exc, path, 'write')})"
-    return ""
+    return undo_ring._save(entries)
 
 
 def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
@@ -268,12 +167,12 @@ SCHEMA = {
     "function": {
         "name": "undo_last_change",
         "description": (
-            "Put a file back the way Chronoa last found it, by restoring the "
-            "content recorded just before Chronoa's own last edit to it. "
-            "Undoes Chronoa's recent writes only - NOT git history, NOT changes "
-            "you made in an editor or a shell, and only while a recorded "
-            "pre-image is still held. Requires the 'file-edit-enabled' consent "
-            "key."
+            "Put a file or a Chronoa setting back the way Chronoa last found "
+            "it, by restoring the content or value recorded just before "
+            "Chronoa's own last change to it. Undoes Chronoa's recent writes "
+            "only - NOT git history, NOT changes you made in an editor or a "
+            "shell, and only while a recorded pre-image is still held. "
+            "Requires the 'file-edit-enabled' consent key."
         ),
         "parameters": {
             "type": "object",
@@ -284,7 +183,15 @@ SCHEMA = {
                 },
                 "list": {
                     "type": "boolean",
-                    "description": "List the recorded undo points (for path, or every file) instead of restoring.",
+                    "description": "List the recorded undo points (for path, setting, or every change) instead of restoring.",
+                },
+                "setting": {
+                    "type": "string",
+                    "description": (
+                        "Restore this Chronoa setting to the value recorded "
+                        "before Chronoa's own last change to it, instead of "
+                        "restoring a file."
+                    ),
                 },
                 "steps": {
                     "type": "integer",
@@ -304,22 +211,69 @@ def _list(arguments: dict) -> str:
     """The undo points held, newest first - the checkpoint list cline/gemini show, for Chronoa's own writes."""
     entries = [e for e in _load() if isinstance(e, dict)]
     raw = (arguments.get("path") or "").strip()
-    if raw:
+    setting = (arguments.get("setting") or "").strip()
+    if setting:
+        entries = [e for e in entries
+                   if (e.get("kind") or "file") == "setting" and e.get("key") == setting]
+    elif raw:
         try:
             target = files.resolve_in_home(raw)
         except files.PathProblem as exc:
             return str(exc)
         entries = [e for e in entries if e.get("path") == str(target)]
     if not entries:
-        return "No undo points are held" + (f" for {raw}." if raw else ".")
-    lines = [f"{len(entries)} undo point(s), newest first (steps=1 is the newest for each file):"]
+        return "No undo points are held" + (
+            f" for {setting}." if setting else f" for {raw}." if raw else ".")
+    lines = [f"{len(entries)} undo point(s), newest first (steps=1 is the newest for each file or setting):"]
     seen: dict = {}
     for e in reversed(entries):
-        seen[e["path"]] = seen.get(e["path"], 0) + 1
-        size = len(e.get("content") or "") or len(e.get("content_b64") or "") * 3 // 4
         when = time.strftime("%Y-%m-%d %H:%M", time.localtime(e.get("at") or 0))
-        lines.append(f"- {when}  {e['path']}  (steps={seen[e['path']]}, {files.human_size(size)} before)")
+        if (e.get("kind") or "file") == "setting":
+            label = str(e.get("key"))
+            seen[label] = seen.get(label, 0) + 1
+            lines.append(f"- {when}  setting {label}: {e.get('before')!r} -> {e.get('after')!r}  (steps={seen[label]})")
+            continue
+        label = str(e.get("path"))
+        seen[label] = seen.get(label, 0) + 1
+        size = len(e.get("content") or "") or len(e.get("content_b64") or "") * 3 // 4
+        lines.append(f"- {when}  {label}  (steps={seen[label]}, {files.human_size(size)} before)")
     return "\n".join(lines)
+
+
+def _restore_setting(arguments: dict) -> str:
+    """Put one setting back to the value recorded before Chronoa changed it."""
+    key = (arguments.get("setting") or "").strip()
+    entries = [e for e in _load() if isinstance(e, dict)
+               and (e.get("kind") or "file") == "setting" and e.get("key") == key]
+    if not entries:
+        return (f"No recorded change to the {key!r} setting, so nothing was "
+                f"restored. Only changes Chronoa itself made and recorded can "
+                f"be undone this way.")
+    try:
+        steps = int(arguments.get("steps") or 1)
+    except (TypeError, ValueError):
+        return f"Steps must be a whole number, not {arguments.get('steps')!r}."
+    if steps < 1:
+        return "Steps must be at least 1 - 1 already means the previous value."
+    if steps > len(entries):
+        return (f"Asked to step back {steps} change(s) but only "
+                f"{len(entries)} {'is' if len(entries) == 1 else 'are'} recorded "
+                f"for {key!r}. Nothing was restored.")
+    chosen = entries[-steps]
+    before = chosen.get("before")
+    if not isinstance(before, str):
+        return f"The recorded change for {key!r} is unreadable, so nothing was restored."
+    config = ChronoaConfig()
+    # record=False: a restore is not a new change, or the ring grows by one
+    # entry for every entry it spends.
+    config.set(key, before, record=False)
+    if _consume(chosen):
+        note = " That recorded state has now been used and will not be offered again."
+    else:
+        note = ""
+    when = time.strftime("%Y-%m-%d %H:%M", time.localtime(chosen.get("at") or 0))
+    return (f"Restored the {key!r} setting to {before!r}, the value recorded "
+            f"at {when} ({steps} step(s) back).{note}")
 
 
 def _run(arguments: dict) -> str:
@@ -328,6 +282,8 @@ def _run(arguments: dict) -> str:
         return f"Refusing to restore: {reason}"
     if arguments.get("list"):
         return _list(arguments)
+    if (arguments.get("setting") or "").strip():
+        return _restore_setting(arguments)
 
     try:
         target = files.resolve_in_home(arguments.get("path") or "")
