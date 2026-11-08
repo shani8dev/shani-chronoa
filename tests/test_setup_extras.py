@@ -434,8 +434,11 @@ def _kokoro_archives(monkeypatch):
         return buf.getvalue()
     release = tarball({f"sherpa-onnx-{sherpa.VERSION}-linux-x64-shared/bin/sherpa-onnx-offline-tts":
                       (b"#!/bin/sh\nexit 0\n", 0o755)})
+    # v1.0's layout: the lexicon files replace the pre-v2 per-language
+    # espeak-ng-data, and `kokoro_files` asks for one of them.
     model = tarball({f"{voices._KOKORO_MODEL_DIR}/{n}": (b"x", 0o644)
-                     for n in ("model.int8.onnx", "voices.bin", "tokens.txt", "espeak-ng-data/phontab")})
+                     for n in ("model.int8.onnx", "voices.bin", "tokens.txt",
+                               "lexicon-us-en.txt", "lexicon-gb-en.txt")})
     monkeypatch.setattr(sherpa, "RELEASE", _spec("sherpa", sherpa.RELEASE.filename, release, "https://github.com/x"))
     monkeypatch.setattr(voices, "_KOKORO_MODEL", _spec("kokoro", voices._KOKORO_MODEL.filename, model,
                                                        "https://github.com/x"))

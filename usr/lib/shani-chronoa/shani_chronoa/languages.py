@@ -73,7 +73,8 @@ LANGUAGES = {
     "pa": Language("pa", "ਪੰਜਾਬੀ - Punjabi", "pan", 497_721,
                    "1ec0907fc3534065ea9ae190c6bb7ec9e5c74fd9d2fa996aaec7407f11ad8131", "", "gurmukhi"),
     "ne": Language("ne", "नेपाली - Nepali", "nep", 1_002_911,
-                   "280ba9450b4f21afbf5985e0de87857b75a972577c50ef0603c141ddde4f1cb8", "", "devanagari"),
+                   "280ba9450b4f21afbf5985e0de87857b75a972577c50ef0603c141ddde4f1cb8",
+                   "ne_NP-google-medium", "devanagari"),
     "or": Language("or", "ଓଡ଼ିଆ - Odia", "ori", 1_480_066,
                    "36f3135e61d501a3acfad41f5fe60b8e791274fff4c5375c969fdcca980cdbac", "", "oriya"),
 }

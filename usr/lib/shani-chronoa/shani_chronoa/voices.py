@@ -102,6 +102,14 @@ VOICES = {
                                        "3ec306035cfd0bbc22342fee5890450708a16dd231809522731678aa583c961f",
                                        "a8385c217a7e276acf5234bf01dbd0adb007a57c32ffbcc57d2db7eac3979bb6", 5236,
                                        63_515_589, "ur"),
+    # Nepali: piper-voices' ne_NP/google (OpenSLR 43 training data,
+    # CC-BY-SA-4.0). Digest-checked against the same pinned revision;
+    # languages.py's "ne" had voice="" until now, so Nepali had no
+    # piper voice to offer even though one existed upstream.
+    "ne_NP-google-medium": Voice("Google - Nepali", "ne/ne_NP/google/medium",
+                                 "e3ff3cbf97a7c01ebf29263c7fa1899ebed15e27a2d819b93dcfb86e10d39eaa",
+                                 "8c3c364bd2ab369850ae0b5d97b9c7a37ea15fb2eb5b91f8fd10e7ffd85ae4eb", 5165,
+                                 76_766_385, "ne"),
 }
 
 
@@ -295,8 +303,11 @@ def install_kokoro(voice: str = KOKORO_DEFAULT_VOICE,
     from shani_chronoa import sherpa
     sherpa.install(progress=progress, config=config, transport=transport, label="kokoro")
     if not all(p.exists() for p in kokoro_files().values()):
-        sherpa.install_archive(_KOKORO_MODEL, kokoro_dir(), kokoro_files()["--kokoro-model"], progress=progress,
-                               config=config, transport=transport, label="kokoro")
+        # An explicit user-side path, not `kokoro_files()["--kokoro-model"]`:
+        # before the unpack that lookup answers with the system directory (the
+        # user has no model yet), so it would call a successful download empty.
+        sherpa.install_archive(_KOKORO_MODEL, kokoro_dir(), kokoro_model_dir() / "model.int8.onnx",
+                               progress=progress, config=config, transport=transport, label="kokoro")
     problem = kokoro_problem(voice)
     if problem:
         raise RuntimeError(f"Kokoro was downloaded but {problem}")
