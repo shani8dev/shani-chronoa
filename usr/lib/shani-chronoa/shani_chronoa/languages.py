@@ -77,6 +77,17 @@ LANGUAGES = {
                    "ne_NP-google-medium", "devanagari"),
     "or": Language("or", "ଓଡ଼ିଆ - Odia", "ori", 1_480_066,
                    "36f3135e61d501a3acfad41f5fe60b8e791274fff4c5375c969fdcca980cdbac", "", "oriya"),
+    # Assamese and Sindhi write in scripts another language already speaks
+    # (Bengali, Arabic), so `voice_for_text` hands their text to that voice
+    # when the person has it; Sanskrit is Devanagari, likewise. Piper has no
+    # voice trained on these three, so they read and listen, and speak
+    # through the shared-script voice.
+    "as": Language("as", "অসমীয়া - Assamese", "asm", 2_045_427,
+                   "299c7f6135ac72ca4820d4c39e3cf65b32b24127fc78c4938d11153adbb9fa77", "", "bengali"),
+    "sd": Language("sd", "سنڌي - Sindhi", "snd", 1_694_035,
+                   "f25cae3b325b0a6dc4dd5d8aeb3ac40b129a18bdd92666317022ee198f7878a7", "", "arabic"),
+    "sa": Language("sa", "संस्कृतम् - Sanskrit", "san", 12_404_677,
+                   "a399958921c64e7d2319369ade1e74b4db2577744ac5bfeabd16663cf743b91c", "", "devanagari"),
 }
 
 #: Unicode blocks of the scripts above (start, end inclusive).
