@@ -27,7 +27,7 @@ jobs:
       # it installs pytest + httpx only, which is exactly what this
       # repo's own conftest documents as its required dep set.
       test-command: |
-        mkdir -p /tmp/.X11-unix; chmod 1777 /tmp/.X11-unix; Xvfb :0 -screen 0 1280x800x24 & sleep 1; DISPLAY=:0 GDK_BACKEND=x11 env PYTHONDONTWRITEBYTECODE=1 python3 -m pytest tests/ -v -p no:cacheprovider; kill %1 2>/dev/null
+        mkdir -p /tmp/.X11-unix; Xvfb :0 -screen 0 1280x800x24 & sleep 1; DISPLAY=:0 GDK_BACKEND=x11 env PYTHONDONTWRITEBYTECODE=1 python3 -m pytest tests/ -v -p no:cacheprovider; kill %1 2>/dev/null
       # The runner's own stack, not ubuntu-latest's: the app needs libadwaita
       # newer than 24.04's 1.5, and on 24.04 the GUI tests segfaulted the run.
       # 26.04 matches the development machine (Python 3.14, GTK/Adw from the
