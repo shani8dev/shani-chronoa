@@ -36,6 +36,16 @@ _PROBE = r'''
 import os, sys, tempfile
 from pathlib import Path
 
+# Capture this parent run's env-based dirs BEFORE importing conftest: conftest
+# import clobbers GSETTINGS_SCHEMA_DIR with its own compiled dir, so reading
+# the env after the import loses the parent's live dirs (e.g. test_skill_
+# workbench's /tmp/chronoa-workbench-schema-* dir), and the reclaimer body
+# below would then collect them mid-run.
+_INHERITED = dict(
+    (k, os.environ.get(k)) for k in
+    ("GSETTINGS_SCHEMA_DIR", "XDG_DATA_HOME", "XDG_STATE_HOME",
+     "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "XDG_CACHE_HOME"))
+
 sys.path.insert(0, {tests!r})
 import conftest
 
@@ -51,13 +61,14 @@ dead = Path(tempfile.mkdtemp(prefix="chronoa-dead-probe-"))
 os.environ["GSETTINGS_SCHEMA_DIR"] = str(live)
 
 # Run the reclaimer's own body, in a subprocess standing in for "this run ends".
+# in_use = the dirs this parent run was pointed at (captured above, before the
+# import clobbered them) plus the probe's own live dir.
 import shutil
 in_use = set()
-for var in ("GSETTINGS_SCHEMA_DIR", "XDG_DATA_HOME", "XDG_STATE_HOME",
-            "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "XDG_CACHE_HOME"):
-    value = os.environ.get(var)
+for value in _INHERITED.values():
     if value:
         in_use.add(os.path.realpath(value))
+in_use.add(os.path.realpath(str(live)))
 
 for entry in tmp.iterdir():
     if not entry.is_dir() or not entry.name.startswith(prefixes):

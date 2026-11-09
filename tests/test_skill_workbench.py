@@ -89,7 +89,12 @@ def _build_extended_schema() -> "Path":
     `git` sense rather than adding - is exactly such a key.
     """
     source = _REPO / "usr" / "share" / "glib-2.0" / "schemas"
-    directory = Path(tempfile.mkdtemp(prefix="chronoa-workbench-schema-"))
+    # Under build/, not /tmp: conftest's reclaimer deletes everything in /tmp
+    # under its owned prefixes, including chronoa-workbench-schema-*, if the
+    # env var has been reset by the time it runs. build/ is gitignored and
+    # not scanned by the reclaimer.
+    directory = _REPO / "build" / f"workbench-schema-{os.getpid()}"
+    directory.mkdir(parents=True, exist_ok=True)
     missing = [k for k in NEW_CONSENT_KEYS if k not in _keys_already_in_the_shipped_schema()]
     additions = "".join(
         f'    <key name="{key}" type="b">\n'
