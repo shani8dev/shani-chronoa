@@ -40,14 +40,10 @@ _REPO = Path(__file__).resolve().parents[1]
 _AUDIT = _REPO / "tools" / "audit_missing_tool_hints.py"
 _ROOT = _REPO / "usr" / "lib" / "shani-chronoa"
 
-#: The one binary allowed to have no package name, and why.
-ALLOWED = {
-    "piper-tts":
-        "a forward-looking lookup for a system Piper: the engine the wizard "
-        "installs is in the user's home, and Arch's `piper` is a "
-        "gaming-mouse configurator rather than Piper TTS, so there is no "
-        "package to name",
-}
+#: The one binary allowed to have no package name, and why. Since 3f0fc2e
+#: ("Fix the piper binary name"), `piper-tts` resolves to shani-piper-tts
+#: in _PACKAGE_HINTS, so nothing is unhinted and this set is empty.
+ALLOWED = {}
 
 #: A line of the audit's output: two spaces, the binary, then where it was.
 _LINE = re.compile(r"^  (\S+)\s+\S+\.py:\d+")

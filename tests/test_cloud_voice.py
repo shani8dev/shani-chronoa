@@ -442,7 +442,7 @@ def test_the_capability_table_matches_the_recorded_probe():
     #: exactly the "a table in a docstring is a claim" defect this file exists to
     #: prevent, written by the very hand that is checking. It stays unmeasured
     #: until somebody runs `probe_capabilities()` against it with network access.
-    not_probed = {"anthropic"}
+    not_probed = {"anthropic", "sarvam"}
 
     from shani_chronoa import cloud_llm
 

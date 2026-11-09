@@ -698,6 +698,15 @@ _PACKAGE_HINTS = {
     "upower": "upower",
     "fwupdmgr": "fwupd",
     "bluetoothctl": "bluez-utils",
+    "aria2c": "aria2",
+    "arpwatch": "arpwatch",
+    "ngrep": "ngrep",
+    "traceroute": "traceroute",
+    # gobuster is not on either image matrix (it is not installed on the
+    # images), so its package name comes from Arch's own file listing
+    # instead - extra/gobuster 3.8.2-1 ships /usr/bin/gobuster, verified
+    # via https://archlinux.org/packages/extra/x86_64/gobuster/files/.
+    "gobuster": "gobuster",
     # libnfc ships its whole tool set as one package (verified from upstream's
     # `BUILD_UTILS` default and Arch's PKGBUILD, which never turns it off), so
     # every `nfc-*` binary maps to the same answer. Without these entries
