@@ -147,3 +147,36 @@ def test_every_atspi_init_in_the_module_goes_through_the_guard():
         f"Atspi.init() is called {len(calls)} times in ui_driver.py (lines "
         f"{calls}); every one of them must go through _a11y_init(), because "
         f"the call aborts the process when there is no bus")
+
+
+def test_every_desktop_query_is_guarded_too():
+    """**The other half of the same trap.**
+
+    `Atspi.get_desktop()` without an initialised AT-SPI is the *same*
+    abort by a different road - measured on a CI runner: the run died at
+    28% inside `_read_focused_text`, in a test whose subject was the call
+    order and not the tree.
+
+    So every `Atspi.get_desktop(` in the module must sit inside a branch
+    that has already asked `_a11y_init()`. The check is by **distance**,
+    not by a regex for a guard: the guard is a few lines above each call,
+    and a reader who moves the call out of the branch breaks the distance
+    before the regex.
+    """
+    source = (_REPO / "usr" / "lib" / "shani-chronoa" / "shani_chronoa"
+              / "ui_driver.py").read_text(encoding="utf-8")
+    lines = source.splitlines()
+    unguarded = []
+    for i, line in enumerate(lines):
+        if "Atspi.get_desktop(" not in line or line.lstrip().startswith("#"):
+            continue
+        # The guard is the closest `_a11y_init()` above, and it must be
+        # nearer than any other `_a11y_init()`-free stretch - so the window
+        # is small and the guard has to be inside it.
+        window = lines[max(0, i - 6):i]
+        if not any("_a11y_init()" in w for w in window):
+            unguarded.append(i + 1)
+    assert not unguarded, (
+        f"Atspi.get_desktop() is called without an _a11y_init() guard on "
+        f"lines {unguarded}; without one, the call aborts the process on a "
+        f"machine with no accessibility bus")

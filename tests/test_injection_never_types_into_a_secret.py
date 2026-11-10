@@ -71,6 +71,16 @@ def _there_is_an_accessibility_bus(monkeypatch):
 
     monkeypatch.setattr(ui_driver, "_a11y_bus_available", lambda: True)
     monkeypatch.setattr(Atspi, "init", lambda: None)
+    # **And the desktop query itself is faked, to nothing.** `Atspi.init()`
+    # is a no-op here, so AT-SPI is *not* initialised - and
+    # `Atspi.get_desktop()` without an initialised AT-SPI aborts the
+    # process on a machine with no a11y bus. That is not hypothetical: it
+    # took a CI run down at 28% with no summary at all, in a test whose
+    # *subject* was the call order and not the tree.
+    #
+    # `_desktop(...)` overrides this with the fake tree, so the tests that
+    # are about the tree still get one.
+    monkeypatch.setattr(Atspi, "get_desktop", lambda n=0: [])
 
 
 class _StateSet:
