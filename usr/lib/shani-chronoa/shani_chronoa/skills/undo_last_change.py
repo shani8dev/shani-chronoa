@@ -70,10 +70,6 @@ RING_SIZE = undo_ring.MAX_PER_KIND
 MAX_PREIMAGE_BYTES = undo_ring.MAX_PREIMAGE_BYTES
 
 
-def _ring_path() -> Path:
-    return undo_ring.ring_path()
-
-
 def _consume(entry: dict) -> bool:
     """Drop a ring entry that has just been restored. True if it was found."""
     return undo_ring.consume(entry)

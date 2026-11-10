@@ -125,7 +125,16 @@ class TestNegativesAreTheOnesThatCrowdTheAnswerOut:
         from shani_chronoa import tool_select as S
 
         for r in rows:
-            scored = S.ranked(r["say"], T.TOOLS)
+            # **`learned={}`, like the builder.** The corpus is compiled
+            # with no learned weights - the builder reads this machine's
+            # live tool-call log otherwise, so two builds of one commit
+            # differed (212 and 211 positives inside the offered set). The
+            # provenance check has to ask the same question the corpus
+            # answers, or it compares a corpus built one way against a
+            # ranking computed another: measured on a CI runner (no log, so
+            # no weights) the two disagreed and the check failed on a
+            # corpus that is right.
+            scored = S.ranked(r["say"], T.TOOLS, learned={})
             offered = {n for _s, n, _h in scored[:S.DEFAULT_LIMIT]}
             for n in r["negatives"]:
                 assert n["tool"] in offered, (

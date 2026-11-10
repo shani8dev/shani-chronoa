@@ -559,7 +559,7 @@ def _query_words(text: str) -> List[str]:
 #: Everything in here - the stemmed name, the stemmed body, the option words, the
 #: serialised size - is a pure function of one schema, and none of it depends on
 #: the request. It was being recomputed on every turn: measured with
-#: `cProfile` over this module's own 220-case corpus, `_tool_text` alone was
+#: `cProfile` over this module's own 220-case corpus, the text extraction alone was
 #: **57,344 calls and 7.8 s of 11.6 s**, because it tokenises all 256
 #: descriptions - roughly 68,000 tokens of text - once per request. Selecting
 #: tools for 220 requests cost **12.6 ms each** and almost all of it was
@@ -654,14 +654,6 @@ def _tool_facts(tool: dict) -> "_ToolFacts":
     return facts
 
 
-def _tool_text(tool: dict) -> "tuple[List[str], List[str]]":
-    """`(name words, body words)` - kept for the tests that read it.
-
-    The body is a **frozenset** now rather than a list. Membership is what every
-    caller does with it, and `ranked()` does it once per request word per tool.
-    """
-    facts = _tool_facts(tool)
-    return facts.name, sorted(facts.body)
 def _name(tool: dict) -> str:
     return tool.get("function", {}).get("name", "")
 

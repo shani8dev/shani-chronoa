@@ -226,6 +226,52 @@ CLASS_ALLOWED: dict = {}
 _TOOLBOX_MODULE = "learning.py"
 
 
+#: A **library module**: a file whose public surface is its published API, and
+#: whose only consumer is a skill rather than the rest of the package.
+#:
+#: `astronomy.py` is one: its own docstring lists what it *provides* - "Julian
+#: Day from UTC datetime, Sun/Moon/planet ecliptic longitudes, ... Vargas
+#: (D1-D60), Vimshottari Dasha, Panchang, Aspects" - and the kundali skill
+#: calls 54 of its 155 public functions. The other 101 are the library's
+#: published calculations, not helpers somebody forgot to call.
+#:
+#: **Same shape as the toolbox exclusion, and the same discipline**: the module
+#: is named here and the *names* are read out of the source on every run, so a
+#: rename shows up as a change rather than as a stale entry, and the exclusion
+#: can only ever point into the module it names - which is what
+#: `test_the_library_exclusion_cannot_reach_another_file` asserts.
+#:
+#: **Not an allowlist of names.** That is the thing this file emptied, and a
+#: name list would absorb whatever is near it: `compute_chart` in a second
+#: module would be silently excused by a name typed here.
+_LIBRARY_MODULES = ("astronomy.py",)
+
+
+def _library_locations():
+    """`"file:line"` for every public callable a library module declares.
+
+    **Derived from the AST at test time**, for the same reason the toolbox
+    exclusion is: a hand-kept name list is the allowlist this file emptied,
+    one level down.
+    """
+    out = set()
+    for module in _LIBRARY_MODULES:
+        for path in sorted(PKG.rglob(module)):
+            if "__pycache__" in path.parts:
+                continue
+            try:
+                tree = ast.parse(path.read_text(errors="replace"))
+            except (SyntaxError, UnicodeDecodeError):
+                continue
+            for node in ast.walk(tree):
+                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                if node.name.startswith("_"):
+                    continue
+                out.add("%s:%d" % (path.relative_to(ROOT), node.lineno))
+    return out
+
+
 def _toolbox_class_names():
     """Class names declared in the toolbox module, read out of the source.
 
@@ -729,6 +775,83 @@ def _planted_toolbox_location_stays_in_its_module():
         _forget_seam_cache()
 
 
+def _planted_library_exclusion_is_confined():
+    """True when the library exclusion names only the module it lists.
+
+    A scratch tree holds two modules: the named library module, with one public
+    function and one private one, and a *second* module declaring a function of
+    the same name. A derivation confined to the named module reports exactly one
+    location - the public function in it - and nothing else: the private one is
+    not public, and the same-named function in the second module is not in the
+    module the exclusion names.
+
+    **Both halves matter.** Reporting nothing at all satisfies "not outside the
+    module" trivially, which is why the count of one is part of the answer.
+    """
+    import pathlib as _pathlib
+    import tempfile as _tempfile
+
+    global PKG, ROOT
+    real_pkg, real_root = PKG, ROOT
+    try:
+        with _tempfile.TemporaryDirectory(prefix="plant-library-") as tmp:
+            base = _pathlib.Path(tmp)
+            pkg = base / "pkg"
+            pkg.mkdir()
+            (pkg / "astronomy.py").write_text(
+                "def compute_chart():\n"
+                "    return 0\n"
+                "def _private():\n"
+                "    return 0\n"
+            )
+            (pkg / "other.py").write_text(
+                "def compute_chart():\n"
+                "    return 0\n"
+            )
+            PKG, ROOT = pkg, base
+            locations = _library_locations()
+            in_module = [l for l in locations if "astronomy.py" in l]
+            outside = [l for l in locations if "astronomy.py" not in l]
+            return len(locations) == 1 and bool(in_module) and not outside
+    finally:
+        PKG, ROOT = real_pkg, real_root
+
+
+def test_the_library_exclusion_cannot_reach_another_file():
+    """**The control that keeps the library exclusion from being an allowlist.**
+
+    A name list would have been the simplest way to exempt a library, and it
+    is exactly what the three emptied allowlists were: a list that only grows,
+    absorbing whatever is near it. The exclusion is derived from the source
+    instead, and the two properties that make that difference real are asserted
+    here rather than promised:
+
+    1. **It can only ever point at a named library module.** A definition site
+       anywhere else is never subtracted, so an orphan in any other file still
+       fails.
+    2. **It is not empty.** An empty derivation would make the public audit
+       pass while orphans sit in the library - the same blindness as a scan
+       that finds nothing.
+    """
+    locations = _library_locations()
+
+    assert locations, (
+        "the library exclusion derived nothing at all - the public audit "
+        "would now pass while orphans sit in the library module")
+
+    named = tuple(_LIBRARY_MODULES)
+    outside = sorted(l for l in locations
+                      if not any(module in l for module in named))
+    assert not outside, (
+        f"the library exclusion points outside the module(s) it names: "
+        f"{outside}")
+
+    assert _planted_library_exclusion_is_confined(), (
+        "the library exclusion reached a module it does not name, or derived "
+        "nothing at all - either way it can no longer be trusted to be "
+        "confined")
+
+
 def _planted_class_orphan_is_found():
     """True when `_class_orphans` reports a class planted in a scratch package.
 
@@ -810,7 +933,9 @@ def test_no_public_helper_is_called_by_nothing():
     # `_toolbox_locations()` can only ever point at `learning.py`, and
     # `test_the_toolbox_exclusion_cannot_reach_another_file` asserts exactly that.
     toolbox = _toolbox_locations()
-    unexpected = {name: [loc for loc in locs if loc not in toolbox]
+    library = _library_locations()
+    unexpected = {name: [loc for loc in locs
+                         if loc not in toolbox and loc not in library]
                   for name, locs in orphans.items()}
     unexpected = {n: l for n, l in unexpected.items() if l}
 

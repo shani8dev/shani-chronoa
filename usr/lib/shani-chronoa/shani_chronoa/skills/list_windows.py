@@ -230,19 +230,6 @@ def _text_argument(arguments: dict, name: str) -> str:
     return value if isinstance(value, str) else ""
 
 
-def _matches_filter(row: "tuple", needle: str) -> bool:
-    """Whether a `(id, name, class, geometry)` row matches a title filter.
-
-    Case-insensitive substring over the title and the class, because "which
-    window is Slack" is asked with either. An empty or absent filter matches
-    everything, so the unfiltered call is unchanged.
-    """
-    if not needle:
-        return True
-    haystack = " ".join(part for part in (row[1], row[2]) if part).lower()
-    return needle.strip().lower() in haystack
-
-
 def _via_accessibility(arguments: dict | None = None) -> str:
     """Window titles from the AT-SPI bus, for a session xdotool cannot serve.
 
