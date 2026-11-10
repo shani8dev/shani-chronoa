@@ -14,6 +14,7 @@ import wave
 
 import pytest
 
+from shani_chronoa import stt_provision  # noqa: E402
 from shani_chronoa import wakeword as ww
 
 _FRAME = ww._FRAME_BYTES
@@ -133,10 +134,17 @@ class TestAvailability:
         assert li.unavailable_reason() is None and li.is_available()
 
     def test_a_model_already_used_for_speech_input_is_found(self, monkeypatch, tmp_path):
-        d = tmp_path / "whisper" / "models"
-        d.mkdir(parents=True)
-        (d / "ggml-base-q5_1.bin").write_bytes(b"x")
+        # **The directory the reader searches, read out of the product.**
+        # `stt_provision.model_dir()` is
+        # `data_home()/shani-chronoa/whisper/models` - the `shani-chronoa`
+        # level included. The fixture used to stop at
+        # `tmp_path/whisper/models`, so the model it "installed" was in a
+        # directory the reader never searches and the answer was always
+        # "not found".
         monkeypatch.setattr("shani_chronoa.files.data_home", lambda: tmp_path)
+        d = stt_provision.model_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "ggml-base-q5_1.bin").write_bytes(b"x")
         assert ww._find_model() == str(d / "ggml-base-q5_1.bin")
         (d / "ggml-tiny-q5_1.bin").write_bytes(b"x")
         assert ww._find_model() == str(d / "ggml-tiny-q5_1.bin"), "the tiny model is preferred"
@@ -181,9 +189,13 @@ class TestSpeechInputUsesAnInstalledModel:
 
     def test_a_missing_auto_model_falls_back_to_the_best_installed(self, monkeypatch, tmp_path):
         from shani_chronoa import stt
-        d = tmp_path / "whisper" / "models"
-        d.mkdir(parents=True)
+        # The reader's own directory, read out of the product - see the note
+        # on `test_a_model_already_used_for_speech_input_is_found`: the
+        # fixture used to stop one level short of it, so every model it
+        # "installed" was somewhere the reader never looks.
         monkeypatch.setattr("shani_chronoa.files.data_home", lambda: tmp_path)
+        d = stt_provision.model_dir()
+        d.mkdir(parents=True, exist_ok=True)
         assert stt.installed_model("medium") == "medium", "nothing installed: the honest answer stays"
         (d / "ggml-tiny-q5_1.bin").write_bytes(b"x")
         (d / "ggml-base-q5_1.bin").write_bytes(b"x")

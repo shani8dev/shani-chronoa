@@ -72,9 +72,17 @@ def parakeet_home(tmp_path, monkeypatch):
     """An isolated data home with a model installed and a working stub CLI."""
     bindir = tmp_path / "bin"
     bindir.mkdir()
-    models = tmp_path / "share" / "parakeet" / "models"
-    models.mkdir(parents=True)
+    # **The data home first, then the directory it names.** The model
+    # directory is read out of the product
+    # (`stt_provision.parakeet_model_dir()`), which resolves
+    # `data_home()/shani-chronoa/parakeet/models` - the `shani-chronoa`
+    # level included. The fixture used to stop at `share/parakeet/models`,
+    # so every model it "installed" was in a directory the reader never
+    # searches, and the five tests below it failed with "Parakeet model not
+    # found" - pointing at the machine rather than at the fixture.
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
+    models = stt_provision.parakeet_model_dir()
+    models.mkdir(parents=True, exist_ok=True)
     # Prepended, not replaced: the stub is a `/bin/sh` script that needs `cat`,
     # and replacing PATH outright makes the fixture fail for a reason that has
     # nothing to do with the filter under test.
@@ -327,7 +335,20 @@ def test_every_parakeet_file_the_provisioner_can_write_is_one_the_reader_finds(
 
 
 def models_dir(tmp_path):
-    path = tmp_path / "share" / "parakeet" / "models"
+    """Where the reader looks: `data_home()/shani-chronoa/parakeet/models`.
+
+    **The `shani-chronoa` level is part of the path.** The fixture used to
+    stop at `share/parakeet/models`, so the file it wrote was in a directory
+    the reader never searches - and the cross-check that says "the download
+    would report success and never be read" failed *because the test put the
+    file somewhere the reader does not look*, which is the same sentence it
+    was written to catch.
+
+    The directory is read out of the product (`stt_provision.parakeet_model_dir`)
+    rather than typed, so a change to the layout cannot make the fixture
+    quietly write somewhere else again.
+    """
+    path = stt_provision.parakeet_model_dir()
     path.mkdir(parents=True, exist_ok=True)
     return path
 
