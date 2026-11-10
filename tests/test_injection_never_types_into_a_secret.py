@@ -51,6 +51,28 @@ def _never_this_niri_session(monkeypatch):
     monkeypatch.delenv("NIRI_SOCKET", raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _there_is_an_accessibility_bus(monkeypatch):
+    """Pretend there is an a11y bus, because this file pretends there is a tree.
+
+    **`ui_driver._a11y_init()` refuses to call `Atspi.init()` without a
+    bus** - that call aborts the whole process when there is none, which is
+    what took a CI run down at 28% with no summary. So "there is a bus here"
+    is part of this file's fiction, and it is faked with the tree.
+
+    `Atspi.init` itself is faked to a no-op for the same reason: the point
+    of the file is the *verdict logic*, and initialising AT-SPI against a
+    real bus would put the test's own machine in the picture.
+    """
+    import gi
+
+    gi.require_version("Atspi", "2.0")
+    from gi.repository import Atspi  # noqa: E402  (needs require_version first)
+
+    monkeypatch.setattr(ui_driver, "_a11y_bus_available", lambda: True)
+    monkeypatch.setattr(Atspi, "init", lambda: None)
+
+
 class _StateSet:
     def __init__(self, states):
         self._states = list(states)

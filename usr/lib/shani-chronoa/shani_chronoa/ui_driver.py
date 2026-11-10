@@ -778,7 +778,8 @@ def element_accessor(app: str, name: str):
 
         gi.require_version("Atspi", "2.0")
         from gi.repository import Atspi
-        Atspi.init()
+        if not _a11y_init():
+            return None
         for application in Atspi.get_desktop(0):
             if application is None or application.get_name() != app:
                 continue
@@ -806,6 +807,69 @@ def _a11y_env() -> None:
     a11y = os.path.join(os.environ.get("XDG_RUNTIME_DIR", ""), "at-spi", "bus")
     if os.path.exists(a11y):
         os.environ.setdefault("AT_SPI_BUS_ADDRESS", f"unix:path={a11y}")
+
+
+def _a11y_bus_available() -> bool:
+    """Whether there is an accessibility bus to initialise AT-SPI against.
+
+    **`Atspi.init()` aborts the whole process when there is no bus.** It
+    raises a `g_error`, not a Python exception, so no `try`/`except` can
+    catch it: the interpreter dies with *"Fatal Python error: Aborted"* and
+    every test after that point is reported as an error rather than as a
+    result. Measured on a CI runner with no a11y bus (2026-11-10): the run
+    stopped at 28%, printed no summary, and exited 134 with a core dump - and
+    the file whose test happened to be running (`test_injection_never_types_
+    into_a_secret.py`) had *passed* every one of its cases first.
+
+    So the question is asked **before** init, and the session bus answers it:
+    `org.a11y.Bus.GetAddress` is the service that publishes the a11y bus
+    address, and the name is simply absent when there is no bus. Asking over
+    D-Bus rather than guessing a socket path is what this module already
+    does everywhere else (`_a11y_env`).
+    """
+    try:
+        from gi.repository import Gio
+
+        conn = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        reply = conn.call_sync(
+            "org.a11y.Bus", "/org/a11y/bus", "org.a11y.Bus", "GetAddress",
+            None, None, Gio.DBusCallFlags.NONE, 2000, None)
+        return bool(reply.unpack()[0])
+    except Exception:  # noqa: BLE001 - no session bus, or no a11y name on it
+        return False
+
+
+def _a11y_init() -> bool:
+    """Initialise AT-SPI, but only against a bus that exists.
+
+    Returns False when there is no accessibility bus, and the caller must
+    then answer "I could not ask" rather than query a desktop that was never
+    connected - `Atspi.get_desktop()` without an initialised AT-SPI is a
+    GLib critical, and the tree it returns is not an answer about anything.
+
+    A test that fakes the tree fakes *this* too, because "there is a bus
+    here" is part of the fiction it is telling - see
+    `tests/test_injection_never_types_into_a_secret.py`.
+    """
+    try:
+        import gi
+
+        gi.require_version("Atspi", "2.0")
+        from gi.repository import Atspi
+    except (ImportError, ValueError):
+        return False
+    try:
+        if Atspi.is_initialized():
+            return True
+    except Exception:  # noqa: BLE001 - an Atspi that cannot answer is no
+        return False
+    if not _a11y_bus_available():
+        return False
+    try:
+        Atspi.init()
+    except Exception:  # noqa: BLE001 - a bus that went away mid-call
+        return False
+    return True
 
 
 def _walk_all(node, depth: int = 0, out=None):
@@ -1075,7 +1139,8 @@ def _desktop_apps():
 
     gi.require_version("Atspi", "2.0")
     from gi.repository import Atspi
-    Atspi.init()
+    if not _a11y_init():
+        return []
     return [a for a in Atspi.get_desktop(0) if a is not None]
 
 
@@ -2018,8 +2083,8 @@ def frame_state(app: str):
         import gi
         gi.require_version("Atspi", "2.0")
         from gi.repository import Atspi
-        if not Atspi.is_initialized():
-            Atspi.init()
+        if not _a11y_init():
+            return (None, None, "")
         wanted = (app or "").lower()
         for desktop_app in Atspi.get_desktop(0):
             if not desktop_app:
@@ -2517,7 +2582,8 @@ def _frame_title(app: str) -> str:
 
         gi.require_version("Atspi", "2.0")
         from gi.repository import Atspi
-        Atspi.init()
+        if not _a11y_init():
+            return ""
         for application in Atspi.get_desktop(0):
             if application is None or application.get_name() != app:
                 continue
@@ -3465,7 +3531,8 @@ def _read_focused_text(app: str) -> str:
 
         gi.require_version("Atspi", "2.0")
         from gi.repository import Atspi
-        Atspi.init()
+        if not _a11y_init():
+            return ""
         for application in Atspi.get_desktop(0):
             if application is None or application.get_name() != app:
                 continue
@@ -3979,7 +4046,8 @@ def _secure_field() -> "tuple[str, str]":
 
         gi.require_version("Atspi", "2.0")
         from gi.repository import Atspi
-        Atspi.init()
+        if not _a11y_init():
+            return ("unknown", "there is no accessibility bus to ask")
         for application in Atspi.get_desktop(0):
             if application is None:
                 continue
