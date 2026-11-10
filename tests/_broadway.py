@@ -95,7 +95,6 @@ def start_display(runtime: "pathlib.Path | str", start: int = 40,
     Raises RuntimeError when no display could be started - which is a
     failure of the environment, said as one.
     """
-    import os
     import shutil
     import subprocess
     import time
