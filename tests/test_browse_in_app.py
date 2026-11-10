@@ -21,11 +21,9 @@ What is checked here:
 import json
 import os
 import pathlib
-import shutil
 import subprocess
 import sys
 import textwrap
-import time
 
 import pytest
 
@@ -232,30 +230,24 @@ def broadway():
     through a proxy socket it makes there, and a private runtime directory has no
     bus (measured: `bwrap: Can't find source path .../webkitgtk/bus-proxy-*`).
     """
-    daemon = shutil.which("gtk4-broadwayd")
     runtime = os.environ.get("XDG_RUNTIME_DIR")
-    if daemon is None or not runtime:
-        pytest.skip("no gtk4-broadwayd or no XDG_RUNTIME_DIR, so no headless display")
+    if not runtime:
+        pytest.skip("no XDG_RUNTIME_DIR, so no headless display")
     runtime = pathlib.Path(runtime)
-    # A free display is a missing socket *and* a free port: tests/_broadway.py.
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from _broadway import free_display
-    number = free_display(runtime, 40, 2600)
-    if number is None:
-        pytest.skip("no free Broadway display number")
-    socket = runtime / f"broadway{number + 1}.socket"
-    proc = subprocess.Popen([daemon, f":{number}"],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    deadline = time.time() + 10
-    while time.time() < deadline and not socket.exists():
-        time.sleep(0.1)
+    from _broadway import start_display
+    number, proc = start_display(runtime, 40, 2600)
+    # **The display is verified before it is handed back**, and a number that
+    # does not work is tried again: a daemon that never came up leaves a
+    # fixture yielding a display that does not exist, which reads as broken
+    # panels ("the harness produced nothing") rather than as a broken
+    # environment. Measured on a CI runner (2026-11-10): 39 panel tests
+    # failed that way. See `tests/_broadway.py::start_display`.
     try:
         yield number, runtime
     finally:
         proc.terminate()  # this PID only
         proc.wait(timeout=10)
-        if socket.exists():
-            socket.unlink()
 
 
 def test_browse_drives_the_real_in_app_window(tmp_path, broadway, compiled_schema_dir):

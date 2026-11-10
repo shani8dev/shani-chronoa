@@ -14,10 +14,8 @@ from __future__ import annotations
 import json
 import os
 import pathlib
-import shutil
 import subprocess
 import sys
-import time
 
 import pytest
 
@@ -206,25 +204,23 @@ else:
 @pytest.fixture(scope="module")
 def broadway():
     """A private Broadway display, so no window appears on anybody's desktop."""
-    daemon = shutil.which("gtk4-broadwayd")
     runtime = os.environ.get("XDG_RUNTIME_DIR")
-    if daemon is None or not runtime:
-        pytest.skip("no gtk4-broadwayd or no XDG_RUNTIME_DIR, so no headless display")
-    base = pathlib.Path(runtime)
-    # A free display is a missing socket *and* a free port: tests/_broadway.py.
+    if not runtime:
+        pytest.skip("no XDG_RUNTIME_DIR, so no headless display")
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from _broadway import free_display
-    number = free_display(base, 40, 260)
-    if number is None:
-        pytest.skip("no free Broadway display number")
-    proc = subprocess.Popen([daemon, f":{number}"], stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL)
-    deadline = time.time() + 10
-    while time.time() < deadline and not (base / f"broadway{number + 1}.socket").exists():
-        time.sleep(0.1)
-    yield number
-    proc.terminate()
-    proc.wait(timeout=10)
+    from _broadway import start_display
+    number, proc = start_display(runtime, 40, 260)
+    # **The display is verified before it is handed back**, and a number that
+    # does not work is tried again: a daemon that never came up leaves a
+    # fixture yielding a display that does not exist, which reads as broken
+    # panels ("the harness produced nothing") rather than as a broken
+    # environment. Measured on a CI runner (2026-11-10): 39 panel tests
+    # failed that way. See `tests/_broadway.py::start_display`.
+    try:
+        yield number
+    finally:
+        proc.terminate()
+        proc.wait(timeout=10)
 
 
 def _run(broadway, case, tmp_path, mode=""):
