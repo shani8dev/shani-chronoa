@@ -98,8 +98,14 @@ jobs:
       # pipewire-bin, alsa-utils, usbutils, mtr-tiny, i2c-tools -> senses
       # espeak-ng -> TTS fallback used by the voice-loop test
       # bubblewrap -> sandbox, dbus-x11, fonts-noto-color-emoji, v4l-utils,
+      # fonts-noto-core + fonts-dejavu-core -> the *same* default sans and
+      # monospace faces the development machine has. The window-chrome
+      # measurement in test_the_window_minimum_is_not_below_the_layouts_floor
+      # reads the real chrome off a real window, and a different font's metrics
+      # are a different number - so the runner without them measured 377px
+      # where the file says 370, and blamed the window for a font.
       # libnotify-bin, upower -> capabilities exercised by the suite
-      apt-packages: python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-atspi-2.0 adwaita-icon-theme git libgtk-4-bin libglib2.0-bin xvfb gir1.2-secret-1 wireplumber xdotool x11-apps imagemagick bluez python3-numpy python3-pil poppler-utils tesseract-ocr-eng nmap bc localsearch gir1.2-webkit-6.0 gir1.2-gtk4layershell-1.0 pipewire-bin alsa-utils usbutils mtr-tiny i2c-tools espeak-ng bubblewrap dbus-x11 fonts-noto-color-emoji v4l-utils libnotify-bin upower netcat-openbsd bind9-dnsutils curl wget x11-utils sysstat ffmpeg
+      apt-packages: python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-atspi-2.0 adwaita-icon-theme git libgtk-4-bin libglib2.0-bin xvfb gir1.2-secret-1 wireplumber xdotool x11-apps imagemagick bluez python3-numpy python3-pil poppler-utils tesseract-ocr-eng nmap bc localsearch gir1.2-webkit-6.0 gir1.2-gtk4layershell-1.0 pipewire-bin alsa-utils usbutils mtr-tiny i2c-tools espeak-ng bubblewrap dbus-x11 fonts-noto-color-emoji fonts-noto-core fonts-dejavu-core v4l-utils libnotify-bin upower netcat-openbsd bind9-dnsutils curl wget x11-utils sysstat ffmpeg
       # Nine tests read shani-pkgbuilds/shani-chronoa/PKGBUILD next door: the
       # package's install list, its units, its icon, its optdepends and the
       # bytecode rule are all asserted against the real file, because the
