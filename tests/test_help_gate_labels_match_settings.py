@@ -84,10 +84,19 @@ def _a_window_needs_a_window():
 
     Module-scoped because it has to be: `row_titles` is module-scoped, so a
     function-scoped guard is set up *after* it has already raised.
-    """
-    from tests.conftest import _has_display_backend
 
-    if not _has_display_backend():
+    **`import conftest`, not `from tests.conftest import ...`.** The package
+    form resolves `tests` as a *namespace* package over every sys.path entry,
+    and `shani_chronoa/_link.py` puts the sibling `shani-link` checkout on
+    sys.path[0] - so on a CI runner with shani-link cloned beside this repo,
+    `tests.conftest` resolved to **shani-link's** tests/conftest.py and the
+    import raised ImportError. The plain `import conftest` form is what the
+    other files in this tree already use, and it names this repo's own
+    conftest, because pytest puts this file's directory (tests/) on sys.path.
+    """
+    import conftest
+
+    if not conftest._has_display_backend():
         pytest.skip("no display backend, so the Help window this file checks "
                     "against the settings window cannot be built")
 
