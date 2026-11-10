@@ -83,6 +83,15 @@ def drm(tmp_path, monkeypatch):
     root = tmp_path / "drm"
     root.mkdir()
     monkeypatch.setattr(display, "_DRM", root)
+    # **The host's own backlights must not decide the answer.** The sense
+    # reads them from an absolute path, so on a laptop with a backlight a
+    # test that faked no connector still got a Percept, and on a machine
+    # without one the same test got the "no backlight or DRM connector
+    # nodes to read" string instead - and then `percept.metadata` raised
+    # AttributeError. Measured on a CI runner (2026-11-10).
+    backlight = tmp_path / "backlight"
+    backlight.mkdir()
+    monkeypatch.setattr(display, "_BACKLIGHT", str(backlight))
     return root
 
 
@@ -242,6 +251,17 @@ class TestConnectors:
 
     def test_an_unreadable_drm_is_not_a_machine_with_no_display(self, tmp_path, monkeypatch, granted):
         monkeypatch.setattr(display, "_DRM", tmp_path / "no-drm")
+        # A backlight the sense can read, and no connector: the answer is
+        # about the connector being unreadable, not about the machine
+        # having nothing at all. (With no backlight and no connector the
+        # sense says so plainly and returns a string - the right answer,
+        # and not the one this test is about.)
+        backlight = tmp_path / "backlight"
+        backlight.mkdir()
+        (backlight / "intel_backlight").mkdir()
+        (backlight / "intel_backlight" / "brightness").write_text("120\n")
+        (backlight / "intel_backlight" / "max_brightness").write_text("480\n")
+        monkeypatch.setattr(display, "_BACKLIGHT", str(backlight))
         percept = display._run({})
         assert percept.metadata["determined"] is False
         assert "fact about what could be read" in percept.content

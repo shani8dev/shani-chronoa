@@ -70,6 +70,38 @@ class _ReExec:
         return self.calls[-1][2]["LD_PRELOAD"]
 
 
+@pytest.fixture(autouse=True)
+def _no_preload_leaks():
+    """**The re-exec writes `LD_PRELOAD` into the real environment.**
+
+    `preload_layer_shell()` sets `os.environ["LD_PRELOAD"]` (and the marker)
+    *before* it calls `os.execv` - and these tests fake the exec, so the
+    write stays. A leaked `LD_PRELOAD` naming a **fake** library (an empty
+    file in `tmp_path`) then reaches every later subprocess in the session,
+    and the loader prints
+
+        ERROR: ld.so: object '.../libgtk4-layer-shell.so.0' from LD_PRELOAD
+        cannot be preloaded (file too short): ignored
+
+    into that child's stderr. Measured on a CI run (2026-11-10): the
+    sandbox tests' exact-output assertions failed on that line, and a
+    harness that parses stdout reported a missing key.
+
+    So the environment is put back after every test in this file, whatever
+    the test did with it - and the two variables are the only two the
+    module touches.
+    """
+    saved = {k: os.environ.get(k) for k in ("LD_PRELOAD", lp.MARKER)}
+    try:
+        yield
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
 @pytest.fixture
 def installed(monkeypatch, tmp_path):
     """A machine that has the library, at a path this test controls."""

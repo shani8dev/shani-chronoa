@@ -392,7 +392,21 @@ def _run(arguments: dict) -> Union[str, Percept]:
     fans = fans_from(chips)
     pwm = read_pwm(chips)
 
-    if not chips and not zones:
+    # **liquidctl is consulted before the "nothing readable" answer.** A
+    # machine whose hwmon exposes nothing but whose AIO cooler is reported
+    # by liquidctl *has* cooling, and answering "no hwmon chip and no
+    # thermal zone exposed a readable channel" says nothing at all about the
+    # cooler the tool did report. The test that names this defect
+    # (`test_an_unreadable_hwmon_is_not_claimed_as_passively_cooled`) passed
+    # only on a laptop that had thermal zones, because the early return was
+    # never reached there - so the defect was invisible on the machine the
+    # test was written on, and on a CI runner with no thermal zone it is
+    # the whole answer.
+    liquidctl_present = shutil.which("liquidctl") is not None
+    status = _liquidctl() if liquidctl_present else None
+    coolers = _coolant(status) if status else []
+
+    if not chips and not zones and not coolers:
         return (
             "No hwmon chip and no thermal zone exposed a readable channel. "
             "That is a fact about what could be read on this machine, not a "
@@ -423,10 +437,6 @@ def _run(arguments: dict) -> Union[str, Percept]:
                         f"  {record['channel']} ({record['label']}): "
                         f"{record['value']} {record['unit']}"
                     )
-
-    liquidctl_present = shutil.which("liquidctl") is not None
-    status = _liquidctl() if liquidctl_present else None
-    coolers = _coolant(status) if status else []
 
     if not fans and not coolers:
         common = {"chips": len(chips), "readings": total_readings,

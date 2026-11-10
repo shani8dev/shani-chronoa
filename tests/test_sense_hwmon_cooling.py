@@ -92,6 +92,17 @@ def hwmon_root(tmp_path, monkeypatch):
     root = tmp_path / "hwmon"
     root.mkdir()
     monkeypatch.setattr(hwmon, "_HWMON_ROOT", root)
+    # **The host's own thermal zones must not decide the answer.** The
+    # sense reads them from an absolute glob, so on a laptop with a thermal
+    # zone a test that faked no chip still got a Percept, and on a machine
+    # without one the same test got the "no hwmon chip and no thermal zone"
+    # string instead - and then `hwmon._run({}).content` raised
+    # AttributeError. Measured on a CI runner (2026-11-10): five tests in
+    # this file failed exactly that way. The glob is pointed at an empty
+    # directory, so the zones are what the test says they are.
+    zones = tmp_path / "thermal"
+    zones.mkdir()
+    monkeypatch.setattr(hwmon, "_ZONE_GLOB", str(zones / "thermal_zone*"))
     monkeypatch.setattr(hwmon.shutil, "which", lambda n: None)
     return root
 
@@ -138,6 +149,8 @@ class TestStoppedIsNotAbsent:
         assert hwmon._run({}).metadata["stopped_fans"] == 1
 
     def test_no_fan_channel_is_neither_stopped_nor_spinning(self, hwmon_root, monkeypatch, granted):
+        # A readable chip with no fan channel - the premise the test is about.
+        _temp_only_chip(hwmon_root)
         content = hwmon._run({}).content
         assert "0 RPM" not in content, "a machine with no fan channel is not a stopped fan"
         assert hwmon._run({}).metadata["fans"] == 0
@@ -178,6 +191,9 @@ class TestLiquidCooler:
     def test_a_cooler_absent_from_hwmon_is_still_reported(self, hwmon_root, monkeypatch, granted):
         """The case that motivates the sense: an AIO's radiator and pump
         usually do not appear in hwmon at all."""
+        # A chip with a temperature and no fan channel: hwmon has something
+        # to report, the cooler is not one of its fan channels.
+        _temp_only_chip(hwmon_root)
         _with_liquidctl(monkeypatch, LIQUIDCTL_JSON)
         content = hwmon._run({}).content
         assert "no fan channel in hwmon" in content
@@ -203,6 +219,9 @@ class TestDegradation:
     def test_no_hwmon_and_no_liquidctl_is_undetermined_both_ways(self, hwmon_root, monkeypatch, granted):
         """Two separate absences: the kernel exposing nothing, and the tool not
         being installed. Collapsing them claims a machine has no fan."""
+        # A chip with a temperature and no fan channel: hwmon is readable and
+        # exposes no fan, and liquidctl is not installed.
+        _temp_only_chip(hwmon_root)
         percept = hwmon._run({})
         content = percept.content
         assert percept.metadata["fans"] == 0
@@ -295,7 +314,11 @@ class TestPwmIsReadNeverWritten:
         assert "still spinning" in content or "disagree" in content
 
     def test_a_chip_with_no_pwm_nodes_says_nothing_about_control(self, hwmon_root, granted):
-        _chip(hwmon_root, "bat0", fans={})
+        # A chip with a fan channel and no pwm node - a battery bridge.
+        # A chip with *no* readable channel at all is not reported at all,
+        # which is a different subject (and one the unreadable-chip test
+        # covers).
+        _chip(hwmon_root, "bat0", fans={1: 1000})
         content = hwmon._run({}).content
         assert "pwm" not in content.lower(), (
             "a chip with no PWM node was given an opinion about fan control"
