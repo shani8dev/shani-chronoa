@@ -68,6 +68,34 @@ def test_the_confirmation_hook_is_registered():
         f"call dispatch unconfirmed. Registered pre-hooks: {[f.__name__ for f in pre]}")
 
 
+def test_an_emptied_hook_registry_gets_the_builtin_hook_back():
+    """**"Once" is per hook, not per process.**
+
+    The installation was guarded by a single `_BUILTIN_HOOKS_INSTALLED` flag,
+    so anything that emptied the registry - `tools._HOOKS_PRE.clear()`, which
+    another test in this tree does - left the flag True and the built-in hooks
+    gone for good. **The flag and the registry disagreed, and the flag won.**
+
+    Measured on a CI run (2026-11-10): `tools.hooks()` reported no pre-hooks
+    at all, so `confirm_outgoing` was not registered - and the consequence is
+    a text this person never confirmed being sent from their phone.
+
+    So the check is the registry itself: is this hook in it?
+    """
+    try:
+        tools._dispatch("nothing", {})
+        tools._HOOKS_PRE.clear()
+        tools._HOOKS_POST.clear()
+        tools._dispatch("nothing", {})
+        pre, _post = tools.hooks()
+        assert "confirm_outgoing" in [f.__name__ for f in pre], (
+            "an emptied hook registry was not refilled with the built-in "
+            f"consent gate: {[f.__name__ for f in pre]}")
+    finally:
+        tools._HOOKS_PRE.clear()
+        tools._HOOKS_POST.clear()
+
+
 def test_an_automatic_rule_cannot_send_a_text(phone_gate_on):
     """**The consequence.** A trigger is not the person."""
     tools._dispatch("nothing", {})

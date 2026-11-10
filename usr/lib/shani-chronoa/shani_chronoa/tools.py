@@ -837,9 +837,6 @@ def _install_builtin_hooks() -> None:
     not recurse at import time.
     """
     global _BUILTIN_HOOKS_INSTALLED
-    if _BUILTIN_HOOKS_INSTALLED:
-        return
-    _BUILTIN_HOOKS_INSTALLED = True
     try:
         from shani_chronoa.skills.phone import confirm_outgoing
     except Exception:                                   # noqa: BLE001
@@ -847,7 +844,20 @@ def _install_builtin_hooks() -> None:
                        exc_info=True)
         _BUILTIN_HOOKS_INSTALLED = False
         return
+    # **"Once" is per hook, not per process.** The flag was a single
+    # `_BUILTIN_HOOKS_INSTALLED`, so anything that emptied the registry -
+    # `tools._HOOKS_PRE.clear()`, which a test does and a plugin could -
+    # left the flag True and the built-in hooks gone for good: the flag and
+    # the registry disagreed, and the *flag* won. Measured on a CI run
+    # (2026-11-10): `tools.hooks()` reported no pre-hooks at all, so
+    # `confirm_outgoing` was not registered and a text the person never
+    # confirmed could have been sent. The check is the registry itself -
+    # is this hook in it? - rather than a memory of having added it.
+    if any(getattr(h, "__name__", "") == "confirm_outgoing" for h in _HOOKS_PRE):
+        _BUILTIN_HOOKS_INSTALLED = True
+        return
     register_hook(pre=confirm_outgoing)
+    _BUILTIN_HOOKS_INSTALLED = True
 
 
 #: How long an in-turn "this came from content" question waits. Short, because
