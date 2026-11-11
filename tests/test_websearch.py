@@ -463,9 +463,16 @@ class TestTheQueryActuallyReachesTheApi:
                 % (name, key))
 
 
-    def test_a_stubbed_fetch_sees_the_query(self, monkeypatch):
+    def test_a_stubbed_fetch_sees_the_query(self, monkeypatch, allowed):
         """End to end through the real `search()`: what actually
-        goes out."""
+        goes out.
+
+        **The consent comes from the `allowed` fixture**, which sets the
+        two keys against the compiled schema in a temp home. Building a
+        `ChronoaConfig()` here instead writes to the **real** keyfile, so
+        the search's consent depended on the machine - and on a CI runner
+        (2026-11-11) the search was refused before anything was
+        requested."""
         import shani_chronoa.netjson as netjson
         seen = []
 
@@ -475,17 +482,13 @@ class TestTheQueryActuallyReachesTheApi:
                     "batchcomplete": ""}
 
         monkeypatch.setattr(netjson, "get_json", fake_get_json)
-        from shani_chronoa.config import ChronoaConfig
-        cfg = ChronoaConfig()
-        cfg.set("privacy-mode", "false")
-        cfg.set("web-sense-enabled", "true")
         results, why, notes = W.search("arch linux install guide")
         assert seen, "nothing was requested"
         for params in seen:
             assert any("arch linux install guide" in str(v)
                        for v in params.values()), params
 
-    def test_irrelevant_results_are_not_passed_off_as_answers(self, monkeypatch):
+    def test_irrelevant_results_are_not_passed_off_as_answers(self, monkeypatch, allowed):
         """The guard this whole section is for: a provider that answers about
         something else must not be the answer."""
         from shani_chronoa import netjson
@@ -498,10 +501,6 @@ class TestTheQueryActuallyReachesTheApi:
                                 "answer_count": 1, "view_count": 9}]}
 
         monkeypatch.setattr(netjson, "get_json", wrong_site)
-        from shani_chronoa.config import ChronoaConfig
-        cfg = ChronoaConfig()
-        cfg.set("privacy-mode", "false")
-        cfg.set("web-sense-enabled", "true")
         results, why, notes = W.search("arch linux install guide")
         # It still returns what it was given - the parser is not a judge - but
         # the source is named so the reader can see it is the newest, not the
@@ -581,16 +580,27 @@ class TestFeedProviders:
             key = "query" if "query" in params else "q"
             assert params[key] == "", "%s's %s must start empty" % (name, key)
 
-    def test_the_stubbed_fetch_sees_the_query(self, monkeypatch):
-        """End to end through the real `search()`: what actually goes out."""
+    def test_the_stubbed_fetch_sees_the_query(self, monkeypatch, allowed):
+        """End to end through the real `search()`: what actually goes out.
+
+        **The consent is arranged, not written to the developer's own
+        settings.** The first version built its own `ChronoaConfig()` and
+        called `.set()` on it, which - with no `gsettings_env` fixture in
+        scope - writes to the **real** keyfile. So the test's consent
+        depended on the machine it ran on: measured on a CI runner
+        (2026-11-11) the two `set()` calls went to a store the
+        permission layer never read, `web-sense-enabled` stayed off, the
+        search was refused before anything was requested, and the test
+        reported *"nothing was requested"*.
+
+        The `allowed` fixture is the one that sets both keys against the
+        compiled schema in a temp home.
+        """
         import shani_chronoa.netjson as netjson
         seen = []
         netjson.get_bytes = lambda c, u, p=None: (seen.append(p or {}), b"")[1]
         monkeypatch.setattr(W, "_fetch_json",
                              lambda url, params, component: ({}, ""))
-        from shani_chronoa.config import ChronoaConfig
-        ChronoaConfig().set("privacy-mode", "false")
-        ChronoaConfig().set("web-sense-enabled", "true")
         W.search("arch linux news")
         assert seen, "nothing was requested"
         for params in seen:
