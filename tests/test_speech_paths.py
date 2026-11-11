@@ -18,12 +18,20 @@ def test_stt_uses_whisper_cli_and_ggml_model(tmp_path, monkeypatch):
     # setting only the fake home left it searching the real one. Deriving the
     # fixture from the variable the code reads is what makes this test a
     # statement about the search rather than about the developer's machine.
-    models = tmp_path / "share" / "whisper" / "models"
-    models.mkdir(parents=True)
-    (models / "ggml-base.bin").write_bytes(b"x")
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    # **The directory the reader searches, read out of the product**:
+    # `stt_provision.model_dir()` is
+    # `data_home()/shani-chronoa/whisper/models`, and the `shani-chronoa`
+    # level is part of it. The fixture used to stop at
+    # `share/whisper/models` - one level short - so the model it "installed"
+    # was somewhere the reader never looks and the search fell back to the
+    # system directory. Measured on a CI runner (2026-11-11).
+    from shani_chronoa import stt_provision
     from shani_chronoa.stt import WhisperSTT
+    models = stt_provision.model_dir()
+    models.mkdir(parents=True, exist_ok=True)
+    (models / "ggml-base.bin").write_bytes(b"x")
     s = WhisperSTT(model="base")
     assert s.whisper_path == str(cli)
     assert s.model_path == str(models / "ggml-base.bin")

@@ -291,7 +291,16 @@ class WhisperSTT:
             for n in names:
                 if os.path.exists(os.path.join(d, n)):
                     return os.path.join(d, n)
-        return os.path.join(dirs[0], names[0])
+        # **The user's own directory, not the first one searched.** The
+        # fallback is "where this model would be", and the provisioner
+        # writes to the user's data home - so a fallback naming the
+        # system directory reported a path nothing ever installs, which is
+        # the same defect this function's own comment describes for
+        # `stt_provision` ("writing here is what makes `is_available()`
+        # true without any change to `stt.py`"). Measured: the file that
+        # checks the search consulted the data home failed on this, and
+        # the same shape is what the Parakeet reader had.
+        return os.path.join(dirs[1], names[0])
 
     def transcribe(self, audio_file: str) -> str:
         """Transcribe audio file to text.
