@@ -204,6 +204,67 @@ def test_the_loopback_answers_a_real_ping():
     assert "unreachable" not in out.lower() or "0% packet loss" in out, out
 
 
+def test_a_name_that_does_not_resolve_is_a_dns_fault(monkeypatch):
+    """**The name failed, and that is not the same as the host being down.**
+
+    A name that resolves to nothing was never sent to, so the percentage
+    loss says nothing at all - and saying "unreachable" would claim the far
+    end was tested when it was not.
+    """
+    class _Proc:
+        returncode = 2
+        stdout = ""
+        stderr = "ping: no.such.host.example: Name or service not known\n"
+
+    monkeypatch.setattr(PH.subprocess, "run", lambda *a, **k: _Proc())
+    out = PH._run({"host": "no.such.host.example", "count": 1})
+    assert "does not resolve" in out, out
+    assert "unreachable" not in out.lower(), out
+
+
+def test_a_machine_that_cannot_send_is_a_permission_fault(monkeypatch):
+    """**iputils exits 2 for this too, and the two must not be confused.**
+
+    Read out of iputils' own source (`create_socket()` ends in `exit(2)`),
+    and reproduced by hand:
+
+        ping: socktype: raw
+        ping: socket: Operation not permitted
+        ping: => missing cap_net_raw+p capability or setuid?
+
+    The first version of the module read the **exit code** as "the name did
+    not resolve", so a machine with no permission to send a packet was told
+    its **DNS** was broken - and the message named a name that had not been
+    looked up at all. Measured on a CI runner (2026-11-11): `ping 127.0.0.1`,
+    a literal address which cannot fail to resolve, came back with that
+    sentence.
+    """
+    class _Proc:
+        returncode = 2
+        stdout = ""
+        stderr = ("ping: socktype: raw\n"
+                  "ping: socket: Operation not permitted\n"
+                  "ping: => missing cap_net_raw+p capability or setuid?\n")
+
+    monkeypatch.setattr(PH.subprocess, "run", lambda *a, **k: _Proc())
+    out = PH._run({"host": "127.0.0.1", "count": 1})
+    assert "does not resolve" not in out, out
+    assert "permission" in out.lower(), out
+
+
+def test_a_loopback_that_cannot_be_pinged_is_not_called_unreachable(monkeypatch):
+    """**And the answer still names the host**, so the person can see which
+    one the refusal is about."""
+    class _Proc:
+        returncode = 2
+        stdout = ""
+        stderr = "ping: socket: Operation not permitted\n"
+
+    monkeypatch.setattr(PH.subprocess, "run", lambda *a, **k: _Proc())
+    out = PH._run({"host": "127.0.0.1", "count": 1})
+    assert "127.0.0.1" in out, out
+
+
 def test_a_host_that_does_not_answer_is_reported_as_such(monkeypatch):
     """**The honest failure.** A firewall dropping ICMP looks exactly like a
     dead host, and the module says so rather than declaring it down.

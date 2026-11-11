@@ -128,14 +128,14 @@ def _pick_binary(host: str) -> tuple[str, str | None]:
     return "ping", files.tool_missing("ping", "ping a host")
 
 
-def _explain(refused: bool, count: int, received: int) -> str:
+def _explain(refused: bool, count: int, received: int, host: str = "") -> str:
     """Why nothing answered, when nothing answered."""
     if refused:
         return (
-            "Ping itself refused to send anything. That is a permission or "
-            "sysctl problem on this machine (ping normally needs either "
-            "capability net_raw or ping_group_range), not a fault at the far "
-            "end - the packets never left."
+            f"Ping to {host} refused to send anything. That is a permission or "
+            f"sysctl problem on this machine (ping normally needs either "
+            f"capability net_raw or ping_group_range), not a fault at the far "
+            f"end - the packets never left."
         )
     if count <= 0:
         return (
@@ -195,17 +195,33 @@ def _run(arguments: dict) -> str:
 
     out = proc.stdout + proc.stderr
 
-    # Exit 2 from iputils is a name or address it could not resolve. That is a
-    # DNS fault and is a different thing from an unreachable host, and it is the
-    # one case where the percentage loss tells you nothing at all.
-    if proc.returncode == 2 or "Name or service not known" in out or "unknown host" in out:
+    # **A permission fault is a permission fault, whatever the exit code.**
+    #
+    # iputils exits **2** for two different things: a name it could not
+    # resolve (`error(2, 0, "%s: %s", target, gai_strerror(...))`) and a
+    # socket it could not create (`create_socket()` ends in `exit(2)` after
+    # printing "socket: Operation not permitted" and "=> missing cap_net_raw+p
+    # capability or setuid?"). So the exit code alone cannot tell them apart,
+    # and reading it as "a DNS fault" reported a machine with no permission
+    # to send a packet as a machine whose **name** was wrong.
+    #
+    # Measured on a CI runner (2026-11-11): `ping 127.0.0.1` - a literal
+    # address, which cannot fail to resolve - came back with that sentence.
+    # The evidence is in the output, so the output is what is read.
+    if "permission denied" in out.lower() or "Operation not permitted" in out:
+        return _explain(True, count, 0, host)
+
+    # A name that did not resolve is a DNS fault, and it is a different thing
+    # from an unreachable host - it is the one case where the percentage loss
+    # tells you nothing at all.
+    if (proc.returncode == 2 or "Name or service not known" in out
+            or "unknown host" in out):
         return (
             f"{host} does not resolve to an address, so there was nothing to "
             f"ping. That is a name problem (this machine's DNS, or the name "
-            f"itself), not an unreachable host."
+            f"itself) - the far end was never contacted, so nothing is known "
+            f"about whether it is there."
         )
-    if "permission denied" in out.lower() or "Operation not permitted" in out:
-        return _explain(True, count, 0)
 
     sent = received = 0
     match = _SENT.search(out)
@@ -233,7 +249,7 @@ def _run(arguments: dict) -> str:
         return "\n".join(filter(None, [
             f"{host} did not answer: {sent or count} sent, 0 received"
             + (f", {loss}% loss." if loss else "."),
-            _explain(refused, sent or count, 0),
+            _explain(refused, sent or count, 0, host),
         ]))
 
     if refused:

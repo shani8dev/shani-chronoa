@@ -55,6 +55,21 @@ opencode    6476 shrinivaskumbhar 13u  IPv4 129072      0t0  TCP 127.0.0.1:35842
 DELETED = ("deleted.txt 999  someuser   12w   REG   252,1     4096  999999"
            " /tmp/gone.txt (deleted)\n")
 
+#: The pid a fixture uses for a process **that is not running**, so that
+#: `/proc/<pid>/comm` cannot be read.
+#:
+#: **`999` was not that pid.** It was a literal in `DELETED`, and on a CI
+#: runner it was alive - `sshd` - so `_real_command` read that process's real
+#: name and the test asserted `sshd == 'deleted.txt'`. The premise the test
+#: is about ("a process that exited between lsof's read and ours") needs a
+#: pid that *cannot* be running, and the only such pid is one above
+#: `kernel.pid_max`, which the kernel never allocates.
+#:
+#: Read from the running kernel rather than typed, because the ceiling moves
+#: (`pid_max` was 32768 by default and is 4194304 on this machine) and a
+#: typed number would be a claim about the machine it was typed on.
+DEAD_PID = int(Path("/proc/sys/kernel/pid_max").read_text().strip()) + 1
+
 WARNINGS = ("lsof: WARNING: can't stat() nsfs file system "
             "/run/docker/netns/default\n"
             "      Output information may be incomplete.\n")
@@ -257,8 +272,17 @@ def test_the_header_is_never_treated_as_a_row(tmp_path, monkeypatch):
 def test_a_pid_that_exited_falls_back_to_lsofs_own_name(tmp_path, monkeypatch):
     """The real name comes from /proc/<pid>/comm, and a process that exited
     between lsof's read and ours has no entry. Its short name is then the only
-    name there is, and blanking it is worse than the truncation."""
-    rows = OF._parse(DELETED)
+    name there is, and blanking it is worse than the truncation.
+
+    **The pid is one that cannot be running** (`DEAD_PID`, above
+    `kernel.pid_max`), because the premise is a process that is *not* there.
+    The fixture's `999` was alive on a CI runner, so the reader found a real
+    `/proc/999/comm` - `sshd` - and the test asserted that instead of the
+    fallback it is named for.
+    """
+    rows = OF._parse(f"deleted.txt {DEAD_PID}  someuser   12w   REG   252,1"
+                     "     4096  999999 /tmp/gone.txt (deleted)\n")
+    assert rows[0]["pid"] == DEAD_PID
     assert OF._real_command(rows[0]["pid"], "deleted.txt") == "deleted.txt"
 
 
