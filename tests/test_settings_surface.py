@@ -115,6 +115,13 @@ _HARNESS = textwrap.dedent(
 )
 
 
+#: The keys the harness must produce for the search filter's effect to have
+#: been read at all. Checked where the harness runs, so a harness that built
+#: nothing says so instead of leaving a KeyError in every test that reads it.
+_HARNESS_KEYS = {"visible_groups", "group_needles", "needle_visible",
+                 "capture_visible"}
+
+
 @pytest.fixture(scope="module")
 def built(tmp_path_factory, compiled_schema_dir):
     import os
@@ -158,6 +165,18 @@ def built(tmp_path_factory, compiled_schema_dir):
             payload = json.loads(line[len("RESULT"):])
     assert payload is not None, f"harness produced no result:\n{proc.stdout}\n{proc.stderr[-2000:]}"
     payload["_stderr"] = proc.stderr
+    # **The harness's own keys are checked here, not in each test.** The
+    # harness builds a window, then reads the search filter's effect from a
+    # 1.2-second timeout; if the window never came up, or the filter never
+    # fired, the result is a dict *without* those keys - and every test that
+    # used one failed with a bare KeyError naming a key the reader had
+    # invented, which says nothing about the product. Measured on a CI
+    # runner (2026-11-11): six tests, six KeyErrors, no clue.
+    missing = sorted(_HARNESS_KEYS - set(payload))
+    assert not missing, (
+        f"the harness produced a result without {missing} - so the window it "
+        f"built, or the search filter it drove, never answered. The child's "
+        f"stderr:\n{proc.stderr[-2000:]}")
     return payload
 
 

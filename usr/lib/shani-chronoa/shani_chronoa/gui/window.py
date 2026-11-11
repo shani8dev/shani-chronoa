@@ -81,7 +81,7 @@ CHAT_TAG = "chronoa-chat"
 #: So two lines is not a compromise between two costs - it costs the same 33px
 #: whether the refusal is 150 characters or 1200, and the extra 16px arrives
 #: **only** for text that needs it. That matters because the window's chrome has
-#: **zero slack**: `set_size_request(380, 490)` is 370 of chrome plus exactly
+#: **zero slack**: `set_size_request(380, 500)` is 380 of chrome plus exactly
 #: 120 of transcript, so a permanent extra line would have to be paid for out of
 #: the conversation. A bound that only costs when it wraps is not that. (The
 #: chrome measured 367 on 2026-10-19 and 370 on 2026-11-07; the minimum is kept
@@ -1882,7 +1882,22 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # 88px is a quarter of it. A minimum that is honest beats a minimum
         # that promises a window with nothing in it; the chrome is the next thing
         # to shrink.
-        self.set_size_request(380, 490)
+        # **500, not 490: the chrome is theme-dependent.** The number above
+        # was `367 + 120` measured on the development machine, and the
+        # development machine's theme is Yaru. Measured on a CI runner with
+        # Adwaita and the same fonts, the same window spends **380px** on
+        # chrome - so a minimum of 490 left **110px** of conversation where
+        # this promises 120, on a machine that had done nothing wrong.
+        #
+        # The chrome is the sum of rows whose heights come from the theme's
+        # padding and the font's metrics, so it is not a constant of the
+        # product - and a minimum derived from one machine's theme is a
+        # promise another theme breaks. So the minimum is sized for the
+        # *tallest* chrome measured for this window (380) plus the
+        # smallest conversation worth reading (120), and the test that
+        # holds the promise measures the chrome on the machine it runs on
+        # rather than against a remembered pixel.
+        self.set_size_request(380, 500)
         self.set_decorated(True)
         self._apply_css()
         self._apply_motion_preference()
