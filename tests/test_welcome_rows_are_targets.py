@@ -93,7 +93,26 @@ def _tag(window):
 
 
 def _activatable_rows(window):
-    page = _view(window).get_visible_page()
+    """The page's activatable rows - **or none, if the page is not up yet.**
+
+    **A tree that has not been built is not an error.** This is polled
+    before the wizard's window settles, and `_view(window)` is None until
+    it does - so the unguarded version raised `AttributeError` inside the
+    poll callback, which removed the poll and left the harness waiting
+    for a callback that was never coming. Measured on a CI runner
+    (2026-11-11): 18 tests failed with "the wizard harness timed out:
+    `after` never called `done`" - a timeout that named the harness and
+    not the cause.
+
+    The default readiness check already asks for the view first (see
+    `settled`); this makes the row list as careful as that check.
+    """
+    view = _view(window)
+    if view is None:
+        return []
+    page = view.get_visible_page()
+    if page is None:
+        return []
     return [w for w in _walk(page)
             if isinstance(w, Adw.ActionRow) and w.get_activatable()]
 
