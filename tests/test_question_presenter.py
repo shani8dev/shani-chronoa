@@ -884,9 +884,20 @@ class TestNobodyToAskSaysNobodyIsThere:
         # voice engines - so the number is 61. 2026-10-23: scroll and drag joined
         # move_pointer behind `input-control-enabled` (63), and that gate now names
         # its Settings row too; the five of its seven tools this sweep reaches
-        # leave this count: 58.
-        assert counts["key_only"] == 58, (
-            f"the raw-key count moved from 58 to {counts['key_only']} - either a "
+        # leave this count: 58. 2026-11-08: **`device_serial` joined** - a new
+        # gated tool from `0fd5cfc` (the serial-port reader), whose refusal
+        # names `i2c-write-enabled` and nothing else - so the count is **59**.
+        #
+        # **Measured, not assumed.** The sweep above is re-run over every
+        # gated tool with nobody to ask, and the number below is what it
+        # answers - so a conversion that lands shows up here as a failure
+        # rather than as a stale literal nobody notices. Measured against the
+        # tree at `ffc6aa4` (where it was 58): the difference is exactly
+        # `device_serial`, and **nothing else moved** - no refusal changed
+        # its wording, so the rise is a new gated tool and not a gate that
+        # stopped naming anything.
+        assert counts["key_only"] == 59, (
+            f"the raw-key count moved from 59 to {counts['key_only']} - either a "
             "skill now names the Settings row (update this, and the sweep "
             "beside it still holds), or a gate stopped naming anything at all"
         )
