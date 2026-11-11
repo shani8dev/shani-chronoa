@@ -249,6 +249,70 @@ def _reclaim_the_temp_dirs_this_suite_makes():
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _no_cloud_model_listing_over_the_network():
+    """**No test asks a cloud provider what models it offers.**
+
+    The setup wizard's cloud-keys page lists each provider's models on a
+    **daemon thread**, and it does so whenever the wizard is built - which
+    eleven test files do. Nothing stubbed it, so the suite made **real HTTPS
+    requests to eight cloud providers** on every run.
+
+    Two things follow, and both are measured rather than argued:
+
+    - **The requests are slow and unavailable.** They go out to the
+      internet, so the result depends on a third party's server being up and
+      on this machine's network. A test that measures a provider's model
+      list is a test of the network.
+    - **The teardown crash.** The worker thread is still holding a live TLS
+      connection when the interpreter tears down, and the process dies with
+      `Fatal Python error: Segmentation fault` inside
+      `ssl.do_handshake`. Measured 2026-11-11: the crash killed the whole
+      file, so every test in it was reported as an error rather than as a
+      result - and it looked like a GTK fault rather than like a network
+      call.
+
+    So the stub is **session-scoped** and patched by hand rather than with
+    `monkeypatch`: the worker is a daemon that outlives the test which
+    started it, so a function-scoped patch is undone while the thread is
+    still running and the thread then makes the very request the stub was
+    there to prevent.
+
+    **The stub answers what the real function answers**, so the page has
+    the same rows it would have had: a provider that publishes no model
+    list gets the real refusal (and makes no request, because
+    `list_models` refuses before it builds a URL), and one that does gets
+    its default plus one alternative.
+
+    **The tests that are *about* the listing opt out** - they stub it
+    themselves, with their own answers, and the marker is how they say so.
+    """
+    try:
+        from shani_chronoa import cloud_llm
+    except Exception:  # noqa: BLE001 - a tree that cannot import it has nothing to stub
+        yield None
+        return
+    original = cloud_llm.offerable_models
+
+    def fake(provider_id, timeout=12.0, api_key="", base_url=""):
+        provider = cloud_llm.PROVIDERS.get(provider_id)
+        if provider is None:
+            return [], f"no provider is registered as {provider_id!r}"
+        if not provider.model_list:
+            return [], (f"{provider.name} does not publish a model list over "
+                        f"an OpenAI-shaped API, so it answers with "
+                        f"{provider.default_model}")
+        if provider.default_model:
+            return [provider.default_model, "alt-one"], ""
+        return ["served-one", "served-two"], ""
+
+    cloud_llm.offerable_models = fake
+    try:
+        yield None
+    finally:
+        cloud_llm.offerable_models = original
+
+
+@pytest.fixture(scope="session", autouse=True)
 def _schema_visible_from_the_first_test(compiled_schema_dir):
     """Make the repo schema resolvable before *any* test constructs a config.
 
