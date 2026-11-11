@@ -135,6 +135,43 @@ def test_the_preset_the_defaults_describe_is_the_one_reported():
         "a fresh config does not read back as the preset its defaults describe")
 
 
+def _xml_defaults():
+    """`{key: default}` read out of the XML source.
+
+    The XML writes every default as a string - `true`, `false`, `'local'` -
+    because that is what the schema format is; the compiled schema carries
+    the *typed* value. So the two are compared after being read the way
+    each file writes them, not as strings.
+    """
+    root = ET.parse(SCHEMA_XML).getroot()
+    out = {}
+    for schema in root.findall("schema"):
+        for key in schema.findall("key"):
+            default = key.find("default")
+            if default is None or default.text is None:
+                continue
+            out[key.get("name")] = default.text.strip()
+    return out
+
+
+def _same(xml_value, compiled_value):
+    """Whether an XML default and a compiled default are the same value.
+
+    The XML's spelling is a string of the schema's own language; the
+    compiled one is the typed value. So `'true'` and `True` are the same
+    default, and `'local'` and `"local"` are too.
+    """
+    text = (xml_value or "").strip()
+    if text in ("true", "false"):
+        return text == ("true" if compiled_value else "false")
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in ("'", '"'):
+        return text[1:-1] == compiled_value
+    try:
+        return int(text) == int(compiled_value)
+    except (TypeError, ValueError):
+        return text == str(compiled_value)
+
+
 def test_the_compiled_schema_is_not_stale():
     """**Editing the XML does nothing until it is recompiled**, and the symptom is
     a change that looks like it did not take.
@@ -145,9 +182,43 @@ def test_the_compiled_schema_is_not_stale():
     """
     assert SCHEMA_XML.exists() and COMPILED.exists(), (
         "the schema or its compiled form is missing; the defaults cannot be read")
-    assert COMPILED.stat().st_mtime >= SCHEMA_XML.stat().st_mtime, (
-        "gschemas.compiled is older than the .xml - run "
+    # **By content, not by mtime.** A checkout writes the two files in
+    # index order and gives them the same second, so a timestamp says
+    # nothing about whether the compiled form matches - and the check
+    # failed on a fresh CI clone for exactly that reason, naming a stale
+    # schema that was not stale.
+    #
+    # What *is* true after a checkout is the thing that matters: does the
+    # compiled schema carry the same defaults as the XML? That is read
+    # key by key here, which is also the check that catches the real
+    # defect - an XML edited and not recompiled, so the defaults in force
+    # are the old ones.
+    import gi
+
+    gi.require_version("Gio", "2.0")
+    from gi.repository import Gio
+
+    source = Gio.SettingsSchemaSource.new_from_directory(
+        str(SCHEMA_XML.parent), Gio.SettingsSchemaSource.get_default(),
+        False)
+    assert source is not None, (
+        "the schema directory does not parse - the compiled schema is not "
+        "readable, so no default can be read from it")
+    compiled = source.lookup(SCHEMA_ID, True)
+    assert compiled is not None, (
+        f"{SCHEMA_ID} is not in the compiled schema - recompile it with "
         "`glib-compile-schemas usr/share/glib-2.0/schemas` and commit it too")
+    wanted = _xml_defaults()
+    forced = {}
+    for key in compiled.list_keys():
+        default = compiled.get_key(key).get_default_value()
+        forced[key] = default.unpack() if default is not None else None
+    wrong = {k: (wanted.get(k), forced.get(k))
+             for k in wanted
+             if k in forced and _same(wanted[k], forced.get(k)) is False}
+    assert not wrong, (
+        "the compiled schema's defaults differ from the XML's - the defaults "
+        f"in force are not the ones in the source: {sorted(wrong)}")
 
 
 def test_the_schema_file_still_declares_every_key_the_preset_names():
