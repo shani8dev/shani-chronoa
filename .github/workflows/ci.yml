@@ -123,7 +123,18 @@ jobs:
       # lives in shani-pkgbuilds. Checked out beside it here rather than
       # skipped, because a skipped install-list assertion is exactly the
       # thing that lets a binary go missing from a package unnoticed.
-      extra-repositories: '[{"repo": "shani8dev/shani-pkgbuilds", "path": "../shani-pkgbuilds"}, {"repo": "shani8dev/shani-link", "path": "../shani-link"}]'
+      #
+      # The other three are the targets of `tools/list-audit.py`, which walks
+      # **four** sibling repos - shani-cassini's python, shani-deploy's shell,
+      # shani-chronoa's own and shani-settings' config - and reports which
+      # hand-kept name lists no test file names. It skips a target whose
+      # directory is absent, so a runner with only two of the four scanned
+      # two and said so in a summary line that reads like a measurement:
+      # "scanned N name lists across 2 repos". The test
+      # (test_it_measures_the_workspace_it_lives_in_with_no_environment)
+      # asserts all four are reached, and it failed on the runner for exactly
+      # this reason.
+      extra-repositories: '[{"repo": "shani8dev/shani-pkgbuilds", "path": "../shani-pkgbuilds"}, {"repo": "shani8dev/shani-link", "path": "../shani-link"}, {"repo": "shani8dev/shani-cassini", "path": "../shani-cassini"}, {"repo": "shani8dev/shani-deploy", "path": "../shani-deploy"}, {"repo": "shani8dev/shani-settings", "path": "../shani-settings"}]'
       system-site-packages: true
     needs: lint
 

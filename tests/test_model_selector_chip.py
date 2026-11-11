@@ -102,14 +102,36 @@ class TestTheModelDropdown:
 
         The quiet word is `recommended()`'s answer rather than a name this file
         chose, so the strip flags what *this machine* would have picked.
+
+        **The machine is arranged, not asked about.** The first version
+        asserted that the recommended tier happened to be *installed*, which
+        is a fact about whoever ran it - and on a runner with no models at
+        all the assertion read "the default is qwen3.5-2b but only [''] is
+        installed", which says nothing about the chip. The property this test
+        is named for is the *highlight*: the recommended tier carries no
+        "you have departed from the default" mark, and every other tier
+        does. So both tiers are installed and the answer is read off the
+        chip's own CSS class.
         """
         strip = _strip(gsettings_env, None)
-        offered = [r[0] for r in strip._model_rows()]
         default = strip._default_model_key()
         assert default, "no default tier could be read, so nothing would be quiet"
-        assert default in offered, (
-            f"the default is {default} but only {offered} is installed; every "
-            f"installed tier is then a departure and the chip should say so")
+        other = next(k for k in local_llm.SPECS if k != default)
+        monkeypatch.setattr(local_llm, "installed", lambda: [default, other])
+
+        # **The default is answering**: the chip must carry no departure mark.
+        monkeypatch.setattr(local_llm, "answering_key", lambda: default)
+        strip.refresh()
+        assert not strip._model_chip.has_css_class("mode-chip-on"), (
+            "the machine's own default tier is answering and the chip marks it "
+            "as a departure from the default")
+
+        # **Something else is answering**: now the mark belongs.
+        monkeypatch.setattr(local_llm, "answering_key", lambda: other)
+        strip.refresh()
+        assert strip._model_chip.has_css_class("mode-chip-on"), (
+            "a tier that is not the machine's default is answering and the "
+            "chip does not say so")
 
     def test_a_machine_with_no_model_says_so_rather_than_raising(
             self, gsettings_env, monkeypatch):
