@@ -26,6 +26,7 @@ here: the flip measured `False` and looked like it had failed. So there is a
 test for staleness at the bottom of this file.
 """
 
+import os
 import pathlib
 import subprocess
 import sys
@@ -40,7 +41,11 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "usr/lib/shani-chronoa"))
 
 from shani_chronoa import capabilities  # noqa: E402
-from shani_chronoa.config import SCHEMA_ID  # noqa: E402
+from shani_chronoa.config import (  # noqa: E402
+    _ROOT_GROUP,
+    SCHEMA_ID,
+    SCHEMA_PATH,
+)
 
 SCHEMA_XML = ROOT / "usr/share/glib-2.0/schemas/org.shani.chronoa.gschema.xml"
 COMPILED = ROOT / "usr/share/glib-2.0/schemas/gschemas.compiled"
@@ -49,10 +54,33 @@ EVERYDAY = capabilities.PRESETS["everyday"][2]
 
 
 def _settings():
+    """**A settings object bound to *this* test's store.**
+
+    `Gio.Settings.new(SCHEMA_ID)` is the **default** backend, and under
+    `GSETTINGS_BACKEND=keyfile` that is a **process-wide singleton** which
+    caches its keyfile path from its first use. So it reads whichever store
+    the first test in the process happened to create - not this test's - and
+    every assertion below is made against another test's writes.
+
+    Measured 2026-11-11: run this file's first test alone and it passes;
+    run it after `test_speech_state.py` and it reads `notification-enabled`
+    as **False** where the schema declares **True**, and reports four keys
+    as "no longer matching the preset" - a failure that names the schema
+    and the preset and is about neither.
+
+    **So the backend is built explicitly, here, for this test.** Not through
+    `ChronoaConfig`: its `get_bool` honours `SHANI_CHRONOA_CONSENT_GRANT`,
+    a per-turn grant that makes exactly one key read as open - which would
+    make a *default* read look like a changed one.
+    """
     source = Gio.SettingsSchemaSource.get_default()
     if source is None or source.lookup(SCHEMA_ID, True) is None:
         pytest.skip("the %s schema is not installed here" % SCHEMA_ID)
-    return Gio.Settings.new(SCHEMA_ID)
+    config_home = os.environ.get("XDG_CONFIG_HOME") or os.path.join(
+        os.path.expanduser("~"), ".config")
+    keyfile = os.path.join(config_home, "glib-2.0", "settings", "keyfile")
+    backend = Gio.keyfile_settings_backend_new(keyfile, SCHEMA_PATH, _ROOT_GROUP)
+    return Gio.Settings.new_with_backend(SCHEMA_ID, backend)
 
 
 def test_every_action_permission_defaults_to_what_the_everyday_preset_says():
