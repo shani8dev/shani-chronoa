@@ -291,25 +291,56 @@ def _no_cloud_model_listing_over_the_network():
     except Exception:  # noqa: BLE001 - a tree that cannot import it has nothing to stub
         yield None
         return
-    original = cloud_llm.offerable_models
+    import json as _json
+    import urllib.request as _urllib
 
-    def fake(provider_id, timeout=12.0, api_key="", base_url=""):
+    original = _urllib.urlopen
+
+    def model_ids(provider_id):
+        """What the stub answers for a provider that publishes a list - the
+        same shape `offerable_models` curates: default model first, then one
+        alternative. Providers without a list are refused by `list_models`
+        itself before it builds a URL, so they never reach the stub."""
         provider = cloud_llm.PROVIDERS.get(provider_id)
-        if provider is None:
-            return [], f"no provider is registered as {provider_id!r}"
-        if not provider.model_list:
-            return [], (f"{provider.name} does not publish a model list over "
-                        f"an OpenAI-shaped API, so it answers with "
-                        f"{provider.default_model}")
+        if provider is None or not provider.model_list:
+            return None
         if provider.default_model:
-            return [provider.default_model, "alt-one"], ""
-        return ["served-one", "served-two"], ""
+            return [provider.default_model, "alt-one"]
+        return ["served-one", "served-two"]
 
-    cloud_llm.offerable_models = fake
+    class _Reply:
+        """What `urlopen` hands back, so no test touches the network."""
+
+        def __init__(self, body):
+            self._body = _json.dumps(body).encode()
+
+        def read(self, *args):
+            return self._body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    def fake_urlopen(request, timeout=None):
+        url = getattr(request, "full_url", str(request))
+        for provider_id, provider in cloud_llm.PROVIDERS.items():
+            ids = model_ids(provider_id)
+            if ids is None:
+                continue
+            if url == provider.base_url.rstrip("/") + "/models":
+                return _Reply({"data": [{"id": m} for m in ids]})
+        # Anything that is not a provider model-list URL (other skills'
+        # localhost endpoints, anything a test stubs for itself) reaches the
+        # real urlopen - this stub only closes the cloud-provider seam.
+        return original(request, timeout=timeout)
+
+    _urllib.urlopen = fake_urlopen
     try:
         yield None
     finally:
-        cloud_llm.offerable_models = original
+        _urllib.urlopen = original
 
 
 @pytest.fixture(scope="session", autouse=True)
