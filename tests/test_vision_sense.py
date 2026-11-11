@@ -519,13 +519,26 @@ class TestCaptureIsBoundedAndRefusesRatherThanHangs:
         monkeypatch.delenv("WAYLAND_DISPLAY")
         assert screengrab.display_environment() == "x11"
 
+
     def test_a_capture_tool_that_hangs_is_stopped_at_the_timeout(self, monkeypatch, tmp_path):
         # A wedged compositor is the failure this bound exists for. A real
         # executable that sleeps, not a mock of subprocess.run.
+        #
+        # **Every backend the X11 path can reach is arranged to hang**, not
+        # just `xwd`. The first thing `_capture_x11` tries is ImageMagick's
+        # `import`, and it is tried *first* - so a fixture that only faked
+        # `xwd` was measuring nothing, because the real `import` answered
+        # and the fake was never run. Measured 2026-11-11: the capture
+        # returned a 157,911-byte PNG from `import` while the test believed
+        # it was exercising a wedged `xwd`.
+        #
+        # So the fixture shadows the **whole** set the path can reach, and
+        # the assertion is about the *timeout*, whichever tool it was.
         bindir = tmp_path / "bin"
         bindir.mkdir()
-        (bindir / "xwd").write_text("#!/bin/sh\nsleep 30\n")
-        (bindir / "xwd").chmod(0o755)
+        for name in ("xwd", "import"):
+            (bindir / name).write_text("#!/bin/sh\nsleep 30\n")
+            (bindir / name).chmod(0o755)
         monkeypatch.setenv("PATH", f"{bindir}:/usr/bin:/bin")
         monkeypatch.setenv("DISPLAY", ":0")
         monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
@@ -557,10 +570,15 @@ class TestCaptureIsBoundedAndRefusesRatherThanHangs:
         assert "x11-apps" not in message, message
 
     def test_a_capture_over_the_byte_ceiling_is_refused(self, tmp_path, monkeypatch):
+        # **Every backend the X11 path can reach is arranged to over-produce**,
+        # for the same reason as the test above: `import` is tried first, and
+        # a fixture that only faked `xwd` was measuring the real `import`'s
+        # answer rather than the ceiling.
         bindir = tmp_path / "bin"
         bindir.mkdir()
-        (bindir / "xwd").write_text("#!/bin/sh\nhead -c 4096 /dev/zero\n")
-        (bindir / "xwd").chmod(0o755)
+        for name in ("xwd", "import"):
+            (bindir / name).write_text("#!/bin/sh\nhead -c 4096 /dev/zero\n")
+            (bindir / name).chmod(0o755)
         monkeypatch.setenv("PATH", f"{bindir}:/usr/bin:/bin")
         monkeypatch.setenv("DISPLAY", ":0")
         monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
