@@ -189,6 +189,12 @@ def test_the_hint_table_has_no_value_that_is_its_own_binary():
         "mesa-utils", "gtk3", "imagemagick", "logrotate", "lynx",
         "systemd", "mokutil", "patch", "sysstat", "procps-ng", "python",
         "rhvoice", "shani-chronoa", "swtpm", "wget", "whisper-cpp",
+        # `shani-piper-tts` is ShaniOS's own package, built in
+        # shani-pkgbuilds (pkgname=shani-piper-tts, pkgver 2023.11.14) -
+        # the same kind of name as `shani-chronoa` above, so the same
+        # reason to list it: it is a package someone can install, and the
+        # hint table has to be able to name it.
+        "shani-piper-tts",
         "xorg-xinput", "xorg-xset", "xorg-xwd", "audit",
         # Read out of the matrix's `commands[].package` on the GNOME image,
         # which is pacman's own file database rather than a guess: fprintd ships
@@ -210,6 +216,21 @@ def test_the_hint_table_has_no_value_that_is_its_own_binary():
         # `lsof` really is its own package - confirmed against the Arch
         # package API (`extra`, 4.99.7), not assumed from the binary name.
         "lsof",
+        # `grim` likewise: confirmed against the Arch package API on
+        # 2026-11-11 (`extra`, 1.5.0-2) and against its own file listing,
+        # which carries `/usr/bin/grim`. The hint table names it for the
+        # Wayland screenshot tool `ui_driver.window_shot` uses, and the
+        # binary and the package genuinely share the name - so this entry
+        # says the package exists, not that the hint is wrong.
+        "grim",
+        # Five more, verified the same way on 2026-11-11 against the Arch
+        # package API (`archlinux.org/packages/search/json/?name=<pkg>`) and
+        # against each package's own file listing, so the name is known to
+        # exist **and** to ship the binary the hint names: aria2 ships
+        # `usr/bin/aria2c`, arpwatch `usr/bin/arpwatch`, gobuster
+        # `usr/bin/gobuster`, ngrep `usr/bin/ngrep`, traceroute
+        # `usr/bin/traceroute`. All five are in `extra`.
+        "aria2", "arpwatch", "gobuster", "ngrep", "traceroute",
         # Confirmed against the Arch package API on 2026-10-10, each
         # with its repo checked - not carried over from memory.
         "alsa-utils", "arp-scan", "pacman-contrib", "cpupower", "bluez",

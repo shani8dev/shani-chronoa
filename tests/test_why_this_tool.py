@@ -473,6 +473,16 @@ class TestTheSentences:
         A turn that dropped nothing gets no sentence about the budget - and the
         control is that one turn in the corpus *did* drop something, so this is
         not passing for want of a case.
+
+        **Both kinds are looked for, and neither is assumed to come first.**
+        The first version stopped at the first turn that dropped something,
+        so it only ever found a busy turn - and when the corpus's own first
+        request began dropping one, the quiet case was never reached and the
+        test reported *"the corpus gave only one kind of turn"*, which is a
+        statement about the corpus and not about the code. Measured: **115 of
+        the corpus's 233 requests drop something and 118 do not**, so both
+        kinds are there and the loop was the thing that could not see one of
+        them.
         """
         quiet = None
         busy = None
@@ -480,10 +490,12 @@ class TestTheSentences:
             lines = _recorded(request).why(record_first(request))
             dropped = any("did not fit the budget" in one for one in lines)
             if dropped:
-                busy = lines
-                break
-            if quiet is None:
+                if busy is None:
+                    busy = lines
+            elif quiet is None:
                 quiet = lines
+            if quiet is not None and busy is not None:
+                break
         assert quiet is not None and busy is not None, (
             "the corpus gave only one kind of turn, so neither the quiet nor "
             "the busy assertion can distinguish itself")

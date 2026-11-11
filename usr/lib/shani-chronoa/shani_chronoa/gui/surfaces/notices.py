@@ -29,6 +29,7 @@ from gi.repository import Adw, Gtk
 
 from shani_chronoa import notices
 from shani_chronoa.gui.surfaces import common
+from shani_chronoa.words import plural
 
 TITLE = "Notices"
 ICON = "mail-unread-symbolic"
@@ -85,10 +86,10 @@ def build(app: Any) -> Gtk.Widget:
     else:
         group = common.group(
             "Notices",
-            f"{len(open_notices)} notice(s) waiting. Dismissing one stops "
-            "the same thing being said again.")
+            f"{plural(len(open_notices), 'notice')} waiting. Dismissing one "
+            "stops the same thing being said again.")
         status_word = common.STATUS_OK
-        status_summary = f"{len(open_notices)} waiting"
+        status_summary = plural(len(open_notices), "notice") + " waiting"
         for notice in open_notices:
             notice_id = str(notice.get("id") or "")
             dismiss = Gtk.Button(label="Dismiss", valign=Gtk.Align.CENTER)
