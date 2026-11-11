@@ -77,30 +77,96 @@ def test_a_window_carries_a_real_class_not_an_empty_string():
             "same defect as xdotool's missing verb" % wid)
 
 
+def _make_window(d, x=137, y=241, width=320, height=240):
+    """A real X window at a known position, and the function to destroy it.
+
+    **A window is arranged, not found.** `window_ids()` reads
+    `_NET_CLIENT_LIST`, which a **window manager** publishes - and a bare
+    `Xvfb` has no window manager and no applications, so the list is empty
+    and every test that wanted a window had nothing to measure. Measured on
+    a CI runner (2026-11-11): the geometry test reported *"no window was
+    on the 1280x800 screen, so this checked nothing: []"*, which is the
+    honest wording of a check that could not run.
+
+    So the window is made here, through the same `libX11` the module
+    already loads: `XCreateSimpleWindow` + `XMapWindow`, then
+    `XSync` so the server has actually mapped it before anything reads
+    its geometry.
+
+    **It is a child of another window, and that is the whole point.**
+    `XGetGeometry` reports a window's coordinates relative to its
+    **parent**, and a client window's parent is the decoration frame - so
+    the raw numbers and the root-relative numbers differ by the frame's
+    offset. A window parented straight to the root has both numbers equal,
+    and a translation that did nothing would look right. So the window is
+    created inside a parent placed at an offset, and the position checked
+    is the one in **root** coordinates.
+    """
+    import ctypes
+
+    X11 = x11.X11
+    c_void_p = ctypes.c_void_p
+    X11.XCreateSimpleWindow.restype = ctypes.c_ulong
+    X11.XCreateSimpleWindow.argtypes = [
+        c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_int,
+        ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.c_ulong,
+        ctypes.c_ulong]
+    X11.XMapWindow.restype = ctypes.c_int
+    X11.XMapWindow.argtypes = [c_void_p, ctypes.c_ulong]
+    X11.XSync.restype = ctypes.c_int
+    X11.XSync.argtypes = [c_void_p, ctypes.c_int]
+    X11.XDestroyWindow.restype = ctypes.c_int
+    X11.XDestroyWindow.argtypes = [c_void_p, ctypes.c_ulong]
+
+    root = d.root()
+    # The parent stands in for a decoration frame: it is placed at an
+    # offset, so the child's own coordinates are relative to *it*.
+    parent = X11.XCreateSimpleWindow(
+        d._d, root, 40, 60, width + 80, height + 60, 0, 0, 0)
+    X11.XMapWindow(d._d, parent)
+    wid = X11.XCreateSimpleWindow(
+        d._d, parent, x, y, width, height, 0, 0, 0)
+    X11.XMapWindow(d._d, wid)
+    X11.XSync(d._d, 0)
+    return parent, wid
+
+
 def test_geometry_is_translated_into_root_coordinates():
     """A client window's own coordinates are relative to its **parent**, which
     is the decoration frame. Using them as screen coordinates puts every click
-    in the wrong place - which is the 37px/74px failure this repo measured."""
+    in the wrong place - which is the 37px/74px failure this repo measured.
+
+    **A window is made, not found** - see `_make_window`. The point of the
+    translation is that the number comes back in **root** coordinates, so
+    the check is that the position asked for is the position read back.
+    """
     with _display() as d:
         width, height = d.size()
-        on_screen = 0
-        for wid in d.window_ids():
+        x, y, w, h = 137, 241, 320, 240
+        parent_x, parent_y = 40, 60
+        if x + parent_x >= width or y + parent_y >= height:
+            pytest.skip(f"the screen is {width}x{height}, too small for the "
+                        f"window this test places")
+        parent, wid = _make_window(d, x, y, w, h)
+        try:
             geo = d.geometry(wid)
-            if geo is None:
-                continue
-            x, y, w, h = geo
-            assert w > 0 and h > 0, (x, y, w, h)
-            if 0 <= x <= width and 0 <= y <= height:
-                on_screen += 1
-                continue
-            # **A window can legitimately sit outside the root's own size.**
-            # Measured 2026-11-07: Xfce's bottom panel is at y=1149 on a
-            # 1080-tall Xwayland root, and `xwininfo` reports the same absolute
-            # position - so that is the desktop's shape, not a translation bug,
-            # and it is skipped rather than asserted either way.
-        assert on_screen, (
-            "no window was on the %dx%d screen, so this checked nothing: %r"
-            % (width, height, [d.geometry(w) for w in d.window_ids()]))
+            assert geo is not None, "the window has no geometry at all"
+            # **The root position is the child's own position plus its
+            # parent's.** The child's own coordinates are relative to the
+            # parent, so a reader that did not translate would answer
+            # `(x, y)` - and that is exactly the number a click must not
+            # be sent to.
+            assert geo == (x + parent_x, y + parent_y, w, h), (
+                f"the window sits at ({x}, {y}) inside a parent at "
+                f"({parent_x}, {parent_y}), so it is at "
+                f"({x + parent_x}, {y + parent_y}) on the screen - but it "
+                f"read back at {geo[:2]}. The numbers are not in root "
+                f"coordinates, so every click would land in the wrong place")
+        finally:
+            import ctypes
+            x11.X11.XDestroyWindow(d._d, wid)
+            x11.X11.XDestroyWindow(d._d, parent)
+            x11.X11.XSync(d._d, 0)
 
 
 def test_the_pointer_is_asked_of_the_server():
