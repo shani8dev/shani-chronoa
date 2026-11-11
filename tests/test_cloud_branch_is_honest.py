@@ -138,6 +138,33 @@ def cloud_config():
     return config
 
 
+@pytest.fixture(autouse=True)
+def no_model_listing_over_the_network(monkeypatch):
+    """**The provider's model list is stubbed, so the test measures the wizard.**
+
+    The cloud-keys page asks each provider what models it offers, over the
+    network, on a worker thread. Nothing here stubs that, so the suite made a
+    **real HTTPS request to a cloud provider** - which is why this file was
+    the one that timed out on CI (2026-11-11: *"the ears page shows a model
+    before it charges for one - timed out"*), and why a local run aborted the
+    whole interpreter inside `ssl.do_handshake` with a core dump.
+
+    The stub answers with a known list, so the page has rows to show - which
+    is what the tests here are about. **A network call in a test is a test of
+    the network**: it is slow, it is unavailable, and it makes the result
+    depend on a third party's server.
+
+    **Patched on `cloud_llm` itself**, because the wizard imports that module
+    *inside* the function that fetches the list - so there is no
+    `setup_wizard.cloud_llm` attribute to reach.
+    """
+    from shani_chronoa import cloud_llm
+    monkeypatch.setattr(cloud_llm, "offerable_models",
+                        lambda provider_id, api_key="", base_url="": (
+                            ["test-model-a", "test-model-b"], ""))
+    return None
+
+
 def _cloud_stt_gate(enabled: bool):
     """Make `CloudSTT.is_available()` a known answer, without touching the network."""
     original = cloud_voice._read_switch, cloud_voice._provider_key

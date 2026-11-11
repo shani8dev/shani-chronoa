@@ -6,6 +6,7 @@ expands in place instead - and where there is nothing to show, no control is
 offered rather than one that opens something unexpected.
 """
 
+import pathlib
 import sys
 from collections import deque
 from pathlib import Path
@@ -259,15 +260,32 @@ def test_a_code_file_preview_is_syntax_coloured(tmp_path):
 
 def test_rows_carry_a_type_icon_and_every_name_resolves(tmp_path):
     """Each row shows a kind icon (harness's typed file list); a name that does
-    not resolve would draw a broken glyph, so pin that every one exists."""
-    from gi.repository import Gdk
+    not resolve would draw a broken glyph, so pin that every one exists.
+
+    **The theme's own files are read, not `Gtk.IconTheme.has_icon`.** The
+    GTK call answers for whatever theme is *in force* plus its fallbacks, and
+    on this box it answered **False** for `text-editor-symbolic` - which
+    Adwaita ships, at `symbolic/legacy/text-editor-symbolic.svg`. The
+    repository has recorded this twice already
+    (`test_sidebar_icons_exist_in_adwaita.py`, and the note in
+    `test_cloud_key_in_its_own_row.py`: *"`has_icon` - which this box's
+    theme fallback answers yes to"*).
+
+    So the question is asked of the **theme directories**, which is what
+    decides whether the icon draws: a name that is in no installed theme
+    is a blank box however the GTK call answers it.
+    """
     icons = set(blocks.ArtifactBlock._TYPE_ICONS.values()) | {
         "text-editor-symbolic", "text-x-generic-symbolic", "folder-symbolic"}
-    display = Gdk.Display.get_default()
-    if display is not None:
-        theme = Gtk.IconTheme.get_for_display(display)
-        missing = [n for n in icons if not theme.has_icon(n)]
-        assert missing == [], f"artifact type icons missing from the theme: {missing}"
+    roots = [pathlib.Path("/usr/share/icons")]
+    installed = {d for d in roots[0].iterdir() if d.is_dir()} if roots[0].is_dir() else set()
+    missing = []
+    for name in sorted(icons):
+        found = any(any(root.rglob(f"{name}.svg")) or any(root.rglob(f"{name}.png"))
+                     for root in installed)
+        if not found:
+            missing.append(name)
+    assert missing == [], f"artifact type icons missing from the theme: {missing}"
     # a non-image file's row has an icon image
     doc = tmp_path / "report.xlsx"
     from shani_chronoa import office
