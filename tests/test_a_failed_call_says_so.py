@@ -84,43 +84,24 @@ def test_the_icon_carries_a_tooltip():
         "the icon's tooltip does not state which of the two happened")
 
 
-#: The icon themes installed on this machine, read out of the icon directory.
-_INSTALLED_THEMES = {
-    d.name for d in pathlib.Path("/usr/share/icons").iterdir()
-    if d.is_dir()
-}
+_ADWAITA = pathlib.Path("/usr/share/icons/Adwaita")
 
 
-def test_both_icons_exist_in_both_themes():
-    """The theme risk, measured rather than assumed.
+@pytest.mark.skipif(not _ADWAITA.is_dir(), reason="Adwaita icon theme not installed")
+def test_both_icons_exist_in_adwaita():
+    """Both icons ship in Adwaita, the theme ShaniOS ships.
 
     `audio-input-microphone-high-symbolic` is present in Yaru and absent from
     Adwaita on this machine, so a symbolic name in this codebase is a guess
-    about another package's contents and the guess is sometimes wrong. Here the
-    guess is right, which is worth recording as much as a wrong one would be.
+    about another package's contents and the guess is sometimes wrong. The
+    check here reads Adwaita's own files rather than assuming, because ShaniOS
+    ships Adwaita - a theme without one of these icons would draw a blank box,
+    and for the failure icon that would make a failed call look like a
+    successful one.
     """
     for icon in ("object-select-symbolic", "dialog-warning-symbolic"):
-        found = list(pathlib.Path("/usr/share/icons").rglob(f"{icon}.svg"))
-        assert found, f"{icon} ships in no installed theme at all"
-        # /usr/share/icons/<theme>/... - index 4, not 3. The first version read
-        # index 3, which is the literal "icons", so every icon looked like it
-        # lived in one theme and this test failed for a reason that had nothing
-        # to do with the icons.
-        themes = {p.parts[4] for p in found}
-        if len(_INSTALLED_THEMES) < 2:
-            # **The question needs two themes to be asked of.** A machine
-            # with one icon theme installed cannot say whether an icon is
-            # "only under Adwaita" - there is no other theme to be missing
-            # it. Measured on a CI runner with only Adwaita (2026-11-11):
-            # this failed as a broken icon when the machine simply had one
-            # theme.
-            pytest.skip(
-                f"only {sorted(_INSTALLED_THEMES)} is installed, so the theme "
-                f"risk cannot be measured - a second theme is needed")
-        assert len(themes) >= 2, (
-            f"{icon} exists only under {themes}, so a theme without it would "
-            f"draw a blank box - and for the failure icon that would make a "
-            f"failed call look like a successful one")
+        found = list(_ADWAITA.rglob(f"{icon}.svg"))
+        assert found, f"{icon} is not in Adwaita, drawn blank on GNOME"
 
 
 def test_a_card_can_be_built_and_says_the_right_thing():
