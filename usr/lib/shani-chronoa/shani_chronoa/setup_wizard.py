@@ -51,6 +51,38 @@ from shani_chronoa.config import (  # noqa: E402  (the factory above needs the r
 logger = logging.getLogger(__name__)
 
 
+def _saved_cloud_model(config, provider_id: str) -> str:
+    """The model this provider was last told to answer with, or "".
+
+    **The key shape is the chain's, not the provider's plain id.**
+    `config.cloud_llm_models()` returns `{"<pid>_model": "<the model>"}` -
+    the shape `CloudLLMChain` reads (`api_keys.get("%s_model" % (p,))`), so
+    a model picked in this wizard is what the chain answers with.
+
+    The page looked it up as `saved.get(provider_id)` - the bare id - so the
+    lookup **never found anything**, and the dropdown opened on the
+    provider's registry default rather than on what the person had chosen.
+    Measured: `cloud_llm_models()` returned `{"kilo_model":
+    "my-chosen-kilo"}` and `saved.get("kilo")` answered `None`.
+
+    The same lookup was where the **crash** came from: `custom` - "Your own
+    server" - has no registry default (`default_model` is `""`, because its
+    model is whatever the person typed), so `current` was `""`, and
+    `ids.index("")` raised `ValueError` inside a `GLib.idle_add` callback,
+    which **aborts the process** rather than failing the test.
+
+    So this one function is both the fix for "the dropdown ignores my
+    choice" and the fix for "the wizard crashes on my own server".
+
+    **`MODEL_SETTINGS` is not the key.** It maps a provider to its *gsettings
+    key name* (`"kilo-model"`), and the chain's dict is keyed `"kilo_model"` -
+    two different strings, and the second is the one `cloud_llm_models()`
+    builds. So the shape is written out here, exactly as the chain writes it.
+    """
+    return (config.cloud_llm_models() or {}).get(
+        "%s_model" % (provider_id,), "")
+
+
 class Cancelled(Exception):
     """The person pressed Cancel; the partial download has been removed."""
 
@@ -1929,7 +1961,6 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
             from shani_chronoa import cloud_llm as _cl
             from shani_chronoa.config import ChronoaConfig as _Config
 
-            saved = _Config().cloud_llm_models()
             # **The keys, so the keyed providers are asked as themselves.**
             # Reading them here rather than closing over the page's `existing`
             # is deliberate: this thread is started before anything typed on
@@ -1970,7 +2001,7 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
                 # missing one. Inserting it would put a **blank option** at the
                 # top of a dropdown, which is a control that looks broken
                 # rather than one that has nothing to show.
-                current = saved.get(provider_id) or default
+                current = _saved_cloud_model(_Config(), provider_id) or default
                 if current and current not in ids:
                     ids.insert(0, current)
 
@@ -1978,7 +2009,27 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
                           current=current) -> bool:
                     picked.set_sensitive(True)
                     picked.set_model(Gtk.StringList.new(ids))
-                    picked.set_selected(ids.index(current))
+                    # **Select what is actually in the list.** `current` can
+                    # be empty - "Your own server" has no registry default,
+                    # because its model is whatever the person typed - and
+                    # `ids.index("")` raised `ValueError`.
+                    #
+                    # **An exception in a `GLib.idle_add` callback aborts
+                    # the process.** It does not propagate and it does not
+                    # fail the test: the interpreter dies with a core dump,
+                    # and everything after it is reported as an error rather
+                    # than as a result. Measured 2026-11-11: the suite
+                    # segfaulted inside `pango_renderer_draw_glyph_item`
+                    # with the traceback pointing at this line, and the
+                    # failure looked like a rendering fault rather than like
+                    # a dropdown selecting a value that is not there.
+                    if current in ids:
+                        picked.set_selected(ids.index(current))
+                    else:
+                        # **Nothing to select is not an error**: the list
+                        # has no entry for this provider's model, so the
+                        # dropdown shows what it has and the person picks.
+                        picked.set_selected(0)
                     return False
 
                 GLib.idle_add(apply)
@@ -2074,7 +2125,7 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
                 ids.remove(default)
             if ids:
                 ids.insert(0, default or ids[0])
-            current = config.cloud_llm_models().get(provider_id) or default
+            current = _saved_cloud_model(config, provider_id) or default
 
             def apply() -> bool:
                 if not ids:
