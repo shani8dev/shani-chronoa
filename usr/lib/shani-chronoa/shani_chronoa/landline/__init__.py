@@ -3,24 +3,33 @@
 The line itself - provisioning, SIP, the call's audio and video - is shani-link's
 (dev.shani.Link on the session bus, /dev/shani/Link/Landline): device plumbing
 that rings with every window closed, on any desktop, with one owner. This module
-keeps the names in Chronoa's landline skill, the `landline_call` skill and the mascot
-always used, so none of them changed when the engine moved:
+is the thin client the assistant's own surfaces use:
 
-    dial(number), answer(), hangup(), dtmf(digit), status(), listen(cb), ...
+    is_set_up(), ready(), status(), dial_user(number), dial(number),
+    answer(), hangup(), resolve_name(name), listen(cb),
+    start(), stop()
 
-A failure the service reports comes back as the RuntimeError (or
-ProvisionError for setting up) the facade used to raise, with its sentence.
-`landline-enabled` is still Chronoa's own consent: whether the *assistant* may
-use the line (capabilities.py); the line runs because its owner set it up.
+**Only what Chronoa reaches is here.** The Phone page - the dialer, the keypad,
+the mute button, the contact cache, the video picture - moved to shani-link's app
+on 2026-11-04, and that app has its own complete client
+(`shani_link/app/line.py`) with every one of those calls on it. A second copy of
+them here would be an unreferenced surface: seventeen wrappers nothing in this
+tree called, which the unwired-helper audit reported by name.
+
+So the split is **by consumer**, not by capability: the same D-Bus service, two
+clients, each holding what its own tree uses. A call the assistant places is
+answered from here; a call the person places from the app's dialer is answered
+from there.
+
+A failure the service reports comes back as the RuntimeError the facade used to
+raise, with its sentence. `landline-enabled` is still Chronoa's own consent:
+whether the *assistant* may use the line (capabilities.py); the line runs
+because its owner set it up.
 """
 from __future__ import annotations
 
 import json
 import logging
-import os
-import socket
-import struct
-import threading
 from typing import Callable
 
 logger = logging.getLogger(__name__)
@@ -29,10 +38,6 @@ CONSENT_KEY = "landline-enabled"
 BUS_NAME = "dev.shani.Link"
 PATH = "/dev/shani/Link/Landline"
 IFACE = "dev.shani.Link.Landline"
-
-
-class ProvisionError(RuntimeError):
-    """Setting the line up failed (the router or the code said no)."""
 
 
 def _bus():
@@ -66,26 +71,6 @@ def _quiet(method: str, default, *a, **kw):
 
 def is_set_up() -> bool:
     return bool(_quiet("IsSetUp", False))
-
-
-def setup_start(host: str = "") -> str:
-    return _call("SetupStart", [host], "s", timeout_ms=60000, error=ProvisionError)
-
-
-def setup_finish(code: str) -> str:
-    return _call("SetupFinish", [code], "s", timeout_ms=60000, error=ProvisionError)
-
-
-def forget() -> None:
-    _call("Forget")
-
-
-def enabled() -> bool:
-    return bool(_quiet("Enabled", False))
-
-
-def set_enabled(on: bool) -> None:
-    _call("SetEnabled", [bool(on)], "b")
 
 
 # --- the line's life: shani-link's, not Chronoa's ------------------------------
@@ -132,55 +117,11 @@ def hangup() -> None:
     _call("Hangup")
 
 
-def dtmf(digit: str) -> bool:
-    return bool(_call("Dtmf", [digit], "s"))
-
-
-def set_muted(on: bool) -> bool:
-    return bool(_quiet("SetMuted", False, [bool(on)], "b"))
-
-
-def muted() -> bool:
-    return bool(_quiet("Muted", False))
-
-
-def in_call() -> bool:
-    return bool(_quiet("InCall", False))
-
-
-def hold() -> bool:
-    return bool(_call("Hold"))
-
-
-def swap() -> bool:
-    return bool(_call("Swap"))
-
-
-def merge() -> bool:
-    return bool(_call("Merge"))
-
-
-def calls() -> list:
-    return json.loads(_quiet("Calls", "[]") or "[]")
-
-
-def history() -> "list[dict]":
-    return json.loads(_quiet("History", "[]") or "[]")
-
-
 def resolve_name(name: str) -> str:
     return _quiet("ResolveName", "", [name], "s")
 
 
-def cache_contacts(book: list) -> None:
-    _quiet("CacheContacts", None, [json.dumps(book, default=str)], "s")
-
-
-def video_available() -> bool:
-    return bool(_quiet("VideoAvailable", False))
-
-
-# --- what happens on the line, and its picture ---------------------------------
+# --- what happens on the line --------------------------------------------------
 
 def listen(callback: Callable[..., None]) -> Callable[[], None]:
     """`callback(kind, **info)` for every event on the line (the service's
@@ -196,32 +137,3 @@ def listen(callback: Callable[..., None]) -> Callable[[], None]:
             logger.debug("landline listener failed", exc_info=True)
     sid = bus.signal_subscribe(BUS_NAME, IFACE, "Event", PATH, None, Gio.DBusSignalFlags.NONE, on_signal)
     return lambda: bus.signal_unsubscribe(sid)
-
-
-def video_sink(sink: Callable[[bytes, int, int], None]) -> Callable[[], None]:
-    """`sink(rgb24, width, height)` for every picture the line decodes, read
-    from shani-link's video socket on a thread of its own (the same rule as
-    before: anything GTK-shaped marshals onto the main loop itself)."""
-    stop = threading.Event()
-
-    def read_all(conn: socket.socket, n: int) -> bytes:
-        buf = b""
-        while len(buf) < n and not stop.is_set():
-            chunk = conn.recv(n - len(buf))
-            if not chunk:
-                raise ConnectionError
-            buf += chunk
-        return buf
-
-    def run():
-        try:
-            path = _call("VideoSocket")
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
-                conn.connect(path)
-                while not stop.is_set():
-                    w, h, n = struct.unpack(">III", read_all(conn, 12))
-                    sink(read_all(conn, n), w, h)
-        except (OSError, ConnectionError, RuntimeError, struct.error):
-            logger.debug("landline: no picture from shani-link", exc_info=True)
-    threading.Thread(target=run, daemon=True, name="landline-video").start()
-    return stop.set
