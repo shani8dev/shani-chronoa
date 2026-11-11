@@ -84,6 +84,13 @@ def test_the_icon_carries_a_tooltip():
         "the icon's tooltip does not state which of the two happened")
 
 
+#: The icon themes installed on this machine, read out of the icon directory.
+_INSTALLED_THEMES = {
+    d.name for d in pathlib.Path("/usr/share/icons").iterdir()
+    if d.is_dir()
+}
+
+
 def test_both_icons_exist_in_both_themes():
     """The theme risk, measured rather than assumed.
 
@@ -100,6 +107,16 @@ def test_both_icons_exist_in_both_themes():
         # lived in one theme and this test failed for a reason that had nothing
         # to do with the icons.
         themes = {p.parts[4] for p in found}
+        if len(_INSTALLED_THEMES) < 2:
+            # **The question needs two themes to be asked of.** A machine
+            # with one icon theme installed cannot say whether an icon is
+            # "only under Adwaita" - there is no other theme to be missing
+            # it. Measured on a CI runner with only Adwaita (2026-11-11):
+            # this failed as a broken icon when the machine simply had one
+            # theme.
+            pytest.skip(
+                f"only {sorted(_INSTALLED_THEMES)} is installed, so the theme "
+                f"risk cannot be measured - a second theme is needed")
         assert len(themes) >= 2, (
             f"{icon} exists only under {themes}, so a theme without it would "
             f"draw a blank box - and for the failure icon that would make a "
