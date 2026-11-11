@@ -54,7 +54,53 @@ from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 
 Adw.init()
 
-from shani_chronoa import setup_wizard  # noqa: E402
+from shani_chronoa import cloud_llm, setup_wizard  # noqa: E402
+
+
+@pytest.fixture(scope="module", autouse=True)
+def no_model_listing_over_the_network():
+    """**The provider's model list is stubbed, so the test measures the wizard.**
+
+    The wizard's cloud-keys page asks each provider what models it offers,
+    over the network, on a **daemon thread**. Nothing here stubbed that, so
+    the suite made a **real HTTPS request to a cloud provider** - and the
+    interpreter **segfaulted** inside `ssl.do_handshake` as the process tore
+    down around the live connection. Measured 2026-11-11 on this file
+    alone: `Fatal Python error: Segmentation fault`, with the traceback
+    pointing at `cloud_llm.list_models`.
+
+    **Module-scoped, and patched by hand rather than with `monkeypatch`.** The
+    page's worker is a daemon thread, so it is still running when the test
+    that started it ends; a function-scoped `monkeypatch` is undone at
+    teardown, and the thread - which reads `cloud_llm.offerable_models`
+    *when it gets there* - then calls the real function and makes the live
+    request the stub was there to prevent.
+
+    The wizard imports `cloud_llm` *inside* the function that fetches the
+    list, so there is no `setup_wizard.cloud_llm` attribute to reach; the
+    module itself is the only seam.
+    """
+    original = cloud_llm.offerable_models
+
+    def fake(provider_id, timeout=12.0, api_key="", base_url=""):
+        provider = cloud_llm.PROVIDERS.get(provider_id)
+        if provider is None:
+            return [], f"no provider is registered as {provider_id!r}"
+        if not provider.model_list:
+            # The real refusal, without the network: `list_models` refuses
+            # before it builds a URL, so this path makes no request.
+            return [], (f"{provider.name} does not publish a model list over "
+                        f"an OpenAI-shaped API, so it answers with "
+                        f"{provider.default_model}")
+        if provider.default_model:
+            return [provider.default_model, "alt-one"], ""
+        return ["served-one", "served-two"], ""
+
+    cloud_llm.offerable_models = fake
+    try:
+        yield None
+    finally:
+        cloud_llm.offerable_models = original
 
 #: How long a wizard gets to appear before the harness stops waiting. The wizard
 #: probes every model and voice when it is built, so this is not instant; and a
