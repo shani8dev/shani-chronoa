@@ -6,23 +6,19 @@ resolves a name, and `check_internet` answers "is the network up" - so
 open on that box?" had no answer at all, and they are among the most common
 questions anyone asks a machine that holds a service.
 
-`nc -z` from `openbsd-netcat` opens a TCP connection and closes it without
-sending anything, and `shani-tools-network` ships it on both images by design.
+It opens one TCP connection (Python's `socket`) and closes it without
+sending anything. It used to run `nc -z` (openbsd-netcat) for that, which
+needed a package for what the standard library does, and told less: see below.
 
 **It is a probe of *this* machine's path to a host, not a scan.** One address,
 one port, one connection, and nothing is sent down it. It is the same shape as
 `ping_host` and `scan_network` is deliberately not: this opens exactly the one
 socket the person asked about.
 
-**Measured here, and the contract is not what the exit code alone suggests:**
-
-    open   -> rc=0, stderr "Connection to 127.0.0.1 54005 port [tcp/*] succeeded!"
-    closed -> **rc=1, and stderr is EMPTY**
-
-A closed port says nothing on stderr at all, so "connection refused" - the
-phrase that tells a person the host is *up* and the *port* is the problem -
-would have to be invented. That distinction is the whole answer, so it comes
-from a **TCP connect to the closed port**, not from the status:
+**Why the connect is ours, measured with `nc -z`:** a closed port gave
+rc=1 and an EMPTY stderr, the same rc as a timeout - so "connection refused",
+the phrase that tells a person the host is *up* and the *port* is the
+problem, was not in its output at all. The connect's own error says it:
 
 - **refused** - something is there and said no. The host is up, the port is
   not listening. This is a different fault from a host that is off.
@@ -30,29 +26,20 @@ from a **TCP connect to the closed port**, not from the status:
   is down.
 - **unreachable / no route** - no network path at all.
 
-`socket` supplies those three words and `nc` supplies the connection, because
-`nc` alone cannot tell a refused connection from a routed-but-silent one: both
-are rc=1.
 """
 
 from __future__ import annotations
 
-import shutil
 import socket
-import subprocess
 
-from shani_chronoa import files
 from shani_chronoa.skills import Skill
 
-_TIMEOUT = 15
 
 
 def _why_closed(host: str, port: int) -> str:
     """A refused/timeout/unreachable verdict, from a real connect.
 
-    `nc -z` reports rc=1 and **no message at all** for a closed port, measured
-    on this machine - so the reason has to come from a connection this module
-    makes itself.
+    "" when it connected: the port is open.
     """
     try:
         with socket.create_connection((host, port), timeout=5):
@@ -82,34 +69,22 @@ def _run(arguments: dict) -> str:
     if not 1 <= port <= 65535:
         return f"{port} is not a port a machine can listen on (1-65535)."
 
-    if shutil.which("nc") is None:
-        return files.tool_missing("nc", "check whether that port is reachable")
-
     # Name resolution first: an unresolvable name is a different answer from an
-    # unreachable host, and nc's rc cannot tell them apart.
+    # unreachable host.
     try:
         address = socket.gethostbyname(host)
     except socket.gaierror as exc:
         return (f"I cannot find the address for {host} ({exc.strerror or exc}). "
                 "That is a name problem, not a port problem.")
 
-    try:
-        proc = subprocess.run(
-            ["nc", "-z", "-w", "5", host, str(port)],
-            capture_output=True, text=True, timeout=_TIMEOUT, check=False)
-    except subprocess.TimeoutExpired:
-        return (f"Checking {host}:{port} took longer than {_TIMEOUT}s, so "
-                "nothing can be said about it.")
-    except OSError as exc:
-        return f"I could not run the check: {exc}."
-
-    if proc.returncode == 0:
+    # One connection of our own: it is both the check and its reason (nc,
+    # which this used to run, said nothing at all for a closed port - and
+    # needed a package for what the standard library does).
+    reason = _why_closed(host, port)
+    if not reason:
         return (f"{host} ({address}) is accepting connections on port {port}. "
                 "Something is listening there.")
 
-    # **rc=1 with empty stderr is a closed port, measured** - and the reason
-    # has to come from a connection of our own, because nc says nothing.
-    reason = _why_closed(host, port)
     answer = f"{host} ({address}) did NOT accept a connection on port {port}: {reason}."
     if "refused" in reason:
         answer += ("\n\nThat is usually the good news: the host is up and the "

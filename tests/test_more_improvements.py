@@ -62,8 +62,8 @@ def test_open_application_falls_back_to_the_desktop_search(monkeypatch):
             return self.id_
     rhythm = Info("Rhythmbox", "org.gnome.Rhythmbox3.desktop")
     monkeypatch.setattr(oa.Gio.AppInfo, "get_all", staticmethod(lambda: [Info("Files", "org.gnome.Nautilus.desktop")]))
-    monkeypatch.setattr(oa.Gio.DesktopAppInfo, "search", staticmethod(lambda q: [["org.gnome.Rhythmbox3.desktop"]]))
-    monkeypatch.setattr(oa.Gio.DesktopAppInfo, "new", staticmethod(lambda i: rhythm))
+    monkeypatch.setattr(oa.DesktopAppInfo, "search", staticmethod(lambda q: [["org.gnome.Rhythmbox3.desktop"]]))
+    monkeypatch.setattr(oa.DesktopAppInfo, "new", staticmethod(lambda i: rhythm))
     assert oa.find_app("files").get_display_name() == "Files"
     assert oa.find_app("music player") is rhythm
     assert oa._alive(os.getpid()) and not oa._alive(2 ** 22 + 7)
@@ -72,11 +72,11 @@ def test_open_application_falls_back_to_the_desktop_search(monkeypatch):
 def test_an_app_that_dies_at_once_is_not_reported_as_opened(monkeypatch):
     from shani_chronoa.skills import open_application as oa
 
-    class Info(oa.Gio.DesktopAppInfo):
+    class Info(oa.DesktopAppInfo):
         pass
     fake = SimpleNamespace(get_display_name=lambda: "Broken")
     monkeypatch.setattr(oa, "find_app", lambda name: fake)
-    monkeypatch.setattr(oa.Gio, "DesktopAppInfo", type(fake))  # isinstance(...) -> True for the fake
+    monkeypatch.setattr(oa, "DesktopAppInfo", type(fake))  # isinstance(...) -> True for the fake
     fake.launch_uris_as_manager_with_fds = lambda *a: (a[5](None, 999_999_999), True)[1]
     monkeypatch.setattr(oa, "ALIVE_SECONDS", 0.01)
     assert "exited straight away" in oa._run({"name": "broken"})

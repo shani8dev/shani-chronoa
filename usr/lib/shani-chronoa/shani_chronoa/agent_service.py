@@ -54,6 +54,51 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+#: What every Write is told before its instruction. The answer is pasted back
+#: where the text was, so anything around it - a preamble, quotes, a note on
+#: what changed - would land in someone's email.
+WRITE_SYSTEM = (
+    "You change text as asked. Reply with only the resulting text: no preamble, "
+    "no explanation, no quotes or code fences around it. Keep the language of the "
+    "text unless asked to translate, and keep names, numbers and links exactly.")
+#: Where FindFiles looks: the folders a person keeps their own things in
+#: (XDG's, else the usual names), the ones that exist.
+def find_roots():
+    import os
+    import pathlib
+    home = pathlib.Path.home()
+    out = []
+    for var, name in (("XDG_DOCUMENTS_DIR", "Documents"), ("XDG_DOWNLOAD_DIR", "Downloads"), ("XDG_DESKTOP_DIR", "Desktop")):
+        p = pathlib.Path(os.environ.get(var) or home / name)
+        if p.is_dir() and p not in out:
+            out.append(p)
+    return out
+
+
+#: How old the file index may be before a FindFiles brings it up to date (in the background).
+FIND_REINDEX_SECONDS = 600.0
+#: The longest text one Write takes (a selection or a message, never a book).
+WRITE_MAX_CHARS = 12000
+#: How long a Write waits for the model before saying it did not finish.
+WRITE_TIMEOUT_SECONDS = 180.0
+
+
+def clean_written(reply: str) -> str:
+    """The text a Write returns: without a thinking block, fences or wrapping quotes."""
+    out = str(reply or "")
+    if "</think>" in out:
+        out = out.split("</think>")[-1]
+    out = out.strip()
+    if out.startswith("```") and out.endswith("```") and out.count("```") == 2:
+        out = out[3:-3]
+        out = out.split("\n", 1)[1] if "\n" in out and not out.split("\n", 1)[0].strip().count(" ") else out
+        out = out.strip()
+    for a, b in (('"', '"'), ("“", "”"), ("'", "'")):
+        if len(out) > 1 and out.startswith(a) and out.endswith(b) and out.count(a) == 1 + (a == b):
+            out = out[1:-1].strip()
+    return out
+
+
 #: How much of a tool's result travels over the bus. The result is for the
 #: pill under the question, not for replaying the turn: a file read can be a
 #: megabyte, and a D-Bus signal is not a file transfer.
@@ -249,6 +294,102 @@ class AgentService:
             return
         entry[1](decision)
         invocation.return_value(GLib.Variant("(b)", (True,)))
+
+    # -- Write: text in, text out, with no tools and no conversation ----
+
+    def Write(self, connection, sender, path, interface, method, params,
+              invocation) -> None:
+        """Transform a piece of text the way `instruction` says, and return it.
+
+        The shell's writing tools (proofread, rewrite, shorter, ...), its smart
+        replies and its file naming all come here. **Not a turn:** a turn picks
+        context, may call tools and lands in the conversation, all wrong for
+        "proofread this sentence" - so this is the model and nothing else,
+        with the same model choice (local first) the turns make. Runs off the
+        main loop (`export` dispatches every method that way), so waiting for
+        the model blocks no one.
+        """
+        instruction, text = (str(v or "") for v in params.unpack())
+        if not instruction.strip():
+            invocation.return_dbus_error(
+                "org.freedesktop.DBus.Error.InvalidArgs", "Write needs an instruction")
+            return
+        llm = getattr(self._app, "llm", None)
+        if llm is None:
+            invocation.return_dbus_error(
+                "dev.shani.chronoa.Error.NoModel", "Chronoa has no model to write with yet")
+            return
+        messages = [
+            {"role": "system", "content": WRITE_SYSTEM},
+            {"role": "user", "content": instruction.strip() + "\n\n<text>\n" + text[:WRITE_MAX_CHARS] + "\n</text>"},
+        ]
+        logger.info("write: %r on %d characters", instruction[:60], len(text))
+        try:
+            # chat_message: what every client has (the local one has no chat())
+            message = self._app._async.run(llm.chat_message(messages)).result(timeout=WRITE_TIMEOUT_SECONDS)
+            reply = message.get("content", "") if isinstance(message, dict) else str(message or "")
+        except Exception as exc:  # noqa: BLE001 - the caller is told, in words
+            invocation.return_dbus_error(
+                "dev.shani.chronoa.Error.WriteFailed", f"{type(exc).__name__}: {exc}")
+            return
+        invocation.return_value(GLib.Variant("(s)", (clean_written(reply),)))
+
+    # -- FindFiles: the person's files by meaning (file_index) --------
+
+    def FindFiles(self, connection, sender, path, interface, method, params,
+                  invocation) -> None:
+        """`{"how", "hits": [{path, kind, size, excerpt}], "indexing"}` as JSON.
+
+        The shell's launcher asks this for "the electricity bill from March":
+        file_index's own search over the folders a person keeps things in
+        (FIND_ROOTS), by meaning when the embedding model answers and by
+        keyword when it does not - and `how` says which, as the skill does. An
+        index older than FIND_REINDEX_SECONDS is brought up to date in the
+        background (incremental: unchanged files are not re-read), so the
+        search answers now from what is there and better next time.
+        """
+        query, limit = params.unpack()
+        query = str(query or "").strip()
+        limit = min(max(int(limit or 8), 1), 25)
+        if len(query) < 3:
+            invocation.return_value(GLib.Variant("(s)", (json.dumps({"how": "", "hits": [], "indexing": False}),)))
+            return
+        from shani_chronoa import file_index
+        hits, how = [], ""
+        for root in find_roots():
+            try:
+                got, how = file_index.search(root, query, limit=limit, embed=True)
+            except Exception as exc:  # noqa: BLE001 - one folder's trouble is not the search's
+                logger.info("find files in %s: %s", root, exc)
+                continue
+            hits.extend(dict(h, root=str(root)) for h in got)
+        indexing = self._reindex_if_stale()
+        out = {"how": how, "hits": hits[:limit], "indexing": indexing}
+        invocation.return_value(GLib.Variant("(s)", (json.dumps(out),)))
+
+    # None, never 0.0: time.monotonic() counts from boot, so for the first ten minutes
+    # after a boot 0.0 looked fresh and the index was never built (measured: 350 s)
+    _last_index = None
+    _index_lock = threading.Lock()
+
+    def _reindex_if_stale(self) -> bool:
+        import time
+        last = AgentService._last_index
+        if (last is not None and time.monotonic() - last < FIND_REINDEX_SECONDS) or not AgentService._index_lock.acquire(blocking=False):
+            return False
+        AgentService._last_index = time.monotonic()
+
+        def run():
+            from shani_chronoa import file_index
+            try:
+                for root in find_roots():
+                    file_index.index_directory(root, embed=True)
+            except Exception:  # noqa: BLE001 - logged; the next search tries again
+                logger.exception("indexing for FindFiles")
+            finally:
+                AgentService._index_lock.release()
+        threading.Thread(target=run, name="find-files-index", daemon=True).start()
+        return True
 
     def _on_done(self, turn_id: str, result) -> None:
         if isinstance(result, Exception):

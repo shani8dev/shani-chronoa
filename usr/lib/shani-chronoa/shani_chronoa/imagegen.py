@@ -272,16 +272,16 @@ def edit(image_png: bytes, width: int, height: int, prompt: str, strength: float
 
 
 def pictures_dir() -> Path:
-    """XDG_PICTURES_DIR/Chronoa, else ~/Pictures/Chronoa."""
-    import shutil
-    import subprocess
+    """XDG_PICTURES_DIR/Chronoa, else ~/Pictures/Chronoa.
+
+    GLib reads user-dirs.dirs itself (what `xdg-user-dir` did, without
+    needing xdg-user-dirs for one lookup)."""
     base = ""
-    if shutil.which("xdg-user-dir"):
-        try:
-            base = subprocess.run(["xdg-user-dir", "PICTURES"], capture_output=True, text=True,
-                                  timeout=5, check=False).stdout.strip()
-        except (OSError, subprocess.TimeoutExpired):
-            base = ""
+    try:
+        from gi.repository import GLib
+        base = GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_PICTURES) or ""
+    except (ImportError, AttributeError):
+        base = ""
     home = Path.home()
     folder = Path(base) if base and Path(base) != home else home / "Pictures"
     return folder / "Chronoa"

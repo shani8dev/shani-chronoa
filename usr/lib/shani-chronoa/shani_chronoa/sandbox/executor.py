@@ -125,7 +125,7 @@ def _landlock_abi() -> int:
 DANGEROUS_BINARIES = ("mkfs", "dd", "shutdown", "reboot", "mount", "umount")
 
 #: Launchers that return immediately instead of waiting for the program.
-_BACKGROUND_PROGRAMS = ("gtk-launch", "xdg-open")
+_BACKGROUND_PROGRAMS = ("gtk-launch", "gio", "xdg-open")
 
 #: Chronoa's own management tools, which an isolated sandbox may not reach.
 #: Named once because guard 3 and guard 6 both apply it and the two must not

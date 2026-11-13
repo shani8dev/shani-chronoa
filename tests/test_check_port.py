@@ -13,8 +13,9 @@ questions anyone asks a machine that holds a service.
 So the phrase that tells a person the most - *connection refused*, meaning the
 host is **up** and the **port** is the problem - is not in `nc`'s output at
 all, and `rc` alone cannot distinguish "refused" from "timed out" because both
-are 1. The verdict therefore comes from a connection the skill makes itself,
-and `nc` supplies only the success case.
+are 1. The verdict therefore comes from a connection the skill makes itself -
+and since 2026-11-13 that connection is the whole check: `nc` is not run, and
+openbsd-netcat is no longer needed for it.
 
 **It is a probe of this machine's path to one host, not a scan.** One address,
 one port, one connection, nothing sent down it.
@@ -33,10 +34,6 @@ import pytest
 
 _REPO = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
-
-_NC = shutil.which("nc")
-if not _NC:
-    pytestmark = pytest.mark.skipif(True, reason="nc is not installed here, so the real check-port paths cannot run")
 
 from shani_chronoa.skills import check_port as CP  # noqa: E402
 
@@ -60,7 +57,7 @@ def _accept_once(server):
 
 
 def test_an_open_port_is_reported_as_listening(tmp_path, monkeypatch, listener):
-    """The real `nc` against a real listening socket, not a stub."""
+    """A real connection to a real listening socket, not a stub."""
     out = CP._run({"host": "127.0.0.1", "port": listener})
     assert "accepting connections" in out
     assert str(listener) in out
@@ -111,22 +108,23 @@ def test_a_timeout_is_not_reported_as_a_refusal(tmp_path, monkeypatch):
     assert "refused" not in out
 
 
-def test_it_opens_exactly_one_connection_and_sends_nothing(tmp_path, monkeypatch):
-    """One host, one port, one connection. A scan is a different skill and a
-    different consent question.
+def test_it_opens_exactly_one_connection_and_runs_nothing(tmp_path, monkeypatch):
+    """One host, one port, one connection, and no program started for it.
+    A scan is a different skill and a different consent question.
     """
     calls = []
 
-    def record(command, *a, **k):
-        calls.append(command)
-        return subprocess.CompletedProcess(command, 1, "", "")
+    def record(address, *a, **k):
+        calls.append(address)
+        raise ConnectionRefusedError()
 
-    monkeypatch.setattr(CP.subprocess, "run", record)
+    def no_program(*a, **k):
+        raise AssertionError("check_port started a program")
+
+    monkeypatch.setattr(CP.socket, "create_connection", record)
+    monkeypatch.setattr(subprocess, "run", no_program)
     CP._run({"host": "127.0.0.1", "port": 9})
-    assert len(calls) == 1, calls
-    argv = calls[0]
-    assert argv[:2] == ["nc", "-z"]
-    assert argv[-2:] == ["127.0.0.1", "9"]
+    assert calls == [("127.0.0.1", 9)]
 
 
 def test_a_port_out_of_range_is_refused(tmp_path):
@@ -146,24 +144,10 @@ def test_missing_arguments_ask_for_both(tmp_path):
     assert CP._run({"host": "127.0.0.1"}).count("host and a port") == 1
 
 
-def test_a_missing_nc_names_the_package(tmp_path, monkeypatch):
-    monkeypatch.setattr(CP.shutil, "which", lambda name: None)
-    out = CP._run({"host": "127.0.0.1", "port": 9})
-    assert "nc" in out
-
-
-def test_a_hung_nc_is_not_a_closed_port(tmp_path, monkeypatch):
-    """A check that ran out of time has said nothing about the port, and
-    reporting it as closed would be the confident-wrong shape.
-    """
-
-    def boom(*a, **k):
-        raise subprocess.TimeoutExpired("nc", 15)
-
-    monkeypatch.setattr(CP.subprocess, "run", boom)
-    out = CP._run({"host": "127.0.0.1", "port": 9})
-    assert "longer than" in out
-    assert "closed" not in out.lower()
+def test_it_works_without_netcat(tmp_path, monkeypatch, listener):
+    """No program on PATH at all, and the answer is the same."""
+    monkeypatch.setenv("PATH", "")
+    assert "accepting connections" in CP._run({"host": "127.0.0.1", "port": listener})
 
 
 def _closed_port() -> int:

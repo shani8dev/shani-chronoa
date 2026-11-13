@@ -8,6 +8,19 @@ import gi
 gi.require_version('Gio', '2.0')
 from gi.repository import Gio, GLib  # type: ignore
 
+
+def _desktop_app_info():
+    """GLib 2.86 moved DesktopAppInfo to GioUnix; Gio's is the deprecated alias."""
+    try:
+        gi.require_version("GioUnix", "2.0")
+        from gi.repository import GioUnix  # type: ignore
+        return GioUnix.DesktopAppInfo
+    except (ValueError, ImportError):
+        return Gio.DesktopAppInfo
+
+
+DesktopAppInfo = _desktop_app_info()
+
 from shani_chronoa.skills import Skill
 
 _SCHEMA = {
@@ -51,9 +64,9 @@ def find_app(name: str):
         return best
     # "music player", "browser", "text editor": the desktop's own ranked search
     # over names, GenericName, Keywords and Categories - what the app grid uses.
-    for group in Gio.DesktopAppInfo.search(name) or []:
+    for group in DesktopAppInfo.search(name) or []:
         for desktop_id in group:
-            info = Gio.DesktopAppInfo.new(desktop_id)
+            info = DesktopAppInfo.new(desktop_id)
             if info is not None and info.should_show():
                 return info
     return None
@@ -78,7 +91,8 @@ def _launch_outside(desktop_id: str) -> str:
     address-space cap among them), and a process it starts inherits them:
     measured 2026-10-15, GNOME Calculator launched from here died at once.
     GNOME Shell (through Chronoa's extension) launches it as the app grid
-    would; elsewhere the user's systemd starts it with `gtk-launch`.
+    would; elsewhere the user's systemd starts it with `gio launch` (glib2,
+    always there - `gtk-launch` needed all of GTK 3 for this one job).
     """
     if not desktop_id:
         return ""
@@ -92,9 +106,13 @@ def _launch_outside(desktop_id: str) -> str:
         pass
     import shutil
     import subprocess
-    if shutil.which("systemd-run") and shutil.which("gtk-launch"):
-        done = subprocess.run(["systemd-run", "--user", "--collect", "--quiet", "gtk-launch",
-                               desktop_id.removesuffix(".desktop")],
+    try:
+        info = DesktopAppInfo.new(desktop_id if desktop_id.endswith(".desktop") else desktop_id + ".desktop")
+        path = info.get_filename() if info else None
+    except (ImportError, TypeError):
+        path = None
+    if path and shutil.which("systemd-run") and shutil.which("gio"):
+        done = subprocess.run(["systemd-run", "--user", "--collect", "--quiet", "gio", "launch", path],
                               capture_output=True, text=True, timeout=20)
         if done.returncode == 0:
             return "the session (systemd)"
@@ -159,7 +177,7 @@ def _run(arguments: dict) -> str:
         return (f"Asked {how} to open {label}, but no window of it appeared within "
                 f"{WINDOW_WAIT_SECONDS:.0f}s - do not type into it until list_windows shows it.")
     try:
-        if isinstance(best, Gio.DesktopAppInfo):
+        if isinstance(best, DesktopAppInfo):
             # **Its output to /dev/null, not into this answer.** Launched as
             # our child, the app inherited the skill's stdout: measured
             # 2026-10-15, open_application's reply was GNOME Calculator's

@@ -62,6 +62,16 @@ XML = f"""<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 
       <arg name="decision" type="s" direction="in"/>
       <arg name="ok" type="b" direction="out"/>
     </method>
+    <method name="Write">
+      <arg name="instruction" type="s" direction="in"/>
+      <arg name="text" type="s" direction="in"/>
+      <arg name="result" type="s" direction="out"/>
+    </method>
+    <method name="FindFiles">
+      <arg name="query" type="s" direction="in"/>
+      <arg name="limit" type="i" direction="in"/>
+      <arg name="json" type="s" direction="out"/>
+    </method>
     <signal name="Event">
       <arg name="json" type="s"/>
     </signal>
