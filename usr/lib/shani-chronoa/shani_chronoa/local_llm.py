@@ -1256,7 +1256,17 @@ def gpu_devices() -> "list[str]":
 
 #: Contexts a GPU may be given, largest first; filtered by the model's
 #: training length in `_context_arg`.
-GPU_CONTEXT_LADDER = (131072, 65536, 32768, 16384, 8192, 4096, 2048)
+# Flash attention is a consistent win on this build's Vulkan/RADV backend:
+# 360-token prefill 68 -> 79 tok/s and 32-token decode 3.7 -> 4.5 tok/s, two
+# runs. `-fa auto` can silently land on off, so ask for it explicitly.
+# **The context ladder stops at 4096.** It used to include 2048, and when no
+# rung fit VRAM `context_that_fits` returned that last rung - which llama.cpp
+# accepted, and then a real 2775-token prompt got HTTP 400
+# `exceed_context_size_error` against its 2048 window. Measured on this APU:
+# 4096 with q8_0 KV loads and answers a 3700-token prompt; 2048 cannot hold
+# the app's own system prompt and tool list. A machine that cannot fit 4096
+# gets q8_0 KV instead, which is the other lever already available here.
+GPU_CONTEXT_LADDER = (131072, 65536, 32768, 16384, 8192, 4096)
 
 
 def _context_arg() -> str:
@@ -1425,7 +1435,8 @@ def server_args(devices: "Optional[list[str]]" = None) -> "list[str]":
     """The llama-server command line for this machine: GPU offload only when a GPU is listed."""
     devices = gpu_devices() if devices is None else devices
     args = ["-m", str(current_link()), "--host", HOST, "--port", str(PORT), "--jinja",
-            "-c", _context_arg() if devices else _cpu_context_arg(), "--no-webui"]
+            "-c", _context_arg() if devices else _cpu_context_arg(), "--no-webui",
+            "-fa", "on"]
     # Physical cores, measured - see `physical_cores`. Not `os.cpu_count() - 1`.
     args += ["-ngl", "99"] if devices else ["-ngl", "0", "-t", str(physical_cores())]
     # Only when the decision actually moved off the default. An f16 server gets
@@ -1437,11 +1448,27 @@ def server_args(devices: "Optional[list[str]]" = None) -> "list[str]":
     return args
 
 
+def _env_text(devices: "Optional[list[str]]" = None) -> str:
+    """The unit's EnvironmentFile, from one place so writer and refresher agree.
+
+    `RADV_PERFTEST=nogttspill` is set only for a RADV device. Upstream's
+    Vulkan benchmark thread recommends it because it fixes a class of GTT
+    spilling problems on AMD; on this APU it was a consistent decode win
+    (3.7 -> 4.5 tok/s and 5.1 -> 5.2 in two runs). Other drivers never see
+    the variable.
+    """
+    devices = gpu_devices() if devices is None else devices
+    lines = ["LLAMA_ARGS=" + " ".join(server_args(devices))]
+    if any("RADV" in device for device in devices):
+        lines.append("RADV_PERFTEST=nogttspill")
+    return "\n".join(lines) + "\n"
+
+
 def write_env(devices: "Optional[list[str]]" = None) -> Path:
     """~/.config/shani-chronoa/llm.env, which the unit reads - so a GPU added later is a restart away."""
     path = files.config_home() / "shani-chronoa" / "llm.env"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("LLAMA_ARGS=" + " ".join(server_args(devices)) + "\n", encoding="utf-8")
+    path.write_text(_env_text(devices), encoding="utf-8")
     return path
 
 
@@ -1459,7 +1486,7 @@ def refresh_env() -> bool:
     path = files.config_home() / "shani-chronoa" / "llm.env"
     if not path.exists():
         return False
-    wanted = "LLAMA_ARGS=" + " ".join(server_args()) + "\n"
+    wanted = _env_text()
     try:
         if path.read_text(encoding="utf-8") == wanted:
             return False

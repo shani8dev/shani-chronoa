@@ -47,6 +47,7 @@ class TestItIsASense:
 
     def test_it_names_its_consent_key(self):
         from shani_chronoa.config import _SENSE_CONSENT_KEYS
+
         assert _SENSE_CONSENT_KEYS.get("idle") == "idle-sense-enabled"
 
 
@@ -60,28 +61,54 @@ class TestZeroMeansSomeoneIsThere:
         success return. If a future change adds a fallback, it has to be added
         below this line, which is the point.
         """
-        source = (_REPO / "usr" / "lib" / "shani-chronoa" / "shani_chronoa"
-                  / "senses" / "idle.py").read_text()
+        source = (
+            _REPO
+            / "usr"
+            / "lib"
+            / "shani-chronoa"
+            / "shani_chronoa"
+            / "senses"
+            / "idle.py"
+        ).read_text()
         body = source.split("def read_idle_seconds()", 1)[1].split("\ndef ", 1)[0]
-        returns = [line.strip() for line in body.splitlines()
-                   if line.strip().startswith("return")]
+        returns = [
+            line.strip()
+            for line in body.splitlines()
+            if line.strip().startswith("return")
+        ]
         assert returns == ["return info.contents.idle / 1000.0"], (
             f"read_idle_seconds has a return other than the real reading: {returns}"
         )
 
     def test_no_display_is_unknown_not_zero(self, monkeypatch):
         monkeypatch.delenv("DISPLAY", raising=False)
+        monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
         with pytest.raises(I._Unavailable):
             I.read_idle_seconds()
+
+    def test_a_wayland_session_reports_unknown_without_calling_x11(self, monkeypatch):
+        """On Wayland the X Screen Saver extension is absent, so asking XWayland
+        only makes Xlib print 'MIT-SCREEN-SAVER missing' on every poll. Report
+        unknown and never load the X11 libraries."""
+        monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-1")
+        monkeypatch.setenv("DISPLAY", ":0")
+        called = []
+        monkeypatch.setattr(I, "_libraries", lambda: called.append(1) or (None, None))
+        with pytest.raises(I._Unavailable):
+            I.read_idle_seconds()
+        assert not called, "the X11 libraries were loaded on a Wayland session"
 
     def test_a_missing_extension_library_is_unknown(self, monkeypatch):
         real = ctypes.util.find_library
-        monkeypatch.setattr(ctypes.util, "find_library",
-                            lambda n: None if n == "Xss" else real(n))
+        monkeypatch.setattr(
+            ctypes.util, "find_library", lambda n: None if n == "Xss" else real(n)
+        )
         with pytest.raises(I._Unavailable):
             I.read_idle_seconds()
 
-    def test_the_message_never_claims_someone_is_present_when_unreadable(self, monkeypatch):
+    def test_the_message_never_claims_someone_is_present_when_unreadable(
+        self, monkeypatch
+    ):
         monkeypatch.delenv("DISPLAY", raising=False)
         out = I._run({}).lower()
         assert "not reading" in out
@@ -154,10 +181,12 @@ def _idle_clock_readable() -> bool:
 _IDLE_CLOCK_READABLE = _idle_clock_readable()
 
 
-@pytest.mark.skipif(not _IDLE_CLOCK_READABLE,
-                    reason="the X server here does not offer MIT-SCREEN-SAVER, "
-                           "so idle.read_idle_seconds() raises _Unavailable and "
-                           "there is no real clock to measure")
+@pytest.mark.skipif(
+    not _IDLE_CLOCK_READABLE,
+    reason="the X server here does not offer MIT-SCREEN-SAVER, "
+    "so idle.read_idle_seconds() raises _Unavailable and "
+    "there is no real clock to measure",
+)
 class TestAgainstTheRealClock:
     def test_it_reads_a_plausible_idle_time(self):
         seconds = I.read_idle_seconds()
@@ -185,6 +214,7 @@ def _config(allowed: bool):
 
         def sense_allowed_reason(self, name):
             return "" if allowed else "the idle sense is turned off"
+
     return _C
 
 
@@ -253,6 +283,10 @@ class TestTheXResourcesAreReleased:
 
     def _wire(self, monkeypatch, **kwargs):
         lib = self._FakeLib(**kwargs)
+        # Simulate an X11 session: on this (Wayland) box WAYLAND_DISPLAY is set,
+        # which makes read_idle_seconds report unknown before any X call. Unset
+        # it so these X-path tests exercise the mocked X11 route.
+        monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
         monkeypatch.setenv("DISPLAY", ":0")
         monkeypatch.setattr(I, "_libraries", lambda: (lib, self._FakeXss(lib)))
         return lib
@@ -294,19 +328,23 @@ class TestTheXResourcesAreReleased:
         # error - it is a silent wrong-typed call, which is how the missing
         # release went unnoticed until the descriptors were counted.
         import ctypes
+
         x11, _ = I._libraries()
         assert x11.XCloseDisplay.restype is ctypes.c_int
         assert x11.XFree.restype is ctypes.c_int
         assert x11.XCloseDisplay.argtypes == [ctypes.c_void_p]
         assert x11.XFree.argtypes == [ctypes.c_void_p]
 
-    @pytest.mark.skipif(not _IDLE_CLOCK_READABLE,
-                        reason="the X server here does not offer MIT-SCREEN-SAVER, "
-                               "so there is no real clock whose descriptors could leak")
+    @pytest.mark.skipif(
+        not _IDLE_CLOCK_READABLE,
+        reason="the X server here does not offer MIT-SCREEN-SAVER, "
+        "so there is no real clock whose descriptors could leak",
+    )
     def test_the_real_read_leaks_no_descriptors(self, monkeypatch):
         # The unit test above proves the calls are made. This proves the calls
         # are what actually release the connection, which a mock cannot.
         import os
+
         I.read_idle_seconds()  # warm any cached library handle
         before = len(os.listdir("/proc/self/fd"))
         for _ in range(120):
@@ -314,4 +352,5 @@ class TestTheXResourcesAreReleased:
         after = len(os.listdir("/proc/self/fd"))
         assert after == before, (
             f"descriptors went {before} -> {after} over 120 reads; the display "
-            f"is still being held open")
+            f"is still being held open"
+        )

@@ -264,21 +264,40 @@ def test_the_assistant_sets_the_level_before_every_call():
 # --- the control beside "Answers with" -------------------------------------------
 
 def test_the_menu_offers_every_level_and_each_row_targets_its_own():
-    """Read off the built menu, as `test_answer_control_is_beside_send` does:
-    a row that renders the right word and fires the wrong target looks fine."""
+    """Read off the built answer popover, the way a person opens it.
+
+    Thinking used to be its own `Gio.Menu` button; it is now a section of the
+    one answer control, so the question is asked of the check rows the popover
+    actually builds. A row that renders the right word and fires the wrong
+    target still looks fine, so the *targets* are asserted.
+    """
     gi = pytest.importorskip("gi")
     gi.require_version("Gtk", "4.0")
     gi.require_version("Adw", "1")
+    from gi.repository import Adw, Gtk
+    Adw.init()
+    from shani_chronoa.gui import model_picker
     from shani_chronoa.gui.window import ChronoaWindow
 
-    class _Shell:
-        _THINKING_WORDS = ChronoaWindow._THINKING_WORDS
+    levels = tuple(
+        (level, ChronoaWindow._THINKING_WORDS[level],
+         ChronoaWindow._THINKING_HINTS[level])
+        for level in cloud_llm.THINKING_LEVELS)
+    picker = model_picker.ModelPicker(
+        None, after=(("How it works it out", "thinking", levels),))
 
-    button = ChronoaWindow._thinking_button(_Shell())
-    model = button.get_menu_model()
-    levels = model.get_item_link(0, "section")
-    assert model.get_item_attribute_value(0, "label", None).get_string() == "How hard it thinks"
-    rows = [(levels.get_item_attribute_value(i, "action", None).get_string(),
-             levels.get_item_attribute_value(i, "target", None).get_string())
-            for i in range(levels.get_n_items())]
+    def descendants(widget):
+        out = []
+        child = widget.get_first_child()
+        while child is not None:
+            out.append(child)
+            out.extend(descendants(child))
+            child = child.get_next_sibling()
+        return out
+
+    rows = [
+        (w.get_action_name(), w.get_action_target_value().get_string())
+        for w in descendants(picker)
+        if isinstance(w, Gtk.CheckButton) and w.get_action_name() == "app.thinking"
+    ]
     assert rows == [("app.thinking", level) for level in cloud_llm.THINKING_LEVELS], rows

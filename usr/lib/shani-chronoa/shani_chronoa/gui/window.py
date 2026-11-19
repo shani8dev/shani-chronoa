@@ -1388,107 +1388,90 @@ class _ModeStrip(Gtk.Box):
 class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMixin,
                     Adw.ApplicationWindow):
 
+    #: Short explanations for the thinking levels, in the answer popover.
+    _THINKING_HINTS = {
+        "off": "Answer straight away - the fastest reply.",
+        "low": "A little thinking before the reply.",
+        "medium": "A moderate amount of thinking before the reply.",
+        "high": "Think longer before the reply.",
+        "xhigh": "Think at extra-high effort before the reply.",
+        "max": "Use the model's whole thinking budget.",
+    }
+
     def _model_row(self) -> Gtk.Widget:
+        """The one answer control: which model, how it thinks, how it replies.
 
-
-
-        """The model picker, on its own row under the composer.
-
-        **A popover of `Adw.ActionRow`s, not a `Gio.Menu` of names.** A menu of
-        names answers one question - what are the choices - and cannot say which
-        is installed, which is answering, or which the quality gate would refuse.
-        All three are things a person wants *before* clicking, and the tier list
-        plus `local_llm.use()` already know all three. See `gui/model_picker.py`.
-
-        **Rebuilt every time the row is shown**, so a model downloaded while the
-        window is open is a new choice rather than a restart.
+        Three questions about the *same* answer used to be three chips packed
+        beside the input methods and Send. At the width the app opens at that
+        row was full, so two of them could only be reached from the palette.
+        One button answers all three, and the popover keeps the detail a menu
+        cannot hold: which model is installed, which is answering, and which
+        the quality gate refuses.
         """
+        from shani_chronoa.cloud_llm import THINKING_LEVELS
         from shani_chronoa.gui import model_picker
 
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        # **`composer-model-row` was applied here and styled by nothing** -
-        # not this package's stylesheet, not GTK, not libadwaita (all three
-        # checked by asking). Removed rather than given a rule, because what
-        # the row should look like is a design decision and inventing one here
-        # would be a second answer to a question nobody has asked yet.
-        # `tests/test_the_chrome_carries_nothing_that_does_nothing.py` fails
-        # if a class with no rule comes back.
         row.set_margin_top(2)
         row.set_margin_bottom(2)
         row.set_margin_start(4)
 
         button = Gtk.MenuButton()
         button.add_css_class("flat")
-        button.set_tooltip_text(
-            "Which model answers. Switching loads it and restarts the local "
-            "server, so the next reply uses it")
-        # Where answers may come from, and whether the model stays in memory,
-        # ride in the same popover: both are about the engine the lists choose,
-        # and both were chips of their own on the strip.
+        button.set_tooltip_text("How Chronoa answers")
+        thinking = tuple(
+            (level, self._THINKING_WORDS[level], self._THINKING_HINTS[level])
+            for level in THINKING_LEVELS)
         button.set_popover(model_picker.ModelPicker(
             self._app,
             before=(("Where it answers", "answer-egress", _ModeStrip._EGRESS),),
-            after=(("Model in memory", "answer-presence", self._PRESENCE_WORDS),)))
+            after=(("Model in memory", "answer-presence", self._PRESENCE_WORDS),
+                   ("How it works it out", "thinking", thinking),
+                   ("How it replies", "reply-style", _ModeStrip._STYLES)),
+            toggles=(("Speak replies aloud", "speak-replies",
+                      "Speak each reply out loud. Press to silence replies "
+                      "without silencing timers."),)))
         # **Held, not inlined.** The palette fetches a provider's list into the
         # cache this picker reads, and an inline popover would keep showing the
-        # rows it drew before the answer arrived until the next reopen. The
-        # handle is what lets a fetch refresh it - and it is also the only
-        # thing that makes "the picker and the palette cannot disagree" a
-        # property rather than a hope.
+        # rows it drew before the answer arrived until the next reopen.
         self._model_picker = button.get_popover()
         button.update_property(
             [Gtk.AccessibleProperty.LABEL],
-            ["Which model answers. Choose a locally installed model."])
+            ["How Chronoa answers: model, thinking, replies"])
 
         lead = Gtk.Image.new_from_icon_name("object-select-symbolic")
         lead.add_css_class("dim-label")
         lead.set_pixel_size(14)
-        label = Gtk.Label(label="Answers with")
-        label.add_css_class("dim-label")
-        label.add_css_class("caption")
-        self._model_picker_caption = label
+        caption = Gtk.Label(label="Answers with")
+        caption.add_css_class("dim-label")
+        caption.add_css_class("caption")
+        self._model_picker_caption = caption
         which = Gtk.Label(label=self._model_word())
         which.add_css_class("caption")
-        # A model name is the one word here with no fixed length, so it is the
-        # one allowed to give way: ellipsised, the toolbar's minimum stays
-        # small enough for the 380px window floor.
         which.set_ellipsize(Pango.EllipsizeMode.END)
         which.set_max_width_chars(22)
+        dot = Gtk.Label(label=" · ")
+        dot.add_css_class("dim-label")
+        dot.add_css_class("caption")
+        think = Gtk.Label(label="")
+        think.add_css_class("caption")
+        think.set_ellipsize(Pango.EllipsizeMode.END)
+        # Two values in one control: which model, and how hard it is working.
+        self._thinking_picker_word = think
 
         inside = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         inside.append(lead)
-        inside.append(label)
+        inside.append(caption)
         inside.append(which)
+        inside.append(dot)
+        inside.append(think)
         button.set_child(inside)
         self._model_picker_button = button
         self._model_picker_word = which
         self._model_picker_lead = lead
         row.append(button)
-        row.append(self._thinking_button())
-        row.append(self._speak_toggle())
         self._refresh_model_word()
         return row
-
-    def _speak_toggle(self) -> Gtk.ToggleButton:
-        """Speak replies aloud, or not - one press, in the window.
-
-        Bound to the stateful `app.speak-replies`, so it shows the setting and
-        cannot disagree with it. Before this the only way to silence replies
-        was Settings → Voice, on a switch that also silenced timers.
-        """
-        button = Gtk.ToggleButton(action_name="app.speak-replies")
-        button.add_css_class("flat")
-
-        def show(*_a) -> None:
-            on = button.get_active()
-            button.set_icon_name("audio-volume-high-symbolic" if on
-                                 else "audio-volume-muted-symbolic")
-            tip = "Replies are spoken - press to stop" if on else "Replies are not spoken - press to speak them"
-            button.set_tooltip_text(tip)
-            button.update_property([Gtk.AccessibleProperty.LABEL], [tip])
-        button.connect("notify::active", show)
-        show()
-        return button
 
     #: `_ModeStrip._PRESENCE` with words for a model menu. The strip's
     #: "Here / Drowsy / Asleep" describe Chronoa; inside "Model in memory"
@@ -1505,39 +1488,6 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
     _THINKING_WORDS = {"off": "Off", "low": "Low", "medium": "Medium",
                        "high": "High", "xhigh": "Extra high", "max": "Max"}
 
-    def _thinking_button(self) -> Gtk.MenuButton:
-        """How hard the model thinks, beside the model it applies to.
-
-        **Beside "Answers with" because it is a property of that answer** - the
-        same engine, asked the same turn. Bound to the stateful `app.thinking`
-        action, so GTK draws the current level as the selected radio and the
-        menu cannot disagree with the setting.
-        """
-        from shani_chronoa.cloud_llm import THINKING_LEVELS
-
-        button = Gtk.MenuButton()
-        button.add_css_class("flat")
-        label = Gtk.Label()
-        label.add_css_class("caption")
-        button.set_child(label)
-        menu = Gio.Menu()
-        levels = Gio.Menu()
-        for level in THINKING_LEVELS:
-            levels.append(self._THINKING_WORDS[level], f"app.thinking::{level}")
-        menu.append_section("How hard it thinks", levels)
-        # **The reply style lives here too**: thinking is how much work goes
-        # into the answer, the style how much of it is written out, and both
-        # are set per question. It used to share a button beside Send with plan
-        # mode, which is about acting rather than answering.
-        styles = Gio.Menu()
-        for key, word, _line, _icon in _ModeStrip._STYLES:
-            styles.append(word, f"app.reply-style::{key}")
-        menu.append_section("How it replies", styles)
-        button.set_menu_model(menu)
-        self._thinking_picker_button = button
-        self._thinking_picker_word = label
-        return button
-
     def _thinking_word(self) -> str:
         from shani_chronoa.cloud_llm import thinking_level
         try:
@@ -1547,9 +1497,13 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         return level
 
     def _refresh_thinking_word(self) -> None:
-        """Redraw the level, and say what it means for the engine answering now."""
+        """Redraw the thinking word inside the one answer button.
+
+        One button, one tooltip: all five questions it answers are stated
+        together rather than across controls that can drift.
+        """
         label = getattr(self, "_thinking_picker_word", None)
-        button = getattr(self, "_thinking_picker_button", None)
+        button = getattr(self, "_model_picker_button", None)
         if label is None or button is None:
             return
         level = self._thinking_word()
@@ -1563,22 +1517,22 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             except Exception:                           # noqa: BLE001
                 style = "ordinary"
         style_word = next((r[1] for r in _ModeStrip._STYLES if r[0] == style), "")
-        # The style is named only when it departs from ordinary, the same
-        # "quiet" rule every chip follows.
         suffix = "" if style == "ordinary" else f" · {style_word}"
         label.set_label((f"Think: {word}" if compact else f"Thinking: {word}") + suffix)
-        if level == "off":
-            what = "It answers without thinking first - the fastest choice."
-        elif self._answering_kind() == "cloud":
-            what = ("The cloud provider is asked for this effort. One that "
-                    "cannot is asked at High, then without thinking.")
-        else:
-            what = ("A local model has no levels, so this turns its thinking "
-                    "on. On a CPU that is most of the wait.")
-        button.set_tooltip_text(f"Thinking: {word}. {what} Replies: {style_word or 'Ordinary'}.")
+        where = self._egress_row()
+        spoken = self._config.get_bool("speak-replies", False) \
+            if hasattr(self._config, "get_bool") else False
+        button.set_tooltip_text(
+            "How Chronoa answers: %s%s. Thinking: %s. Replies: %s. %s. "
+            "Click to change any of them." % (
+                self._model_word(),
+                "" if where is None else " - " + where[1],
+                word,
+                style_word or "Ordinary",
+                "Replies are spoken" if spoken else "Replies are not spoken"))
         button.update_property(
             [Gtk.AccessibleProperty.LABEL],
-            [f"How hard it thinks before answering, currently {word}"])
+            ["How Chronoa answers: model, thinking, replies"])
 
     def _refresh_model_word(self) -> None:
         """Redraw the chosen model's name under the composer.
@@ -1607,19 +1561,14 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # the word, or the row says one thing in a symbol and another in a
         # label - the two-widgets-that-disagree failure this file records more
         # than any other.
-        button = getattr(self, "_model_picker_button", None)
-        if button is not None:
-            where = self._egress_row()
-            lead = getattr(self, "_model_picker_lead", None)
-            if lead is not None and where is not None and len(where) > 3 and where[3]:
-                # **The icon says where answers go**, so "Nothing leaves" is
-                # still visible at a glance now that its chip is gone.
-                lead.set_from_icon_name(where[3])
-            button.set_tooltip_text(
-                "Answers with %s%s. Click to change the model, where answers "
-                "come from, or whether the model stays in memory" % (
-                    self._model_word(),
-                    "" if where is None else " - " + where[1]))
+        where = self._egress_row()
+        lead = getattr(self, "_model_picker_lead", None)
+        if lead is not None and where is not None and len(where) > 3 and where[3]:
+            # The icon says where answers go, so "Nothing leaves" stays
+            # visible now that its chip is gone.
+            lead.set_from_icon_name(where[3])
+        # The tooltip is composed in `_refresh_thinking_word`, called at the
+        # top of this method: one sentence for all five answers.
 
     def _egress_row(self):
         """The `_EGRESS` row in force, or None when the strip cannot say."""
@@ -1912,6 +1861,16 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         away. Each part reads one existing source and hides itself when it has
         nothing to say, so a fresh install sees quick actions and little else.
         """
+        # **Not on a narrow window.** Measured at the 380px minimum: the
+        # prompt (18) + hints (37) + chips (194) already fill the ~130px
+        # transcript viewport, and this board adds 267px below them - so a
+        # newcomer saw half a chip row and had to scroll an empty transcript
+        # to reach the suggestions. Its contents (Today, recent conversations,
+        # quick actions) are all reachable from the header and the palette at
+        # this width; the chips are not. Wide windows keep the board exactly
+        # as before.
+        if getattr(self, "_narrow_applied", False):
+            return None
         app = getattr(self, "_app", None)
         board = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14,
                         margin_top=18, halign=Gtk.Align.FILL)
@@ -2689,6 +2648,17 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # have failed either".
         composer.set_child(self._input_entry)
         composer.add_overlay(self._input_placeholder)
+        # **The arrow lives in the field, at the end of the line.** Claude's
+        # composer puts Send inside the box; here it used to be the last button
+        # of the toolbar row, where it read as a third way to put something in
+        # beside attach and dictate. The field is one act: type, then press the
+        # arrow at its right end.
+        self._input_entry.set_margin_end(46)
+        self._send_button.set_halign(Gtk.Align.END)
+        self._send_button.set_valign(Gtk.Align.END)
+        self._send_button.set_margin_end(6)
+        self._send_button.set_margin_bottom(6)
+        composer.add_overlay(self._send_button)
         # **The text field is the card's first line, and this row its second.**
         # See `composer_card` below: the field, the model it goes to, how hard
         # that model thinks and Send are one act - writing a message - so they
@@ -2698,10 +2668,13 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # **"Answers with" rides here, beside the attachment button**, because
         # the question it answers is asked at the moment of typing. It used to
         # be a row of its own between the conversation and the strips.
-        input_row.append(self._model_row())
+        # Input methods on the left, how Chronoa answers on the right - the
+        # same reading as the model/effort/thinking readouts under Claude's
+        # field, without mixing them with attach and dictate.
         toolbar_gap = Gtk.Box()
         toolbar_gap.set_hexpand(True)
         input_row.append(toolbar_gap)
+        input_row.append(self._model_row())
         input_row.append(self._stop_button)
         # **Stopping the turn, which the button above does not do.** That one is
         # `app.stop-speaking` - it stops the *voice* after the answer is made,
@@ -2744,7 +2717,6 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         input_row.append(self._undo_button)
         self._refresh_undo_button()
 
-        input_row.append(self._send_button)
 
         # **The model picker, under the composer.** Below the field and beside
         # it rather than on the mode strip, because "which model answers" is
@@ -2956,6 +2928,13 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
                 self._set_panels_visible(False)
             elif self._split.get_collapsed():
                 self._split.set_collapsed(False)
+            # The empty state's home board is gated on this flag, but it is
+            # built once in __init__ - before the first width notification -
+            # so without a rebuild a narrow window kept the wide board and a
+            # wide window that had started narrow never got it back.
+            transcript = getattr(self, "_transcript", None)
+            if transcript is not None and transcript.is_empty():
+                transcript.show_placeholder()
             self._fold_header(narrow)
         self._sync_sidebar_toggle()
 
@@ -5011,7 +4990,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             "answer-ambient": getattr(strip, "_permissions_chip", None),
             "answer-presence": model,
             "hands-free": getattr(strip, "_hands_chip", None),
-            "reply-style": getattr(self, "_thinking_picker_button", None),
+            "reply-style": getattr(self, "_model_picker_button", None),
         }.get(action_name)
         if chip is not None and hasattr(chip, "popup"):
             self._open_chip_dropdown(chip)

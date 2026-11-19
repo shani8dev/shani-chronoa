@@ -208,11 +208,14 @@ def test_undo_and_the_turn_stop_remain_reachable_by_mouse():
     worth pinning rather than assuming.
     """
     src = _src()
-    for name in ("_turn_stop_button", "_undo_button", "_send_button",
-                 "_attach_button"):
+    for name in ("_turn_stop_button", "_undo_button", "_attach_button"):
         assert f"input_row.append(self.{name})" in src, (
             f"{name} is no longer in the composer row, so the Overlay "
             f"reflow changed where the controls sit")
+    # Send is the one exception: it belongs inside the field now, at the end
+    # of the line, the way the message box reads as one thing.
+    assert "composer.add_overlay(self._send_button)" in src, (
+        "the send arrow is back in the toolbar, beside the input methods")
 
 
 def test_this_files_controls_can_fail():

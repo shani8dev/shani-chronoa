@@ -369,7 +369,9 @@ class AmbientScheduler:
             self._reflexes = ReflexRunner()
         else:
             self._reflexes = reflex_layer
-        self._senses: dict[str, Sense] = dict(senses if senses is not None else discover_senses())
+        self._senses: dict[str, Sense] = dict(
+            senses if senses is not None else discover_senses()
+        )
         self._store = store if store is not None else PerceptStore()
         self._config_factory = config_factory
         self._arguments: dict[str, dict] = {
@@ -414,8 +416,10 @@ class AmbientScheduler:
         self._event_engine = event_engine
         self._event_seconds = max(0.0, float(event_poll_seconds))
         self._last_event_poll = (
-            (now - self._event_seconds) if poll_immediately else now
-        ) if event_engine is not None else now
+            ((now - self._event_seconds) if poll_immediately else now)
+            if event_engine is not None
+            else now
+        )
         self._event_results: "deque[object]" = deque(maxlen=_RESULT_HISTORY)
         self._event_failures = 0
         self.event_polls = 0
@@ -499,14 +503,18 @@ class AmbientScheduler:
         """
         sense = self._senses.get(name)
         if sense is None:
-            return PollResult(name, False, None, "no sense module is registered under that name")
+            return PollResult(
+                name, False, None, "no sense module is registered under that name"
+            )
 
         refusal = self._refusals.get(name)
         if refusal is not None:
             return PollResult(name, False, None, refusal)
 
         if not sense.is_ambient():
-            return PollResult(name, False, None, "reactive only (poll_interval is None)")
+            return PollResult(
+                name, False, None, "reactive only (poll_interval is None)"
+            )
 
         config = self._config_factory()
         if not config.sense_allowed(name):
@@ -533,9 +541,13 @@ class AmbientScheduler:
             # `:g`, not `:.0f`: a 0.5s budget would print "timed out after 0s",
             # which is a number that reads as a rounding error rather than the
             # bound the sense was actually given.
-            return PollResult(name, False, None,
-                              f"timed out after {exc.seconds:g}s; the result was "
-                              f"dropped, not waited for")
+            return PollResult(
+                name,
+                False,
+                None,
+                f"timed out after {exc.seconds:g}s; the result was "
+                f"dropped, not waited for",
+            )
         except Exception as exc:  # noqa: BLE001 - an unattended loop must survive
             self._note_failure(name, exc)
             return PollResult(name, False, None, f"{type(exc).__name__}: {exc}")
@@ -544,10 +556,17 @@ class AmbientScheduler:
         # wraps it with this sense's declared shape, and the reactive CLI
         # (`cmd_run`) stores it the same way, so both modes file a refusal
         # string identically rather than one mode quietly diverging.
-        percept = result if isinstance(result, Percept) else sense.to_percept(str(result))
+        percept = (
+            result if isinstance(result, Percept) else sense.to_percept(str(result))
+        )
 
         if not isinstance(percept, Percept):
-            return PollResult(name, False, None, f"run() returned {type(result).__name__}, not text or a Percept")
+            return PollResult(
+                name,
+                False,
+                None,
+                f"run() returned {type(result).__name__}, not text or a Percept",
+            )
 
         # Last gate before disk. The registry check above catches a sense that
         # *declares* a durable lifetime; this catches one that *returns* one.
@@ -613,6 +632,7 @@ class AmbientScheduler:
         # the lock-HOLDER refuse to poll, so the engine never ran at all and
         # `seconds_until_next_due()` stayed at 0.0. Six tests caught that. The
         # question is about acquiring, not about possession.
+
     def _poll_event_rules(self, now: float) -> "list[object]":
         """Re-read every armed event rule's signal, and dispatch what fired.
 
@@ -636,12 +656,21 @@ class AmbientScheduler:
         """
         if self._event_engine is None:
             return []
-        from shani_chronoa import runner_lock
-        if not runner_lock.holds():
-            return []
+        # Advance the event-poll clock BEFORE the runner-lock gate. The lock is
+        # held by whichever process runs the trigger engine (the daemon, when it
+        # is up), so `holds()` is False here on every tick - and returning before
+        # the stamp left `_last_event_poll` permanently stale. `seconds_until_
+        # next_due()` still counts the event interval down, so after 15s it
+        # returned 0 and the loop spun at `max(0.001, 0)` = 1000 Hz (measured:
+        # ~690 voluntary context switches a second). Stamping first makes the
+        # countdown mean what it says: one wake-up per interval, not per ms.
         if now - self._last_event_poll < self._event_seconds:
             return []
         self._last_event_poll = time.monotonic()
+        from shani_chronoa import runner_lock
+
+        if not runner_lock.holds():
+            return []
         try:
             # `poll()` reads the signals and runs the anti-noise layers;
             # `run_due()` dispatches the debounced runs whose delay elapsed,
@@ -678,7 +707,9 @@ class AmbientScheduler:
         current = time.monotonic() if now is None else now
         results: list[PollResult] = []
         for position, (name, sense) in enumerate(self.ambient_senses().items()):
-            if current - self._last_poll.get(name, current) < (sense.poll_interval or 0.0):
+            if current - self._last_poll.get(name, current) < (
+                sense.poll_interval or 0.0
+            ):
                 continue
             # A stop cancels the senses *after* the one in hand; it must not
             # cancel the first. `break` on any stop meant a caller that started
@@ -714,7 +745,11 @@ class AmbientScheduler:
         """
         current = time.monotonic() if now is None else now
         remaining = [
-            max(0.0, (sense.poll_interval or 0.0) - (current - self._last_poll.get(name, current)))
+            max(
+                0.0,
+                (sense.poll_interval or 0.0)
+                - (current - self._last_poll.get(name, current)),
+            )
             for name, sense in self.ambient_senses().items()
         ]
         if self._event_engine is not None:
@@ -809,13 +844,15 @@ class AmbientScheduler:
         try:
             self._reflexes.consolidate()
         except Exception as exc:  # noqa: BLE001 - the tick must survive
-            logger.debug("consolidation failed and was skipped: %s: %s",
-                         type(exc).__name__, exc)
+            logger.debug(
+                "consolidation failed and was skipped: %s: %s", type(exc).__name__, exc
+            )
         try:
             urges = self._reflexes.due()
         except Exception as exc:  # noqa: BLE001 - the tick must survive
-            logger.debug("reflex layer failed and said nothing: %s: %s",
-                         type(exc).__name__, exc)
+            logger.debug(
+                "reflex layer failed and said nothing: %s: %s", type(exc).__name__, exc
+            )
             return []
         if urges:
             try:
@@ -881,9 +918,9 @@ class AmbientScheduler:
                 "interval_seconds": self._event_seconds,
                 "polls": self.event_polls,
                 "fired": self.event_fired,
-                "rules": sorted(
-                    r.name for r in self._event_engine.store().all()
-                ) if self._event_engine is not None else [],
+                "rules": sorted(r.name for r in self._event_engine.store().all())
+                if self._event_engine is not None
+                else [],
             },
             "polls": polls,
             "deposited": deposited,

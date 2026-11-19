@@ -108,8 +108,28 @@ def test_it_is_its_own_switch_not_the_timers_one():
     assert app.config.notification_enabled is True, "muting replies silenced timers too"
 
 
-def test_the_window_toggle_is_bound_to_the_action():
-    from shani_chronoa.gui import window as window_mod
-    source = pathlib.Path(window_mod.__file__).read_text()
-    assert 'Gtk.ToggleButton(action_name="app.speak-replies")' in source
-    assert "row.append(self._speak_toggle())" in source
+def test_the_answer_popover_toggle_is_bound_to_the_action():
+    """Muting lives in the one answer button, not a chip beside the mic.
+
+    Build the popover the way the window builds it and ask the widget, rather
+    than reading the source for a helper that no longer exists.
+    """
+    from shani_chronoa.gui import model_picker
+
+    picker = model_picker.ModelPicker(
+        None, toggles=(("Speak replies aloud", "speak-replies", "tip"),))
+
+    def descendants(widget):
+        out = []
+        child = widget.get_first_child()
+        while child is not None:
+            out.append(child)
+            out.extend(descendants(child))
+            child = child.get_next_sibling()
+        return out
+
+    # `get_children()` is GTK 3; walking with `get_first_child()` is the only
+    # route on this build.
+    checks = [w for w in descendants(picker) if isinstance(w, Gtk.CheckButton)
+              and w.get_action_name() == "app.speak-replies"]
+    assert len(checks) == 1, [w.get_label() for w in checks]

@@ -43,12 +43,19 @@ KIND = "machine-state"
 SENSITIVITY = SENSITIVITY_PUBLIC
 _TTL_SECONDS = 300.0
 _POLL_INTERVAL = 300.0
-_TIMEOUT = 20
+_TIMEOUT = 8
+# `firewall-cmd --state` calls firewalld's `info` method, which hangs
+# indefinitely on some firewalld/dbus-python/Python combinations (measured:
+# firewalld 2.5.2 on Python 3.14.9 with dbus-python 1.5.1 - `--get-default-zone`
+# answers in milliseconds while `--state` never replies). A status check must
+# not cost the whole poll budget, so this call gets its own short timeout.
+_FIREWALLD_TIMEOUT = 3
 
 
-def _run_cmd(argv, env=None):
+def _run_cmd(argv, env=None, timeout=None):
     """This module's seam over `subproc.run` (tests replace it), with the module's timeout."""
-    return subproc.run(argv, timeout=_TIMEOUT, env=env)
+    return subproc.run(argv, timeout=timeout or _TIMEOUT, env=env)
+
 
 _SCHEMA = {
     "type": "function",
@@ -71,26 +78,55 @@ def ufw_state() -> Optional[dict]:
     proc = _run_cmd(["ufw", "status"])
     if proc is None or proc.returncode != 0:
         # ufw needs root even to report. Say so rather than "no firewall".
-        return {"present": True, "active": None,
-                "detail": "ufw is installed but its status needs root, so its "
-                          "state is UNKNOWN from an unprivileged account"}
+        return {
+            "present": True,
+            "active": None,
+            "detail": "ufw is installed but its status needs root, so its "
+            "state is UNKNOWN from an unprivileged account",
+        }
     text = proc.stdout
     active = "Status: active" in text
-    return {"present": True, "active": active,
-            "detail": text.strip().splitlines()[0] if text.strip() else ""}
+    return {
+        "present": True,
+        "active": active,
+        "detail": text.strip().splitlines()[0] if text.strip() else "",
+    }
 
 
 def firewalld_state() -> Optional[dict]:
     if shutil.which("firewall-cmd") is None:
         return None
-    proc = _run_cmd(["firewall-cmd", "--state"])
-    if proc is None or proc.returncode != 0:
-        return {"present": True, "active": None,
-                "detail": "firewalld is installed but --state needs root, so its "
-                          "state is UNKNOWN from an unprivileged account"}
-    running = "running" in proc.stdout
-    return {"present": True, "active": running,
-            "detail": proc.stdout.strip()}
+    # Use the read-only --get-default-zone (the `info` polkit action, which is
+    # passwordless for an active session) rather than --state. On firewalld
+    # 2.5.2 --state calls the `config` (write) method, which polkit gates
+    # behind AUTH_SELF - a password prompt for a status read (measured: it
+    # hangs on the auth while --get-default-zone answers instantly). A default
+    # zone means the daemon is running.
+    zone = _run_cmd(["firewall-cmd", "--get-default-zone"], timeout=_FIREWALLD_TIMEOUT)
+    if zone is not None and zone.returncode == 0 and zone.stdout.strip():
+        return {
+            "present": True,
+            "active": True,
+            "detail": f"running (default zone {zone.stdout.strip()})",
+        }
+    # --get-default-zone failed: firewalld is not running, or it needs root.
+    # --state only runs here, where the daemon is down, so it answers without
+    # a prompt ("not running" is rc 0).
+    proc = _run_cmd(["firewall-cmd", "--state"], timeout=_FIREWALLD_TIMEOUT)
+    if proc is not None and proc.returncode == 0:
+        # Exact match: `"running" in "not running"` is True.
+        running = proc.stdout.strip() == "running"
+        return {
+            "present": True,
+            "active": running,
+            "detail": proc.stdout.strip() or "not running",
+        }
+    return {
+        "present": True,
+        "active": None,
+        "detail": "firewalld is installed but its state could not be read "
+        "(--get-default-zone and --state both failed)",
+    }
 
 
 def nftables_default() -> Optional[str]:
@@ -142,20 +178,29 @@ def _run(arguments: dict) -> Union[str, Percept]:
     unknown_any = False
 
     if ufw is not None:
-        state = ("active" if ufw["active"] else
-                 "installed but INACTIVE" if ufw["active"] is False else
-                 "state UNKNOWN")
-        lines.append(f"  ufw: {state}"
-                     + (f" ({ufw['detail']})" if ufw["detail"] else ""))
+        state = (
+            "active"
+            if ufw["active"]
+            else "installed but INACTIVE"
+            if ufw["active"] is False
+            else "state UNKNOWN"
+        )
+        lines.append(
+            f"  ufw: {state}" + (f" ({ufw['detail']})" if ufw["detail"] else "")
+        )
         active_any = active_any or ufw["active"] is True
         unknown_any = unknown_any or ufw["active"] is None
     else:
         lines.append("  ufw: not installed")
 
     if fwd is not None:
-        state = ("running" if fwd["active"] else
-                 "installed but NOT running" if fwd["active"] is False else
-                 "state UNKNOWN")
+        state = (
+            "running"
+            if fwd["active"]
+            else "installed but NOT running"
+            if fwd["active"] is False
+            else "state UNKNOWN"
+        )
         lines.append(f"  firewalld: {state}")
         active_any = active_any or fwd["active"] is True
         unknown_any = unknown_any or fwd["active"] is None
@@ -163,27 +208,43 @@ def _run(arguments: dict) -> Union[str, Percept]:
         lines.append("  firewalld: not installed")
 
     if nft is not None:
-        lines.append(f"  nftables base chain policy: {nft}"
-                     + ("" if nft in ("drop", "reject") else
-                        "  <- a base policy of accept filters nothing by default"))
+        lines.append(
+            f"  nftables base chain policy: {nft}"
+            + (
+                ""
+                if nft in ("drop", "reject")
+                else "  <- a base policy of accept filters nothing by default"
+            )
+        )
     if ipt is not None:
-        lines.append(f"  iptables INPUT policy: {ipt}"
-                     + ("" if ipt in ("DROP", "REJECT") else
-                        "  <- a default ACCEPT permits everything not explicitly listed"))
+        lines.append(
+            f"  iptables INPUT policy: {ipt}"
+            + (
+                ""
+                if ipt in ("DROP", "REJECT")
+                else "  <- a default ACCEPT permits everything not explicitly listed"
+            )
+        )
 
     if active_any:
         verdict = "A firewall is active."
     elif unknown_any:
-        verdict = ("Whether a firewall is enforcing is UNKNOWN - a tool is "
-                   "installed but its state could not be read without root.")
+        verdict = (
+            "Whether a firewall is enforcing is UNKNOWN - a tool is "
+            "installed but its state could not be read without root."
+        )
     else:
-        verdict = ("No firewall is active. Every backend is either absent or "
-                   "inactive, so this machine is not filtering incoming traffic "
-                   "itself.")
+        verdict = (
+            "No firewall is active. Every backend is either absent or "
+            "inactive, so this machine is not filtering incoming traffic "
+            "itself."
+        )
 
-    verdict += ("\nNote: being behind a router's NAT is not protection. It "
-                "blocks unsolicited inbound connections from the internet and "
-                "does nothing about other machines on the same network.")
+    verdict += (
+        "\nNote: being behind a router's NAT is not protection. It "
+        "blocks unsolicited inbound connections from the internet and "
+        "does nothing about other machines on the same network."
+    )
     verdict += "\n" + "\n".join(lines)
 
     return _SENSE.to_percept(

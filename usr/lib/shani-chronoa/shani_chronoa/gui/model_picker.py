@@ -330,17 +330,18 @@ class ModelPicker(Gtk.Popover):
     repository's most-recorded defect wearing a docstring as a disguise.
     """
 
-    def __init__(self, app, before=(), after=()) -> None:
+    def __init__(self, app, before=(), after=(), toggles=()) -> None:
         """`before`/`after`: `(heading, action, rows)` choice sections drawn
-        above and below the model lists - where answers may come from, and
-        whether the model is kept in memory, which are about the same engine
-        the lists choose and used to be two chips of their own."""
+        above and below the model lists. `toggles`: `(label, action, tip)`
+        for independent on/off answers that belong to the same question -
+        speaking a reply aloud is part of *how* it answers."""
         super().__init__()
         self.add_css_class("model-picker")
         self.set_size_request(260, -1)
         self._app = app
         self._before = tuple(before)
         self._after = tuple(after)
+        self._toggles = tuple(toggles)
         self.rebuild()
         # **On `show`, not on construction.** The list is ten HTTP requests, so
         # a picker that fetched when it was built would freeze the window at
@@ -418,6 +419,16 @@ class ModelPicker(Gtk.Popover):
         box.append(cloud)
         for heading, action, rows in self._after:
             box.append(_choice_section(heading, action, rows))
+
+        if self._toggles:
+            box.append(_heading("Answer out loud"))
+            for label, action, tip in self._toggles:
+                check = Gtk.CheckButton(label=label)
+                check.set_action_name(f"app.{action}")
+                check.set_tooltip_text(tip)
+                check.set_margin_start(12)
+                check.set_margin_end(12)
+                box.append(check)
 
         scroller = Gtk.ScrolledWindow()
         # **The height is a ceiling, not a demand.** Below it the popover is

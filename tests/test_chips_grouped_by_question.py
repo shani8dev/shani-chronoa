@@ -144,9 +144,13 @@ def test_the_voice_chip_does_not_share_the_dictate_glyph(window):
 def test_the_composer_card_holds_the_field_and_the_toolbar(window):
     card = window._composer_card
     assert _is_inside(window._input_entry, card)
+    # One answer control beside Send, not three chips fighting the
+    # input methods for the width of the window it opens at.
     for name in ("_send_button", "_attach_button", "_dictate_button",
-                 "_model_picker_button", "_thinking_picker_button"):
+                 "_model_picker_button"):
         assert _is_inside(getattr(window, name), card), f"{name} left the composer card"
+    assert not hasattr(window, "_thinking_picker_button"), (
+        "a second answer chip came back beside the one answer control")
 
 
 def test_dictate_has_a_button_and_it_fires_dictate(window):
@@ -158,8 +162,12 @@ def test_the_model_popover_carries_where_it_answers_and_memory(window):
     checks = [w for w in _descendants(picker) if isinstance(w, Gtk.CheckButton)]
     by_action = {}
     for check in checks:
+        # A stateful boolean action (speak-replies) carries no target; the
+        # choice actions do. Reading a target off every check is how this
+        # test broke when the speak toggle joined the popover.
+        target = check.get_action_target_value()
         by_action.setdefault(check.get_action_name(), []).append(
-            check.get_action_target_value().get_string())
+            target.get_string() if target is not None else None)
     assert by_action.get("app.answer-egress") == [k for k, *_ in _ModeStrip._EGRESS]
     assert by_action.get("app.answer-presence") == [k for k, *_ in _ModeStrip._PRESENCE]
     # The menu's words are its own, but they must cover the strip's keys.
@@ -167,9 +175,28 @@ def test_the_model_popover_carries_where_it_answers_and_memory(window):
 
 
 def test_the_thinking_menu_carries_the_reply_style(window):
-    menu = _sections(window._thinking_picker_button)
-    assert [a for _l, a, _t in menu["How hard it thinks"]] == ["app.thinking"] * 6
-    assert [t for _l, _a, t in menu["How it replies"]] == [k for k, *_ in _ModeStrip._STYLES]
+    """Thinking, reply style and speaking are sections of the one popover.
+
+    They used to be a second `Gtk.MenuButton` with its own `Gio.Menu`, which is
+    why this test read `get_menu_model()`. The single control uses a popover
+    of bound check rows, so ask the widget the person actually opens, and
+    check the *targets* rather than the words alone.
+    """
+    from shani_chronoa.cloud_llm import THINKING_LEVELS
+
+    picker = window._model_picker_button.get_popover()
+    checks = [w for w in _descendants(picker) if isinstance(w, Gtk.CheckButton)]
+    by_action = {}
+    for check in checks:
+        by_action.setdefault(check.get_action_name(), []).append(
+            check.get_action_target_value())
+    assert [v.get_string() for v in by_action.get("app.thinking", ())] == \
+        list(THINKING_LEVELS)
+    assert [v.get_string() for v in by_action.get("app.reply-style", ())] == \
+        [k for k, *_ in _ModeStrip._STYLES]
+    # A boolean action carries no target, which is what makes this a toggle
+    # rather than one more mutually-exclusive answer.
+    assert by_action.get("app.speak-replies") == [None]
 
 
 def test_no_control_picks_a_model_except_the_answers_with_button(window):

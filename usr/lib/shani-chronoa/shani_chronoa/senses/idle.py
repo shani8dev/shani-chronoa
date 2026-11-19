@@ -102,7 +102,9 @@ def _libraries():
     xss.XScreenSaverAllocInfo.restype = ctypes.POINTER(_ScreenSaverInfo)
     xss.XScreenSaverAllocInfo.argtypes = []
     xss.XScreenSaverQueryInfo.argtypes = [
-        ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(_ScreenSaverInfo),
+        ctypes.c_void_p,
+        ctypes.c_ulong,
+        ctypes.POINTER(_ScreenSaverInfo),
     ]
     # These release the two resources `read_idle_seconds` acquires below, and
     # nothing else in the codebase calls either.
@@ -121,6 +123,15 @@ def read_idle_seconds() -> float:
     be read - see the module docstring for why that particular wrong answer is
     the dangerous one.
     """
+    # A Wayland session has no X Screen Saver extension - XWayland is not the
+    # display server, and asking it anyway makes Xlib print "MIT-SCREEN-SAVER
+    # missing" to stderr on every poll (measured: every 30s in the daemon log).
+    # Report unknown here rather than guessing, as the module docstring says.
+    if os.environ.get("WAYLAND_DISPLAY"):
+        raise _Unavailable(
+            "a Wayland session is running, so the X Screen Saver extension is "
+            "not available - the display sense reads idle time there"
+        )
     if not os.environ.get("DISPLAY"):
         raise _Unavailable(
             "no X display is available, so there is no idle clock to read"
@@ -134,9 +145,7 @@ def read_idle_seconds() -> float:
         root = x11.XDefaultRootWindow(display)
         info = xss.XScreenSaverAllocInfo()
         if not xss.XScreenSaverQueryInfo(display, root, info):
-            raise _Unavailable(
-                "the X server does not offer the Screen Saver extension"
-            )
+            raise _Unavailable("the X server does not offer the Screen Saver extension")
         return info.contents.idle / 1000.0
     except _Unavailable:
         raise

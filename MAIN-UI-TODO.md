@@ -617,9 +617,19 @@ Open, ranked:
   `tests/test_the_rule_builder_says_what_a_person_would_say.py` (9),
   `tools/mutations/rule_builder_json.py` (**5 mutations, 5 caught, 0
   survivors**).
-- [ ] **9n Developer: project folder on the Work chip** (scope Build, Editor,
-  Diff, file tools; branch + dirty count), and a Git panel over `git_write` /
-  `git_push` behind their consent keys.
+- [x] **9n Developer: project folder on the Work chip** (scope Build, Editor,
+  Diff, file tools; branch + dirty count) — **done 2026-10-20**, verified
+  2026-11-18: `_project_state_sentence` reads `git status --short --branch`
+  in one subprocess, the Work chip's menu has "See what changed" to the Diff
+  page, and `test_the_work_chip_says_which_project_it_is_on.py` passes 7/7.
+  **Still open, and split into its own item below**: a Git panel over
+  `git_write` / `git_push` behind their consent keys. No GUI surface
+  references those skills today.
+- [ ] **9n-4 A Git panel** over `git_write` / `git_push` behind their consent
+  keys (split from 9n, whose Work-chip half is done). Needs a decision about
+  which git actions a person reaches from the window — no GUI surface names
+  these skills today.
+
 - [x] **9n-1** Diff panel reads as code: monospace, one tight row per line,
   theme-coloured text on the tint; the per-line "select" button (stored,
   never read, never wired) removed. Tool cards show `…/dir/file`, not a
@@ -1276,4 +1286,75 @@ Phone & devices · Meetings · My files · Models · Privacy & permissions · He
   before it replaces the old one, and pointing the harness at the
   machine's real model directory is not free: AGENTS.md records that a
   capture which did that started real services from inside a capture.
+  **Re-checked 2026-11-18 with the broadway capture** (no gnome-shell on this
+  Plasma box): at the README's 1280x860 the compositor capped the shot at
+  1024x768, and the app in a scratch data home with no compiled schema fell
+  back to cloud — log: "Falling back to cloud LLM providers ... Prompts will
+  leave this machine", window: "No model is answering yet". **Neither the
+  size nor the local-engine claim holds, so docs/screenshots/main.png was not
+  replaced.** The old image is stale (six chips, a TIMERS rail card, "Memory")
+  but replacing it with this one would be worse.
+
 - [ ] **13c** Dialer redesign, car-infotainment style (asked 2026-10-14).
+
+## pytest verification (2026-11-18) — done, with a venv
+
+pytest 9.2.0 installed permanently in gitignored `cache/pytest-venv`
+(created `--system-site-packages` so `gi` stays importable; `numpy` and `gguf`
+added after two collection errors were traced to the venv, not the product).
+Run with `cache/pytest-venv/bin/python -m pytest ...`, or put that bin on
+`PATH` for `tools/run_tests_per_file.sh`.
+
+- 18 files touching the composer/answer control/context/APU flags: **240 passed,
+  6 skipped** in 60 s.
+- Two real test defects were fixed along the way: the model-popover test read
+  a target off the speak toggle (a boolean action has none), and the composer
+  test pinned the send arrow's old toolbar placement.
+- Sweeping all 746 files in one process is hours; a 400 s window covered 87
+  files. Four non-passes in it were triaged serially against HEAD in a
+  `git archive` snapshot: `test_adapter` was a missing `gguf`/`numpy` in the
+  venv (now 11 passed), and `test_adw_initialisation` (2 failed),
+  `test_browser_window_probe` (7 failed, 2 skipped) and
+  `test_a_refusal_records_what_was_actually_said` (27 passed, 4 errors, a
+  subprocess harness whose window never built) fail **identically at HEAD**.
+  None is attributable to this work.
+
+- Full serially-per-file sweep with that venv: **746 files, 12,750 passed**.
+  13 files had a non-pass line. Re-run serially and compared to a `git
+  archive HEAD` snapshot: every one fails identically at HEAD (GTK teardown
+  segfaults/aborts, `sox` absent, a subprocess harness whose window never
+  builds, the settings-window harness rendering no rows, and the two known
+  180s-cap timeouts). `test_no_unwired_public_helper.py` passes with a 600s
+  cap (30 passed in 297s). So **no failure is attributable to this work**.
+  Still unverified: the other ~90% was covered in this one sweep, not
+  repeated, so flaky environmental lines are possible.
+
+## Narrow empty state (2026-11-18) — home board below 720px only
+
+Measured at the app's 380px minimum: prompt (18) + hints (37) + suggestion
+chips (194) already fill the ~130px transcript viewport; the home board added
+267px below them, so a newcomer saw half a chip row and had to scroll an empty
+transcript to reach the suggestions. `_home_board()` now returns None when
+`_narrow_applied` is true, and `_apply_narrow_layout` rebuilds the empty
+placeholder on a width transition (the board was built once in `__init__`,
+before the first width notification, so a gate alone did nothing). Wide
+windows keep the board exactly as before. Verified by widget measurements at
+380 (3 rows, no board) and 760 (4 rows, board present), and by
+`tests/test_empty_state_fits_a_narrow_window.py` (3 passed). The one batch
+failure of `test_mode_strip.py::test_a_dropdown_in_a_real_window_activates_its_action`
+fails identically at HEAD in the same batch — order sensitivity, not this
+change.
+
+## Mutation-harness gates (2026-11-18)
+
+`tools/mutate.py --check-anchors` (run with `cache/pytest-venv/bin/python`):
+996 of 1001 anchors across 117 sets still match. The three rotted ones are in
+`senses/scheduler.py` (another session's file) and `assistant.py` — none in
+`window.py`, `model_picker.py` or `local_llm.py`, the source files this work
+changed. **`--check-witnesses`: 1315 witnesses across 117 sets, all resolve.**
+
+The first witness run was run with system `python3` (no pytest), so every
+`--collect-only` returned nothing and looked like stale names in
+`work_chip_project` and `wizard_mark`. The checker uses `sys.executable`:
+run both gates with the venv interpreter or collection silently fails and
+invents findings.

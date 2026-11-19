@@ -219,10 +219,10 @@ NOT_EXPOSED = {
                              "(gui/surfaces/sandbox.py)",
     "sandbox-command-low-priority": "the Limits group on the Sandbox panel "
                                     "(gui/surfaces/sandbox.py)",
-    "speak-replies": "the speaker toggle beside the microphone in the main "
-                     "window (gui/window.py `_speak_toggle`, `app.speak-replies`)",
-    "thinking": "the `app.thinking` menu in the mode strip, beside \"Answers "
-                "with\" (gui/window.py `_thinking_button`)",
+    "speak-replies": "Speak replies aloud in the one answer button beside "
+                     "Send (gui/window.py, `app.speak-replies`)",
+    "thinking": "How it works it out in the one answer button beside "
+                "Send (gui/window.py, `app.thinking`)",
     # **Where the answer comes from, chosen in the mode strip rather than here.**
     # `answer-mode` is a real GAction (`answer-mode`, a string state) and the
     # strip draws a menu button for it beside the reply-style chip, appending
