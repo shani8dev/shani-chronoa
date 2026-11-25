@@ -38,14 +38,16 @@ _SRC = _REPO / "usr" / "lib" / "shani-chronoa"
 #: coverage is the claim: if a post-condition is added elsewhere the coverage
 #: widens, and this test should be the thing that says so rather than the thing
 #: that quietly stops being true.
-COVERED = ["airplane_mode", "click_pointer", "close_window", "container",
+COVERED = ["airplane_mode", "click_pointer", "close_window",
            "control_service", "conversations", "default_apps", "delete_file",
-           "desktop_setting", "drag", "driver_build", "edit_file",
+           "desktop_setting", "drag", "edit_file",
            "find_and_replace", "git_branch", "git_commit", "git_push",
            "kill_process", "manage_mount", "manage_triggers",
            "move_pointer", "office_document", "power_action", "print_queue",
            "scroll", "set_hostname", "set_locale", "take_photo", "toggle_wifi",
-           "type_text", "vm"]
+           "type_text"]
+#: Three tools with post-conditions (container, driver_build, vm) moved to
+#: shani-sysadmin and are no longer in Chronoa's replayable set.
 #: Kept by hand, deliberately, because the whole point of this list is to be a
 #: **claim** about coverage rather than a re-derivation of it: if it were
 #: computed from the registry it would agree with the registry by construction

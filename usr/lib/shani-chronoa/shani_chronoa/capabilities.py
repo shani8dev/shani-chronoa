@@ -51,11 +51,9 @@ GATED: dict[str, str] = {
     # Driver development: scaffolding text is ungated (it creates files in the
     # user's own home, like write_text_file); *building* runs a toolchain over a
     # tree, which is a different act and gets its own key.
-    "driver_build": "driver-build-enabled",
     # Writing a device register can erase an EEPROM's calibration or drive a
     # power device into a state it cannot be talked out of. Reading one is not
     # gated - it is the same data class as reading a sysfs file.
-    "device_i2c": "i2c-write-enabled",
     "desktop_setting": "appearance-control-enabled",
     "airplane_mode": "radio-control-enabled",
     "phone": "phone-control-enabled",
@@ -99,15 +97,10 @@ GATED: dict[str, str] = {
     # network that already exists), while this one *creates* network interfaces
     # and needs the machine administrator's password to do it. Reading about a
     # network and being allowed to invent one are different agreements.
-    "lab_network_list": "network-provision-enabled",
-    "lab_network_create": "network-provision-enabled",
-    "lab_network_destroy": "network-provision-enabled",
-    "lab_network_status": "network-provision-enabled",
     # Packet capture is the only thing in the package that reads what is IN a
     # packet. Its own key, not `network-sense-enabled`: that one reads interface
     # counters, this one sees payloads, and on a machine with a browser open
     # that is a very different permission.
-    "capture_packets": "packet-capture-enabled",
     "control_service": "service-control-enabled",
     # `systemd-analyze verify` - the command that answers "why won't it start"
     # - is deliberately **not** here. It reads a configuration file, starts
@@ -169,13 +162,10 @@ GATED: dict[str, str] = {
     # btrfs compression saving: the same subject the filesystems sense reports
     # (mounts and real room), so it follows that sense's switch - measured on a
     # slot, compsize walks extents and reports the ratio.
-    "compression_savings": "filesystems-sense-enabled",
     # Disk activity follows the storage sense: the same subject that sense
     # reports, so it wears the same consent rather than opening a new switch.
     "disk_activity": "storage-sense-enabled",
     "security_status": "security-sense-enabled",
-    "list_containers": "containers-sense-enabled",
-    "boot_report": "boots-sense-enabled",
     "disk_health": "storage-sense-enabled",
     "temperatures": "hwmon-sense-enabled",
     "usb_devices": "usb-sense-enabled",
@@ -233,11 +223,9 @@ GATED: dict[str, str] = {
     # its own agreement, never the `containers-sense-enabled` read key that
     # `list_containers` follows. `machinectl` shares it because an nspawn
     # machine is the same thing with a boot.
-    "container": "container-control-enabled",
     # Driving a virtual machine: QEMU with a window on the desktop and QMP
     # on a socket, which is the same shape as `browse`'s window-plus-protocol.
     # Off by default, like every actuator that can run arbitrary code.
-    "vm": "vm-control-enabled",
     # Answering a sentence the overnight sleep pass noticed. Gated on the
     # memory sense's own key rather than a new one, because keeping a proposal
     # IS remembering something and a second switch for the same decision is the
@@ -415,7 +403,6 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # it sits with: capture_packets reads packets as they cross,
     # dissect_traffic says what they are, and interface_counters says how much
     # moved. One gate covers the first two.
-    "dissect_traffic": ("System", "Dissect traffic into protocol fields"),
     # Pre-existing strays: these three are complete skills with no _GROUPS
     # entry, so they fell through to OTHER and failed
     # test_no_builtin_skill_lands_in_the_other_group. Grouped here so the
@@ -553,12 +540,7 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # share one consent key, so a user cannot allow `vpc_status` - which only
     # reports reachability - while refusing `vpc_create`, which builds
     # interfaces and needs the machine administrator's password.
-    "lab_network_list": ("System", "List the lab networks built on this machine"),
-    "lab_network_create": ("System", "Build an isolated lab network with named subnets"),
-    "lab_network_destroy": ("System", "Remove a lab network this machine built"),
-    "lab_network_status": ("System", "Check what a lab network can actually reach"),
     "interface_counters": ("System", "How much traffic each interface has carried"),
-    "bridge_topology": ("System", "Which interfaces are bridges, and what is plugged into them"),
     "neighbour_table": ("System", "Which addresses on this link have answered, and which never have"),
     # The active counterpart to neighbour_table: that one reads the kernel's
     # passive cache and so only sees hosts that already talked to this machine.
@@ -571,7 +553,6 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # `trace_route` is.
     "dns_lookup": ("System", "Look a name up in DNS, or read its mail, name or certificate records"),
     "whois_lookup": ("System", "Look up who a domain or address is registered to"),
-    "capture_packets": ("System", "Watch the packets crossing an interface"),
     "ui_elements": ("Pointer and keyboard",
                    "Press buttons, fill fields and open menus in other apps, and drive them visible"),
     "android_device": ("Devices", "Battery, screenshot, apps and files of a phone connected with adb"),
@@ -636,12 +617,9 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "empty_directories": ("Files", "Which directories hold nothing at all"),
     # Read-only: lists matches with sizes and dates, deletes none.
     "files_by_name": ("Files", "Where every file with this name lives"),
-    "compression_savings": ("System", "How much space btrfs compression is saving"),
     "disk_activity": ("System", "How hard the disks are working right now"),
     # Read-only: `readelf` parses the file and never runs it, so it is ungated
     # by precedent with `get_file_info` and `explain_command`.
-    "inspect_binary": ("System", "What a program is, and what it needs to run"),
-    "binary_hardening": ("System", "Whether a program has the protections that make it safe to run"),
     # Not a duplicate of the `gpu` sense, which reports the *kernel* driver from
     # sysfs. This one answers whether OpenGL is actually hardware accelerated or
     # has fallen back to software - which only the renderer string says, and a
@@ -677,26 +655,14 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # rather than gated, so there is no switch that turns it on.
     "sync_folder": ("Files", "Sync two folders, showing what would change first"),
     "security_status": ("System", "Secure Boot, TPM and firewall status"),
-    "list_containers": ("Apps", "Distroboxes and containers"),
-    "list_vms": ("Apps", "Virtual machines"),
     # The actuator half of both siblings: the read skills list what exists,
     # these two start and drive it.
-    "container": ("Apps", "Run containers and nspawn machines"),
-    "vm": ("Apps", "Run and drive a virtual machine"),
-    "boot_report": ("System", "Why booting is slow, and whether it shut down cleanly"),
     "disk_health": ("Devices", "Drive health and disk encryption"),
     "temperatures": ("Devices", "Temperatures and fan speeds"),
     "usb_devices": ("Devices", "What is plugged in, and Thunderbolt docks"),
-    "driver_info": ("Devices", "Which driver each device uses"),
     # Driver work (2026-10-10). Beside driver_info because that answers "which
     # driver is bound right now" and these answer "can I write one, and how do I
     # talk to hardware without one".
-    "driver_status": ("Devices", "Whether this machine can build a kernel driver"),
-    "driver_scaffold": ("Devices", "Write an out-of-tree kernel module project"),
-    "driver_build": ("Devices", "Compile a kernel module with Kbuild"),
-    "device_probe": ("Devices", "User-space driver routes: I2C buses, video, FUSE"),
-    "device_i2c": ("Devices", "Read or write an I2C device register"),
-    "device_serial": ("Devices", "Read from or write to a serial device"),
     "list_fonts": ("Appearance", "Installed fonts, and which one is used"),
     "photo_metadata": ("Photos and video", "When, where and with what camera a photo was taken"),
     "crash_report": ("Services and logs", "What crashed recently"),
@@ -930,7 +896,7 @@ SENSE_TITLES = {
     "firewall": "Firewall", "git": "Git working tree", "gpu": "Graphics card",
     "hardware": "Hardware model", "heard-sound": "Sounds in the room",
     "hearing": "Hearing", "hwmon": "Fans and temperatures", "idle": "Idle time",
-    "kernel": "Kernel", "kernellog": "What the kernel logged",
+    "kernel": "Kernel",
     "labnetworks": "Lab networks", "listeners": "Open ports",
     "polkitpolicy": "What needs no password here",
     "location": "Location", "memory": "Remembered facts",
@@ -1421,11 +1387,8 @@ READ_ONLY_TOOLS = frozenset({
     "charger_info", "firmware_updates",
     # `device_i2c` reads by default; its write half is the gated direction, and
     # being in this set is what stops `EXPLORE` mode from reaching it.
-    "device_i2c",
     # device_serial is the serial half of the same shape: reads by default,
     # writes gated by the same key.
-    "device_serial",
-    "driver_status",
     "project_outline",
     "calendar_events",
     # Gated like calendar_events, and only reads: the one write a wearable can be
@@ -1479,7 +1442,6 @@ READ_ONLY_TOOLS = frozenset({
     "interface_counters",
     # Reads /sys/class/net only: which interfaces are bridges and which are
     # enslaved to them. No command, no privileges, nothing written.
-    "bridge_topology",
     # /proc/net/arp only. Unprivileged, unlike `ip neigh` and `arp`, and the
     # COMPLETE/UNRESOLVED split is what `ping_host` cannot tell you.
     "neighbour_table",
@@ -1497,9 +1459,9 @@ READ_ONLY_TOOLS = frozenset({
     # and share its switch (they are in GATED too, like `calendar_events`, so
     # `tool_annotations` takes the gated branch and never claims read-only for
     # them); the rest read the kernel, a config file or a read-only command.
-    "snapshot_status", "security_status", "list_containers", "list_vms",
-    "boot_report", "disk_health", "temperatures", "usb_devices",
-    "driver_info", "list_fonts", "photo_metadata", "crash_report",
+    "snapshot_status", "security_status",
+    "disk_health", "temperatures", "usb_devices",
+    "list_fonts", "photo_metadata", "crash_report",
 })
 
 #: Tools that change the machine but need no consent key.

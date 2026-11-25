@@ -40,7 +40,8 @@ _REPO = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
 from shani_chronoa import sense_reading  # noqa: E402
-from shani_chronoa.skills import compression_savings as CS  # noqa: E402
+from shani_sysadmin import run_skill
+from shani_sysadmin.skills import compression_savings as CS  # noqa: E402
 
 #: The captured table, verbatim.
 CAPTURED = """Processed 14 files, 15 regular extents (15 refs), 8 inline.

@@ -238,7 +238,7 @@ _SENSE_CONSENT_KEYS = {
     "security": "security-sense-enabled",
     # What this user may do without a password: the one question whose answer is a
     # *permission* rather than a state. Hand-kept table, so a sense missing from
-    # it is permanently ungrantable - see `kernellog` above.
+    # it is permanently ungrantable - see the sense's own docstring.
     "polkitpolicy": "polkitpolicy-sense-enabled",
     "devices": "devices-sense-enabled",
     "audio": "audio-sense-enabled",
@@ -265,7 +265,6 @@ _SENSE_CONSENT_KEYS = {
     # reads. That is the `heard-sound` defect, and `tests/test_sense_manifest.py`
     # is what catches it: it writes the key through the real config and asks
     # whether a fresh one honours it.
-    "kernellog": "kernellog-sense-enabled",
     # Whether the machine is on mains or on a UPS battery, and how long is left.
     # Reads /sys/class/power_supply (type "UPS") plus NUT's own upsc. On by
     # default with the other machine-state set: it is a hardware fact, it needs

@@ -27,10 +27,12 @@ import sys
 
 import pytest
 
-_REPO = pathlib.Path(__file__).resolve().parents[1]
+_REPO = pathlib.Path(__file__).resolve().parents[3]  # app/tests -> app -> apps -> repo
+_APP = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
-from shani_chronoa.skills import inspect_binary as IB  # noqa: E402
+from shani_sysadmin import run_skill
+from shani_sysadmin.skills import inspect_binary as IB  # noqa: E402
 
 #: Real `readelf -h /usr/bin/true`, captured on this machine.
 HEADER_EXEC = """ELF Header:
@@ -227,8 +229,7 @@ def test_the_package_name_comes_from_the_hint_table_not_this_module():
     and then believed - the string cannot be re-derived from the data, so it
     rots silently.
     """
-    source = (_REPO / "usr/lib/shani-chronoa/shani_chronoa/skills"
-              / "inspect_binary.py").read_text()
+    source = (_APP / "shani_sysadmin/skills" / "inspect_binary.py").read_text()
     code = "\n".join(line for line in source.splitlines()
                      if not line.lstrip().startswith("#"))
     body = code.split('"""', 2)[-1] if code.count('"""') >= 2 else code
@@ -243,8 +244,7 @@ def test_it_never_runs_the_file_it_inspects(tmp_path, monkeypatch):
     file's loader on the file; on an untrusted binary that is executing it, and
     on some files it hangs. `ldd` must never appear in this module.
     """
-    source = (_REPO / "usr/lib/shani-chronoa/shani_chronoa/skills"
-              / "inspect_binary.py").read_text()
+    source = (_APP / "shani_sysadmin/skills" / "inspect_binary.py").read_text()
     assert "ldd" not in source.replace("`ldd`", "").replace("ldd`.", "")
 
 

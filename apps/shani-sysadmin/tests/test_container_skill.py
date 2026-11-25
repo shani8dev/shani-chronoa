@@ -26,7 +26,8 @@ import subprocess
 
 import pytest
 
-from shani_chronoa.skills import container
+from shani_sysadmin.skills import container
+from shani_sysadmin import run_skill
 
 
 def _recorded_run(argv, **kwargs):
@@ -64,7 +65,7 @@ def test_gate_refuses_then_opens(tmp_path, monkeypatch) -> None:
         # `everyday` preset and ships on, so the refusal below was never
         # reached - it was asserting against a run that happened instead.
         ChronoaConfig().set("container-control-enabled", "false")
-        refused = tools.execute_tool_outcome("container", {"action": "list"}).text
+        refused = run_skill("container", {"action": "list"}).text
         assert "Refusing" in refused, f"the gate is open by default: {refused!r}"
         assert "container-control-enabled" in refused, (
             f"the refusal must name the switch that opens it: {refused!r}"
@@ -76,7 +77,7 @@ def test_gate_refuses_then_opens(tmp_path, monkeypatch) -> None:
             "the grant did not take, so everything after this would be vacuous"
         )
 
-        after = tools.execute_tool_outcome("container", {"action": "list"}).text
+        after = run_skill("container", {"action": "list"}).text
         assert "Refusing to run containers" not in after, (
             f"the gate is still closed after it was granted: {after!r}"
         )
@@ -374,7 +375,7 @@ def test_a_real_container_runs_end_to_end(tmp_path, monkeypatch) -> None:
     (tmp_path / "config").mkdir()
     try:
         ChronoaConfig().set("container-control-enabled", "true")
-        outcome = tools.execute_tool_outcome(
+        outcome = run_skill(
             "container",
             {"action": "run", "image": "alpine", "command": ["echo", "CONTAINER-ECHO-OK"]},
         )

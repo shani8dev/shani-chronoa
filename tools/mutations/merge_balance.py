@@ -15,7 +15,7 @@ anchor can match while measuring nothing:
 
 TEST_FILE = 'tests/test_merge_arithmetic.py'
 
-_SRC = 'usr/lib/shani-chronoa/shani_chronoa/merge.py'
+_SRC = 'apps/shani-sysadmin/shani_sysadmin/merge.py'
 
 MUTATIONS = [
     {

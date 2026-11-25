@@ -85,9 +85,12 @@ class TestNoRequestAppearsOnBothSides:
         assert train & held == set()
 
     def test_every_scorable_case_is_present_exactly_once(self, rows, corpus):
+        from shani_chronoa import tools as T
         cases = json.loads((REPO / "tools" / "eval_cases.json").read_text())["cases"]
+        registered = {t["function"]["name"] for t in T.TOOLS}
         usable = {c["say"] for c in cases
-                  if c.get("expect") and c["expect"][0].get("tool")}
+                  if c.get("expect") and c["expect"][0].get("tool")
+                  and c["expect"][0]["tool"] in registered}
         assert {r["say"] for r in rows} == usable
         assert len(rows) == len(usable), "a request was written twice"
 
@@ -171,7 +174,9 @@ class TestNegativesAreTheOnesThatCrowdTheAnswerOut:
                 f"distractor and dropped the confuser"
             )
             checked += 1
-        assert checked > 20, f"only {checked} rows could check the ordering"
+        # The floor was 20 before 22 sysadmin skills left the registry; the
+        # smaller population leaves 17 rows that can check the ordering.
+        assert checked >= 15, f"only {checked} rows could check the ordering"
 
 
 class TestTheCorpusDoesNotDriftWithThisMachinesHistory:
@@ -260,17 +265,19 @@ class TestArgumentsAreCarried:
     #: place is a red test rather than a corpus that quietly carries nothing.
     ARGS_KEY = "args"
 
-    def test_the_arguments_reach_every_row_that_has_them(self, rows):
+    def test_the_arguments_reach_every_row_that_has_them(self, rows, corpus):
+        from shani_chronoa import tools as T
+        registered = {t["function"]["name"] for t in T.TOOLS}
         source = {}
         for case in json.loads(
                 (REPO / "tools" / "eval_cases.json").read_text())["cases"]:
-            if case.get("expect"):
+            if case.get("expect") and case["expect"][0]["tool"] in registered:
                 source[case["say"]] = dict(case["expect"][0].get(self.ARGS_KEY) or {})
         expected = sum(1 for v in source.values() if v)
         carried = sum(1 for r in rows if r["positive_args"])
-        assert expected == 111, (
-            f"{expected} cases carry arguments, not 111 - the corpus's own "
-            f"stated number is stale and the limit sentence below is false"
+        assert expected == corpus["recall"]["with_args"], (
+            f"{expected} cases carry arguments but the corpus states "
+            f"{corpus['recall']['with_args']}"
         )
         assert carried == expected, (
             f"{carried} of {expected} rows carry the arguments the corpus "
@@ -312,7 +319,7 @@ class TestArgumentsAreCarried:
         )
         assert 'want.get("args")' in src
 
-    def test_the_headroom_the_gate_is_capable_of(self):
+    def test_the_headroom_the_gate_is_capable_of(self, corpus):
         """How much of the corpus `ascension_gate` can score at all.
 
         Of the 220 case-carrying rows, **109 declare no expected arguments**, so
@@ -330,10 +337,15 @@ class TestArgumentsAreCarried:
         """
         sys.path.insert(0, str(REPO / "tools"))
         import task_eval
+        from shani_chronoa import tools as T
+        registered = {t["function"]["name"] for t in T.TOOLS}
         cases = json.loads((REPO / "tools" / "eval_cases.json").read_text())["cases"]
-        rows = [c for c in cases if c.get("expect")]
+        rows = [c for c in cases if c.get("expect")
+                and c["expect"][0]["tool"] in registered]
         empty = [c for c in rows if not c["expect"][0].get("args")]
-        assert len(rows) == 220 and len(empty) == 109, (
+        total = corpus["counts"]["requests"]
+        no_args = total - corpus["recall"]["with_args"]
+        assert len(rows) == total and len(empty) == no_args, (
             f"{len(rows)} expect-carrying cases with {len(empty)} declaring no "
             f"arguments - both numbers moved, so the limit sentence and the "
             f"assertion above are stale"
@@ -342,7 +354,7 @@ class TestArgumentsAreCarried:
             1 for c in empty
             if task_eval.score(c, [{"name": c["expect"][0]["tool"], "args": {}}])
         )
-        assert vacuous == len(empty) == 109, (
+        assert vacuous == len(empty) == no_args, (
             f"{vacuous} of {len(empty)} no-argument cases score as passing on an "
             f"empty argument dict"
         )
@@ -373,7 +385,11 @@ class TestTheDeclaredLimitIsTrue:
         # - which is how the previous revision of this test survived a mutation
         # that made the limit vague. This is the family AGENTS.md records most
         # often: a check that cannot fail, discovered only by a mutation run.
-        assert ("answerable on 111 rows and NOT on the 109" in limit), (
+        written = json.loads((tmp_path / "c.json").read_text())
+        with_args = written["recall"]["with_args"]
+        no_args = written["counts"]["requests"] - with_args
+        assert (f"answerable on {with_args} rows and NOT on the {no_args}"
+                in limit), (
             "the limit must state its own bounded population in one sentence, "
             "not two numbers a mutation can remove one at a time"
         )
@@ -422,5 +438,7 @@ class TestTheScriptItselfRuns:
             capture_output=True, text=True, env=env, timeout=600,
         )
         assert proc.returncode == 0, proc.stderr[-2000:]
-        assert "carrying arguments: 111" in proc.stdout
-        assert "111 rows" in proc.stdout
+        written = json.loads((REPO / "tools" / "reranker_corpus.json").read_text())
+        with_args = written["recall"]["with_args"]
+        assert f"carrying arguments: {with_args}" in proc.stdout
+        assert f"score over {with_args} rows" in proc.stdout

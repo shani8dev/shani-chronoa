@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shani-sysadmin"
+version = "0.1.0"
+description = "Sysadmin and driver tooling moved out of the Chronoa assistant"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+# The moved skills use only the standard library plus modules already shipped
+# by Chronoa (files, config, sysfs, sense_reading, egress, netprovision). The
+# ML harnesses additionally use numpy, which Chronoa's model work already
+# declares for its own optional paths.
+dependencies = []
+
+[project.optional-dependencies]
+ml = ["numpy"]
+
+[project.scripts]
+shani-sysadmin = "shani_sysadmin.__main__:main"
+
+[tool.setuptools]
+packages = [
+    "shani_sysadmin",
+    "shani_sysadmin.skills",
+    "shani_sysadmin.senses",
+]

@@ -34,7 +34,7 @@ import pytest
 _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
-from shani_chronoa.skills import driver_dev, user_driver  # noqa: E402
+from shani_sysadmin.skills import driver_dev, user_driver  # noqa: E402
 
 _UNAME = subprocess.run(["uname", "-r"], capture_output=True, text=True,
                         timeout=10, check=False).stdout.strip()
@@ -349,7 +349,7 @@ class TestPostConditionKnowsWhichToolRan:
         """
         from shani_chronoa import verification
         self._scaffold(project, monkeypatch)
-        result = verification.verify("shani_chronoa.skills.driver_dev",
+        result = verification.verify("shani_sysadmin.skills.driver_dev",
                                      {"name": "mymod", "path": "unused"},
                                      tool="driver_scaffold")
         assert result.verdict.value == "verified", result.evidence
@@ -511,7 +511,7 @@ def _root(tmp_path, *, lockdown="[none] integrity confidentiality",
 def test_the_firmware_is_read_even_when_lockdown_exists(tmp_path):
     """**The fix.** A machine with both is the ordinary one, and it is exactly
     where the old code stopped looking."""
-    from shani_chronoa.skills import driver_dev as driver_dev
+    from shani_sysadmin.skills import driver_dev as driver_dev
 
     root = _root(tmp_path, secure_boot=b"\x06\x00\x00\x00\x01")
 
@@ -524,7 +524,7 @@ def test_the_firmware_is_read_even_when_lockdown_exists(tmp_path):
 
 def test_secure_boot_off_is_read_from_the_firmware_not_assumed(tmp_path):
     """Measured on this box: `0600000000` - attributes, then the data byte `00`."""
-    from shani_chronoa.skills import driver_dev as driver_dev
+    from shani_sysadmin.skills import driver_dev as driver_dev
 
     root = _root(tmp_path, lockdown=None, secure_boot=b"\x06\x00\x00\x00\x00")
 
@@ -535,7 +535,7 @@ def test_secure_boot_off_is_read_from_the_firmware_not_assumed(tmp_path):
 def test_lockdown_is_not_secure_boot(tmp_path):
     """Lockdown enforces 'none' while the firmware says on, and the two rows must
     not agree by construction - that is what folding them together did."""
-    from shani_chronoa.skills import driver_dev as driver_dev
+    from shani_sysadmin.skills import driver_dev as driver_dev
 
     root = _root(tmp_path, secure_boot=b"\x06\x00\x00\x00\x01")
     rows = driver_dev._driver_status_rows(root) if hasattr(
@@ -548,7 +548,7 @@ def test_lockdown_is_not_secure_boot(tmp_path):
 
 
 def test_a_locked_down_kernel_says_no(tmp_path):
-    from shani_chronoa.skills import driver_dev as driver_dev
+    from shani_sysadmin.skills import driver_dev as driver_dev
 
     root = _root(tmp_path, lockdown="[integrity] none integrity confidentiality",
                  secure_boot=b"\x06\x00\x00\x00\x01")
@@ -560,7 +560,7 @@ def test_a_locked_down_kernel_says_no(tmp_path):
 def test_no_variable_and_no_mokutil_is_unknown_not_off(tmp_path):
     """"Could not ask" and "it is off" are opposite claims, and the second is
     what a default would produce."""
-    from shani_chronoa.skills import driver_dev as driver_dev
+    from shani_sysadmin.skills import driver_dev as driver_dev
 
     root = _root(tmp_path, lockdown=None, with_efivars=True)
     monkey = pytest.MonkeyPatch()
@@ -575,7 +575,7 @@ def test_no_variable_and_no_mokutil_is_unknown_not_off(tmp_path):
 
 
 def test_a_legacy_iboot_is_named_as_such(tmp_path):
-    from shani_chronoa.skills import driver_dev as driver_dev
+    from shani_sysadmin.skills import driver_dev as driver_dev
 
     root = tmp_path          # no efivars directory at all
     monkey = pytest.MonkeyPatch()
@@ -591,7 +591,7 @@ def test_a_legacy_iboot_is_named_as_such(tmp_path):
 
 def test_mokutil_is_used_only_when_it_answers_something_recognised(tmp_path):
     """A tool that prints something new must not be read as either state."""
-    from shani_chronoa.skills import driver_dev as driver_dev
+    from shani_sysadmin.skills import driver_dev as driver_dev
 
     monkey = pytest.MonkeyPatch()
     # **Strict by name.** An earlier version answered for any argument, so a
@@ -624,7 +624,7 @@ def test_the_answer_rows_say_the_right_thing_for_each_lockdown(monkeypatch):
     assertion green and reported "no - an unsigned module is refused" on a
     machine where it loads. That is the dangerous direction this module names.
     """
-    from shani_chronoa.skills import driver_dev as driver_dev
+    from shani_sysadmin.skills import driver_dev as driver_dev
 
     def rows_with(mode):
         monkeypatch.setattr(driver_dev, "_lockdown_mode", lambda root=Path("/"): (mode, None))
@@ -642,7 +642,7 @@ def test_the_answer_rows_say_the_right_thing_for_each_lockdown(monkeypatch):
 def test_secure_boot_is_reported_separately_from_lockdown(monkeypatch):
     """Two rows, two questions. Folding them is what made all four of the old
     tests pass against the half that ran."""
-    from shani_chronoa.skills import driver_dev as driver_dev
+    from shani_sysadmin.skills import driver_dev as driver_dev
 
     monkeypatch.setattr(driver_dev, "_lockdown_mode", lambda root=Path("/"): ("none", None))
     monkeypatch.setattr(driver_dev, "_firmware_secure_boot",
