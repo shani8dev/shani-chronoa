@@ -107,7 +107,7 @@ _ORIGIN = ORIGIN_UNATTENDED
 # does not agree with is not a way through.
 _DESTRUCTIVE_ACTUATORS = frozenset({
     "kill_process", "control_service", "manage_mount", "lock_screen",
-    "delete_file", "empty_trash", "power_profile",
+    "delete_file", "power_profile",
 })
 
 # One actuator is refused on both paths with **no** opt-in at all, and the

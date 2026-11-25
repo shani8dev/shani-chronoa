@@ -37,7 +37,7 @@ BUILD_TOOLS = (
     "list_directory",
     "read_text_file",
     "read_document",
-    "search_documents",
+    "search_my_files",
     "find_files",
     "write_text_file",
     "edit_file",

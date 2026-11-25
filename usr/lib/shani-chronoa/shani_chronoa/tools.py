@@ -865,7 +865,7 @@ TAINT_APPROVAL_SECONDS = 60
 #: `effect_of` alone would call them "acts on this machine" and let them pass.
 _TAINT_WRITES = frozenset({
     "write_text_file", "move_or_copy_file", "apply_patch",
-    "cleanup_apply", "extract_archive", "create_archive",
+    "extract_archive", "create_archive",
 })
 
 

@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**203 skills in 23 groups.** Each is a named, schema-typed module; the model
+**190 skills in 23 groups.** Each is a named, schema-typed module; the model
 calls them by name. The whitelist *is* the design, so a new capability is a
 new named skill. The one exception is `run_command`, for running a project's
 tests and builds: off by default, sandboxed (no network, nothing outside the
@@ -37,7 +37,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**78 of 203 are consent-gated and 15 are destructive.**
+**73 of 190 are consent-gated and 13 are destructive.**
 
 ## Files
 
@@ -47,9 +47,6 @@ Read, write, move, archive and undo files.
 |---|---|---|
 | `analyze_table` | Ask questions of a spreadsheet or CSV, and chart it | — |
 | `apply_patch` | Apply a .patch/.diff file to files here | — |
-| `broken_symlinks` | Which shortcuts point at nothing | — |
-| `cleanup_apply` | Clear caches and unused Flatpak runtimes | **asks first, always** · needs `cleanup-enabled` |
-| `cleanup_report` | What could be cleaned up | — |
 | `compare_files` | Compare two files | — |
 | `compute_hash` | Checksum a file | — |
 | `convert_document` | Convert a document between md, txt, and html | — |
@@ -60,15 +57,11 @@ Read, write, move, archive and undo files.
 | `dashboard` | Build a dashboard as a self-contained HTML page | — |
 | `delete_file` | Delete a file or folder, recoverably from the trash | **asks first, always** · needs `file-delete-enabled` |
 | `directory_tree` | Show a folder's shape | — |
-| `duplicate_files` | Which files are stored twice, and how much that wastes | — |
 | `edit_file` | Change one exact piece of text | **asks first, always** · needs `file-edit-enabled` |
 | `email_draft` | Save an email draft as a local file, without sending | — |
 | `email_read` | Read your mailbox: list recent messages or open one | needs `email-read-enabled` |
 | `email_send` | Send an email from the configured account | needs `email-send-enabled` |
-| `empty_directories` | Which directories hold nothing at all | — |
-| `empty_trash` | Permanently empty the desktop trash | **asks first, always** · needs `trash-empty-enabled` |
 | `extract_archive` | Unpack a tar, zip, 7z, rar or cab archive | — |
-| `files_by_name` | Where every file with this name lives | — |
 | `find_and_replace` | Find and replace | **asks first, always** · needs `bulk-edit-enabled` |
 | `find_files` | Find files by name | — |
 | `find_recently_modified` | What changed today | — |
@@ -89,13 +82,10 @@ Read, write, move, archive and undo files.
 | `read_image` | Read a picture's dimensions, format, and colour | — |
 | `read_text_file` | Read a text file | — |
 | `read_video` | Read a video's length, size, and format | — |
-| `search_documents` | Search inside your files with the desktop's own index | needs `document-search-enabled` |
 | `search_file_contents` | Search inside files | — |
 | `search_my_files` | Search your own files by meaning | needs `file-index-enabled` |
 | `shopping_list` | Keep a shopping list: add, list, tick off and remove | — |
-| `stale_files` | What is big AND untouched - the deletion candidates | — |
 | `sync_folder` | Sync two folders, showing what would change first | — |
-| `temp_files` | Find junk, temporary and leftover files by name | — |
 | `undo_last_change` | Undo Chronoa's last change to a file | **asks first, always** · needs `file-edit-enabled` |
 | `write_text_file` | Write a text file | needs `file-edit-enabled` to replace a file that already has content |
 
@@ -180,11 +170,9 @@ The clock, dates, countdowns and alarms.
 | `calendar_month` | Month calendar | — |
 | `date_math` | Date arithmetic | — |
 | `get_datetime` | Date and time | — |
-| `get_world_time` | Time somewhere else | — |
 | `notify` | Send a notification | needs `notification-enabled` |
 | `reminders` | Add, list, complete, and remove reminders | — |
 | `set_timer` | Timer | — |
-| `set_timezone` | Report or change the system timezone | needs `timezone-control-enabled` |
 | `stopwatch` | Stopwatch | — |
 
 ## Code and git
@@ -202,22 +190,6 @@ Inspect repositories and work through files.
 | `resolve_conflict` | What is conflicting in a git repository, and resolve it | needs `git-sense-enabled` |
 | `run_command` | Run a project's tests, build or linter | **asks first, always** · needs `run-command-enabled` |
 | `todo_list` | Keep a list of tasks to do | needs `todo-list-enabled` |
-
-## Power and screen
-
-Brightness, theme, power state, night light.
-
-| Skill | What it does | Before it runs |
-|---|---|---|
-| `charger_info` | Say what is charging this machine, and how fast | — |
-| `do_not_disturb` | Do Not Disturb | — |
-| `get_battery_status` | Battery status | — |
-| `lock_screen` | Lock this session | needs `screen-lock-enabled` |
-| `power_action` | Suspend, restart or shut down | **asks first, always** · needs `power-control-enabled` |
-| `set_brightness` | Screen brightness | — |
-| `set_power_profile` | Power profile | — |
-| `set_screensaver` | Change when the screen blanks and locks | needs `idle-timeout-enabled` |
-| `set_sleep_inhibit` | Hold the machine awake for a bounded time | needs `sleep-inhibit-enabled` |
 
 ## Sound
 
@@ -280,6 +252,21 @@ Drive the desktop without the keyboard.
 | `set_keyboard_layout` | Change the keyboard layout | — |
 | `type_text` | Type text | needs `input-control-enabled` |
 | `ui_elements` | Press buttons, fill fields and open menus in other apps, and drive them visible | needs `input-control-enabled` |
+
+## Power and screen
+
+Brightness, theme, power state, night light.
+
+| Skill | What it does | Before it runs |
+|---|---|---|
+| `charger_info` | Say what is charging this machine, and how fast | — |
+| `do_not_disturb` | Do Not Disturb | — |
+| `get_battery_status` | Battery status | — |
+| `lock_screen` | Lock this session | needs `screen-lock-enabled` |
+| `power_action` | Suspend, restart or shut down | **asks first, always** · needs `power-control-enabled` |
+| `set_brightness` | Screen brightness | — |
+| `set_power_profile` | Power profile | — |
+| `set_screensaver` | Change when the screen blanks and locks | needs `idle-timeout-enabled` |
 
 ## Processes and windows
 

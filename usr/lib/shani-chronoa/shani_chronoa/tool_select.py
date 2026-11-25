@@ -1405,7 +1405,7 @@ _SITE = re.compile(r"https?://|\bwww\.|\b[a-z0-9-]+\." + _TLDS + r"\b|\bdot " + 
 #: Qwen3-1.7B opened the desktop browser with `open_application`.
 _DISPLACED_BY_A_SITE = frozenset({
     "open_application", "open_file", "find_files", "find_and_replace", "find_recently_modified",
-    "search_file_contents", "search_documents", "directory_tree", "json_query", "find_emoji"})
+    "search_file_contents", "search_my_files", "directory_tree", "json_query", "find_emoji"})
 #: Words that mean the request really is about files or an app, so nothing is displaced.
 _FILE_OR_APP = re.compile(r"\b(file|files|folder|folders|directory|document|documents|pdf|download(?:s|ed)?|"
                           r"desktop|app|application|program)\b|~/|/home/", re.I)
@@ -1439,8 +1439,6 @@ _ACT_ON_A_PAGE = re.compile(r"\b(book|booking|fill (?:in|out)|sign (?:in|up)|\bl
 #: offered as noise in the same runs.
 _CUES = {name: re.compile(cue) for name, cue in {
     "default_apps": r"\bdefault",
-    "get_world_time": r"\btime\b.*\b(?:in|at|for)\s+[a-z]{3,}|\b(?:in|at)\s+[a-z]{3,}\b.*\btime\b|time ?zones?"
-                      r"|\bworld (?:time|clock)",
     "explain_command": r"`|\bcommand|\bshell\b|\bterminal\b|\bflags?\b|(?:^|\s)-{1,2}[a-z]|\b(?:sudo|ls|grep|awk|sed|chmod|"
                        r"chown|tar|curl|wget|git|ssh|rsync|systemctl|journalctl|pacman|apt|dd|ps|kill|df|du|mount)\b",
     "set_scaling": r"\bscal|\btext size|\bfont size|\bzoom|\bbigger|\bsmaller|\bhidpi|\bresolution",

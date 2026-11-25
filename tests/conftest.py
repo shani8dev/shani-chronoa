@@ -83,16 +83,22 @@ def _compile_repo_schema() -> str:
     # on `org.gnome...gschema.xml` for whichever files happened to draw that pid.
     import uuid
 
-    directory = (REPO_ROOT / "build"
-                 / f"test-schema-{os.getpid()}-{uuid.uuid4().hex[:8]}")
+    directory = (
+        REPO_ROOT / "build" / f"test-schema-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    )
     directory.mkdir(parents=True, exist_ok=True)
     for xml in SCHEMA_SRC.glob("*.xml"):
         shutil.copy2(xml, directory)
-    result = subprocess.run(["glib-compile-schemas", str(directory)],
-                            capture_output=True, text=True, timeout=60)
+    result = subprocess.run(
+        ["glib-compile-schemas", str(directory)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
     if result.returncode != 0 or not (directory / "gschemas.compiled").is_file():
         raise RuntimeError(
-            f"glib-compile-schemas failed for the repo schema: {result.stderr}")
+            f"glib-compile-schemas failed for the repo schema: {result.stderr}"
+        )
     return str(directory)
 
 
@@ -137,6 +143,7 @@ def _hermetic_env(tmp_path, monkeypatch):
     # one is up every "nothing installed" test read its model ("1.7B" where the
     # test said "No model"). A test that wants a server fakes one itself.
     from shani_chronoa import local_llm
+
     monkeypatch.setattr(local_llm, "_loaded_model_path", lambda *a, **k: "")
     monkeypatch.setattr(local_llm, "_LOADED_TTL", 0.0)
 
@@ -168,8 +175,15 @@ def compiled_schema_dir():
 #: by default), so the honest thing is to leave its directories to it and clean
 #: only what this suite makes itself.
 _OWNED_TMP_PREFIXES = (
-    "chronoa-", "cwa", "cwm", "gs-", "kept-", "organism-doc-",
-    "ties-", "three-", "sibling-merge-",
+    "chronoa-",
+    "cwa",
+    "cwm",
+    "gs-",
+    "kept-",
+    "organism-doc-",
+    "ties-",
+    "three-",
+    "sibling-merge-",
 )
 
 
@@ -220,8 +234,14 @@ def _reclaim_the_temp_dirs_this_suite_makes():
     yield
 
     in_use = set()
-    for var in ("GSETTINGS_SCHEMA_DIR", "XDG_DATA_HOME", "XDG_STATE_HOME",
-                "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "XDG_CACHE_HOME"):
+    for var in (
+        "GSETTINGS_SCHEMA_DIR",
+        "XDG_DATA_HOME",
+        "XDG_STATE_HOME",
+        "XDG_CONFIG_HOME",
+        "XDG_RUNTIME_DIR",
+        "XDG_CACHE_HOME",
+    ):
         value = os.environ.get(var)
         if value:
             in_use.add(os.path.realpath(value))
@@ -383,12 +403,14 @@ def gsettings_env(compiled_schema_dir, monkeypatch):
 @pytest.fixture
 def chronoa_config(gsettings_env):
     from shani_chronoa.config import ChronoaConfig
+
     return ChronoaConfig()
 
 
 @pytest.fixture
 def privacy_manager(chronoa_config):
     from shani_chronoa.config import PrivacyManager
+
     return PrivacyManager(chronoa_config)
 
 
@@ -399,14 +421,16 @@ def fake_wpctl(tmp_path, monkeypatch):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     script = bin_dir / "wpctl"
-    script.write_text(textwrap.dedent(f"""\
+    script.write_text(
+        textwrap.dedent(f"""\
         #!/bin/sh
         echo "$@" >> "{wpctl_log}"
         case "$1" in
             get-volume) echo "Volume: 0.50 [MUTED]";;
             *) exit 0;;
         esac
-    """))
+    """)
+    )
     script.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ.get('PATH', '')}")
     return wpctl_log
@@ -435,8 +459,10 @@ def mock_launch_uri(monkeypatch):
         calls.append(uri)
 
     import gi
+
     gi.require_version("Gio", "2.0")
     from gi.repository import Gio
+
     monkeypatch.setattr(Gio.AppInfo, "launch_default_for_uri", _fake)
     monkeypatch.setattr(Gio.AppInfo, "launch_default_for_uri_async", _fake_async)
     return calls
@@ -449,10 +475,12 @@ def mock_notify_send(tmp_path, monkeypatch):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     script = bin_dir / "notify-send"
-    script.write_text(textwrap.dedent(f"""\
+    script.write_text(
+        textwrap.dedent(f"""\
         #!/bin/sh
         echo "$@" >> "{send_log}"
-    """))
+    """)
+    )
     script.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ.get('PATH', '')}")
     return send_log
@@ -464,6 +492,7 @@ def temp_user_skills_dir(tmp_path, monkeypatch):
     skills_dir = tmp_path / "user_skills"
     skills_dir.mkdir()
     import shani_chronoa.skills as skills_mod
+
     monkeypatch.setattr(skills_mod, "_USER_SKILLS_DIR", skills_dir)
     return skills_dir
 
@@ -472,6 +501,7 @@ def temp_user_skills_dir(tmp_path, monkeypatch):
 def mock_httpx(monkeypatch):
     """Replace httpx.AsyncClient with a MockTransport-backed recorder (no network)."""
     import httpx
+
     recorded: dict = {}
 
     def _handler(request):
@@ -525,6 +555,7 @@ def stubbed_app(chronoa_config):
     app._sync_autostart = lambda: None
     return app
 
+
 @pytest.fixture(autouse=True)
 def _trigger_and_capture_paths_are_inside_the_test(tmp_path_factory):
     """Guard, not a redirect: every data path the trigger engine and the
@@ -538,10 +569,18 @@ def _trigger_and_capture_paths_are_inside_the_test(tmp_path_factory):
     """
     triggers = pytest.importorskip("shani_chronoa.triggers")
     from shani_chronoa.skills import screenshot
-    for path in (triggers.rules_file(), triggers.event_rules_file(), triggers.fingerprints_file(),
-                 triggers.verdicts_dir(), triggers.deadlines_dir(), Path(screenshot.output_dir())):
-        assert str(path).startswith(str(tmp_path_factory.getbasetemp())), \
+
+    for path in (
+        triggers.rules_file(),
+        triggers.event_rules_file(),
+        triggers.fingerprints_file(),
+        triggers.verdicts_dir(),
+        triggers.deadlines_dir(),
+        Path(screenshot.output_dir()),
+    ):
+        assert str(path).startswith(str(tmp_path_factory.getbasetemp())), (
             f"{path} is outside pytest's temporary directory - a test would write into a real home"
+        )
     yield
 
 
@@ -604,7 +643,9 @@ def _isolate_percept_store(tmp_path_factory, monkeypatch):
     store = pytest.importorskip("shani_chronoa.senses.store")
     percept_dir = tmp_path_factory.mktemp("percepts")
     monkeypatch.setattr(store, "PERCEPT_DIR", percept_dir, raising=False)
-    monkeypatch.setattr(store, "DURABLE_FILE", percept_dir / "memory.jsonl", raising=False)
+    monkeypatch.setattr(
+        store, "DURABLE_FILE", percept_dir / "memory.jsonl", raising=False
+    )
     monkeypatch.setattr(store, "LIVE_FILE", percept_dir / "live.json", raising=False)
 
 
@@ -633,12 +674,15 @@ def _isolate_xdg_data_home(tmp_path_factory, monkeypatch):
         ("shani_chronoa.argfile", "_ARGFILE_ROOT"),
         ("shani_chronoa.conversation_store", "SESSION_DIR"),
         ("shani_chronoa.skills.reminders", "_STORE"),
-        ("shani_chronoa.skills.set_sleep_inhibit", "STATE_FILE"),
+        ("shani_sysadmin.skills.set_sleep_inhibit", "STATE_FILE"),
     ):
         module = pytest.importorskip(module_name)
         if hasattr(module, attribute):
             monkeypatch.setattr(
-                module, attribute, tmp_path_factory.mktemp("xdg") / "state", raising=False
+                module,
+                attribute,
+                tmp_path_factory.mktemp("xdg") / "state",
+                raising=False,
             )
 
 
@@ -691,8 +735,11 @@ def _no_organ_may_stay_lit(request):
     # Pulses are exempt on purpose: they report something already finished and
     # expire by themselves, so there is nothing to leave behind. Only an
     # *activity* - something in progress - can be left hanging by mistake.
-    after = [activity for activity in body.body.snapshot()
-             if activity.organ not in before and not activity.pulse]
+    after = [
+        activity
+        for activity in body.body.snapshot()
+        if activity.organ not in before and not activity.pulse
+    ]
     if after:
         described = ", ".join(f"{a.organ} ({a.what!r})" for a in after)
         # pytest reports a teardown failure as ERROR rather than FAILED. That is
@@ -704,7 +751,8 @@ def _no_organ_may_stay_lit(request):
             "the indicator stays on after the thing it describes has stopped, "
             "which is worse than having no indicator at all. Open it with "
             "`body.use(...)` and close it with `body.done(...)` - in a finally, "
-            "so a failure closes it too.")
+            "so a failure closes it too."
+        )
 
 
 #: Set by `tools/mutate.py` on the pytest *it* spawns. Absent means this is a
@@ -742,16 +790,17 @@ def _mutation_in_flight() -> "str | None":
         owner = RUN_LOCK.read_text(encoding="utf-8").split()[0]
         pid = int(owner)
     except (OSError, IndexError, ValueError):
-        return None                      # no lock, or unreadable: not a hold
+        return None  # no lock, or unreadable: not a hold
     try:
         os.kill(pid, 0)
     except OSError:
-        return None                      # stale - the runner takes these over
+        return None  # stale - the runner takes these over
     return (
         f"a mutation run (pid {pid}) is rewriting the source tree right now, so "
         f"this suite would read mutated code and report failures on code that "
         f"is correct. Wait for it, or stop it by that pid. If you are that run, "
-        f"{MUTATION_MARKER} is set and this check does not apply.")
+        f"{MUTATION_MARKER} is set and this check does not apply."
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -773,6 +822,7 @@ def _files_count_as_read(request, monkeypatch):
             return read_ledger.revision(Path(path).read_bytes())
         except OSError:
             return None
+
     monkeypatch.setattr(read_ledger, "last", last)
 
 
@@ -780,7 +830,8 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers",
         "read_guard: use the real read ledger, so edit_file refuses a file "
-        "that was not read first (tests of that check)")
+        "that was not read first (tests of that check)",
+    )
     held = _mutation_in_flight()
     if held is not None:
         # **`pytest.exit`, not a raise.** A raise here is an INTERNALERROR, which
@@ -789,7 +840,8 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers",
         "holds_organs: this test leaves a body activity open on purpose - it is "
-        "the subject of the test, not a leak")
+        "the subject of the test, not a leak",
+    )
     config.addinivalue_line(
         "markers",
         "slow: takes minutes, not seconds, and is excluded from the default run "
@@ -818,6 +870,7 @@ def _no_question_presenter_outlives_its_test():
     """
     yield
     from shani_chronoa import ask_bridge
+
     ask_bridge._presenter = None
     ask_bridge._text_presenter = None
 
@@ -825,8 +878,15 @@ def _no_question_presenter_outlives_its_test():
 #: Test files whose subject is a real, allocated GTK window. Read from the
 #: source rather than a marker because these files predate any marker, and a
 #: test that quietly stops being in this list stops being guarded.
-_GUI_SUBJECTS = ("ChronoaWindow", "SettingsWindow", "HelpWindow", "SetupWizard",
-                 "PhonePanel", "Gtk.Window(", "surface.build(")
+_GUI_SUBJECTS = (
+    "ChronoaWindow",
+    "SettingsWindow",
+    "HelpWindow",
+    "SetupWizard",
+    "PhonePanel",
+    "Gtk.Window(",
+    "surface.build(",
+)
 
 
 def _has_display_backend() -> bool:
@@ -895,9 +955,11 @@ def _a_test_about_a_window_needs_a_window(request):
         return
     path = Path(str(request.node.fspath))
     if _file_needs_a_display(path):
-        pytest.skip("no display backend on this machine, so the window this "
-                    "file is about cannot be built; the assertions are about a "
-                    "real allocated window and there is nothing to assert")
+        pytest.skip(
+            "no display backend on this machine, so the window this "
+            "file is about cannot be built; the assertions are about a "
+            "real allocated window and there is nothing to assert"
+        )
 
 
 def pytest_ignore_collect(collection_path, config):

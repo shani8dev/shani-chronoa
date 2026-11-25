@@ -64,7 +64,7 @@ _CONSENT_NAMES = (
 _IMPL = {
     "run_command": "shani_chronoa.skills.run_command",
     "screenshot": "shani_chronoa.skills.screenshot",
-    "cleanup_apply": "shani_chronoa.skills.cleanup_apply",
+    "cleanup_apply": "shani_sysadmin.skills.cleanup_apply",
     # Gated on `memory-sense-enabled` and does **not** consult it itself - the
     # gate belongs in `decide_candidate`, so both the panel and this skill are
     # refused by one check rather than two that could disagree.
@@ -138,8 +138,8 @@ _IMPL = {
     "toggle_bluetooth": "shani_chronoa.skills.toggle_bluetooth",
     "set_mic_mute": "shani_chronoa.skills.set_mic_mute",
     "lock_screen": "shani_chronoa.skills.lock_screen",
-    "empty_trash": "shani_chronoa.skills.empty_trash",
-    "search_documents": "shani_chronoa.skills.search_documents",
+    "empty_trash": "shani_sysadmin.skills.empty_trash",
+    "search_documents": "shani_sysadmin.skills.search_documents",
     "calendar_events": "shani_chronoa.skills.calendar_events",
     "phone": "shani_chronoa.skills.phone",
     "search_my_files": "shani_chronoa.skills.search_my_files",
@@ -149,7 +149,7 @@ _IMPL = {
     "airplane_mode": "shani_chronoa.skills.airplane_mode",
     "desktop_setting": "shani_chronoa.skills.desktop_setting",
     "set_theme": "shani_chronoa.skills.set_theme",
-    "set_timezone": "shani_chronoa.skills.set_timezone",
+    "set_timezone": "shani_sysadmin.skills.set_timezone",
     # The 2026-10-07 matrix skills that change something, plus login_history,
     # which reuses the `sessions` sense's key.
     "default_apps": "shani_chronoa.skills.default_apps",
@@ -171,7 +171,7 @@ _IMPL = {
     # switch - the same one web_search asks permission through.
     "browse": "shani_chronoa.skills.browse",
     "set_screensaver": "shani_chronoa.skills.set_screensaver",
-    "set_sleep_inhibit": "shani_chronoa.skills.set_sleep_inhibit",
+    "set_sleep_inhibit": "shani_sysadmin.skills.set_sleep_inhibit",
     # All three share `appearance-control-enabled` with set_theme: they are the
     # same permission, "change how this desktop looks", and three separate keys
     # for it would imply a distinction the user cannot act on.

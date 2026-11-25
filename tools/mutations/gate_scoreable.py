@@ -89,17 +89,17 @@ MUTATIONS = [
         'label': 'the measured headroom is replaced by vacuous assertions',
         'equivalent': True,
         'why': 'EQUIVALENT, and the reason is the finding: `vacuous >= 0` and '
-               '`vacuous == 109` are both true on this corpus, because all 109 '
+               '`vacuous == 105` are both true on this corpus, because all 105 '
                'no-argument cases vacuously score as passing. Weakening the '
                'bound changes nothing any assertion here can see. The test is '
                'not therefore worthless - it DRIVES task_eval rather than '
-               'restating a number, so the `== 111` assertion beside it is what '
+               'restating a number, so the `== 110` assertion beside it is what '
                'moves when a case gains arguments. The lesson is the pair, not '
                'this one: a count nobody computed from the source is the '
                'constant that stays right by accident and then lies.',
         'expect': [],
         'file': TEST_FILE,
-        'old': 'assert vacuous == len(rows) - gradable == 109, (',
+        'old': 'assert vacuous == len(rows) - gradable == 105, (',
         'new': 'assert vacuous >= 0, (',
     },
 ]

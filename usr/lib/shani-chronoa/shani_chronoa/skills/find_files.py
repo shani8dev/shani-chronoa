@@ -5,6 +5,11 @@ answers "where is that file, anywhere under here". Name search only - it never
 opens a file and never looks at its contents, so it is safe to run across a
 whole home directory. `search_file_contents` is the one that reads.
 
+`details: true` adds each match's size and modification time and names the
+newest, which is the answer to "where are all my report.docx, and which is the
+one I want". That used to be a second skill, `files_by_name`; it is the same
+question with a richer answer, so the two handlers are one now.
+
 Honesty rules:
 
 - "no files matched that pattern" is a different sentence from "there are no
@@ -21,6 +26,7 @@ import fnmatch
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 from shani_chronoa import files
@@ -61,6 +67,15 @@ SCHEMA = {
                     "type": "integer",
                     "description": f"Stop after this many matches. Defaults to {_MAX_RESULTS}.",
                 },
+                "details": {
+                    "type": "boolean",
+                    "description": (
+                        "Include each match's size and modification time, and "
+                        "name the newest. Use for 'which copy is the one I "
+                        "want'. Sizes agreeing is a hint, not proof the "
+                        "contents match."
+                    ),
+                },
             },
         },
     },
@@ -81,8 +96,20 @@ def _from_index(root: Path, pattern: str, include_hidden: bool, limit: int) -> l
     if not shutil.which("plocate") or not _PLOCATE_DB.exists():
         return []
     try:
-        r = subprocess.run(["plocate", "--ignore-case", "--basename", "--limit", str(limit * 20), "--", pattern],
-                           capture_output=True, text=True, timeout=10)
+        r = subprocess.run(
+            [
+                "plocate",
+                "--ignore-case",
+                "--basename",
+                "--limit",
+                str(limit * 20),
+                "--",
+                pattern,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
     except (OSError, subprocess.TimeoutExpired):
         return []
     out = []
@@ -124,10 +151,13 @@ def _run(arguments: dict) -> str:
     except files.PathProblem as exc:
         return str(exc)
     if not root.exists():
-        return files.describe(FileNotFoundError(2, "No such file or directory"),
-                              root, "search")
+        return files.describe(
+            FileNotFoundError(2, "No such file or directory"), root, "search"
+        )
     if not root.is_dir():
-        return f"{root} is a file, not a directory, so there is nothing to search under."
+        return (
+            f"{root} is a file, not a directory, so there is nothing to search under."
+        )
 
     include_hidden = bool(arguments.get("include_hidden"))
     try:
@@ -142,7 +172,9 @@ def _run(arguments: dict) -> str:
     indexed = _from_index(root, pattern, include_hidden, limit)
     if indexed:
         matches, truncated = indexed[:limit], len(indexed) > limit
-    for dirpath, dirnames, filenames in ([] if indexed else os.walk(root, onerror=lambda e: skipped.append(str(e)))):
+    for dirpath, dirnames, filenames in (
+        [] if indexed else os.walk(root, onerror=lambda e: skipped.append(str(e)))
+    ):
         here = Path(dirpath)
         if len(here.parts) - len(root.parts) >= _MAX_DEPTH:
             dirnames[:] = []
@@ -163,22 +195,71 @@ def _run(arguments: dict) -> str:
         if not include_hidden:
             base += " Hidden entries were not searched."
         if skipped:
-            base += f" {len(skipped)} directory(ies) could not be read and were skipped."
+            base += (
+                f" {len(skipped)} directory(ies) could not be read and were skipped."
+            )
         return base
 
-    lines = [f"{len(matches)}{'+' if truncated else ''} match(es) for {pattern!r} under {root}:"]
+    lines = [
+        f"{len(matches)}{'+' if truncated else ''} match(es) for {pattern!r} under {root}:"
+    ]
     if asked != pattern:
-        lines.insert(0, f"(Matched the name {pattern!r} from {asked!r} - names are matched, not paths.)")
-    for m in matches:
-        lines.append(f"  {m}")
+        lines.insert(
+            0,
+            f"(Matched the name {pattern!r} from {asked!r} - names are matched, not paths.)",
+        )
+    details = bool(arguments.get("details"))
+    if details:
+        stated: list[tuple[Path, int, float]] = []
+        for m in matches:
+            try:
+                info = m.stat()
+            except OSError:
+                stated.append((m, 0, 0.0))
+                continue
+            stated.append((m, info.st_size, info.st_mtime))
+        sizes = {size for _m, size, _t in stated if size}
+        for m, size, when in stated:
+            lines.append(f"  {files.human_size(size):>10}  {m}   ({_age(when)})")
+        if len(sizes) == 1 and len(stated) > 1:
+            lines.append(
+                f"  All {len(stated)} are the same size, which is a hint "
+                "they may be copies - not proof: same name is not same content."
+            )
+        elif len(stated) > 1:
+            lines.append(
+                "  They are not all the same size, so they are not all "
+                "copies of one thing."
+            )
+        newest = max(stated, key=lambda item: item[2])[0]
+        lines.append(
+            f"  Newest: {newest} - if these are copies, that is usually "
+            "the one you want. This has not compared their contents."
+        )
+    else:
+        for m in matches:
+            lines.append(f"  {m}")
     if truncated:
-        lines.append(f"  ... stopped at the {limit}-match limit; this is not everything.")
+        lines.append(
+            f"  ... stopped at the {limit}-match limit; this is not everything."
+        )
     if skipped:
         lines.append(
             f"  note: {len(skipped)} directory(ies) could not be read and were "
             f"not searched, so matches may exist that are not listed."
         )
     return "\n".join(lines)
+
+
+def _age(when: float) -> str:
+    days = int((time.time() - when) / 86400)
+    if days >= 730:
+        return f"{days // 365}y ago"
+    if days >= 60:
+        return f"{days // 30}mo ago"
+    if days > 0:
+        return f"{days}d ago"
+    return "today"
 
 
 def files_here_matches(name: str, pattern: str) -> bool:

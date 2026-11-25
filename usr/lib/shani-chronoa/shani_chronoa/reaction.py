@@ -237,6 +237,6 @@ def destructive_tools() -> frozenset:
     """
     return frozenset({
         "delete_file", "move_or_copy_file", "write_text_file",
-        "edit_file", "create_directory", "empty_trash", "kill_process",
+        "edit_file", "create_directory", "kill_process",
         "control_service", "remove_file", "replace_file",
     })

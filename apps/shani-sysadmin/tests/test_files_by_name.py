@@ -15,10 +15,10 @@ from pathlib import Path
 
 import pytest
 
-_REPO = pathlib.Path(__file__).resolve().parents[1]
+_REPO = pathlib.Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
-from shani_chronoa.skills import files_by_name as FN  # noqa: E402
+from shani_sysadmin.skills import files_by_name as FN  # noqa: E402
 
 _KIB = 1024
 
