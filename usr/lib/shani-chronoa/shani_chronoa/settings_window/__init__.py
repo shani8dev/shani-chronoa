@@ -81,5 +81,6 @@ from .window import (  # noqa: F401
 )
 from .senses import SensesPage  # noqa: F401
 from .privacy import PrivacyPage  # noqa: F401
+from .email import EmailPage  # noqa: F401
 from .voice import VoicePage  # noqa: F401
 from .activity import ActivityPage  # noqa: F401
