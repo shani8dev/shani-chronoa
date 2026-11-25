@@ -797,6 +797,12 @@ def pytest_configure(config):
         "inventory is what needed this: under two minutes with four sets, over "
         "ten with eleven, and a test that quietly outgrew its own timeout "
         "reports a failure about something else entirely.")
+    config.addinivalue_line(
+        "markers",
+        "render: maps a real ChronoaApplication and renders its window; "
+        "several in one process segfault in GTK/Pango, so the default batch "
+        "deselects them and tools/run_render_tests.sh runs each in its own "
+        "process. The window, the button and the press are still asserted.")
 
 
 @pytest.fixture(autouse=True)

@@ -194,7 +194,15 @@ def _cap_to_window(keep: Set[str], tools: List[dict], scored: List[tuple],
     if fits_now():
         return keep
     scored_names = {name for _s, name, _h in scored}
-    droppable = [name for _s, name, _h in sorted(scored, key=lambda x: x[0])
+    # Drop the tools the request did not **name** first, then compare scores.
+    # "explain what is in this file" scored `manage_triggers` at 5.8 on generic
+    # words (zero name hits) and its file tools at 4.5 (one name hit); the old
+    # score-only order spent the whole budget on the 936-token generic schema
+    # and dropped every file tool, so the negative control for "explain"
+    # lost `edit_file`. A word in the tool's own name is evidence the person
+    # named that tool; a word in a description is only a match.
+    droppable = [name for _s, name, _h in sorted(
+                     scored, key=lambda x: (x[2] > 0, x[0]))
                  if name not in protected]
     # Added by a cue, by `in_use`, or by the distilled router, and scored zero:
     # there is no evidence for it, so it is dropped after the scored ones.
