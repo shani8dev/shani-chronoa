@@ -41,6 +41,22 @@ _MAX_MESSAGES = 20
 _MAX_CHARS = 4000
 _ADDRESS = re.compile(r"^[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+$")
 
+#: The keys the account file may hold. One definition: the skill's reader and
+#: Settings' account form must agree about what is writable, or the form could
+#: save a field this reader silently discards. A password is never in here.
+ACCOUNT_FIELDS = frozenset(
+    {
+        "imap_host",
+        "imap_port",
+        "imap_tls",
+        "smtp_host",
+        "smtp_port",
+        "smtp_tls",
+        "user",
+        "mailbox",
+    }
+)
+
 
 def _config_path() -> Path:
     return files.config_home() / "shani-chronoa" / "email.json"
@@ -70,21 +86,7 @@ def _account() -> "tuple[dict | None, str]":
                 f"the email account file must not hold a {name}; "
                 "store it in the session keyring as email:<user>"
             )
-    cfg = {
-        k: v
-        for k, v in data.items()
-        if k
-        in {
-            "imap_host",
-            "imap_port",
-            "imap_tls",
-            "smtp_host",
-            "smtp_port",
-            "smtp_tls",
-            "user",
-            "mailbox",
-        }
-    }
+    cfg = {k: v for k, v in data.items() if k in ACCOUNT_FIELDS}
     if not cfg.get("imap_host") or not cfg.get("smtp_host"):
         return None, (
             "the email account needs both imap_host and smtp_host; "

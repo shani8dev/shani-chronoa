@@ -15,6 +15,7 @@ from shani_chronoa import engines, local_llm, model_choice
 
 from .senses import SensesPage
 from .privacy import PrivacyPage
+from .email import EmailPage
 from .voice import VoicePage
 from .activity import ActivityPage
 
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 
-class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Window):
+class SettingsWindow(SensesPage, PrivacyPage, EmailPage, VoicePage, ActivityPage, Gtk.Window):
     """Every setting Chronoa has, in one searchable window."""
 
     def __init__(self, app) -> None:
@@ -104,6 +105,7 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
         # they are declared where the promise is made.
         self._build_senses(page)
         self._build_privacy(page)
+        self._build_email(page)
         self._build_approvals(page)
         self._build_tool_activity(page)
         self._build_voice(page)
