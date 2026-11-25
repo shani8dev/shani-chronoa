@@ -583,6 +583,9 @@ class VoiceMixin:
 
     def _on_recording_done_main(self, audio_path: Optional[str]) -> bool:
         """Handle a finished recording (auto-stopped or cancelled early) on the GTK main thread."""
+        # No audio means no label. Clearing here too makes that true even after
+        # an earlier path left a stash behind.
+        self._pending_speaker = ""
         self._listening = False
         # Why it ended, read now: the recorder's reason describes *this*
         # recording, and a later turn would overwrite it.
@@ -647,10 +650,21 @@ class VoiceMixin:
                     GLib.idle_add(self.window.set_state, AssistantState.QUEUED)
                     GLib.idle_add(self.window.set_status, gate.last_reason)
                 try:
-                    return self.stt.transcribe(audio_path)
+                    text = self.stt.transcribe(audio_path)
                 finally:
                     if waited and self.window:
                         GLib.idle_add(self.window.set_state, AssistantState.LISTENING)
+                # Still inside `_transcribe`'s lifetime: the audio is removed in
+                # the outer `finally` only after this executor job returns. The
+                # optional label is stashed, never folded into the transcript;
+                # an empty result means the turn behaves exactly as before.
+                speaker = ""
+                if str(text).strip():
+                    from shani_chronoa import speaker_turn
+                    speaker = speaker_turn.label_for(
+                        audio_path, getattr(self, "config", None))
+                self._pending_speaker = speaker
+                return text
 
             return await loop.run_in_executor(None, _work)
         finally:
@@ -658,6 +672,10 @@ class VoiceMixin:
 
     def _on_transcribed(self, result: object) -> bool:
         """Feed the transcribed text into the assistant, back on the GTK thread."""
+        # Consume once, at the top: every early return below (noise, echo, a
+        # pending question) drops the label with its audio rather than letting
+        # it leak into a later turn.
+        speaker, self._pending_speaker = getattr(self, "_pending_speaker", ""), ""
         if isinstance(result, Exception) or not str(result).strip():
             logger.error(f"Transcription failed or empty: {result}")
             if self.window:
@@ -691,7 +709,7 @@ class VoiceMixin:
             names, files_block = self.window.take_attachments()
             self.window.set_state(AssistantState.THINKING)
             self.window.add_user_turn(text + (("\n📎 " + ", ".join(names)) if names else ""))
-        self._submit(text + files_block)
+        self._submit(text + files_block, speaker=speaker)
         return GLib.SOURCE_REMOVE
 
     def _spoken_presenter(self, present):

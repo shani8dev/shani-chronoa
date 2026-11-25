@@ -416,6 +416,10 @@ class Fact(NamedTuple):
     #: the one the fact was captured on; reads with no channel (the owner's
     #: own view) always see it. Public by default.
     private: bool = False
+    #: A neutral local diarization label for the spoken turn this fact came
+    #: from ("Speaker 1"), or "". Attribution only - it grants nothing and
+    #: changes none of the consent or visibility gates above.
+    speaker: str = ""
 
 
 _STORE: Optional[PerceptStore] = None
@@ -745,6 +749,7 @@ def _memory_percept(fact: Fact) -> Percept:
         **({"relation": list(fact.relation)} if fact.relation else {}),
         **({"channel": fact.channel} if fact.channel else {}),
         **({"private": True} if fact.private else {}),
+        **({"speaker": fact.speaker} if fact.speaker else {}),
     }
     # One embedding per fact, here at the write: the vector rides in this
     # percept's metadata, so `forget()` and capacity eviction need no second
@@ -885,7 +890,7 @@ def store_fact(fact: Fact, store: Optional[PerceptStore] = None) -> Optional[Per
         return duplicate
     percept = _memory_percept(
         Fact(content, span, key, fact.source, fact.confidence, fact.valid_until, relation,
-             channel=fact.channel, private=fact.private)
+             channel=fact.channel, private=fact.private, speaker=fact.speaker)
     )
     target.add(percept)
     changed = [p for p in replaced if p.content != content]
@@ -1100,7 +1105,8 @@ def remember_fact(
 
 
 def remember_from_turn(text: str, store: Optional[PerceptStore] = None,
-                        force: bool = False, channel: str = "") -> "tuple[Optional[Percept], str]":
+                        force: bool = False, channel: str = "",
+                        speaker: str = "") -> "tuple[Optional[Percept], str]":
     """Pull a salient fact out of a completed turn and persist it.
 
     The entry point for automatic memory: durable memory is only useful if
@@ -1114,6 +1120,10 @@ def remember_from_turn(text: str, store: Optional[PerceptStore] = None,
     matters (a `remember` operation, or a fact with a `valid_until`). An
     explicit remember still updates the throttle timer, so rapid explicit
     remembers don't fill memory with near-duplicates.
+
+    `speaker` is a neutral diarization label from the spoken turn. It is
+    attribution on the fact only: the consent and visibility gates above are
+    unchanged, and a fact with no label is indistinguishable from a typed one.
     """
     global _last_auto_capture
     found, reason = capture_plan(text)
@@ -1129,8 +1139,11 @@ def remember_from_turn(text: str, store: Optional[PerceptStore] = None,
     covering = _covered_by(found, target)
     if covering is not None:
         return None, (f"covered: already stored as {covering.content!r}")
-    if channel and isinstance(found, Fact):
-        found = found._replace(channel=channel)
+    if isinstance(found, Fact):
+        if channel:
+            found = found._replace(channel=channel)
+        if speaker:
+            found = found._replace(speaker=speaker)
     stored = store_fact(found, target)
     return stored, ""
 
