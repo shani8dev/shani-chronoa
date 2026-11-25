@@ -40,6 +40,7 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Gdk', '4.0')
 
 from gi.repository import Gtk  # type: ignore
+from shani_chronoa.gui.locale import _
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,7 @@ class QuickAskWindow(Gtk.Window):
 
     def __init__(self, application=None, on_ask=None, on_keep=None) -> None:
         super().__init__(application=application)
-        self.set_title("Quick Ask")
+        self.set_title(_("Quick Ask"))
         self.set_resizable(False)
         self.set_default_size(460, -1)
         self._on_ask = on_ask
@@ -68,7 +69,7 @@ class QuickAskWindow(Gtk.Window):
         box.set_margin_end(14)
 
         self._entry = Gtk.Entry()
-        self._entry.set_placeholder_text("Ask something…")
+        self._entry.set_placeholder_text(_("Ask something…"))
         # A placeholder is not an accessible name; without this a screen reader
         # announces the field as "text" (shani-testbed a11y-lint, chronoa-voice).
         self._entry.update_property([Gtk.AccessibleProperty.LABEL], ["Question to ask"])
@@ -83,19 +84,19 @@ class QuickAskWindow(Gtk.Window):
         box.append(self._answer)
 
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self._keep = Gtk.CheckButton(label="Keep in the conversation")
+        self._keep = Gtk.CheckButton(label=_("Keep in the conversation"))
         self._keep.set_tooltip_text(
-            "Off: the question and answer are not saved anywhere. "
-            "On: they are added to the open conversation as a normal turn."
+            _("Off: the question and answer are not saved anywhere. "
+            "On: they are added to the open conversation as a normal turn.")
         )
         actions.append(self._keep)
         spacer = Gtk.Box()
         spacer.set_hexpand(True)
         actions.append(spacer)
-        close = Gtk.Button(label="Close")
+        close = Gtk.Button(label=_("Close"))
         close.connect("clicked", lambda _b: self.close())
         actions.append(close)
-        self._send_button = Gtk.Button(label="Ask")
+        self._send_button = Gtk.Button(label=_("Ask"))
         self._send_button.add_css_class("suggested-action")
         self._send_button.connect("clicked", self._on_activate)
         actions.append(self._send_button)

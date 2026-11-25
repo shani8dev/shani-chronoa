@@ -29,6 +29,8 @@ import logging
 from dataclasses import dataclass
 from typing import Callable, Optional
 
+from shani_chronoa import capabilities
+
 logger = logging.getLogger(__name__)
 
 
@@ -73,7 +75,11 @@ def lookup(text: str) -> "tuple[Optional[Command], str]":
     ordinary text, because a command bar that eats prose is worse than none.
     """
     stripped = (text or "").strip()
-    if not stripped.startswith("/") or " " not in stripped and not stripped[1:].isalnum():
+    if (
+        not stripped.startswith("/")
+        or " " not in stripped
+        and not stripped[1:].isalnum()
+    ):
         return None, stripped
     name, _, argument = stripped.partition(" ")
     command = _COMMANDS.get(name[1:].lower())
@@ -104,6 +110,7 @@ def _diff(window, argument: str) -> Optional[str]:
 def _undo(window, argument: str) -> Optional[str]:
     """Runs the real skill, so the same consent key and sandbox apply."""
     from shani_chronoa.tools import execute_tool_outcome
+
     return execute_tool_outcome("undo_last_change", {}).text
 
 
@@ -125,6 +132,7 @@ def _help(window, argument: str) -> Optional[str]:
     text = (argument or "").strip()
     if text:
         from shani_chronoa import capabilities as caps
+
         window.set_input_text(caps.help_prompt() if text.endswith("?") else text)
         return None
     window.open_help()
@@ -148,7 +156,7 @@ def install() -> None:
     register(Command("undo", "Put the last file change back", _undo))
     register(Command("tasks", "Show or hide the task list", _tasks))
     register(Command("diagnostics", "Open the diagnostics panel", _diagnostics))
-    register(Command("help", "What can Chronoa do?", _help))
+    register(Command("help", capabilities.help_label(), _help))
 
 
 install()

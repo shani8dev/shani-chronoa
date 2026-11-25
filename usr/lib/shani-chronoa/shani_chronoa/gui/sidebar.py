@@ -34,6 +34,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk  # type: ignore
 
 from shani_chronoa.gui.surfaces import common
+from shani_chronoa.gui.locale import _
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +203,7 @@ class SidebarPage(Adw.NavigationPage):
         not also pop the content stack, because the drawer can be sitting over a
         panel that was already open.
         """
-        super().__init__(title="Panels")
+        super().__init__(title=_("Panels"))
         # **No `Adw.HeaderBar` here, on purpose.**
         #
         # This page is the sidebar of an `Adw.NavigationSplitView`, and the split
@@ -227,7 +228,7 @@ class SidebarPage(Adw.NavigationPage):
 
         self._app = app
         stack = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        search = common.search_entry("Search panels")
+        search = common.search_entry(_("Search panels"))
         search.set_margin_top(6)
         search.set_margin_bottom(6)
         search.set_margin_start(12)
@@ -547,13 +548,13 @@ class SidebarPage(Adw.NavigationPage):
         self._drawer_close = Gtk.Button(
             icon_name="window-close-symbolic")
         self._drawer_close.add_css_class("flat")
-        self._drawer_close.set_tooltip_text("Close the panel list (F9)")
+        self._drawer_close.set_tooltip_text(_("Close the panel list (F9)"))
         self._drawer_close.update_property(
             [Gtk.AccessibleProperty.LABEL], ["Close the panel list"])
         self._drawer_close.connect(
             "clicked", lambda _b: on_close() if on_close else None)
         bar.pack_start(self._drawer_close)
-        title = Adw.WindowTitle(title="Panels")
+        title = Adw.WindowTitle(title=_("Panels"))
         bar.set_title_widget(title)
         bar.set_visible(False)
         self._drawer_bar = bar

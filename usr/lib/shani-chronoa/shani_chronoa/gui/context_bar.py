@@ -25,6 +25,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk  # noqa: E402
+from shani_chronoa.gui.locale import _
 
 logger = logging.getLogger(__name__)
 
@@ -117,8 +118,8 @@ class ContextBar(Gtk.Box):
             except Exception:  # noqa: BLE001 - a tooltip is not worth a crash
                 logger.debug("context breakdown unreadable", exc_info=True)
         if getattr(report, "elided", False):
-            parts.append("part of this conversation was already dropped to "
-                         "make the request fit")
+            parts.append(_("part of this conversation was already dropped to "
+                         "make the request fit"))
         return "\n".join(str(part) for part in parts)
 
 

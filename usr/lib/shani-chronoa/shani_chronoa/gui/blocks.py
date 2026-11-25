@@ -53,6 +53,7 @@ from gi.repository import Gdk, Gio, GLib, Gtk, Pango  # type: ignore
 from shani_chronoa import markdown_lite
 from shani_chronoa.gui import code_hl
 from shani_chronoa.words import plural
+from shani_chronoa.gui.locale import _
 
 logger = logging.getLogger(__name__)
 
@@ -780,9 +781,9 @@ class InlineDiff(Gtk.Box):
         spacer = Gtk.Box(hexpand=True)
         head.append(spacer)
         if on_show_full is not None:
-            full = Gtk.Button(label="Show full diff")
+            full = Gtk.Button(label=_("Show full diff"))
             full.add_css_class("flat")
-            full.set_tooltip_text("Open this change in the Diff panel")
+            full.set_tooltip_text(_("Open this change in the Diff panel"))
             full.connect("clicked", lambda _b: on_show_full())
             head.append(full)
         self.append(head)
@@ -805,7 +806,7 @@ class InlineDiff(Gtk.Box):
             more.add_css_class("dim-label")
             lines.append(more)
         if not changed:
-            same = Gtk.Label(xalign=0.0, label="No line changed")
+            same = Gtk.Label(xalign=0.0, label=_("No line changed"))
             same.add_css_class("dim-label")
             lines.append(same)
         self.append(lines)
@@ -1121,8 +1122,8 @@ class ArtifactBlock(Gtk.Box):
         switch = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         switch.add_css_class("linked")
         switch.set_halign(Gtk.Align.START)
-        rendered_btn = Gtk.ToggleButton(label="Rendered")
-        source_btn = Gtk.ToggleButton(label="Source")
+        rendered_btn = Gtk.ToggleButton(label=_("Rendered"))
+        source_btn = Gtk.ToggleButton(label=_("Source"))
         source_btn.set_group(rendered_btn)
         switch.append(rendered_btn)
         switch.append(source_btn)
@@ -1390,7 +1391,7 @@ class ArtifactBlock(Gtk.Box):
 
         controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         play = Gtk.ToggleButton(icon_name="media-playback-start-symbolic")
-        play.set_tooltip_text("Play or pause")
+        play.set_tooltip_text(_("Play or pause"))
         scrubber = Gtk.Scale(orientation=Gtk.Orientation.HORIZONTAL)
         scrubber.set_hexpand(True)
         scrubber.set_draw_value(False)
@@ -1403,12 +1404,12 @@ class ArtifactBlock(Gtk.Box):
         box.append(controls)
 
         marker_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        set_start = Gtk.Button(label="Set start")
-        set_end = Gtk.Button(label="Set end")
-        add = Gtk.Button(label="Add to message")
+        set_start = Gtk.Button(label=_("Set start"))
+        set_end = Gtk.Button(label=_("Set end"))
+        add = Gtk.Button(label=_("Add to message"))
         add.add_css_class("suggested-action")
         add.set_sensitive(False)
-        range_label = Gtk.Label(label="No part marked")
+        range_label = Gtk.Label(label=_("No part marked"))
         range_label.add_css_class("dim-label")
         range_label.set_hexpand(True)
         range_label.set_xalign(0.0)
@@ -1431,9 +1432,9 @@ class ArtifactBlock(Gtk.Box):
                     from shani_chronoa import recordings
                     range_label.set_label(f"from {recordings._clock(s)} - now set the end")
                 elif s is not None and e is not None:
-                    range_label.set_label("the end must come after the start")
+                    range_label.set_label(_("the end must come after the start"))
                 else:
-                    range_label.set_label("No part marked")
+                    range_label.set_label(_("No part marked"))
 
         def on_play(button):
             if button.get_active():
@@ -1672,7 +1673,7 @@ def _why_block(selection, name: str) -> Optional[Gtk.Box]:
     if not lines:
         return None
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-    heading = Gtk.Label(label="Why this tool")
+    heading = Gtk.Label(label=_("Why this tool"))
     heading.set_xalign(0.0)
     box.append(heading)
     for line in lines:
@@ -1757,11 +1758,11 @@ class ToolCallCard(Gtk.Box):
             # and one that silently did not is a symbol a person has to already
             # know how to read. `verification.Verdict` may know more; this says
             # the one thing a person can act on.
-            outcome = Gtk.Label(label="did not work")
+            outcome = Gtk.Label(label=_("did not work"))
             outcome.add_css_class("dim-label")
             outcome.set_tooltip_text(
-                "Chronoa says this call did not succeed. Its answer below "
-                "explains why, if it did.")
+                _("Chronoa says this call did not succeed. Its answer below "
+                "explains why, if it did."))
             row.append(outcome)
         summary = call_phrase(name, self.arguments)
         if len(summary) > 60:
@@ -1779,7 +1780,7 @@ class ToolCallCard(Gtk.Box):
 
         toggle = Gtk.ToggleButton()
         toggle.set_icon_name("view-more-symbolic")
-        toggle.set_tooltip_text("Show what this ran, and what came back")
+        toggle.set_tooltip_text(_("Show what this ran, and what came back"))
         toggle.update_property([Gtk.AccessibleProperty.LABEL],
                                ["Show the details of " + name])
         row.append(toggle)
@@ -1827,7 +1828,7 @@ class ToolCallCard(Gtk.Box):
             grid.attach(value_label, 1, index, 1, 1)
         inner.append(grid)
         if on_open is not None:
-            open_button = Gtk.Button(label="Open")
+            open_button = Gtk.Button(label=_("Open"))
             open_button.add_css_class("flat")
             open_button.connect("clicked", lambda _b: on_open(name, self.arguments, result))
             inner.append(open_button)
@@ -1891,7 +1892,7 @@ class ToolCallCard(Gtk.Box):
                     and not getattr(self, "_panel_link", None):
                 # Several files, or one the ring cannot diff: no guessed
                 # preview, but the panel that has them is still one click away.
-                link = Gtk.Button(label="Show what changed")
+                link = Gtk.Button(label=_("Show what changed"))
                 link.add_css_class("flat")
                 link.set_halign(Gtk.Align.START)
                 link.connect("clicked", lambda _b: self._on_show_diff())

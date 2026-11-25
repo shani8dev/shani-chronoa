@@ -27,6 +27,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Pango", "1.0")
 from gi.repository import Gdk, Gtk, Pango  # noqa: E402 - after require
+from shani_chronoa.gui.locale import _
 
 
 #: How tall the result list may grow before it starts scrolling.
@@ -169,7 +170,7 @@ class CommandPalette(Gtk.Box):
         self._row_count = 0
 
         self._search = Gtk.SearchEntry()
-        self._search.set_placeholder_text("Go to a panel, a command, a skill...")
+        self._search.set_placeholder_text(_("Go to a panel, a command, a skill..."))
         self._search.set_hexpand(True)
         self._search.update_property(
             [Gtk.AccessibleProperty.LABEL],
@@ -216,7 +217,7 @@ class CommandPalette(Gtk.Box):
         self._scroller = scroller
         self.append(scroller)
 
-        self._empty = Gtk.Label(label="Nothing matches that.")
+        self._empty = Gtk.Label(label=_("Nothing matches that."))
         self._empty.add_css_class("dim-label")
         self._empty.set_visible(False)
         self.append(self._empty)

@@ -264,16 +264,12 @@ def _registry_schemas() -> Tuple[List[Any], Optional[str]]:
     empty list states "Chronoa has no skills" about a registry it never managed
     to read.
     """
-    try:
-        tools, _handlers = discover_skills()
-    except Exception as exc:  # noqa: BLE001 - the window must still open
-        logger.warning("skill registry unavailable; the skills list cannot be read",
-                       exc_info=True)
-        return [], f"{type(exc).__name__}: {exc}"
-    try:
-        return list(tools or ()), None
-    except TypeError:
-        return [], "the registry returned something that is not a list of schemas"
+    tools, _handlers, error = capabilities.live_registry(discover_skills)
+    if error:
+        logger.warning("skill registry unavailable; the skills list cannot be read: %s",
+                       error)
+        return [], error
+    return tools, None
 
 
 def _schema_declares(config: Any, key: str) -> bool:

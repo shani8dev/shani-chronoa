@@ -62,6 +62,7 @@ gi.require_version('GLib', '2.0')
 from gi.repository import Gio, GLib, Gtk  # noqa: E402 - gi.require_version must come first
 
 from shani_chronoa import egress, markdown_lite, webtext
+from shani_chronoa.gui.locale import _
 
 logger = logging.getLogger(__name__)
 
@@ -426,7 +427,7 @@ class BrowserWindow(Gtk.Window):
     # -- construction ------------------------------------------------------
 
     def _build_ui(self) -> None:
-        self.set_title("Chronoa Browser")
+        self.set_title(_("Chronoa Browser"))
         self.set_default_size(960, 700)
         self.set_size_request(420, 320)
 
@@ -445,12 +446,12 @@ class BrowserWindow(Gtk.Window):
         self._home = self._tool_button("go-home-symbolic", "Go home", self.go_home)
 
         self._entry = Gtk.Entry()
-        self._entry.set_placeholder_text("Search or enter an address")
+        self._entry.set_placeholder_text(_("Search or enter an address"))
         self._entry.set_hexpand(True)
         # A placeholder is not an accessible name; without this a screen reader
         # announces the field as "text" (shani-testbed a11y-lint).
         self._entry.update_property(
-            [Gtk.AccessibleProperty.LABEL], ["Search or enter an address"])
+            [Gtk.AccessibleProperty.LABEL], [_("Search or enter an address")])
         self._entry.connect("activate", self._on_entry_activate)
         focus = Gtk.EventControllerFocus()
         # Selecting everything on focus is what makes typing a new address
@@ -467,9 +468,9 @@ class BrowserWindow(Gtk.Window):
         self._menu_button = Gtk.MenuButton()
         self._menu_button.set_icon_name("view-more-symbolic")
         self._menu_button.add_css_class("flat")
-        self._menu_button.set_tooltip_text("Page actions")
+        self._menu_button.set_tooltip_text(_("Page actions"))
         self._menu_button.update_property(
-            [Gtk.AccessibleProperty.LABEL], ["Page actions"])
+            [Gtk.AccessibleProperty.LABEL], [_("Page actions")])
         self._menu_button.set_popover(self._build_menu())
 
         for widget in (self._back, self._forward, self._reload, self._home,
@@ -844,7 +845,7 @@ class BrowserWindow(Gtk.Window):
 
     def _on_view_title(self, webview, _param) -> None:
         title = webview.get_title() or ''
-        self.set_title(f"{title} - Chronoa Browser" if title else "Chronoa Browser")
+        self.set_title(f"{title} - Chronoa Browser" if title else _("Chronoa Browser"))
 
     def _on_create(self, _webview, navigation_action):
         """Refuse a new window and keep the navigation in this one.
