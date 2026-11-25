@@ -7,7 +7,7 @@ key spelled out - *"the web sense is turned off (enable 'web-sense-enabled')"*
 the instruction the refusal gave pointed at a spelling no screen anywhere uses,
 and a person following it was hunting for a switch that does not exist under
 that name. Measured 2026-10-14: **47 hand-written refusals across 20 files** all
-named a key the same way, and **36 of the 53 sense consent keys had no friendly
+named a key the same way, and **36 of the 52 sense consent keys had no friendly
 label anywhere at all**.
 
 **Why the information was already there.** `capabilities.GATE_NAMES` maps a
@@ -80,7 +80,7 @@ ALL_SENSES = sorted(discover_senses())
 
 
 class TestEverySenseRefusalNamesItsRow:
-    """All 53, not a sample, because the gap was exactly in the unsampled ones.
+    """All 52, not a sample, because the gap was exactly in the unsampled ones.
 
     The 36 keys with no `GATE_NAMES` entry are the population a hand-written list
     of examples would have missed - `hearing`, `ocr`, `cpu`, `idle` and the rest
@@ -105,9 +105,24 @@ class TestEverySenseRefusalNamesItsRow:
 
     def test_the_population_is_the_whole_registry(self, senses):
         """A parameter list that quietly shrinks is a witness that stops biting."""
-        assert len(ALL_SENSES) == len(senses) == 53, (
+        assert len(ALL_SENSES) == len(senses) == 52, (
             f"{len(ALL_SENSES)} listed against {len(senses)} registered"
         )
+
+    def test_the_count_agrees_with_the_consent_table(self, senses):
+        """52 is measured, not remembered: the config table is a second source.
+
+        A literal pinned to one registry goes stale the day a sense lands. The
+        consent table is the other half of the same population, so a mismatch
+        names which side moved instead of failing on a bare number. The list
+        equality catches a sample of the right size, which the count cannot.
+        """
+        from shani_chronoa.config import _SENSE_CONSENT_KEYS
+
+        assert len(senses) == len(_SENSE_CONSENT_KEYS) == 52, (
+            f"{len(senses)} senses against {len(_SENSE_CONSENT_KEYS)} keys"
+        )
+        assert ALL_SENSES == senses, "the parameter list is not the registry"
 
 
 class TestTheLabelIsTheOneAScreenShows:
