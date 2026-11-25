@@ -2128,6 +2128,17 @@ is" above) — that placeholder-REST-client note is stale as of the pass that
 replaced it; don't trust old descriptions of `mcp.py` in memory or prior
 notes without re-reading the file.
 
+**2026-11-26 — the Kundali/Panchang engine and its astronomy moved to shani-shell.**
+`skills/kundali.py` and `astronomy.py` are gone from this package. shani-shell
+owns `bridge/kundali_engine.py` (the plain computation layer) and
+`bridge/astronomy.py` (the pure-Python calculations, copied verbatim); its
+`bridge/kundali.py` imports the local astronomy module with no path shim and
+keeps the QML panel's JSON stdout contract. The skill's `_GROUPS` row, both
+modules, and the library-module exclusion in `tests/test_no_unwired_public_helper.py`
+were removed with them; `CAPABILITIES.md`, the README counts and the reranker
+corpus were regenerated. Nothing under `skills/` calculates the sidereal sky
+any more — ask the shell's Kundali bridge, not this registry.
+
 ## Settings window (added 2026-09-16)
 
 `settings_window.py`'s `SettingsWindow` now exists - plain GTK4, no
