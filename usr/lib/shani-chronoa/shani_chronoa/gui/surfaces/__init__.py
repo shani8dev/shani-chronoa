@@ -67,6 +67,7 @@ SETTINGS_TARGETS = {
     "activity": "tool-activity",
     # The seccomp switch is a Privacy row; it is also on the page itself.
     "sandbox": "privacy",
+    "git_panel": "privacy",
 }
 
 
@@ -121,6 +122,13 @@ SURFACE_IDS = (
     # shape for a transcript somebody wants to read again.
     "my_files",
     "meetings",
+    "today",
+    "git_panel",
+    "models_hub",
+    "automation_hub",
+    "changes_hub",
+    "health_hub",
+    "privacy_hub",
     # The device panels - Phone, Phone link, Screen share, Devices, Wearables,
     # Android and Connect a device - moved to Shani Link (shani-link-app) on
     # 2026-11-04 with the engines they drive: they are used by a person
@@ -258,7 +266,14 @@ DEFAULT_SECTION = {
     "conversations": "Remembering",
     "compare": "Remembering",
     "memory": "Remembering",
+    "today": "Remembering",
     "activity": "Remembering",
+    "git_panel": "Making",
+    "models_hub": "Thinking",
+    "automation_hub": "Acting",
+    "changes_hub": "Making",
+    "health_hub": "Health and trust",
+    "privacy_hub": "Health and trust",
     "skills": "Acting",
     "triggers": "Acting",
     "notices": "Acting",    "senses": "Sensing",

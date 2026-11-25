@@ -42,6 +42,7 @@ from .attaching import AttachingMixin
 from .conversations_menu import ConversationsMenuMixin
 from .sidebar import SidebarBreakpoint, SidebarPage
 from . import rail as rail_module
+from .surfaces import common
 from . import context_bar as context_bar_module
 from . import task_card as task_card
 from . import timers as timers_module
@@ -1696,6 +1697,16 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._holding = False
         self._setup_ui()
         self.connect("close-request", lambda *_a: self._on_close_request())
+        # Dictate into the app that had focus: two presses of one key. The
+        # target lives on this window so two windows cannot overwrite it.
+        try:
+            action = Gio.SimpleAction.new("dictate-into-app", None)
+            action.connect("activate", lambda *_a: self._dictate_into_app())
+            self.add_action(action)
+            application.set_accels_for_action(
+                "win.dictate-into-app", ["<Ctrl><Shift><Alt>d"])
+        except Exception:  # noqa: BLE001 - a hotkey is not the window
+            logger.debug("dictation hotkey unavailable", exc_info=True)
         try:
             self._apply_organ_css()
         except Exception:                               # noqa: BLE001
@@ -3376,6 +3387,43 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
     # Background activity (the bell)
     # ------------------------------------------------------------------
 
+    def _dictate_into_app(self) -> None:
+        """Hotkey: remember the focused app, then start a dictation turn.
+
+        Two presses of one key, not a mode. The first press is the only moment
+        the target app has focus - starting the microphone moves focus here - so
+        that is when the app is remembered. The dictated words arrive as a
+        normal user turn; pressing again types that turn into the remembered app
+        through the guarded driver. The guard lives in ui_driver.type_text.
+        """
+        from shani_chronoa.gui import dictation_target as _dictation
+
+        try:
+            last = self._last_user_turn()
+        except Exception:  # noqa: BLE001
+            last = ""
+        stored = _dictation.remembered_target(self)
+        if stored is not None:
+            said = _dictation.send(last, self)
+            _dictation.clear(self)
+            common.toast(self, said)
+            return
+        target = _dictation.remember_target(self)
+        if not target.app:
+            common.toast(self, "No app in focus to dictate into; nothing was started")
+            return
+        common.toast(self, f"Dictating into {target.app}; press again to type it there")
+        self._app.activate_action("dictate", None)
+
+    def _last_user_turn(self) -> str:
+        """The text of the most recent question in the transcript, or ""."""
+        transcript = getattr(self, "_transcript", None)
+        for name in ("last_user_text", "last_user_turn"):
+            reader = getattr(transcript, name, None)
+            if callable(reader):
+                return str(reader() or "")
+        return ""
+
     def _build_activity_bell(self):
         """A bell in the header for what happened while you were not looking.
 
@@ -3460,8 +3508,16 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             said.append(f"{plural(len(results), 'rule')} fired")
         if proposals:
             said.append(f"{plural(proposals, 'proposal')} waiting")
-        self._bell_button.set_tooltip_text(
-            "Background activity: " + ", ".join(said))
+        tip = "Background activity: " + ", ".join(said)
+        self._bell_button.set_tooltip_text(tip)
+        # The tray mirrors the same count, not a second reading of the store.
+        tray = getattr(self._app, "_tray", None)
+        set_badge = getattr(tray, "set_badge", None)
+        if callable(set_badge):
+            try:
+                set_badge(proposals, ", ".join(said))
+            except Exception:  # noqa: BLE001
+                logger.debug("bell: tray badge failed", exc_info=True)
         self._fill_activity_bell(results, proposals)
 
     def _fill_activity_bell(self, results, proposals: int) -> None:
