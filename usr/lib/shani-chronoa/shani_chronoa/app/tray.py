@@ -99,6 +99,23 @@ class Tray:
             logger.debug("tray icon could not be updated: %s", exc)
         self._icon.set_label(label)
 
+    def set_badge(self, count: int, why: str = "") -> None:
+        """Mirror the header bell's count of proposals waiting.
+
+        The count is the same one the bell shows, passed in by
+        `window._refresh_activity_bell` rather than re-derived here: a second
+        reader of the proposal store can disagree with the badge on screen.
+        The tray has no popover in this binding, so the number is the signal and
+        the reason is the icon's label. Zero means no badge, not "0" on screen.
+        A tray with no badge API answers by doing nothing.
+        """
+        try:
+            text = str(int(count)) if count else ""
+            self._icon.set_label(text)
+            self._icon.set_title(f"Chronoa — {why}" if why else "Chronoa")
+        except Exception:  # noqa: BLE001 - an icon is not the assistant
+            logger.debug("tray badge could not be updated", exc_info=True)
+
     def destroy(self) -> None:
         try:
             self._icon.set_visible(False)

@@ -1326,7 +1326,38 @@ def _voice_top(app: Any) -> Gtk.Widget:
         ears.add_suffix(download)
     listening.add(ears)
     box.append(listening)
+    box.append(_voice_cloning(app))
     return box
+
+
+def _voice_cloning(app: Any) -> Gtk.Widget:
+    """Registration for a cloned voice, and the reason it cannot run here.
+
+    A disabled state with a reason, never a button that pretends. The two gates
+    are real, but the engine behind them (KittenTTS, which needs torch) is not
+    packaged. clone_problem() is the one place that answer comes from.
+    """
+    from shani_chronoa import voice_clone
+
+    group = common.group("Cloned voices",
+                         "A voice built from your own recording. Not available on this install.")
+    problem = voice_clone.clone_problem() or "the voice-cloning engine is not available"
+    adder = getattr(group, "add", None) or group.append
+    adder(common.row("Registration is unavailable", problem))
+    try:
+        registered = [name for name, _entry in voice_clone.voices()]
+    except Exception:  # noqa: BLE001 - an unreadable registry is not empty
+        logger.debug("voice cloning registry unreadable", exc_info=True)
+        registered = []
+    if registered:
+        adder(common.row(f"{len(registered)} registered voice(s)",
+                         "Stored here, but synthesis needs the engine above."))
+    adder(common.row("How it would work",
+                     "Turn on “" + voice_clone.gate_label() + "”, then read a consent "
+                     "sentence into the microphone; the recording is both permission "
+                     "and reference clip. No Register button: a control that cannot "
+                     "finish is worse than the honest sentence."))
+    return group
 
 
 def build(app: Any) -> Gtk.Widget:

@@ -207,6 +207,96 @@ def _run_again(record: dict, widget: Gtk.Widget) -> None:
                      name="chronoa-activity-rerun").start()
 
 
+#: Tools whose call changed a file in the person's home. A row for one of these
+#: carries an Undo button; a read-only tool does not. The set is the write
+#: skills that record a pre-image in the undo ring.
+_FILE_WRITERS = frozenset({
+    "write_text_file", "edit_file", "find_and_replace", "office_document",
+    "apply_patch", "create_document", "convert_document",
+})
+
+
+def _written_path(record: dict) -> str:
+    """The file this call wrote, read from the args the audit trail holds."""
+    args = record.get("args")
+    if not isinstance(args, dict):
+        return ""
+    for key in ("path", "file", "filename", "output", "output_path"):
+        value = args.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _arg_lines(record: dict) -> "list[tuple[str, str]]":
+    """The call's arguments as two short columns, for a side-by-side diff."""
+    args = record.get("args")
+    if not isinstance(args, dict) or not args:
+        return []
+    return [(str(k), _clip(v, 120)) for k, v in args.items()]
+
+
+def _diff_widget(record: dict) -> Gtk.Widget:
+    """Two columns: what was asked, and what the call reported back.
+
+    The log holds one call, not two versions of it, so the comparison is
+    requested against observed. Column headings say which is which.
+    """
+    box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+    box.set_margin_top(8); box.set_margin_bottom(8)
+    box.set_margin_start(8); box.set_margin_end(8)
+
+    def column(heading: str, lines: "list[str]", mono: bool) -> None:
+        col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        col.set_halign(Gtk.Align.START)
+        title = Gtk.Label(label=heading)
+        title.add_css_class("dim-label"); title.set_xalign(0.0)
+        col.append(title)
+        for line in lines or ["(none recorded)"]:
+            label = Gtk.Label(label=line)
+            label.set_xalign(0.0); label.set_wrap(True)
+            label.set_max_width_chars(48)
+            if mono:
+                label.add_css_class("monospace")
+            col.append(label)
+        box.append(col)
+
+    column("Arguments asked for",
+           [f"{k}: {v}" for k, v in _arg_lines(record)], True)
+    result = _flatten(record.get("result"))
+    column("What came back",
+           [_status(record)] + ([_clip(result, 120)] if result else []), False)
+    return box
+
+
+def _undo(record: dict, widget: Gtk.Widget) -> None:
+    """Put the file this row wrote back, through the skill and its own gate.
+
+    Off the drawing thread; undo_last_change is a dispatch like any other,
+    so file-edit-enabled is checked and the restore is recorded.
+    """
+    from shani_chronoa import tools
+
+    path = _written_path(record)
+    if not path:
+        common.toast(widget, "This row does not name a file, so there is nothing to undo")
+        return
+
+    def work() -> None:
+        try:
+            outcome = tools.execute_tool_outcome(
+                "undo_last_change", {"path": path}, origin=tools.ORIGIN_USER)
+            said = (outcome.text or "").strip() or "Nothing was put back"
+            verdict = str(getattr(outcome, "verdict", "") or "").strip()
+            if verdict:
+                said = f"{said} ({verdict})"
+        except Exception as exc:  # noqa: BLE001
+            said = f"Undo could not run: {type(exc).__name__}: {exc}"
+        GLib.idle_add(lambda: (common.toast(widget, said), False)[1])
+
+    threading.Thread(target=work, daemon=True, name="chronoa-activity-undo").start()
+
+
 def _row(record: dict) -> Gtk.Widget:
     when = _parse_timestamp(record.get("timestamp"))
     when_text = when.astimezone().strftime("%Y-%m-%d %H:%M:%S") if when else "time unreadable"
@@ -252,6 +342,28 @@ def _row(record: dict) -> Gtk.Widget:
             [f"Run {tool} again"])
         again.connect("clicked", lambda _b: _run_again(record, row))
         row.add_suffix(again)
+        # The digest is one line; the two columns are the same call side by
+        # side. A MenuButton because Gtk.Button has no set_popover in GTK4.
+        details = Gtk.MenuButton(icon_name="dialog-information-symbolic",
+                                 valign=Gtk.Align.CENTER)
+        details.add_css_class("flat"); details.add_css_class("circular")
+        tip = "See the arguments asked for beside what came back"
+        details.set_tooltip_text(tip)
+        details.update_property([Gtk.AccessibleProperty.LABEL], [tip])
+        popover = Gtk.Popover()
+        popover.set_child(_diff_widget(record))
+        details.set_popover(popover)
+        row.add_suffix(details)
+        # Undo only on rows that wrote a file the ring can put back.
+        tool = _flatten(record.get("tool_name", ""))
+        if tool in _FILE_WRITERS and _written_path(record):
+            undo = Gtk.Button(icon_name="edit-undo-symbolic", valign=Gtk.Align.CENTER)
+            undo.add_css_class("flat"); undo.add_css_class("circular")
+            utip = f"Put back the file {_written_path(record)} that {tool} wrote"
+            undo.set_tooltip_text(utip)
+            undo.update_property([Gtk.AccessibleProperty.LABEL], [utip])
+            undo.connect("clicked", lambda _b: _undo(record, row))
+            row.add_suffix(undo)
     return row
 
 
