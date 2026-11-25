@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**256 skills in 24 groups.** Each is a named, schema-typed module; the model
+**222 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. The whitelist *is* the design, so a new capability is a
 new named skill. The one exception is `run_command`, for running a project's
 tests and builds: off by default, sandboxed (no network, nothing outside the
@@ -37,7 +37,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**89 of 256 are consent-gated and 16 are destructive.**
+**86 of 222 are consent-gated and 16 are destructive.**
 
 ## Files
 
@@ -60,7 +60,6 @@ Read, write, move, archive and undo files.
 | `dashboard` | Build a dashboard as a self-contained HTML page | — |
 | `delete_file` | Delete a file or folder, recoverably from the trash | **asks first, always** · needs `file-delete-enabled` |
 | `directory_tree` | Show a folder's shape | — |
-| `disk_layout` | How this machine's disks are partitioned | — |
 | `duplicate_files` | Which files are stored twice, and how much that wastes | — |
 | `edit_file` | Change one exact piece of text | **asks first, always** · needs `file-edit-enabled` |
 | `email_draft` | Save an email draft as a local file, without sending | — |
@@ -94,69 +93,11 @@ Read, write, move, archive and undo files.
 | `search_file_contents` | Search inside files | — |
 | `search_my_files` | Search your own files by meaning | needs `file-index-enabled` |
 | `shopping_list` | Keep a shopping list: add, list, tick off and remove | — |
-| `space_by_type` | Where the space goes, by kind of file | — |
 | `stale_files` | What is big AND untouched - the deletion candidates | — |
 | `sync_folder` | Sync two folders, showing what would change first | — |
 | `temp_files` | Find junk, temporary and leftover files by name | — |
 | `undo_last_change` | Undo Chronoa's last change to a file | **asks first, always** · needs `file-edit-enabled` |
 | `write_text_file` | Write a text file | needs `file-edit-enabled` to replace a file that already has content |
-
-## System
-
-Processes, packages, updates, containers, vms, disks, network.
-
-| Skill | What it does | Before it runs |
-|---|---|---|
-| `autostart_entries` | What starts on this machine automatically, at login and on a schedule | — |
-| `backup_adapters` | Check a backup repository or print a backup command without running it | — |
-| `backup_status` | Whether this machine has an off-machine backup, and when | — |
-| `bandwidth_to_host` | How fast this machine talks to another machine | — |
-| `check_internet` | Is the internet working? | — |
-| `check_port` | Whether a host accepts connections on a port | — |
-| `check_updates` | Check for waiting package updates | — |
-| `cloud_files` | What is in this machine's cloud storage remotes | — |
-| `connect_wifi` | Join a WiFi network | needs `wifi-connect-enabled` |
-| `content_discovery` | Which paths a local web server answers on | — |
-| `cpu_frequency` | The CPU governor, its speed, and its hardware range | — |
-| `cpu_per_core` | Which processor cores are busy right now | — |
-| `data_usage` | Data used | — |
-| `discover_hosts` | Who is on this network right now | — |
-| `disk_activity` | How hard the disks are working right now | needs `storage-sense-enabled` |
-| `disk_usage` | Report filesystem and directory space use | — |
-| `dns_lookup` | Look a name up in DNS, or read its mail, name or certificate records | — |
-| `file_locks` | Who holds a file lock, and on what | — |
-| `firmware_updates` | List firmware updates for this machine's devices | — |
-| `graphics_stack` | Whether the graphics are hardware accelerated or falling back to software | — |
-| `interface_counters` | How much traffic each interface has carried | — |
-| `list_wifi_networks` | WiFi networks | — |
-| `log_files` | Which logs are biggest, still growing, and unrotated | — |
-| `login_history` | Who logged in recently | needs `sessions-sense-enabled` |
-| `machine_capabilities` | What this machine can actually do | — |
-| `my_ip_address` | IP address | — |
-| `neighbour_table` | Which addresses on this link have answered, and which never have | — |
-| `network_activity` | What is using this machine's network right now, per program | — |
-| `network_watch` | Watch for new devices on one interface | — |
-| `open_files` | Which programs have a file or socket open | — |
-| `open_settings` | Open the system Settings at a page | — |
-| `permission_audit` | What other users on this machine can read or write | — |
-| `ping_host` | Ping a host | — |
-| `port_owner` | Which program is using a port | — |
-| `print_file` | Print a file | — |
-| `process_detail` | What one running process is waiting on | — |
-| `routing_table` | The machine's routing table | — |
-| `scan_network` | Find other devices on the local network | — |
-| `scheduled_tasks` | What is scheduled to run: cron jobs and systemd timers | — |
-| `security_status` | Secure Boot, TPM and firewall status | needs `security-sense-enabled` |
-| `set_hostname` | This computer's name | needs `hostname-control-enabled` |
-| `snapshot_status` | Can this machine roll back, and which slot is it on | needs `snapshots-sense-enabled` |
-| `system_history` | What this machine was doing earlier today | — |
-| `system_info` | Describe this machine | — |
-| `tailscale_status` | Tailscale | — |
-| `thread_activity` | Which thread of a process is using the CPU, or waiting | — |
-| `tls_certificate` | Inspect a TLS certificate | — |
-| `trace_route` | Trace the network path to a host | — |
-| `vpn_control` | VPN connections | needs `wifi-connect-enabled` |
-| `whois_lookup` | Look up who a domain or address is registered to | — |
 
 ## Devices
 
@@ -186,6 +127,35 @@ Hardware, peripherals, sensors and their state.
 | `toggle_wifi` | Turn the Wi-Fi radio on or off | needs `radio-control-enabled` |
 | `usb_devices` | What is plugged in, and Thunderbolt docks | needs `usb-sense-enabled` |
 | `watch` | Steps, sleep, stress, heart rate, SpO2 and settings on your watch | needs `bluetooth-gatt-enabled` |
+
+## System
+
+Processes, packages, updates, containers, vms, disks, network.
+
+| Skill | What it does | Before it runs |
+|---|---|---|
+| `autostart_entries` | What starts on this machine automatically, at login and on a schedule | — |
+| `backup_adapters` | Check a backup repository or print a backup command without running it | — |
+| `backup_status` | Whether this machine has an off-machine backup, and when | — |
+| `check_internet` | Is the internet working? | — |
+| `check_updates` | Check for waiting package updates | — |
+| `cloud_files` | What is in this machine's cloud storage remotes | — |
+| `connect_wifi` | Join a WiFi network | needs `wifi-connect-enabled` |
+| `content_discovery` | Which paths a local web server answers on | — |
+| `data_usage` | Data used | — |
+| `disk_usage` | Report filesystem and directory space use | — |
+| `firmware_updates` | List firmware updates for this machine's devices | — |
+| `list_wifi_networks` | WiFi networks | — |
+| `login_history` | Who logged in recently | needs `sessions-sense-enabled` |
+| `machine_capabilities` | What this machine can actually do | — |
+| `my_ip_address` | IP address | — |
+| `open_settings` | Open the system Settings at a page | — |
+| `print_file` | Print a file | — |
+| `security_status` | Secure Boot, TPM and firewall status | needs `security-sense-enabled` |
+| `set_hostname` | This computer's name | needs `hostname-control-enabled` |
+| `snapshot_status` | Can this machine roll back, and which slot is it on | needs `snapshots-sense-enabled` |
+| `system_info` | Describe this machine | — |
+| `vpn_control` | VPN connections | needs `wifi-connect-enabled` |
 
 ## Everyday tools
 
@@ -248,23 +218,6 @@ Inspect repositories and work through files.
 | `todo_list` | Keep a list of tasks to do | needs `todo-list-enabled` |
 | `vcs_status` | State of a git, subversion or mercurial checkout | — |
 
-## Web
-
-Search, fetch and act on a page.
-
-| Skill | What it does | Before it runs |
-|---|---|---|
-| `browse` | Use a web page: click, type and read it | needs `web-sense-enabled` |
-| `convert_currency` | Currency | — |
-| `define_word` | What a word means | — |
-| `get_location` | Where this computer is | — |
-| `get_weather` | Weather | — |
-| `lookup_wikipedia` | Who or what something is | — |
-| `maps` | Find a place, get directions, or look up what is nearby | needs `web-sense-enabled` |
-| `news` | Today's headlines, on a topic or in general | needs `web-sense-enabled` |
-| `speed_test` | Internet speed | needs `speed-test-enabled` |
-| `web_search` | Look something up | — |
-
 ## Power and screen
 
 Brightness, theme, power state, night light.
@@ -281,22 +234,6 @@ Brightness, theme, power state, night light.
 | `set_screensaver` | Change when the screen blanks and locks | needs `idle-timeout-enabled` |
 | `set_sleep_inhibit` | Hold the machine awake for a bounded time | needs `sleep-inhibit-enabled` |
 
-## Processes and windows
-
-Find, move and close what is open.
-
-| Skill | What it does | Before it runs |
-|---|---|---|
-| `arrange_window` | Minimize, maximize, move or resize a window | — |
-| `close_window` | Close a window | **asks first, always** · needs `window-close-enabled` |
-| `focus_window` | Focus a window | — |
-| `kill_process` | Stop a process | **asks first, always** · needs `process-kill-enabled` |
-| `list_processes` | Running processes | — |
-| `list_windows` | Open windows | — |
-| `oom_score` | Who the kernel would kill if memory ran out | — |
-| `press_key` | Press a key | needs `input-control-enabled` |
-| `process_cost` | What is using the CPU or the disk | — |
-
 ## Sound
 
 Play, record, describe and edit audio.
@@ -312,6 +249,22 @@ Play, record, describe and edit audio.
 | `set_volume` | Change the volume | — |
 | `sing` | Sing a line aloud | — |
 | `speak` | Speak a reply aloud | — |
+
+## Web
+
+Search, fetch and act on a page.
+
+| Skill | What it does | Before it runs |
+|---|---|---|
+| `browse` | Use a web page: click, type and read it | needs `web-sense-enabled` |
+| `convert_currency` | Currency | — |
+| `define_word` | What a word means | — |
+| `get_location` | Where this computer is | — |
+| `get_weather` | Weather | — |
+| `lookup_wikipedia` | Who or what something is | — |
+| `maps` | Find a place, get directions, or look up what is nearby | needs `web-sense-enabled` |
+| `news` | Today's headlines, on a topic or in general | needs `web-sense-enabled` |
+| `web_search` | Look something up | — |
 
 ## Appearance
 
@@ -343,6 +296,21 @@ Drive the desktop without the keyboard.
 | `type_text` | Type text | needs `input-control-enabled` |
 | `ui_elements` | Press buttons, fill fields and open menus in other apps, and drive them visible | needs `input-control-enabled` |
 
+## Processes and windows
+
+Find, move and close what is open.
+
+| Skill | What it does | Before it runs |
+|---|---|---|
+| `arrange_window` | Minimize, maximize, move or resize a window | — |
+| `close_window` | Close a window | **asks first, always** · needs `window-close-enabled` |
+| `focus_window` | Focus a window | — |
+| `kill_process` | Stop a process | **asks first, always** · needs `process-kill-enabled` |
+| `list_processes` | Running processes | — |
+| `list_windows` | Open windows | — |
+| `press_key` | Press a key | needs `input-control-enabled` |
+| `process_cost` | What is using the CPU or the disk | — |
+
 ## Pictures
 
 | Skill | What it does | Before it runs |
@@ -367,18 +335,6 @@ Memory, percepts and what it has decided.
 | `list_percepts` | What it perceives | — |
 | `review_proposals` | What it noticed but did not keep | needs `memory-sense-enabled` |
 
-## Services and logs
-
-Systemd units and the journal.
-
-| Skill | What it does | Before it runs |
-|---|---|---|
-| `check_units` | Verify systemd units | — |
-| `control_service` | Start or stop a service | **asks first, always** · needs `service-control-enabled` |
-| `crash_report` | What crashed recently | needs `coredumps-sense-enabled` |
-| `list_services` | System services | — |
-| `read_logs` | Read the system log | — |
-
 ## Apps
 
 Launch, list and find applications.
@@ -399,6 +355,16 @@ Read, edit and extract from media.
 | `photo_metadata` | When, where and with what camera a photo was taken | — |
 | `photos` | Find your photos by what is in them, what is written on them, or when they were taken | — |
 | `take_photo` | Take a photo or selfie with the webcam | needs `vision-sense-enabled` |
+
+## Services and logs
+
+Systemd units and the journal.
+
+| Skill | What it does | Before it runs |
+|---|---|---|
+| `control_service` | Start or stop a service | **asks first, always** · needs `service-control-enabled` |
+| `list_services` | System services | — |
+| `read_logs` | Read the system log | — |
 
 ## Clipboard
 

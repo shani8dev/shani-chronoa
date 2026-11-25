@@ -159,7 +159,7 @@ logger.info(f"Loaded {len(_HANDLER_FNS)} skill(s): {', '.join(sorted(_HANDLER_FN
 #: asked, 15 s for an unattended rule), so this can only lengthen up to that.
 _SLOW_TOOLS = {"run_command": 600, "generate_image": 300, "photo_video": 300, "scan_document": 180, "recording": 300, "photos": 300,
                # 100 MB at a slow link; a long PDF merge; a polkit password prompt left open.
-               "speed_test": 180, "pdf_pages": 150, "set_hostname": 90, "set_locale": 90,
+               "pdf_pages": 150, "set_hostname": 90, "set_locale": 90,
                # A wrist measurement takes up to a minute after a ~5 s connect, and
                # `listen` accepts up to 60 s: both were killed at the 30 s default.
                "watch": 150, "bluetooth_gatt": 100, "find_device": 60,

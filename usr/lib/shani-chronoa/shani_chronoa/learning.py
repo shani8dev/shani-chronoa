@@ -3935,8 +3935,6 @@ class OutcomeModel:
         "record_audio": ("pw-record", "parecord"),
         "speak": ("piper-tts", "espeak-ng"),
         "sing": ("piper-tts", "espeak-ng"),
-        "port_owner": ("ss", "lsof"),
-        "interface_counters": ("ethtool",),
         "wireless": ("iw", "nmcli"),
     }
 

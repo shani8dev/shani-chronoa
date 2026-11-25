@@ -17,10 +17,10 @@ from pathlib import Path
 
 import pytest
 
-_REPO = pathlib.Path(__file__).resolve().parents[1]
+_REPO = pathlib.Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
-from shani_chronoa.skills import dns_lookup as DL  # noqa: E402
+from shani_sysadmin.skills import dns_lookup as DL  # noqa: E402
 
 #: Verbatim `host` output, measured.
 HOST_A = ("example.com has address 172.66.147.243\n"
@@ -218,7 +218,7 @@ def test_privacy_mode_still_refuses():
     applies to it - a fallback that bypassed the privacy switch would be a hole
     wearing a workaround."""
     monkey = None
-    import shani_chronoa.skills.dns_lookup as module
+    import shani_sysadmin.skills.dns_lookup as module
     old = module.egress.privacy_mode_enabled
     module.egress.privacy_mode_enabled = lambda: True
     try:

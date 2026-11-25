@@ -28,16 +28,16 @@ import sys
 
 import pytest
 
-_REPO = pathlib.Path(__file__).resolve().parents[1]
+_REPO = pathlib.Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
 from shani_sysadmin.skills import bridge_topology as BT  # noqa: E402
-from shani_chronoa.skills import dns_lookup as DL  # noqa: E402
-from shani_chronoa.skills import neighbour_table as NT  # noqa: E402
-from shani_chronoa.skills import ping_host as PH  # noqa: E402
-from shani_chronoa.skills import routing_table as RT  # noqa: E402
-from shani_chronoa.skills import tailscale_status as TS  # noqa: E402
-from shani_chronoa.skills import whois_lookup as WL  # noqa: E402
+from shani_sysadmin.skills import dns_lookup as DL  # noqa: E402
+from shani_sysadmin.skills import neighbour_table as NT  # noqa: E402
+from shani_sysadmin.skills import ping_host as PH  # noqa: E402
+from shani_sysadmin.skills import routing_table as RT  # noqa: E402
+from shani_sysadmin.skills import tailscale_status as TS  # noqa: E402
+from shani_sysadmin.skills import whois_lookup as WL  # noqa: E402
 
 
 @pytest.fixture

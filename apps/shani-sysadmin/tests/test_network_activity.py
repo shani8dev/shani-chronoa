@@ -23,8 +23,8 @@ import subprocess
 
 import pytest
 
-from shani_chronoa.skills import network_activity as na
-from shani_chronoa.skills import port_owner
+from shani_sysadmin.skills import network_activity as na
+from shani_sysadmin.skills import port_owner
 
 # --- captured: nethogs -t on the real slot, with curl pulling 100 MB --------
 NETHOGS_ALL_UNKNOWN = """\
@@ -420,7 +420,7 @@ class TestItIsReachable:
         what `_split_pair` produces from nethogs' own spelling - the two have to
         agree or every row silently reads as unattributed.
         """
-        from shani_chronoa.skills.port_owner import Socket
+        from shani_sysadmin.skills.port_owner import Socket
 
         # **The real field names**, taken from `port_owner.Socket` itself
         # rather than from memory - it is a flat NamedTuple and a nested-pair
@@ -446,7 +446,7 @@ class TestItIsReachable:
 
 def test_bandwhich_is_the_first_per_program_source(monkeypatch):
     """bandwhich names processes itself; nethogs needs the join."""
-    from shani_chronoa.skills import network_activity as NA
+    from shani_sysadmin.skills import network_activity as NA
     entries = [{"process": {"name": "firefox"}, "remote_ip": "1.2.3.4",
                 "up": 1024, "down": 2048}]
     monkeypatch.setattr(NA.shutil, "which", lambda name: "/usr/bin/bandwhich")
@@ -457,7 +457,7 @@ def test_bandwhich_is_the_first_per_program_source(monkeypatch):
 
 
 def test_bandwhich_idle_says_so_not_zero(monkeypatch):
-    from shani_chronoa.skills import network_activity as NA
+    from shani_sysadmin.skills import network_activity as NA
     monkeypatch.setattr(NA.shutil, "which", lambda name: "/usr/bin/bandwhich")
     monkeypatch.setattr(NA.subprocess, "run", lambda *a, **k: _Done(0, "[]"))
     rows, why = NA._bandwhich()
@@ -465,7 +465,7 @@ def test_bandwhich_idle_says_so_not_zero(monkeypatch):
 
 
 def test_iftop_totals_are_parsed(monkeypatch):
-    from shani_chronoa.skills import network_activity as NA
+    from shani_sysadmin.skills import network_activity as NA
     monkeypatch.setattr(NA.shutil, "which", lambda name: "/usr/bin/iftop")
     monkeypatch.setattr(NA.subprocess, "run",
                         lambda *a, **k: _Done(0, "12:00:01.123  total send: 1.5Kb  total receive: 3.0Kb\n"))

@@ -60,7 +60,7 @@ import time
 from typing import Dict, List, Tuple
 
 from shani_chronoa.skills import Skill
-from shani_chronoa.skills import port_owner
+from shani_sysadmin.skills import port_owner
 
 _TIMEOUT = 30
 
@@ -91,7 +91,8 @@ _NETHOGS_REFRESHES = 3
 #: behaviour. A parser that never matches looks exactly like a quiet machine.
 _NETHOGS_ROW = re.compile(
     r"^(?P<pair>\S+)/(?P<proto>[^/]+)/(?P<pid>\d+)"
-    r"\t(?P<sent>[\d.]+)\t(?P<received>[\d.]+)\s*$")
+    r"\t(?P<sent>[\d.]+)\t(?P<received>[\d.]+)\s*$"
+)
 
 
 def _split_pair(pair: str) -> Tuple[str, str]:
@@ -100,6 +101,7 @@ def _split_pair(pair: str) -> Tuple[str, str]:
     if not sep:
         return pair, ""
     return local, remote
+
 
 #: What nethogs prints for a row it cannot attribute. Measured: this is the
 #: entire output on a machine with no visible socket owner, six lines of it.
@@ -128,6 +130,7 @@ def _interface_rates(seconds: float = 2.0) -> Tuple[Dict[str, Tuple[int, int]], 
     subtraction and a negative result (a wrap, or an interface that appeared
     mid-window) is reported as unknown rather than as a huge negative rate.
     """
+
     def read() -> Dict[str, Tuple[int, int]]:
         out: Dict[str, Tuple[int, int]] = {}
         try:
@@ -224,25 +227,36 @@ def _nethogs() -> Tuple[List[Tuple[str, str, float, float]], str]:
       having nothing to attribute, which on this image is every time.
     """
     if shutil.which("nethogs") is None:
-        return [], ("nethogs is not installed, so per-program rates could not "
-                    "be read. It comes with the nethogs package.")
+        return [], (
+            "nethogs is not installed, so per-program rates could not "
+            "be read. It comes with the nethogs package."
+        )
     argv = ["nethogs", "-t", "-c", str(_NETHOGS_REFRESHES)]
     try:
-        proc = subprocess.run(argv, capture_output=True, text=True,
-                              timeout=_TIMEOUT + _NETHOGS_REFRESHES * 10,
-                              check=False)
+        proc = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=_TIMEOUT + _NETHOGS_REFRESHES * 10,
+            check=False,
+        )
     except subprocess.TimeoutExpired:
         return [], "nethogs did not finish inside its sampling window."
     except OSError as exc:
         return [], f"nethogs could not be run ({exc})."
     if proc.returncode < 0:
-        return [], (f"nethogs CRASHED (killed by signal "
-                    f"{signal.Signals(-proc.returncode).name}), so nothing it "
-                    f"would have said about this machine is not known.")
+        return [], (
+            f"nethogs CRASHED (killed by signal "
+            f"{signal.Signals(-proc.returncode).name}), so nothing it "
+            f"would have said about this machine is not known."
+        )
     if proc.returncode != 0:
         detail = (proc.stderr or "").strip().splitlines()
-        return [], (detail[-1] if detail
-                    else f"nethogs exited {proc.returncode} without saying why")
+        return [], (
+            detail[-1]
+            if detail
+            else f"nethogs exited {proc.returncode} without saying why"
+        )
 
     rows: List[Tuple[str, str, float, float]] = []
     unknown = 0
@@ -259,17 +273,20 @@ def _nethogs() -> Tuple[List[Tuple[str, str, float, float]], str]:
         except ValueError:
             continue
         local, remote = _split_pair(match.group("pair"))
-        rows.append((match.group("pair"), remote or match.group("pair"),
-                     sent, received))
+        rows.append(
+            (match.group("pair"), remote or match.group("pair"), sent, received)
+        )
     if not rows:
         if unknown:
-            return [], (f"nethogs ran and attributed none of its {unknown} "
-                        f"connections - every row was `{_NETHOGS_UNKNOWN}`. "
-                        f"That is about this machine's processes, not its "
-                        f"traffic: nethogs names a program by reading "
-                        f"/proc/<pid>/fd, so a machine where the socket's "
-                        f"owner is not visible to it answers like this even "
-                        f"while bandwidth is being used.")
+            return [], (
+                f"nethogs ran and attributed none of its {unknown} "
+                f"connections - every row was `{_NETHOGS_UNKNOWN}`. "
+                f"That is about this machine's processes, not its "
+                f"traffic: nethogs names a program by reading "
+                f"/proc/<pid>/fd, so a machine where the socket's "
+                f"owner is not visible to it answers like this even "
+                f"while bandwidth is being used."
+            )
         return [], "nethogs ran and reported no connections at all."
     return rows, ""
 
@@ -287,16 +304,24 @@ def _bandwhich() -> Tuple[List[Tuple[str, str, float, float]], str]:
     if shutil.which("bandwhich") is None:
         return [], "bandwhich is not installed, so no per-program rates from it."
     try:
-        proc = subprocess.run(["bandwhich", "--json"], capture_output=True,
-                              text=True, timeout=_TIMEOUT, check=False)
+        proc = subprocess.run(
+            ["bandwhich", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=_TIMEOUT,
+            check=False,
+        )
     except subprocess.TimeoutExpired:
         return [], "bandwhich did not finish inside its sampling window."
     except OSError as exc:
         return [], f"bandwhich could not be run ({exc})."
     if proc.returncode != 0:
         detail = (proc.stderr or "").strip().splitlines()
-        return [], (detail[-1] if detail
-                    else f"bandwhich exited {proc.returncode} without saying why")
+        return [], (
+            detail[-1]
+            if detail
+            else f"bandwhich exited {proc.returncode} without saying why"
+        )
     try:
         entries = json.loads(proc.stdout or "[]")
     except ValueError:
@@ -322,9 +347,11 @@ def _bandwhich() -> Tuple[List[Tuple[str, str, float, float]], str]:
             name = "unattributed"
         rows.append((name, remote, sent, received))
     if not rows:
-        return [], ("bandwhich ran and saw no traffic with a process attached "
-                    "in its window - either the machine is idle or it could "
-                    "not attribute sockets to programs here.")
+        return [], (
+            "bandwhich ran and saw no traffic with a process attached "
+            "in its window - either the machine is idle or it could "
+            "not attribute sockets to programs here."
+        )
     return rows, ""
 
 
@@ -340,8 +367,13 @@ def _iftop_rates() -> Tuple[Dict[str, Tuple[int, int]], str]:
     if shutil.which("iftop") is None:
         return {}, "iftop is not installed either."
     try:
-        proc = subprocess.run(["iftop", "-t", "-s", "1"], capture_output=True,
-                              text=True, timeout=10, check=False)
+        proc = subprocess.run(
+            ["iftop", "-t", "-s", "1"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
     except subprocess.TimeoutExpired:
         return {}, "iftop did not finish inside its window."
     except OSError as exc:
@@ -366,7 +398,7 @@ def _parse_iftop_bytes(text: str) -> int:
         raise ValueError(text)
     value = float(match.group(1))
     unit = match.group(2).lower()
-    factor = {"b": 1, "kb": 1024, "mb": 1024 ** 2, "gb": 1024 ** 3}[unit]
+    factor = {"b": 1, "kb": 1024, "mb": 1024**2, "gb": 1024**3}[unit]
     return int(value * factor)
 
 
@@ -376,24 +408,32 @@ def _describe() -> str:
     if rates:
         lines.append("Network right now (measured from /proc/net/dev over 2s):")
         for name, (rx, tx) in sorted(rates.items()):
-            lines.append(f"  {name}: down {_human_kb(rx / 1024)}  "
-                         f"up {_human_kb(tx / 1024)}")
+            lines.append(
+                f"  {name}: down {_human_kb(rx / 1024)}  up {_human_kb(tx / 1024)}"
+            )
     else:
         # /proc unreadable is rare; iftop's text totals are the fallback
         # measurement instead of no answer at all.
         rates, iftop_why = _iftop_rates()
         if rates:
-            lines.append("Network right now (measured by iftop, because "
-                         "/proc/net/dev could not be read):")
+            lines.append(
+                "Network right now (measured by iftop, because "
+                "/proc/net/dev could not be read):"
+            )
             for name, (rx, tx) in sorted(rates.items()):
-                lines.append(f"  {name}: down {_human_kb(rx / 1024)}  "
-                             f"up {_human_kb(tx / 1024)}")
+                lines.append(
+                    f"  {name}: down {_human_kb(rx / 1024)}  up {_human_kb(tx / 1024)}"
+                )
         else:
-            lines.append("Network right now (measured from /proc/net/dev "
-                         "over 2s):")
-            lines.append(f"  no interface moved any bytes - {why or 'this machine is idle'}"
-                         + (f"; iftop could not be read either ({iftop_why})"
-                            if iftop_why else ""))
+            lines.append("Network right now (measured from /proc/net/dev over 2s):")
+            lines.append(
+                f"  no interface moved any bytes - {why or 'this machine is idle'}"
+                + (
+                    f"; iftop could not be read either ({iftop_why})"
+                    if iftop_why
+                    else ""
+                )
+            )
     lines.append("")
 
     # Per-program: bandwhich first (it names processes itself), nethogs as
@@ -406,14 +446,15 @@ def _describe() -> str:
     if not rows:
         lines.append(f"Per-program rates: not known - {why}")
         lines.append("")
-        lines.append("The interface numbers above are still real; what is "
-                     "missing is which program moved them.")
+        lines.append(
+            "The interface numbers above are still real; what is "
+            "missing is which program moved them."
+        )
         return "\n".join(lines)
 
     by_pair, _ = _owners_by_pair()
     lines.append(f"Per-program (from {source}):")
-    for pair, remote, sent, received in sorted(rows,
-                                               key=lambda r: -(r[2] + r[3]))[:12]:
+    for pair, remote, sent, received in sorted(rows, key=lambda r: -(r[2] + r[3]))[:12]:
         if source == "bandwhich":
             # bandwhich names the process itself; no join needed.
             name = pair
@@ -428,14 +469,15 @@ def _describe() -> str:
                 # name, and a row claiming a program here would be a guess
                 # about who is spending the user's bandwidth.
                 name = f"unattributed socket to {remote}"
-        lines.append(f"  {name}: up {_human_kb(sent)}  "
-                     f"down {_human_kb(received)}")
+        lines.append(f"  {name}: up {_human_kb(sent)}  down {_human_kb(received)}")
     if any(pair not in by_pair for pair, *_ in rows):
         lines.append("")
-        lines.append("Some sockets could not be attributed to a program. "
-                     "Their rates are measured; the owner is not known - "
-                     "a program outside your own, or one that has since "
-                     "exited.")
+        lines.append(
+            "Some sockets could not be attributed to a program. "
+            "Their rates are measured; the owner is not known - "
+            "a program outside your own, or one that has since "
+            "exited."
+        )
     return "\n".join(lines)
 
 

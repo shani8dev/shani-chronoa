@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import pytest
 
-from shani_chronoa.skills import thread_activity as ta
+from shani_sysadmin.skills import thread_activity as ta
 
 PID = "303214"
 

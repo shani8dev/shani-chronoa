@@ -122,6 +122,7 @@ _SYSADMIN_SKILLS = {
     "list_containers", "list_vms", "boot_report", "driver_info",
     "capture_packets", "dissect_traffic", "binary_hardening", "inspect_binary",
     "container", "vm", "bridge_topology", "compression_savings",
+    "crash_report", "speed_test",
 }
 
 
@@ -140,8 +141,8 @@ def test_every_new_skill_is_registered():
     names = {t["function"]["name"] for t in tools.TOOLS}
     new = {"snapshot_status", "security_status",
            "disk_health", "temperatures", "usb_devices", "list_fonts",
-           "photo_metadata", "crash_report", "login_history", "audio_output", "default_apps",
-           "pdf_pages", "print_queue", "set_hostname", "set_locale", "speed_test"}
+           "photo_metadata", "login_history", "audio_output", "default_apps",
+           "pdf_pages", "print_queue", "set_hostname", "set_locale"}
     assert new <= names, f"not registered: {sorted(new - names)}"
 
 
@@ -186,7 +187,6 @@ def test_snapshot_status_without_shani_deploy_is_unknown_not_no(bindir):
 @pytest.mark.parametrize("name, marker", [
     ("security_status", "Firewall:"),
     ("temperatures", ""),
-    ("crash_report", ""),
 ])
 def test_sense_wrappers_run_through_dispatch(name, marker):
     outcome, text = call(name, {})
@@ -824,57 +824,3 @@ def test_set_locale_refuses_ungenerated_and_ungranted(bindir):
     grant("locale-control-enabled")
     _, text = call("set_locale", {"action": "set", "locale": "fr_FR.UTF-8"})
     assert "not generated on this machine" in text
-
-
-# ── 20. speed_test ───────────────────────────────────────────────────────────
-
-def _mock_transport(hits):
-    import httpx
-
-    def handler(request):
-        hits.append((request.method, str(request.url)))
-        if request.url.path == "/__down":
-            n = int(request.url.params.get("bytes", "0"))
-            return httpx.Response(200, content=b"\0" * n)
-        return httpx.Response(200, json={})
-    return httpx.MockTransport(handler)
-
-
-def test_speed_test_is_refused_until_granted_and_never_touches_the_wire(monkeypatch):
-    # **The key is shut by this test.** It ships on - these are in the
-    # `everyday` preset - so a refusal was never reached and every
-    # assertion below was about a run that happened instead.
-    grant("speed-test-enabled", False)
-    from shani_chronoa.skills import speed_test as st
-    hits = []
-    monkeypatch.setattr(st, "_TRANSPORT", _mock_transport(hits))
-    text = st._run({})
-    # Key first, so the refusal names the switch a person can turn on - even
-    # though privacy mode (default on) would refuse as well.
-    assert "Refusing" in text and "speed-test-enabled" in text and hits == []
-    _, text = call("speed_test", {})
-    assert "speed-test-enabled" in text
-
-
-def test_speed_test_privacy_mode_wins_over_the_grant(monkeypatch):
-    from shani_chronoa.skills import speed_test as st
-    grant("speed-test-enabled")
-    hits = []
-    monkeypatch.setattr(st, "_TRANSPORT", _mock_transport(hits))
-    monkeypatch.setattr(st.egress, "privacy_mode_enabled", lambda: True)
-    text = st._run({})
-    assert "privacy mode is on" in text and hits == []
-
-
-def test_speed_test_measures_and_logs(monkeypatch):
-    from shani_chronoa.skills import speed_test as st
-    grant("speed-test-enabled")
-    hits, logged = [], []
-    monkeypatch.setattr(st, "_TRANSPORT", _mock_transport(hits))
-    monkeypatch.setattr(st.egress, "privacy_mode_enabled", lambda: False)
-    monkeypatch.setattr(st.egress, "record", lambda *a, **k: logged.append((a, k)))
-    text = st._run({"download_mb": 1, "upload_mb": 1})
-    assert "Latency:" in text and "Download:" in text and "Upload:" in text
-    assert "1.0 MB" in text and "One measurement" in text
-    assert any(k.get("bytes_out") == 1_000_000 for _, k in logged), "the upload's bytes must be logged"
-    assert sum(1 for m, _ in hits if m == "POST") == 1

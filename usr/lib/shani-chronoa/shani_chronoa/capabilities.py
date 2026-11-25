@@ -154,7 +154,6 @@ GATED: dict[str, str] = {
     "print_queue": "print-control-enabled",
     "set_hostname": "hostname-control-enabled",
     "set_locale": "locale-control-enabled",
-    "speed_test": "speed-test-enabled",
     # The `sessions` sense's own key, not a new one: login history is other
     # people's presence, the same agreement whether volunteered or asked for.
     "login_history": "sessions-sense-enabled",
@@ -170,12 +169,10 @@ GATED: dict[str, str] = {
     # slot, compsize walks extents and reports the ratio.
     # Disk activity follows the storage sense: the same subject that sense
     # reports, so it wears the same consent rather than opening a new switch.
-    "disk_activity": "storage-sense-enabled",
     "security_status": "security-sense-enabled",
     "disk_health": "storage-sense-enabled",
     "temperatures": "hwmon-sense-enabled",
     "usb_devices": "usb-sense-enabled",
-    "crash_report": "coredumps-sense-enabled",
     # The `web` sense's own key, not a new one: driving a browser is
     # the same agreement web_search asks for when it reads a page -
     # reaching the web - so one switch covers both.
@@ -267,7 +264,6 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # what each one is for. Not a duplicate of the `storage`/`filesystems`
     # senses, which report filesystems and their room - this answers "what is
     # where on the disk", which is the question you ask before resizing.
-    "disk_layout": ("Files", "How this machine's disks are partitioned"),
     "find_files": ("Files", "Find files by name"),
     "search_file_contents": ("Files", "Search inside files"),
     "read_text_file": ("Files", "Read a text file"),
@@ -280,7 +276,6 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # Beside list_processes and process_cost: both answer "what is running and
     # what is it costing", and this one answers the question that follows when
     # something disappears - who the kernel would kill, and whether it has.
-    "oom_score": ("Processes and windows", "Who the kernel would kill if memory ran out"),
     # Beside list_processes because it is the same subject asked a different
     # way: that one is a snapshot of what is running, this one is what each
     # program is COSTING - time-weighted CPU, memory, page faults and disk.
@@ -307,7 +302,6 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "email_send": ("Files", "Send an email from the configured account"),
     "email_draft": ("Files", "Save an email draft as a local file, without sending"),
     "list_services": ("Services and logs", "System services"),
-    "check_units": ("Services and logs", "Verify systemd units"),
     "control_service": ("Services and logs", "Start or stop a service"),
     "read_logs": ("Services and logs", "Read the system log"),
     "create_archive": ("Files", "Make or extract an archive"),
@@ -429,26 +423,12 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # only ever reads, and a report you cannot act on is the gap this closes.
     "cleanup_apply": ("Files", "Clear caches and unused Flatpak runtimes"),
     # Finds junk by name (editor swap, OS metadata, leftover installers) and is
-    # read-only. It is not `space_by_type`: that groups by *kind of file* across
-    # a tree, and this looks for names that are junk whatever they contain.
+    # read-only. The by-kind grouping (`space_by_type`) and the packet and
+    # interface diagnostics now live in the shani-sysadmin app; this looks for
+    # names that are junk whatever they contain.
     "temp_files": ("Files", "Find junk, temporary and leftover files by name"),
     "bluetooth_devices": ("Devices", "Bluetooth devices"),
     "vpn_control": ("System", "VPN connections"),
-    # Packet-level work, beside the interface counters and the neighbour table
-    # it sits with: capture_packets reads packets as they cross,
-    # dissect_traffic says what they are, and interface_counters says how much
-    # moved. One gate covers the first two.
-    # Pre-existing strays: these three are complete skills with no _GROUPS
-    # entry, so they fell through to OTHER and failed
-    # test_no_builtin_skill_lands_in_the_other_group. Grouped here so the
-    # surface test passes and they appear somewhere a user can find them.
-    # Opens one TCP connection to one address and sends nothing. Not a
-    # scan: one host, one port, one connect - the same shape as ping_host.
-    "check_port": ("System", "Whether a host accepts connections on a port"),
-    "ping_host": ("System", "Ping a host"),
-    "routing_table": ("System", "The machine's routing table"),
-    "tls_certificate": ("System", "Inspect a TLS certificate"),
-    "tailscale_status": ("System", "Tailscale"),
     "install_app": ("Apps", "Install and remove apps"),
     "power_action": ("Power and screen", "Suspend, restart or shut down"),
     "ask_user": ("Everyday tools", "Ask a clarifying question"),
@@ -457,8 +437,6 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "check_updates": ("System", "Check for waiting package updates"),
     "disk_usage": ("System", "Report filesystem and directory space use"),
     "system_info": ("System", "Describe this machine"),
-    "scan_network": ("System", "Find other devices on the local network"),
-    "network_watch": ("System", "Watch for new devices on one interface"),
     "content_discovery": ("System", "Which paths a local web server answers on"),
     "toggle_bluetooth": ("Devices", "Turn the Bluetooth adapter on or off"),
     # Reading what a device says about itself, one layer under `bluetooth_devices`
@@ -500,8 +478,6 @@ _GROUPS: dict[str, tuple[str, str]] = {
                        "What the keyboard shortcuts on this machine are"),
     # Reads a crontab, /etc/cron.d and both systemd timer sets - all three,
     # because a machine can have any one and none of the others.
-    "scheduled_tasks": ("System",
-                        "What is scheduled to run: cron jobs and systemd timers"),
     # Reads fprintd's database and nothing else: `fprintd-enroll` and
     # `fprintd-delete` are in the same package and deliberately not reachable.
     "fingerprint_status": ("Privacy controls",
@@ -563,31 +539,11 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # over rows, this one answers what a document actually contains. Grouped
     # together because they are the two halves of "what is in this file".
     "json_query": ("Files", "Ask what a JSON document contains"),
-    "port_owner": ("System", "Which program is using a port"),
-    # Next to `check_internet`, which it does not overlap: that one walks a
-    # fixed ladder and takes no arguments, so it cannot be pointed at a host.
-    "trace_route": ("System", "Trace the network path to a host"),
-    # The machine-asks-what-it-can-do layer. Grouped with the other System
-    # entries because that is what it answers: what this machine offers, and
-    # therefore which path to a goal is actually open here.
+    # `check_internet` walks a fixed ladder and takes no arguments; the
+    # address-, route- and neighbour-level questions it cannot answer moved to
+    # shani-sysadmin. `machine_capabilities` answers what this machine offers,
+    # which is the path to a goal that is actually open here.
     "machine_capabilities": ("System", "What this machine can actually do"),
-    # The lab-network builder, grouped with the other System entries. All four
-    # share one consent key, so a user cannot allow `vpc_status` - which only
-    # reports reachability - while refusing `vpc_create`, which builds
-    # interfaces and needs the machine administrator's password.
-    "interface_counters": ("System", "How much traffic each interface has carried"),
-    "neighbour_table": ("System", "Which addresses on this link have answered, and which never have"),
-    # The active counterpart to neighbour_table: that one reads the kernel's
-    # passive cache and so only sees hosts that already talked to this machine.
-    # This one asks, and only ever about a private segment - the one this
-    # machine is on, or a private CIDR named explicitly.
-    "discover_hosts": ("System", "Who is on this network right now"),
-    # The Lookup and Whois tabs of GNOME's gnome-nettool, which nothing here
-    # covered. Read-only, but they leave the machine - so they go in the
-    # ungated read-only set and are refused in privacy mode, exactly as
-    # `trace_route` is.
-    "dns_lookup": ("System", "Look a name up in DNS, or read its mail, name or certificate records"),
-    "whois_lookup": ("System", "Look up who a domain or address is registered to"),
     "ui_elements": ("Pointer and keyboard",
                    "Press buttons, fill fields and open menus in other apps, and drive them visible"),
     "adb_workflow": ("Devices", "Pair an Android phone and copy one file over adb"),
@@ -605,24 +561,13 @@ _GROUPS: dict[str, tuple[str, str]] = {
         "System",
         "Check a backup repository or print a backup command without running it",
     ),
-    # Transfers data between two machines and writes nothing. Not gated: it
-    # discards what it sends, exactly like speed_test.
-    "bandwidth_to_host": ("System", "How fast this machine talks to another machine"),
-    # Read-only: lsof with a filter. Never a kill flag, asserted on the argv.
-    "open_files": ("System", "Which programs have a file or socket open"),
-    # Read-only: /proc/locks, no binary and no privilege. Beside `open_files`
-    # because the two are asked together - "why won't this save" is answered
-    # by the lock table and "who has it open" by lsof, and lsof prints the
-    # lock as a suffix this parser does not decode.
-    "file_locks": ("System", "Who holds a file lock, and on what"),
-    # Read-only: `sar` reading /var/log/sa. No -f, no -o (asserted on argv).
-    "system_history": ("System", "What this machine was doing earlier today"),
     # Read-only: rclone listremotes/size/lsf only. `_FORBIDDEN` is enforced in
     # `_run`, not merely documented, and the test owns its own copy of the list.
+    # The lsof, /proc/locks, `sar` and transfer-rate diagnostics moved to
+    # shani-sysadmin with the rest of the deep system tooling.
     "cloud_files": ("System", "What is in this machine's cloud storage remotes"),
     # Read-only: logrotate is always run with --debug, which rotates nothing
     # (a mutation removing that flag fails 1 test).
-    "log_files": ("System", "Which logs are biggest, still growing, and unrotated"),
     # Read-only: hashes and lists. Never deletes, never marks a copy as the
     # original (both asserted by a mutation each).
     "duplicate_files": ("Files", "Which files are stored twice, and how much that wastes"),
@@ -647,47 +592,21 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # Writes (on `apply`), but defaults to a dry run and never prompts or
     # reverse-applies. `--forward` and `--batch` are asserted on the argv.
     "apply_patch": ("Files", "Apply a .patch/.diff file to files here"),
-    # Read-only: walks and groups by suffix. Nothing deleted or moved. It is not
-    # the filesystems sense: that reports filesystems and their room, and this
-    # walks a tree and groups it by what the files *are* - video, audio, image,
-    # archive - and says the category is a guess, because an extension is a
-    # claim rather than a fact.
-    "space_by_type": ("Files", "Where the space goes, by kind of file"),
-    # Read-only: reports modes, never chmods (a mutation asserting "Permissions
-    # changed to 0600" fails 1 test).
-    "permission_audit": ("System", "What other users on this machine can read or write"),
     # Read-only: lists empty dirs, removes none (a mutation replacing the
     # closing sentence fails 1 test).
     "empty_directories": ("Files", "Which directories hold nothing at all"),
     # Read-only: lists matches with sizes and dates, deletes none.
     "files_by_name": ("Files", "Where every file with this name lives"),
-    "disk_activity": ("System", "How hard the disks are working right now"),
-    # Read-only: `readelf` parses the file and never runs it, so it is ungated
-    # by precedent with `get_file_info` and `explain_command`.
-    # Not a duplicate of the `gpu` sense, which reports the *kernel* driver from
-    # sysfs. This one answers whether OpenGL is actually hardware accelerated or
-    # has fallen back to software - which only the renderer string says, and a
-    # machine with a healthy `i915` and a `llvmpipe` fallback is the exact case
-    # that reads as fine everywhere else.
-    "graphics_stack": ("System", "Whether the graphics are hardware accelerated or falling back to software"),
-    # Not a duplicate of `data_usage` (vnstat: cumulative, includes yesterday)
-    # or `bandwidth_to_host` (iperf3: to one named host, needs a server there).
-    # This is the question in between - which program is moving bytes now.
-    "network_activity": ("System", "What is using this machine's network right now, per program"),
-    # Not `list_services`, which is systemd *system* units. Autostart .desktop
+    # The by-suffix space breakdown, the permission audit and the per-program
+    # network reading now live in shani-sysadmin. Autostart .desktop
     # files, systemd *user* units and timers, and the crontab are the other
     # three ways a machine arranges to run something unasked - and Chronoa
     # writes one of them itself (`_sync_autostart`), so nothing could read back
     # what its own auto-start setting produced.
     "autostart_entries": ("System", "What starts on this machine automatically, at login and on a schedule"),
-    "process_detail": ("System", "What one running process is waiting on"),
-    # One level below that: process_detail reports a single `wchan` for the
-    # whole process, which cannot tell one hot thread from every core shared
-    # evenly - and `list_processes` has the same limit.
-    "thread_activity": ("System", "Which thread of a process is using the CPU, or waiting"),
-    # Read-only: cpupower frequency-info reports, and changes nothing.
-    "cpu_frequency": ("System", "The CPU governor, its speed, and its hardware range"),
-    "cpu_per_core": ("System", "Which processor cores are busy right now"),
+    # Thread-level, `wchan` and CPU-frequency diagnostics moved to
+    # shani-sysadmin; `list_processes` and `process_cost` stay as the plain
+    # "what is running / why is it slow" answers.
     # Downloading writes a new file and replaces nothing, so it is ungated by
     # precedent with `convert_document`.
     "download_file": ("Everyday tools", "Download a file from a web address"),
@@ -709,7 +628,6 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # talk to hardware without one".
     "list_fonts": ("Appearance", "Installed fonts, and which one is used"),
     "photo_metadata": ("Photos and video", "When, where and with what camera a photo was taken"),
-    "crash_report": ("Services and logs", "What crashed recently"),
     "login_history": ("System", "Who logged in recently"),
     "audio_output": ("Sound", "Switch speakers, headphones and microphones"),
     "default_apps": ("Apps", "Which app opens a kind of file, and the default browser"),
@@ -717,7 +635,6 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "print_queue": ("Devices", "The print queue, and cancelling a job"),
     "set_hostname": ("System", "This computer's name"),
     "set_locale": ("Appearance", "System language and date, number and money formats"),
-    "speed_test": ("Web", "Internet speed"),
     # `browse` is deliberately NOT repeated here. It appeared twice in this
     # table - once as "Use a web page: click, type and read it" and once as
     # "Drive a web browser" - and a duplicate dict key is silently resolved to
@@ -1335,10 +1252,10 @@ EVERYDAY_TASKS: tuple = (
         ("create_document", "convert_document", "create_archive")),
     EverydayTask(
         "Fix the internet",
-        "Checks the connection, Wi-Fi, speed and name lookups, and says what is "
-        "actually wrong.",
+        "Checks the connection and Wi-Fi, and says what is actually wrong. "
+        "Deep network diagnostics moved to the shani-sysadmin app.",
         "My internet feels slow - find out why.",
-        ("check_internet", "list_wifi_networks", "speed_test", "dns_lookup", "ping_host")),
+        ("check_internet", "list_wifi_networks")),
     EverydayTask(
         "Keep the computer healthy",
         "Disk space, updates, battery, temperature and what is filling the disk.",
@@ -1456,19 +1373,17 @@ READ_ONLY_TOOLS = frozenset({
     # machine with a user crontab and no timers still has work coming, and vice
     # versa, so the three sources are reported separately rather than merged
     # into one number that would be wrong half the time.
-    "scheduled_tasks",
     # Reads the enrolled-fingerprint list; enrolls and deletes nothing, so it
     # has no post-condition to verify and no reason to withhold the answer.
     "fingerprint_status",
     "list_services", "read_logs", "check_updates", "compute_hash",
     # Runs systemd-analyze verify and changes nothing.
-    "check_units",
     "list_percepts", "recommend_model", "calculate", "system_info",
     "get_weather", "get_location", "get_world_time", "convert_units",
     "convert_currency", "lookup_wikipedia", "define_word", "solve_math",
     "spell_word", "explain_command", "check_internet", "data_usage",
     "date_math", "random_pick", "my_ip_address", "read_document", "read_video", "read_audio", "read_image", "look_at_image", "create_document", "convert_document",
-    "encode_text", "convert_color", "calendar_month", "cleanup_report", "tailscale_status",
+    "encode_text", "convert_color", "calendar_month", "cleanup_report",
     # Read-only, and deliberately not gated: a user must be able to see what
     # the machine will do, and what is armed, without first being granted
     # permission to do any of it.
@@ -1484,33 +1399,17 @@ READ_ONLY_TOOLS = frozenset({
     # why they are here and not behind a gate: a user must be able to ask what
     # is listening, and what a file says, without first being granted
     # permission to act on it.
-    "json_query", "port_owner",
-    # Reads /proc/net/dev and the kernel's own TCP counters. No daemon, no
-    # privilege, and no state written anywhere - which is why it is here rather
-    # than behind a gate, and why it is not `ifstat` or `vnstat`.
-    "interface_counters",
-    # Reads /sys/class/net only: which interfaces are bridges and which are
-    # enslaved to them. No command, no privileges, nothing written.
-    # /proc/net/arp only. Unprivileged, unlike `ip neigh` and `arp`, and the
-    # COMPLETE/UNRESOLVED split is what `ping_host` cannot tell you.
-    "neighbour_table",
-    # Read-only in effect but not in intent: it sends probes beyond this network,
-    # exactly as the public steps of `check_internet` do, and is refused in
-    # privacy mode. It is listed here because on the machines where it runs it
-    # changes nothing on this one - it is a measurement, not an actuator.
-    "trace_route",
-    # Read-only in effect but not in intent: both leave this machine, which is
-    # why privacy mode refuses them. A DNS query tells a resolver which names
-    # this computer wants; a whois query can return the person who registered
-    # the domain. Neither changes anything here.
-    "dns_lookup", "whois_lookup",
+    # `json_query` reads a file or a kernel table and changes nothing. The
+    # counter, neighbour, route, DNS/whois and trace diagnostics moved to
+    # shani-sysadmin; `check_internet` stays as the plain answer.
+    "json_query",
     # The 2026-10-07 matrix skills that only read. Eight are backed by a sense
     # and share its switch (they are in GATED too, like `calendar_events`, so
     # `tool_annotations` takes the gated branch and never claims read-only for
     # them); the rest read the kernel, a config file or a read-only command.
     "snapshot_status", "security_status",
     "disk_health", "temperatures", "usb_devices",
-    "list_fonts", "photo_metadata", "crash_report",
+    "list_fonts", "photo_metadata",
 })
 
 #: Tools that change the machine but need no consent key.
@@ -1601,12 +1500,11 @@ MUTATING_TOOLS = frozenset({
 
 #: Tools that reach outside this machine.
 OPEN_WORLD_TOOLS = frozenset({
-    "web_search", "scan_network", "connect_wifi", "install_model",
+    "web_search", "connect_wifi", "install_model",
     "translate_text", "print_file",
     "get_weather", "get_location", "convert_currency", "lookup_wikipedia",
     "define_word", "get_world_time",
-    "speed_test",
-    # The parity skills that reach the network, with `browse` and `speed_test`.
+    # The parity skills that reach the network, with `browse`.
     # `news` fetches publisher RSS and `maps` queries OpenStreetMap and
     # Overpass: both are reads that leave this machine, so both are refused in
     # privacy mode for the same reason `get_weather` is - which is also the

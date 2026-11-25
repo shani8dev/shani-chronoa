@@ -40,14 +40,13 @@ import sys
 
 sys.path.insert(0, "usr/lib/shani-chronoa")
 
-from shani_chronoa.skills import file_locks as fl  # noqa: E402
-from shani_chronoa.skills import open_files  # noqa: E402
+from shani_sysadmin.skills import file_locks as fl  # noqa: E402
+from shani_sysadmin.skills import open_files  # noqa: E402
 
 # Two real lines, verbatim from this machine's /proc/locks, with the device in
 # hex and the inode in decimal. Captured, not typed: a fixture that disagrees
 # with the kernel's format tests nothing about the parser.
-LINE_WRITE = ("1: POSIX  ADVISORY  WRITE 440213 00:26:4048156 "
-              "1073741825 1073741825")
+LINE_WRITE = "1: POSIX  ADVISORY  WRITE 440213 00:26:4048156 1073741825 1073741825"
 LINE_READ_PART = "3: POSIX  ADVISORY  READ  112059 fc:01:14596476 128 128"
 
 
@@ -72,9 +71,9 @@ class TestTheParse:
 
     def test_the_device_is_hex_and_the_inode_is_decimal(self):
         lock = fl._parse(LINE_READ_PART)
-        assert lock.major == 0xFC          # 252, not 252*16+1
+        assert lock.major == 0xFC  # 252, not 252*16+1
         assert lock.minor == 0x01
-        assert lock.inode == 14596476      # decimal, not hex
+        assert lock.inode == 14596476  # decimal, not hex
 
     def test_the_zero_major_of_a_zero_device_line(self):
         """`00:26:4048156` is major 0, minor 0x26 - both parse as 0/38.
@@ -100,7 +99,7 @@ class TestTheParse:
         """The table is read on every call, so one bad line must not stop the rest."""
         assert fl._parse("") is None
         assert fl._parse("garbage") is None
-        assert fl._parse("1: POSIX ADVISORY READ 112059") is None   # 5 fields
+        assert fl._parse("1: POSIX ADVISORY READ 112059") is None  # 5 fields
         assert fl._parse("1: POSIX ADVISORY READ 112059 zz:01:1 0 EOF") is None
         assert fl._parse("1: POSIX ADVISORY READ x fc:01:1 0 EOF") is None
 
@@ -120,6 +119,7 @@ class TestTheParse:
     def test_a_table_that_cannot_be_read_is_no_locks(self, monkeypatch):
         def boom(self):
             raise OSError("nope")
+
         monkeypatch.setattr(fl.Path, "read_text", boom)
         assert fl._locks() == []
 
@@ -137,10 +137,11 @@ class TestTheSurveyPhrasing:
         assert "not a failure" in out
 
     def test_the_counts_are_write_first_and_name_the_split(self, monkeypatch):
-        locks = [fl.Lock(i, "POSIX", "ADVISORY", "WRITE", 1, 0, 8, 10, "0", "EOF")
-                 for i in (1, 2)]
-        locks.append(fl.Lock(3, "POSIX", "ADVISORY", "READ", 2, 0, 8, 11,
-                             "0", "EOF"))
+        locks = [
+            fl.Lock(i, "POSIX", "ADVISORY", "WRITE", 1, 0, 8, 10, "0", "EOF")
+            for i in (1, 2)
+        ]
+        locks.append(fl.Lock(3, "POSIX", "ADVISORY", "READ", 2, 0, 8, 11, "0", "EOF"))
         monkeypatch.setattr(fl, "_locks", lambda: locks)
         monkeypatch.setattr(fl, "_comm", lambda pid: f"pid{pid}")
         monkeypatch.setattr(fl, "_resolve_all", lambda ls: {})
@@ -149,27 +150,23 @@ class TestTheSurveyPhrasing:
         assert "Locks that block another writer" in out
 
     def test_a_write_lock_is_listed_with_its_holder_and_range(self, monkeypatch):
-        lock = fl.Lock(7, "POSIX", "ADVISORY", "WRITE", 4242, 0, 8, 99,
-                       "0", "EOF")
+        lock = fl.Lock(7, "POSIX", "ADVISORY", "WRITE", 4242, 0, 8, 99, "0", "EOF")
         monkeypatch.setattr(fl, "_locks", lambda: [lock])
         monkeypatch.setattr(fl, "_comm", lambda pid: "someapp")
-        monkeypatch.setattr(fl, "_resolve_all",
-                            lambda ls: {7: "/tmp/data.db"})
+        monkeypatch.setattr(fl, "_resolve_all", lambda ls: {7: "/tmp/data.db"})
         out = fl._survey()
         assert "someapp" in out and "pid 4242" in out
         assert "/tmp/data.db" in out
         assert "the whole file" in out
 
-    def test_an_unreadable_holder_keeps_pid_and_name_and_says_why(self,
-                                                                  monkeypatch):
+    def test_an_unreadable_holder_keeps_pid_and_name_and_says_why(self, monkeypatch):
         """A process of another user's fd table is not readable - say that.
 
         Not "no lock" and not a blank path. This sentence is the whole privacy
         boundary, and it is the difference between "I could not look" and
         "there is nothing there".
         """
-        lock = fl.Lock(7, "POSIX", "ADVISORY", "WRITE", 4242, 0, 8, 99,
-                       "0", "EOF")
+        lock = fl.Lock(7, "POSIX", "ADVISORY", "WRITE", 4242, 0, 8, 99, "0", "EOF")
         monkeypatch.setattr(fl, "_locks", lambda: [lock])
         monkeypatch.setattr(fl, "_comm", lambda pid: "otherusersapp")
         monkeypatch.setattr(fl, "_resolve_all", lambda ls: {7: None})
@@ -177,19 +174,20 @@ class TestTheSurveyPhrasing:
         assert "otherusersapp" in out and "pid 4242" in out
         assert "(the holder's fd table is not readable)" in out
 
-    def test_read_locks_are_grouped_by_program_not_listed_one_by_one(self,
-                                                                   monkeypatch):
+    def test_read_locks_are_grouped_by_program_not_listed_one_by_one(self, monkeypatch):
         """Three READ locks on one file are ordinary.
 
         They are *ranged*, which is the case that is genuinely shared - so
         they belong in the grouped section, which is what a range lock is for.
         """
-        locks = [fl.Lock(i, "POSIX", "ADVISORY", "READ", pid, 0, 8, 10 * i,
-                         "128", "512") for i, pid in ((1, 5), (2, 5), (3, 5),
-                                                      (4, 6))]
+        locks = [
+            fl.Lock(i, "POSIX", "ADVISORY", "READ", pid, 0, 8, 10 * i, "128", "512")
+            for i, pid in ((1, 5), (2, 5), (3, 5), (4, 6))
+        ]
         monkeypatch.setattr(fl, "_locks", lambda: locks)
-        monkeypatch.setattr(fl, "_comm", lambda pid: "readerA" if pid == 5
-                            else "readerB")
+        monkeypatch.setattr(
+            fl, "_comm", lambda pid: "readerA" if pid == 5 else "readerB"
+        )
         monkeypatch.setattr(fl, "_resolve_all", lambda ls: {})
         out = fl._survey()
         assert "readerA: 3" in out
@@ -210,13 +208,36 @@ class TestTheSurveyPhrasing:
         # key from `os.stat` is also what keeps this honest if the matcher
         # changes.
         st = os.stat(target)
-        locks = [fl.Lock(1, "POSIX", "ADVISORY", "READ", 5, os.major(st.st_dev),
-                         os.minor(st.st_dev), st.st_ino, "128", "512"),
-                 fl.Lock(2, "POSIX", "ADVISORY", "READ", 5, os.major(st.st_dev),
-                         os.minor(st.st_dev), st.st_ino, "128", "EOF")]
+        locks = [
+            fl.Lock(
+                1,
+                "POSIX",
+                "ADVISORY",
+                "READ",
+                5,
+                os.major(st.st_dev),
+                os.minor(st.st_dev),
+                st.st_ino,
+                "128",
+                "512",
+            ),
+            fl.Lock(
+                2,
+                "POSIX",
+                "ADVISORY",
+                "READ",
+                5,
+                os.major(st.st_dev),
+                os.minor(st.st_dev),
+                st.st_ino,
+                "128",
+                "EOF",
+            ),
+        ]
         monkeypatch.setattr(fl, "_locks", lambda: locks)
-        monkeypatch.setattr(fl, "_resolve_all",
-                            lambda ls: {1: str(target), 2: str(target)})
+        monkeypatch.setattr(
+            fl, "_resolve_all", lambda ls: {1: str(target), 2: str(target)}
+        )
         out = fl._locks_on(str(target))
         assert "bytes 128-512" in out
         assert "bytes 128 to the end" in out
@@ -245,19 +266,17 @@ class TestAWholeFileReadLockBlocksAWriter:
         Claiming it blocks the whole file would be as wrong as ignoring a
         whole-file one - the failure in both directions is the same.
         """
-        ranged = fl.Lock(1, "POSIX", "ADVISORY", "READ", 7, 0, 8, 9, "128",
-                         "512")
+        ranged = fl.Lock(1, "POSIX", "ADVISORY", "READ", 7, 0, 8, 9, "128", "512")
         assert fl._blocks_a_writer(ranged) is False
 
     def test_any_write_lock_blocks_whatever_its_range(self):
-        ranged_write = fl.Lock(1, "POSIX", "ADVISORY", "WRITE", 7, 0, 8, 9,
-                               "128", "512")
+        ranged_write = fl.Lock(
+            1, "POSIX", "ADVISORY", "WRITE", 7, 0, 8, 9, "128", "512"
+        )
         assert fl._blocks_a_writer(ranged_write) is True
 
-    def test_the_survey_lists_a_whole_file_read_lock_as_blocking(self,
-                                                                monkeypatch):
-        lock = fl.Lock(1, "POSIX", "ADVISORY", "READ", 4242, 0, 8, 99, "0",
-                       "EOF")
+    def test_the_survey_lists_a_whole_file_read_lock_as_blocking(self, monkeypatch):
+        lock = fl.Lock(1, "POSIX", "ADVISORY", "READ", 4242, 0, 8, 99, "0", "EOF")
         monkeypatch.setattr(fl, "_locks", lambda: [lock])
         monkeypatch.setattr(fl, "_comm", lambda pid: "readerapp")
         monkeypatch.setattr(fl, "_resolve_all", lambda ls: {1: "/tmp/db"})
@@ -269,16 +288,14 @@ class TestAWholeFileReadLockBlocksAWriter:
         # And not filed under the harmless section.
         assert "ranged read locks" not in out
 
-    def test_the_counts_still_report_write_and_read_as_they_are(self,
-                                                               monkeypatch):
+    def test_the_counts_still_report_write_and_read_as_they_are(self, monkeypatch):
         """Grouping does not change what the counts say: one read lock is
         still one read lock, whether or not it blocks a writer."""
-        locks = [fl.Lock(1, "POSIX", "ADVISORY", "READ", 1, 0, 8, 9, "0",
-                         "EOF"),
-                 fl.Lock(2, "POSIX", "ADVISORY", "READ", 2, 0, 8, 10, "5",
-                         "9"),
-                 fl.Lock(3, "POSIX", "ADVISORY", "WRITE", 3, 0, 8, 11, "0",
-                         "EOF")]
+        locks = [
+            fl.Lock(1, "POSIX", "ADVISORY", "READ", 1, 0, 8, 9, "0", "EOF"),
+            fl.Lock(2, "POSIX", "ADVISORY", "READ", 2, 0, 8, 10, "5", "9"),
+            fl.Lock(3, "POSIX", "ADVISORY", "WRITE", 3, 0, 8, 11, "0", "EOF"),
+        ]
         monkeypatch.setattr(fl, "_locks", lambda: locks)
         monkeypatch.setattr(fl, "_comm", lambda pid: f"app{pid}")
         monkeypatch.setattr(fl, "_resolve_all", lambda ls: {})
@@ -295,8 +312,18 @@ class TestTheTargetedAnswer:
         target = tmp_path / "locked.db"
         target.write_text("x")
         st = os.stat(target)
-        lock = fl.Lock(4, "POSIX", "ADVISORY", "WRITE", 321, st.st_dev >> 8,
-                       st.st_dev & 0xFF, st.st_ino, "0", "EOF")
+        lock = fl.Lock(
+            4,
+            "POSIX",
+            "ADVISORY",
+            "WRITE",
+            321,
+            st.st_dev >> 8,
+            st.st_dev & 0xFF,
+            st.st_ino,
+            "0",
+            "EOF",
+        )
         monkeypatch.setattr(fl, "_locks", lambda: [lock])
         monkeypatch.setattr(fl, "_comm", lambda pid: "holder")
         monkeypatch.setattr(fl, "_resolve_all", lambda ls: {4: str(target)})
@@ -306,8 +333,7 @@ class TestTheTargetedAnswer:
         assert "holder (pid 321)" in out
         assert str(target) in out
 
-    def test_an_unlocked_file_says_where_to_look_instead(self, tmp_path,
-                                                          monkeypatch):
+    def test_an_unlocked_file_says_where_to_look_instead(self, tmp_path, monkeypatch):
         target = tmp_path / "quiet.txt"
         target.write_text("x")
         monkeypatch.setattr(fl, "_locks", lambda: [])
@@ -323,8 +349,7 @@ class TestTheTargetedAnswer:
         assert out.startswith("Cannot look at /definitely/not/here:")
         assert "No such file or directory" in out
 
-    def test_a_lock_on_a_different_inode_is_not_this_file(self, tmp_path,
-                                                          monkeypatch):
+    def test_a_lock_on_a_different_inode_is_not_this_file(self, tmp_path, monkeypatch):
         """Two files can share an inode number on different filesystems.
 
         Matching on the inode alone reports the other file's lock as this
@@ -334,27 +359,28 @@ class TestTheTargetedAnswer:
         target = tmp_path / "mine.db"
         target.write_text("x")
         key = _key_of(target)
-        elsewhere = fl.Lock(1, "POSIX", "ADVISORY", "WRITE", 9, key[0],
-                            key[1], key[2] + 500, "0", "EOF")
+        elsewhere = fl.Lock(
+            1, "POSIX", "ADVISORY", "WRITE", 9, key[0], key[1], key[2] + 500, "0", "EOF"
+        )
         # The fixture must actually differ from the file's own key, or the
         # test asserts nothing and passes for a reason that has nothing to do
         # with the matcher. A control that cannot fail is not a control.
-        assert (elsewhere.major, elsewhere.minor,
-                elsewhere.inode) != key
+        assert (elsewhere.major, elsewhere.minor, elsewhere.inode) != key
         monkeypatch.setattr(fl, "_locks", lambda: [elsewhere])
         out = fl._locks_on(str(target))
         assert "No process holds a lock on" in out
 
     def test_the_same_inode_on_a_different_device_is_not_this_file(
-            self, tmp_path, monkeypatch):
+        self, tmp_path, monkeypatch
+    ):
         """Same inode, different device - the half that needs the device."""
         target = tmp_path / "mine.db"
         target.write_text("x")
         key = _key_of(target)
-        other_dev = fl.Lock(1, "POSIX", "ADVISORY", "WRITE", 9, key[0] + 7,
-                            key[1], key[2], "0", "EOF")
-        assert (other_dev.major, other_dev.minor,
-                other_dev.inode) != key
+        other_dev = fl.Lock(
+            1, "POSIX", "ADVISORY", "WRITE", 9, key[0] + 7, key[1], key[2], "0", "EOF"
+        )
+        assert (other_dev.major, other_dev.minor, other_dev.inode) != key
         monkeypatch.setattr(fl, "_locks", lambda: [other_dev])
         out = fl._locks_on(str(target))
         assert "No process holds a lock on" in out
@@ -382,8 +408,7 @@ class TestTheFdTable:
     def test_a_pid_that_does_not_exist_is_empty_not_a_crash(self):
         assert fl._fd_paths(4294967000) == {}
 
-    def test_one_fd_walk_answers_every_lock_that_holder_carries(self,
-                                                                monkeypatch):
+    def test_one_fd_walk_answers_every_lock_that_holder_carries(self, monkeypatch):
         """**Three locks, one pid, one walk.**
 
         The grouping is a cost claim, not a correctness one: walking
@@ -400,12 +425,11 @@ class TestTheFdTable:
             walks.append(pid)
             return {(0, 8, 10): "/a", (0, 8, 11): "/b", (0, 8, 12): "/c"}
 
-        locks = [fl.Lock(1, "POSIX", "ADVISORY", "WRITE", 777, 0, 8, 10,
-                         "0", "EOF"),
-                 fl.Lock(2, "POSIX", "ADVISORY", "READ", 777, 0, 8, 11,
-                         "0", "EOF"),
-                 fl.Lock(3, "POSIX", "ADVISORY", "WRITE", 777, 0, 8, 12,
-                         "0", "EOF")]
+        locks = [
+            fl.Lock(1, "POSIX", "ADVISORY", "WRITE", 777, 0, 8, 10, "0", "EOF"),
+            fl.Lock(2, "POSIX", "ADVISORY", "READ", 777, 0, 8, 11, "0", "EOF"),
+            fl.Lock(3, "POSIX", "ADVISORY", "WRITE", 777, 0, 8, 12, "0", "EOF"),
+        ]
         monkeypatch.setattr(fl, "_fd_paths", counting)
         resolved = fl._resolve_all(locks)
         # The answer is right either way - which is why this test counts.
@@ -419,10 +443,10 @@ class TestTheFdTable:
             walks.append(pid)
             return {(0, 8, 10): "/a", (0, 8, 20): "/b"}
 
-        locks = [fl.Lock(1, "POSIX", "ADVISORY", "WRITE", 11, 0, 8, 10,
-                         "0", "EOF"),
-                 fl.Lock(2, "POSIX", "ADVISORY", "WRITE", 22, 0, 8, 20,
-                         "0", "EOF")]
+        locks = [
+            fl.Lock(1, "POSIX", "ADVISORY", "WRITE", 11, 0, 8, 10, "0", "EOF"),
+            fl.Lock(2, "POSIX", "ADVISORY", "WRITE", 22, 0, 8, 20, "0", "EOF"),
+        ]
         monkeypatch.setattr(fl, "_fd_paths", counting)
         fl._resolve_all(locks)
         assert sorted(walks) == [11, 22]
@@ -439,8 +463,8 @@ class TestTheSkillEndToEnd:
         assert fl.SKILLS[0].run.__name__.isidentifier()
 
     def test_it_is_discovered_by_the_real_registry(self):
-        from shani_chronoa import skills
-        tools, handlers = skills.discover_skills()
+        import shani_sysadmin
+        tools, handlers = shani_sysadmin.discover_skills()
         names = {t["function"]["name"] for t in tools}
         assert "file_locks" in names
         assert "file_locks" in handlers
@@ -456,8 +480,7 @@ class TestTheSkillEndToEnd:
         assert str(target) in fl._run({"path": str(target)})
         assert str(target) in fl._run({"path": target})
 
-    def test_an_empty_path_string_surveys_rather_than_being_a_path(self,
-                                                                   monkeypatch):
+    def test_an_empty_path_string_surveys_rather_than_being_a_path(self, monkeypatch):
         """`path=""` is falsy, so it surveys. A model that sends an empty
         string gets every lock rather than an error about an empty path."""
         monkeypatch.setattr(fl, "_locks", lambda: [])

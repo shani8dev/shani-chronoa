@@ -41,10 +41,10 @@ from pathlib import Path
 
 import pytest
 
-_REPO = Path(__file__).resolve().parents[1]
+_REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
-from shani_chronoa.skills import tls_certificate as T  # noqa: E402
+from shani_sysadmin.skills import tls_certificate as T  # noqa: E402
 
 
 class TestTheDeadPlaceholderIsGone:
@@ -56,7 +56,7 @@ class TestTheDeadPlaceholderIsGone:
         claim is about the *source*, because a class that nothing uses cannot
         be caught by running anything.
         """
-        source = (_REPO / "usr/lib/shani-chronoa/shani_chronoa"
+        source = (_REPO / "apps/shani-sysadmin/shani_sysadmin"
                   "/skills/tls_certificate.py").read_text()
         assert "class Cert(" not in source, (
             "a Cert class is back. If it is needed it should be a real "
@@ -166,7 +166,7 @@ class TestHandshakeErrors:
         assert T._handshake_error("good.example", 443) == ""
 
     def test_it_names_the_package_that_supports_it(self):
-        source = (_REPO / "usr/lib/shani-chronoa/shani_chronoa"
+        source = (_REPO / "apps/shani-sysadmin/shani_sysadmin"
                   "/skills/tls_certificate.py").read_text()
         assert "openssl" in source.lower(), (
             "nothing here names what provides the certificate reader, so a "

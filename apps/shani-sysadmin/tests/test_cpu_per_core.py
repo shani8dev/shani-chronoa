@@ -35,10 +35,10 @@ import sys
 
 import pytest
 
-_REPO = pathlib.Path(__file__).resolve().parents[1]
+_REPO = pathlib.Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
-from shani_chronoa.skills import cpu_per_core as CP  # noqa: E402
+from shani_sysadmin.skills import cpu_per_core as CP  # noqa: E402
 
 #: Real `mpstat -P ALL 1 2` from this machine: the banner, the first interval,
 #: the second (live) interval, and the Average block - four reports, and the

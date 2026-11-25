@@ -26,10 +26,10 @@ import sys
 
 import pytest
 
-_REPO = pathlib.Path(__file__).resolve().parents[1]
+_REPO = pathlib.Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
-from shani_chronoa.skills import cpu_frequency as CF  # noqa: E402
+from shani_sysadmin.skills import cpu_frequency as CF  # noqa: E402
 
 #: Real `cpupower frequency-info` from this machine, captured verbatim -
 #: including the two frequency lines, in the order it prints them.

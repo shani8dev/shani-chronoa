@@ -45,13 +45,36 @@ so a grant already made still applies.
 `shani_chronoa/senses/kernel_log.py`; it is no longer polled by Chronoa's
 ambient scheduler).
 
+**System, network and forensics diagnostics (second move)** — the deep reads
+that answer a specialist's question, not an everyday one:
+
+- Network: `routing_table`, `neighbour_table`, `interface_counters`,
+  `port_owner`, `trace_route`, `dns_lookup`, `whois_lookup`,
+  `tailscale_status`, `network_watch`, `scan_network`, `discover_hosts`,
+  `network_activity`, `check_port`, `ping_host`, `bandwidth_to_host`,
+  `tls_certificate`, `speed_test`.
+- Files and locks: `open_files`, `file_locks`.
+- History and logs: `system_history`, `log_files`, `crash_report`.
+- Disk internals: `disk_layout`, `disk_activity`, `space_by_type`.
+- Units and posture: `check_units`, `scheduled_tasks`, `graphics_stack`,
+  `permission_audit`.
+- Process internals: `process_detail`, `thread_activity`, `cpu_frequency`,
+  `cpu_per_core`, `oom_score`.
+
+`login_history` stayed in Chronoa on purpose: "who logged in" is a plain
+question, while its three forensic siblings above moved. The other plain
+answers still offered by the assistant are `disk_usage`, `system_info`,
+`list_processes`, `process_cost`, `check_internet`, `my_ip_address` and
+`data_usage` — eight in total. `run_command` also stayed: it is the documented
+exception to the fixed-whitelist design and closes the edit-test loop for the
+assistant itself. Asking Chronoa for any moved tool now gets a clear unknown-tool
+refusal; use `python3 -m shani_sysadmin list` to see what the app provides.
+
 **ML harnesses with no assistant-facing caller** — `rerank.py`, `distill.py`,
 `merge.py`, `adapter.py`, `cultivation.py`, `gguf_write.py`,
-`model_registry.py`.
-
-`run_command` deliberately stayed in Chronoa: it is the documented exception
-to the fixed-whitelist design and closes the edit-test loop for the assistant
-itself.
+`model_registry.py`, now grouped under `shani_sysadmin/ml_harness/`. Nothing was
+deleted: each is the same module at its new path, and `ml_harness/__init__.py`
+records why the package exists.
 
 ## Shared dependencies kept in Chronoa
 
@@ -63,7 +86,7 @@ forking them would be worse than the dependency:
 |---|---|
 | `shani_chronoa.skills.Skill` | every skill here (the plugin contract) |
 | `shani_chronoa.files`, `shani_chronoa.config` | path resolution and consent reads |
-| `shani_chronoa.sense_reading` | sense-backed reports (`boot_report`, `compression_savings`, `list_containers`, `list_vms`) |
+| `shani_chronoa.sense_reading` | sense-backed reports (`boot_report`, `compression_savings`, `list_containers`, `list_vms`, `crash_report`, `disk_activity`, `disk_layout`) |
 | `shani_chronoa.sysfs` | kernel-interface reads (`bridge_topology`, `driver_*`) |
 | `shani_chronoa.egress` | network-facing tools |
 | `shani_chronoa.netprovision` | the four `lab_network_*` skills |
@@ -73,11 +96,12 @@ forking them would be worse than the dependency:
 `shani_sysadmin/bootstrap.py` puts both this app root and
 `usr/lib/shani-chronoa` on `sys.path` so the checkout works without an install.
 
-Chronoa keeps import shims for six moved ML modules (`distill`, `merge`,
+Chronoa keeps import shims for all six moved ML modules (`distill`, `merge`,
 `adapter`, `cultivation`, `gguf_write`, `model_registry`) because two of them
 still have callers inside Chronoa (`app/brain.py`, `tool_select.py`,
-`gui/surfaces/models.py`). Those shims alias the app's module object in
-`sys.modules`; the implementation is only here.
+`gui/surfaces/models.py`) and the other four are kept reachable for any
+out-of-tree caller. Every shim aliases the app's module object in `sys.modules`;
+the implementation is only here, under `shani_sysadmin.ml_harness`.
 
 ## Tests
 

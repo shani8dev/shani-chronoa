@@ -15,7 +15,7 @@ from unittest import mock
 
 import pytest
 
-from shani_chronoa.skills import trace_route as tr
+from shani_sysadmin.skills import trace_route as tr
 
 # Captured from a real `mtr -r -w -n -c 5 example.com` on this machine: a
 # healthy 10-hop IPv6 path with three hops that never answered. The naive

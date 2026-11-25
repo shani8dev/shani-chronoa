@@ -27,7 +27,7 @@ import sys
 
 sys.path.insert(0, "usr/lib/shani-chronoa")
 
-from shani_chronoa.skills import oom_score as om  # noqa: E402
+from shani_sysadmin.skills import oom_score as om  # noqa: E402
 
 # `/proc/pressure/memory` verbatim from this box. **`some` comes first and
 # `full` second, which is the order that makes an order-dependent reader read
@@ -355,8 +355,8 @@ class TestTheAnswer:
 
 class TestTheRegistration:
     def test_it_is_discovered_and_dispatchable(self):
-        from shani_chronoa import skills
-        tools, handlers = skills.discover_skills()
+        import shani_sysadmin
+        tools, handlers = shani_sysadmin.discover_skills()
         names = {tool["function"]["name"] for tool in tools}
         assert "oom_score" in names
         assert "oom_score" in handlers

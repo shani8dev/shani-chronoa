@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from shani_chronoa.skills import port_owner as po
+from shani_sysadmin.skills import port_owner as po
 
 # Real lines copied out of /proc/net/* on this machine: header, LISTEN,
 # ESTABLISHED and a TIME_WAIT with no inode, across v4 and v6.

@@ -25,7 +25,7 @@ import subprocess
 
 import pytest
 
-from shani_chronoa.skills import graphics_stack as gs
+from shani_sysadmin.skills import graphics_stack as gs
 
 # --- captured from the real slot: /sys/class/drm ----------------------------
 CARD1_UEVENT = """\

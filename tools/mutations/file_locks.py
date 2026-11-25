@@ -27,9 +27,9 @@ the *answer* cannot see the *cost*.
 
 from __future__ import annotations
 
-TEST_FILE = "tests/test_file_locks.py"
+TEST_FILE = "apps/shani-sysadmin/tests/test_file_locks.py"
 
-SKILL = "usr/lib/shani-chronoa/shani_chronoa/skills/file_locks.py"
+SKILL = "apps/shani-sysadmin/shani_sysadmin/skills/file_locks.py"
 
 MUTATIONS = [
     # ---- the parse -------------------------------------------------------
