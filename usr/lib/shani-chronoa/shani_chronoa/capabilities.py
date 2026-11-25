@@ -139,6 +139,12 @@ GATED: dict[str, str] = {
     # local commits never turns on pushing. Destructive, so it asks.
     "git_push": "git-push-enabled",
     "todo_list": "todo-list-enabled",
+    # Reading and sending are two disclosures, not one: letting Chronoa read a
+    # mailbox says nothing about letting it write to somebody else. Both are
+    # off by default. Saving a local draft needs neither gate (it is a note in
+    # a private file and never leaves the machine), so `email_draft` is absent.
+    "email_read": "email-read-enabled",
+    "email_send": "email-send-enabled",
     "manage_goals": "goals-enabled",
     "manage_triggers": "trigger-control-enabled",
     # The 2026-10-07 matrix skills. Each changing one has its own key; reading
@@ -281,6 +287,16 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "print_file": ("System", "Print a file"),
     "reminders": ("Time and reminders", "Add, list, complete, and remove reminders"),
     "notes": ("Files", "Keep your own notes: add, list, search and remove"),
+    # Beside notes because a shopping list is a plain file the person can open
+    # without Chronoa, not something that reaches a model or a server. It is
+    # deliberately ungated for the same reason notes is.
+    "shopping_list": ("Files", "Keep a shopping list: add, list, tick off and remove"),
+    # Email against a locally configured account, with no credentials built in.
+    # Read and send are separate consent keys; drafting is a local file and is
+    # therefore ungated, like notes.
+    "email_read": ("Files", "Read your mailbox: list recent messages or open one"),
+    "email_send": ("Files", "Send an email from the configured account"),
+    "email_draft": ("Files", "Save an email draft as a local file, without sending"),
     "list_services": ("Services and logs", "System services"),
     "check_units": ("Services and logs", "Verify systemd units"),
     "control_service": ("Services and logs", "Start or stop a service"),
@@ -824,6 +840,11 @@ GATE_NAMES: dict[str, str] = {
     "locale-control-enabled": "Let Chronoa change the language and formats",
     "speed-test-enabled": "Let Chronoa run speed tests",
     "todo-list-enabled": "Let Chronoa keep a task list",
+    # These two must read exactly like the rows in Settings -> Privacy: a
+    # refusal quotes this string, and a spelling no screen carries is a switch
+    # nobody can find.
+    "email-read-enabled": "Let Chronoa read your email",
+    "email-send-enabled": "Let Chronoa send email",
     "goals-enabled": "Let Chronoa keep multi-step goals",
     "trigger-control-enabled": "Let Chronoa arm automatic rules",
     # The five trigger event types. Phrased as the thing the user is agreeing

@@ -1145,6 +1145,16 @@ Off by default, and the reason is measured rather than assumed: the Find Me aler
       <summary>Let Chronoa keep multi-step goals</summary>
       <description>When true, Chronoa may save a goal as a plan of tool steps that outlives the conversation, and answer or remove saved goals. Saving runs nothing: steps are run from the Goals panel, each through the same consent keys and approval questions as a chat request. On by default because a saved plan is a record that persists.</description>
     </key>
+    <key name="email-read-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa read your email</summary>
+      <description>When true, Chronoa may list and read messages in the locally configured IMAP mailbox. Off by default: a mailbox is other people's correspondence as well as yours. No account or cloud credential is built in - the account is a file you write yourself, and the password is read from the session keyring. Saving a local draft needs no switch, because it never leaves the machine.</description>
+    </key>
+    <key name="email-send-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa send email</summary>
+      <description>When true, Chronoa may send a plain-text message through the locally configured SMTP account. Off by default: sending reaches somebody outside this machine and cannot be taken back. This is a separate agreement from reading a mailbox, so granting one never grants the other.</description>
+    </key>
     <key name="trigger-control-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa arm automatic rules</summary>
