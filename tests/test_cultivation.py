@@ -871,14 +871,14 @@ class TestTheGateNamesWhatItCouldScore:
             (repo / "tools" / "eval_cases.json").read_text())["cases"]
         rows = [c for c in cases if c.get("expect")]
         gradable = sum(1 for c in rows if c["expect"][0].get("args"))
-        assert len(rows) == 220 and gradable == 111, (
+        assert len(rows) == 215 and gradable == 110, (
             f"{len(rows)} expect-carrying cases with {gradable} carrying "
             f"arguments - both the corpus and this test have drifted")
         vacuous = sum(
             1 for c in rows if not c["expect"][0].get("args")
             and task_eval.score(c, [{"name": c["expect"][0]["tool"],
                                      "args": {}}])[1])
-        assert vacuous == len(rows) - gradable == 109, (
+        assert vacuous == len(rows) - gradable == 105, (
             f"{vacuous} no-argument cases score as passing on an empty dict, "
             f"against 109 expected - the headroom claim in the docstring is "
             f"now stale")

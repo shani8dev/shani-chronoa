@@ -73,10 +73,31 @@ MOVED_SKILLS = {
     "cpu_frequency",
     "cpu_per_core",
     "oom_score",
+    # Third move: redundant file-discovery, disk-cleanup and system-time tools.
+    # The first three are the old modules whose handlers were folded into a
+    # surviving Chronoa skill (find_files, search_my_files, get_datetime).
+    "files_by_name",
+    "search_documents",
+    "get_world_time",
+    "cleanup_report",
+    "cleanup_apply",
+    "temp_files",
+    "duplicate_files",
+    "broken_symlinks",
+    "stale_files",
+    "empty_directories",
+    "empty_trash",
+    "set_timezone",
+    "set_sleep_inhibit",
 }
 
 #: The plain-answer diagnostics that deliberately stayed in Chronoa.
 KEPT_SKILLS = {
+    # The merged survivors: one name for each question the moved modules used
+    # to answer, with both backends behind it.
+    "find_files",
+    "search_my_files",
+    "get_datetime",
     "disk_usage",
     "system_info",
     "list_processes",
@@ -124,11 +145,14 @@ def test_moved_skill_and_sense_files_left_the_canonical_package():
         "capture_packets", "dissect_traffic", "binary_hardening",
         "inspect_binary", "driver_dev", "user_driver", "container", "vm",
         "lab_network", "boot_report", "compression_savings",
-        "bridge_topology",
+        "bridge_topology", "world_clock", "set_timezone",
+        "set_sleep_inhibit",
     } | {n for n in MOVED_SKILLS if n not in {
         "lab_network_create", "lab_network_destroy", "lab_network_list",
         "lab_network_status", "device_probe", "device_serial", "device_i2c",
         "driver_status", "driver_scaffold", "driver_build",
+        # The world-clock module registers get_world_time, not its own name.
+        "get_world_time",
     }}
     for module in modules:
         assert not (package / "skills" / f"{module}.py").exists(), module

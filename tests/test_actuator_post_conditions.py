@@ -249,13 +249,6 @@ def test_power_profile(bindir):
     assert _verify("power_profile", {}).verdict is Verdict.UNVERIFIED
 
 
-def test_set_timezone(bindir):
-    _stub(bindir, "timedatectl", 'echo Asia/Kolkata\n')
-    assert _verify("set_timezone", {"action": "set", "timezone": "Asia/Kolkata"}).verdict is Verdict.VERIFIED
-    assert _verify("set_timezone", {"action": "set", "timezone": "Europe/Paris"}).verdict is Verdict.FAILED
-    assert _verify("set_timezone", {"action": "status"}).verdict is Verdict.UNVERIFIED
-
-
 def test_do_not_disturb(bindir, tmp_path):
     banners = tmp_path / "banners"
     banners.write_text("false")
@@ -279,7 +272,7 @@ def test_every_post_condition_is_read_only_by_name():
     """A post-condition reads; one that writes would be an actuator nobody consented to."""
     import inspect
     import importlib
-    for mod in ("volume", "set_mic_mute", "power_profile", "set_timezone", "control_service", "kill_process",
+    for mod in ("volume", "set_mic_mute", "power_profile", "control_service", "kill_process",
                 "create_directory", "delete_file", "write_text_file", "move_or_copy_file",
                 "do_not_disturb", "clipboard"):
         src = inspect.getsource(importlib.import_module(f"shani_chronoa.skills.{mod}").POST_CONDITION)

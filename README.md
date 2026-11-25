@@ -10,7 +10,7 @@ Pair the phone, read the watch, keep your rules running while you're away.<br>
 With a local model your data never leaves the desk, every action can be undone, and it asks before anything risky.</p>
 
 <p align="center">
-  <a href="CAPABILITIES.md">222 skills</a> ·
+  <a href="CAPABILITIES.md">209 skills</a> ·
   free (GPL-3.0) ·
   runs offline ·
   no account, no telemetry ·
@@ -33,7 +33,7 @@ through skills you can read, switch off, and undo.
   voice (Kokoro or Piper) that you pick and preview in the app.
 - 🛠️ **It does things, not just chats.** Files, apps, windows, settings,
   calendar, reminders, network, Bluetooth, screenshots, documents, images,
-  git — [222 skills](CAPABILITIES.md), each a small, typed, auditable module.
+  git — [209 skills](CAPABILITIES.md), each a small, typed, auditable module.
 - 💻 **Builds with you.** Point it at a project folder: it edits with inline
   diffs, runs your tests in a sandbox, commits, and reverts a whole turn with
   one click. Plan mode, subagents, and MCP servers in both directions.
@@ -92,7 +92,7 @@ plan. Chronoa is a different bet:
 | Account, telemetry, training on your chats | **None** | Account required; training is opt-out |
 | Works offline | **Yes**, local model by default | No |
 | Price | **Free**, GPL-3.0 | Free tier, then paid plans |
-| What it may do | 256 typed skills you can read and switch off | Whatever the vendor's integrations allow |
+| What it may do | 209 typed skills you can read and switch off | Whatever the vendor's integrations allow |
 | Risky actions | Asks first, **sandboxed** (bubblewrap, Landlock, seccomp) | Asks first |
 | Undo | **Revert a file or a whole turn** | — |
 | Code | Edits, tests, diffs and revert in Build mode | Usually not the focus |
@@ -116,7 +116,7 @@ real, layered, and tested by running them:
 | **Landlock (ABI up to 8)** | Kernel-enforced file rules pinned to file descriptors, plus scoping that blocks abstract-socket and signal escapes — and it still applies where user namespaces are unavailable. |
 | **seccomp** | An optional filter denying 28 syscalls (mount, kexec, bpf, ptrace, io_uring, unshare, …); with it on, a machine that cannot install it runs nothing. Under bubblewrap it is skipped, because bubblewrap's own setup needs `mount` — there the namespaces stand in. |
 | **Containers and VMs** | Run a project's commands in a rootless podman container with no network, or in a systemd-nspawn / vmspawn machine. |
-| **Consent per switch, per action** | 76 skills sit behind a named switch in `capabilities.GATED`; the 14 destructive consent keys ask first, showing the exact command or the diff it will apply. "Allow for this turn" covers one turn, never a session. |
+| **Consent per switch, per action** | 72 skills sit behind a named switch in `capabilities.GATED`; the 14 destructive consent keys ask first, showing the exact command or the diff it will apply. "Allow for this turn" covers one turn, never a session. |
 | **Remote turns need the desk** | A message from your phone or a chat app can ask, but cannot edit, delete or run commands unless someone at the computer approves it. |
 | **Undo** | Every file Chronoa writes is snapshotted; revert one file or a whole turn. |
 | **Limits you set** | Memory, time limit and CPU for project commands, and whether they run at low priority (on by default: nice 10, idle disk), on the Sandbox page. |
@@ -149,17 +149,17 @@ its own **Download** button.
 - **Local speech-to-text** — whisper.cpp; runs on CPU or CUDA.
 - **On-device LLM** — tool-calling via llama.cpp `llama-server` by default
   (the `ollama` package is also supported), so Chronoa can act on your machine
-  rather than just chatting about it. **222 callable
+  rather than just chatting about it. **209 callable
   skills**, every one a named, schema-typed module under `skills/`. The
   whitelist is the design; the one command runner (`run_command`, for a
   project's tests and builds) is sandboxed, off by default, and asks each time.
   **They are all listed in [`CAPABILITIES.md`](CAPABILITIES.md)**, grouped by
   what they are for, each with the consent switch it needs and whether the
-  assistant asks before running it — 73 are consent-gated and 14 are
+  assistant asks before running it — 72 are consent-gated and 14 are
   destructive (the counts from `capabilities.GATED` and
   `DESTRUCTIVE_CONSENT_KEYS`). The generated `CAPABILITIES.md` also counts
-  skills that gate themselves, so its line reads 86 of 222 consent-gated and
-  16 destructive. That file is generated from `capabilities._GROUPS`, the same
+  skills that gate themselves, so its line reads 81 of 209 consent-gated and
+  14 destructive. That file is generated from `capabilities._GROUPS`, the same
   table the Help window renders, so it cannot drift from what the build does;
   `tests/check_capabilities_doc.py` fails if it does. The deep system,
   network and forensics diagnostics are **not** in this list any more: they
@@ -494,7 +494,7 @@ A turn is audio → whisper.cpp transcribes → the local LLM generates a respon
 (possibly calling skills) → espeak-ng or Piper speaks the reply.
 
 **The tool loop is what the small model depends on, and it is measured.** All
-256 schemas sent with every request is ~61,000 tokens — measured, by
+209 schemas sent with every request is ~55,000 tokens — measured, by
 serialising `tools.TOOLS` and dividing by `local_llm.CHARS_PER_TOKEN`, the 3
 the tree actually uses — so the request is rejected before the model reads a
 word.

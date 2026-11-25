@@ -117,12 +117,14 @@ class TestNoTwoBuiltinsClaimOneName:
     def test_it_checks_a_real_number_of_skills(self):
         """**The control.** A collector that finds nothing passes everything.
 
-        Measured: 240 modules declare 244 names, which is the size of the
-        registry AGENTS.md re-measured on 2026-10-11. If that collapses the
-        parser has broken, not the tree.
+        Measured: 191 modules declare 209 names after the cluster move into
+        shani-sysadmin (was 240/244). A floor rather than an exact number: the
+        registry grows as skills land, and a control pinned to the day's count
+        would go red for a reason that has nothing to do with the parser. If
+        this collapses, the parser has broken, not the tree.
         """
         by_module = builtin_names_by_module()
-        assert len(by_module) > 200, (
+        assert len(by_module) > 180, (
             f"only {len(by_module)} skill modules were read - the parser is "
             f"broken, not the tree")
         assert sum(len(v) for v in by_module.values()) > 200

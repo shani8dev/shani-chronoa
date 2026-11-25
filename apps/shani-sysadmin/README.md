@@ -70,6 +70,23 @@ exception to the fixed-whitelist design and closes the edit-test loop for the
 assistant itself. Asking Chronoa for any moved tool now gets a clear unknown-tool
 refusal; use `python3 -m shani_sysadmin list` to see what the app provides.
 
+**File discovery, cleanup and system time (third move)** — the overlapping
+and admin-heavy tools from three everyday clusters. Nothing was deleted: each
+is the same module at its new path.
+
+- **File discovery** — `files_by_name`, `search_documents`. Their handlers were
+  folded into the surviving Chronoa skills `find_files` (name search with
+  `details: true` for sizes, dates and the newest copy) and `search_my_files`
+  (`action=desktop`, the LocalSearch/Baloo backend). The old modules keep their
+  standalone tools here; consent keys are unchanged.
+- **Disk cleanup** — `cleanup_report`, `cleanup_apply`, `temp_files`,
+  `duplicate_files`, `broken_symlinks`, `stale_files`, `empty_directories`,
+  `empty_trash`. These are specialist hygiene scans and mutations. Chronoa
+  keeps only the plain `disk_usage` answer.
+- **System time and sleep** — `set_timezone`, `set_sleep_inhibit`. The clock
+  question itself stays in Chronoa as `get_datetime`, which now also answers
+  "what time is it in Tokyo" (the old `world_clock` handler is merged into it).
+
 **ML harnesses with no assistant-facing caller** — `rerank.py`, `distill.py`,
 `merge.py`, `adapter.py`, `cultivation.py`, `gguf_write.py`,
 `model_registry.py`, now grouped under `shani_sysadmin/ml_harness/`. Nothing was

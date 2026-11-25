@@ -322,18 +322,18 @@ class TestTheCoreFloorIsPricedNotWaste:
         # then **1380** on one box with no edit between them. Pinning it would
         # fail on a machine that had been used. `zero` and the *attribution*
         # below are the stable facts; the ratio is what the claim rests on.
-        # **Re-derived from 553 to 552, and the ratio re-derived with it.** The
-        # nineteen synonym entries below `CORE` match one schema that previously
-        # scored nothing, which is what a synonym is for - so the floor moved by
-        # one and `offered` moved with it. 552/1384 = **39.9%**, the same ~40% the
-        # claim rests on, and the attribution below is unchanged.
+        # **Re-derived from 552 to 537 after the cluster move into
+        # shani-sysadmin, and the ratio re-derived with it.** Thirteen tools
+        # and five corpus cases left the assistant, so both the floor and the
+        # denominator moved. 537/1298 = **41.4%**, the same ~40% the claim rests
+        # on, and the attribution below is unchanged.
         #
         # **Which is the point of pinning the ratio rather than the count**: a
         # synonym table that starts matching more schemas should change the
         # numerator, and a test that had frozen the count would call that a
         # regression when it is the thing working.
-        assert zero == 552, (
-            f"{zero} schemas score no word match, against 552 measured - the "
+        assert zero == 537, (
+            f"{zero} schemas score no word match, against 537 measured - the "
             f"size of the floor has moved again, so re-derive the 40% claim")
         assert 0.35 < zero / offered < 0.45, (
             f"{zero}/{offered} = {100*zero/offered:.0f}% of the offered budget "
@@ -360,17 +360,16 @@ class TestTheCoreFloorIsPricedNotWaste:
         # drift to nothing while the test stays green, which is how a measured
         # figure becomes folklore - and these three are the whole reason the 40%
         # is read as a *constant* rather than as ranking noise.
-        # **Re-derived from 212 / 177 / 163 to 212 / 176 / 163.** `ask_user` is
-        # the one that moved, and it moved *down*, which is the direction that
-        # matters: the nineteen synonym entries match a request that used to score
-        # nothing and fall through to `ask_user`. A vague request that now finds
-        # its tool is a request `ask_user` is not needed for - so the floor got
-        # smaller in exactly the place the class says it lives.
-        assert who["get_datetime"] == 212 and who["ask_user"] == 176 \
-            and who["web_search"] == 163, (
+        # **Re-derived from 212 / 176 / 163 to 207 / 171 / 158 after the
+        # cluster move.** Thirteen tools and five corpus cases left the
+        # assistant, so all three CORE members fell together; the ratio the
+        # claim rests on (41.4%) did not move. The direction still matters:
+        # `ask_user` is the one a synonym match removes from a vague request.
+        assert who["get_datetime"] == 207 and who["ask_user"] == 171 \
+            and who["web_search"] == 158, (
             f"per-tool counts {{get_datetime: {who['get_datetime']}, "
             f"ask_user: {who['ask_user']}, web_search: {who['web_search']}}} "
-            f"against 212 / 176 / 163 measured - re-derive before quoting")
+            f"against 207 / 171 / 158 measured - re-derive before quoting")
 
     def test_conditional_core_is_refused_by_the_measurement_not_by_taste(self):
         """The refusal is recorded so nobody re-litigates it from the budget.
@@ -513,6 +512,6 @@ class TestTheSynonymTableBuysAccuracyWithoutAModel:
             "the nineteen are worth only %d of 220 top-1 (%d with, %d without); "
             "they were added on a measurement of +17, so something else changed"
             % (with_them - without_them, with_them, without_them))
-        assert with_them >= 160, (
-            "top-1 with the table as it stands is %d/220, below the 162 "
-            "measured after the second sysadmin move" % with_them)
+        assert with_them >= 155, (
+            "top-1 with the table as it stands is %d/220, below the 159 "
+            "measured after the third (cluster) sysadmin move" % with_them)

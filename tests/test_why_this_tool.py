@@ -275,16 +275,18 @@ class TestEachDecisionIsStated:
         assert record.says("browse") == tool_select.REASON_BROWSER
 
     def test_a_tool_a_cue_removed_is_reported_as_removed(self, no_learning):
-        """`get_world_time` scored on "time" and was then taken back out.
+        """`android_device` scored on "firefox" and was then taken back out.
 
         The cue table exists because a small model took these tools on a generic
         word and opened something; a record that said "matched the request" for
         one that was removed would be the exact lie the table prevents.
+        `get_world_time` used to be the example here; its handler was folded
+        into `get_datetime`, which is always offered and has no cue.
         """
-        record = _recorded("what is the time")
-        removed = record.offered("get_world_time")
+        record = _recorded("open firefox please")
+        removed = record.offered("android_device")
         assert removed is not None, (
-            "expected the cue to have considered get_world_time at all")
+            "expected the cue to have considered android_device at all")
         assert removed.sent is False
         assert removed.reason == tool_select.REASON_NO_CUE
 

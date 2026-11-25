@@ -49,8 +49,8 @@ def corpus(tmp_path_factory):
     doc = json.loads((REPO / "tools" / "reranker_corpus.json").read_text())
     # The structural fields come from the real generator; only the row lists are
     # replaced, so the limit/provenance text under test is the shipped text.
-    doc["train"] = rows[:len(doc["train"])] if doc["train"] else []
-    doc["held_out"] = rows[len(doc["train"]):]
+    doc["train"] = rows[: len(doc["train"])] if doc["train"] else []
+    doc["held_out"] = rows[len(doc["train"]) :]
     doc["counts"]["requests"] = len(rows)
     doc["recall"] = stats
     return doc
@@ -86,11 +86,16 @@ class TestNoRequestAppearsOnBothSides:
 
     def test_every_scorable_case_is_present_exactly_once(self, rows, corpus):
         from shani_chronoa import tools as T
+
         cases = json.loads((REPO / "tools" / "eval_cases.json").read_text())["cases"]
         registered = {t["function"]["name"] for t in T.TOOLS}
-        usable = {c["say"] for c in cases
-                  if c.get("expect") and c["expect"][0].get("tool")
-                  and c["expect"][0]["tool"] in registered}
+        usable = {
+            c["say"]
+            for c in cases
+            if c.get("expect")
+            and c["expect"][0].get("tool")
+            and c["expect"][0]["tool"] in registered
+        }
         assert {r["say"] for r in rows} == usable
         assert len(rows) == len(usable), "a request was written twice"
 
@@ -101,6 +106,7 @@ class TestEveryNamedToolIsReal:
     def test_positives_and_negatives_resolve(self, rows):
         from shani_chronoa import tools as T
         from shani_chronoa import tool_select as S
+
         real = {S._name(t) for t in T.TOOLS}
         for r in rows:
             assert r["positive"] in real, f"{r['positive']} is not a tool"
@@ -138,7 +144,7 @@ class TestNegativesAreTheOnesThatCrowdTheAnswerOut:
             # no weights) the two disagreed and the check failed on a
             # corpus that is right.
             scored = S.ranked(r["say"], T.TOOLS, learned={})
-            offered = {n for _s, n, _h in scored[:S.DEFAULT_LIMIT]}
+            offered = {n for _s, n, _h in scored[: S.DEFAULT_LIMIT]}
             for n in r["negatives"]:
                 assert n["tool"] in offered, (
                     f"{n['tool']} is a negative for {r['say']!r} but the "
@@ -162,8 +168,10 @@ class TestNegativesAreTheOnesThatCrowdTheAnswerOut:
         for r in rows:
             if not r["negatives"] or not r["recall_hit"]:
                 continue
-            rank = {n: i for i, (_s, n, _h) in
-                    enumerate(S.ranked(r["say"], T.TOOLS, learned={}))}
+            rank = {
+                n: i
+                for i, (_s, n, _h) in enumerate(S.ranked(r["say"], T.TOOLS, learned={}))
+            }
             mine = rank[r["positive"]]
             if mine == 0:
                 continue  # already first; nothing crowded it out
@@ -197,8 +205,9 @@ class TestTheCorpusDoesNotDriftWithThisMachinesHistory:
         from shani_chronoa import tool_select as S
 
         plain = builder.build()[0]
-        monkeypatch.setattr(S, "learned_weights",
-                            lambda: {"qr_code": 99.0, "browse": 99.0})
+        monkeypatch.setattr(
+            S, "learned_weights", lambda: {"qr_code": 99.0, "browse": 99.0}
+        )
         assert S.learned_weights(), "the control did not take: no weights in force"
         after = builder.build()[0]
         assert [r["say"] for r in plain] == [r["say"] for r in after]
@@ -215,6 +224,7 @@ class TestTheCorpusDoesNotDriftWithThisMachinesHistory:
         disagreed.
         """
         import inspect
+
         src = inspect.getsource(builder.build)
         assert "learned={}" in src, (
             "the builder calls ranked() without learned={}, so the corpus "
@@ -232,15 +242,19 @@ class TestARecallFailureIsStillACorpusRow:
     """
 
     def test_rows_whose_positive_was_not_offered_are_present(self, corpus):
-        missed = [r for r in corpus["train"] + corpus["held_out"]
-                  if not r["recall_hit"]]
+        missed = [
+            r for r in corpus["train"] + corpus["held_out"] if not r["recall_hit"]
+        ]
         assert len(missed) == corpus["recall"]["not_offered"]
-        assert corpus["recall"]["offered"] + corpus["recall"]["not_offered"] == \
-            corpus["counts"]["requests"]
+        assert (
+            corpus["recall"]["offered"] + corpus["recall"]["not_offered"]
+            == corpus["counts"]["requests"]
+        )
 
     def test_a_missed_row_still_carries_its_negatives(self, corpus):
-        missed = [r for r in corpus["train"] + corpus["held_out"]
-                  if not r["recall_hit"]]
+        missed = [
+            r for r in corpus["train"] + corpus["held_out"] if not r["recall_hit"]
+        ]
         assert missed, "no recall failures in the corpus, so this checks nothing"
         assert any(r["negatives"] for r in missed)
 
@@ -267,10 +281,12 @@ class TestArgumentsAreCarried:
 
     def test_the_arguments_reach_every_row_that_has_them(self, rows, corpus):
         from shani_chronoa import tools as T
+
         registered = {t["function"]["name"] for t in T.TOOLS}
         source = {}
-        for case in json.loads(
-                (REPO / "tools" / "eval_cases.json").read_text())["cases"]:
+        for case in json.loads((REPO / "tools" / "eval_cases.json").read_text())[
+            "cases"
+        ]:
             if case.get("expect") and case["expect"][0]["tool"] in registered:
                 source[case["say"]] = dict(case["expect"][0].get(self.ARGS_KEY) or {})
         expected = sum(1 for v in source.values() if v)
@@ -286,8 +302,9 @@ class TestArgumentsAreCarried:
 
     def test_the_arguments_are_the_ones_the_corpus_names(self, rows):
         source = {}
-        for case in json.loads(
-                (REPO / "tools" / "eval_cases.json").read_text())["cases"]:
+        for case in json.loads((REPO / "tools" / "eval_cases.json").read_text())[
+            "cases"
+        ]:
             if case.get("expect"):
                 source[case["say"]] = dict(case["expect"][0].get(self.ARGS_KEY) or {})
         for r in rows:
@@ -311,8 +328,10 @@ class TestArgumentsAreCarried:
         failure.
         """
         import inspect
+
         sys.path.insert(0, str(REPO / "tools"))
         import task_eval
+
         src = inspect.getsource(task_eval)
         assert '"args"' in src, (
             "task_eval no longer reads `args`; this corpus's key must follow it"
@@ -338,10 +357,12 @@ class TestArgumentsAreCarried:
         sys.path.insert(0, str(REPO / "tools"))
         import task_eval
         from shani_chronoa import tools as T
+
         registered = {t["function"]["name"] for t in T.TOOLS}
         cases = json.loads((REPO / "tools" / "eval_cases.json").read_text())["cases"]
-        rows = [c for c in cases if c.get("expect")
-                and c["expect"][0]["tool"] in registered]
+        rows = [
+            c for c in cases if c.get("expect") and c["expect"][0]["tool"] in registered
+        ]
         empty = [c for c in rows if not c["expect"][0].get("args")]
         total = corpus["counts"]["requests"]
         no_args = total - corpus["recall"]["with_args"]
@@ -351,7 +372,8 @@ class TestArgumentsAreCarried:
             f"assertion above are stale"
         )
         vacuous = sum(
-            1 for c in empty
+            1
+            for c in empty
             if task_eval.score(c, [{"name": c["expect"][0]["tool"], "args": {}}])
         )
         assert vacuous == len(empty) == no_args, (
@@ -368,8 +390,9 @@ class TestTheDeclaredLimitIsTrue:
     limit was simply wrong.
     """
 
-    def test_the_limit_is_stated_in_what_the_generator_writes(self, tmp_path,
-                                                              monkeypatch):
+    def test_the_limit_is_stated_in_what_the_generator_writes(
+        self, tmp_path, monkeypatch
+    ):
         """Read from a generated document, not the shipped one.
 
         The first version asserted against `tools/reranker_corpus.json`, which
@@ -388,8 +411,7 @@ class TestTheDeclaredLimitIsTrue:
         written = json.loads((tmp_path / "c.json").read_text())
         with_args = written["recall"]["with_args"]
         no_args = written["counts"]["requests"] - with_args
-        assert (f"answerable on {with_args} rows and NOT on the {no_args}"
-                in limit), (
+        assert f"answerable on {with_args} rows and NOT on the {no_args}" in limit, (
             "the limit must state its own bounded population in one sentence, "
             "not two numbers a mutation can remove one at a time"
         )
@@ -408,6 +430,7 @@ class TestTheDeclaredLimitIsTrue:
         distractors per request while every other test stays green.
         """
         from shani_chronoa import tool_select as S
+
         # The offered slice holds at most `DEFAULT_LIMIT` names, one of which is
         # the answer, so at most `DEFAULT_LIMIT - 1` can ever be a negative.
         # Truncation starts biting the moment that exceeds `NEGATIVES`.
@@ -428,14 +451,22 @@ class TestTheScriptItselfRuns:
         monkeypatch.setattr(builder, "OUT", tmp_path / "reranker_corpus.json")
         assert builder.main() == 0
         written = json.loads((tmp_path / "reranker_corpus.json").read_text())
-        assert written["counts"]["requests"] > 200
+        # A floor, not the day's count: this is the control that catches a
+        # builder which reads no eval cases at all. Measured 184 requests after
+        # the cluster move into shani-sysadmin (was 189); 150 still cannot pass
+        # on an empty corpus, and does not go red the next time a case is
+        # retired from the assistant's whitelist.
+        assert written["counts"]["requests"] > 150
         assert written["train"] and written["held_out"]
 
     def test_it_is_runnable_as_a_script(self):
         env = {"PYTHONDONTWRITEBYTECODE": "1", "PATH": "/usr/bin:/bin"}
         proc = subprocess.run(
             [sys.executable, str(REPO / "tools" / "build_reranker_corpus.py")],
-            capture_output=True, text=True, env=env, timeout=600,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=600,
         )
         assert proc.returncode == 0, proc.stderr[-2000:]
         written = json.loads((REPO / "tools" / "reranker_corpus.json").read_text())

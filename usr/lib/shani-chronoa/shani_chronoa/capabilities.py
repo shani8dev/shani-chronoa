@@ -58,7 +58,6 @@ GATED: dict[str, str] = {
     "airplane_mode": "radio-control-enabled",
     "phone": "phone-control-enabled",
     "calendar_events": "calendar-read-enabled",
-    "search_documents": "document-search-enabled",
     "move_pointer": "input-control-enabled",
     "click_pointer": "input-control-enabled",
     "type_text": "input-control-enabled",
@@ -328,7 +327,6 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "speak": ("Sound", "Speak a reply aloud"),
     "sing": ("Sound", "Sing a line aloud"),
     "get_datetime": ("Time and reminders", "Date and time"),
-    "get_world_time": ("Time and reminders", "Time somewhere else"),
     "set_timer": ("Time and reminders", "Timer"),
     # With timers, not alone: a notification is how a reminder surfaces, and a
     # heading with one row under it is a worse help screen.
@@ -418,15 +416,6 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "find_emoji": ("Everyday tools", "Find an emoji"),
     "calendar_month": ("Time and reminders", "Month calendar"),
     "stopwatch": ("Time and reminders", "Stopwatch"),
-    "cleanup_report": ("Files", "What could be cleaned up"),
-    # The action half, gated separately and destructively: `cleanup_report`
-    # only ever reads, and a report you cannot act on is the gap this closes.
-    "cleanup_apply": ("Files", "Clear caches and unused Flatpak runtimes"),
-    # Finds junk by name (editor swap, OS metadata, leftover installers) and is
-    # read-only. The by-kind grouping (`space_by_type`) and the packet and
-    # interface diagnostics now live in the shani-sysadmin app; this looks for
-    # names that are junk whatever they contain.
-    "temp_files": ("Files", "Find junk, temporary and leftover files by name"),
     "bluetooth_devices": ("Devices", "Bluetooth devices"),
     "vpn_control": ("System", "VPN connections"),
     "install_app": ("Apps", "Install and remove apps"),
@@ -483,8 +472,6 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "fingerprint_status": ("Privacy controls",
                            "Whether fingerprint login is set up, and which fingers"),
     "lock_screen": ("Power and screen", "Lock this session"),
-    "empty_trash": ("Files", "Permanently empty the desktop trash"),
-    "search_documents": ("Files", "Search inside your files with the desktop's own index"),
     "calendar_events": ("Time and reminders", "Read what is on your calendar"),
     "phone": ("Devices", "Find, ping or send a file to your paired phone"),
     "airplane_mode": ("Devices", "Report the radios, or turn airplane mode on or off"),
@@ -499,10 +486,7 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "set_scaling": ("Appearance", "Change the text size"),
     "toggle_night_light": ("Appearance", "Turn the blue-light filter on or off"),
     "set_screensaver": ("Power and screen", "Change when the screen blanks and locks"),
-    "set_sleep_inhibit": ("Power and screen",
-                           "Hold the machine awake for a bounded time"),
-    "set_timezone": ("Time and reminders", "Report or change the system timezone"),
-    "git_inspect": ("Code and git", "What changed in a git repository"),
+     "git_inspect": ("Code and git", "What changed in a git repository"),
     # Reads all three sides git holds for a conflicted file - base, yours,
     # theirs - and can take one whole side or abandon the operation. No
     # automatic merge: that judgement belongs to the person.
@@ -570,13 +554,6 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # (a mutation removing that flag fails 1 test).
     # Read-only: hashes and lists. Never deletes, never marks a copy as the
     # original (both asserted by a mutation each).
-    "duplicate_files": ("Files", "Which files are stored twice, and how much that wastes"),
-    # Read-only: walks and classifies. Never removes a link (asserted by a
-    # mutation on the closing sentence).
-    "broken_symlinks": ("Files", "Which shortcuts point at nothing"),
-    # Read-only: nothing deleted, and no "safe to delete" is claimed for any
-    # file (both asserted by a mutation each).
-    "stale_files": ("Files", "What is big AND untouched - the deletion candidates"),
     # Read-only: reads a bounded 512-byte head. Never renames or moves.
     "identify_file": ("Files", "What this file really is, whatever its name says"),
     # Cuts across directories on purpose, and says its category is a guess.
@@ -594,9 +571,6 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "apply_patch": ("Files", "Apply a .patch/.diff file to files here"),
     # Read-only: lists empty dirs, removes none (a mutation replacing the
     # closing sentence fails 1 test).
-    "empty_directories": ("Files", "Which directories hold nothing at all"),
-    # Read-only: lists matches with sizes and dates, deletes none.
-    "files_by_name": ("Files", "Where every file with this name lives"),
     # The by-suffix space breakdown, the permission audit and the per-program
     # network reading now live in shani-sysadmin. Autostart .desktop
     # files, systemd *user* units and timers, and the crontab are the other
@@ -1054,7 +1028,6 @@ _EXAMPLES: dict[str, str] = {
     "screenshot": "Take a screenshot",
     "web_search": "Search the web for the Arch wiki",
     "get_weather": "What's the weather today?",
-    "get_world_time": "What time is it in Tokyo?",
     "convert_units": "How many miles is 100 km?",
     "solve_math": "What is the integral of x squared?",
     "spell_word": "How do you spell necessary?",
@@ -1064,7 +1037,6 @@ _EXAMPLES: dict[str, str] = {
     "random_pick": "Flip a coin",
     "find_emoji": "Emoji for a red heart",
     "bluetooth_devices": "Connect my headphones",
-    "cleanup_report": "What can I clean up to free space?",
     "do_not_disturb": "Turn on Do Not Disturb",
     # **A voice and a routine**, which the empty state did not offer at all:
     # six chips about the battery, the clock and the screen, and nothing
@@ -1288,7 +1260,7 @@ EVERYDAY_TASKS: tuple = (
         "Keep the computer healthy",
         "Disk space, updates, battery, temperature and what is filling the disk.",
         "Is my laptop healthy? Check disk space, updates, battery and temperature.",
-        ("disk_usage", "cleanup_report", "check_updates", "get_battery_status", "temperatures")),
+        ("disk_usage", "check_updates", "get_battery_status", "temperatures")),
     EverydayTask(
         "Arrange your screen",
         "Puts windows side by side, maximises, minimises or moves them to another "
@@ -1401,7 +1373,6 @@ READ_ONLY_TOOLS = frozenset({
     # Gated like calendar_events, and only reads: the one write a wearable can be
     # sent (the buzz) is its own tool, `find_device`, so it is not in this set.
     "bluetooth_gatt",
-    "search_documents",
     "get_datetime", "get_volume", "get_battery_status", "get_clipboard",
     "list_apps", "list_directory", "find_files", "search_file_contents",
     "read_text_file", "open_file", "disk_usage", "system_info",
@@ -1420,11 +1391,11 @@ READ_ONLY_TOOLS = frozenset({
     "list_services", "read_logs", "check_updates", "compute_hash",
     # Runs systemd-analyze verify and changes nothing.
     "list_percepts", "recommend_model", "calculate", "system_info",
-    "get_weather", "get_location", "get_world_time", "convert_units",
+    "get_weather", "get_location", "convert_units",
     "convert_currency", "lookup_wikipedia", "define_word", "solve_math",
     "spell_word", "explain_command", "check_internet", "data_usage",
     "date_math", "random_pick", "my_ip_address", "read_document", "read_video", "read_audio", "read_image", "look_at_image", "create_document", "convert_document",
-    "encode_text", "convert_color", "calendar_month", "cleanup_report",
+    "encode_text", "convert_color", "calendar_month",
     # Read-only, and deliberately not gated: a user must be able to see what
     # the machine will do, and what is armed, without first being granted
     # permission to do any of it.
@@ -1544,7 +1515,7 @@ OPEN_WORLD_TOOLS = frozenset({
     "web_search", "connect_wifi", "install_model",
     "translate_text", "print_file",
     "get_weather", "get_location", "convert_currency", "lookup_wikipedia",
-    "define_word", "get_world_time",
+    "define_word",
     # The parity skills that reach the network, with `browse`.
     # `news` fetches publisher RSS and `maps` queries OpenStreetMap and
     # Overpass: both are reads that leave this machine, so both are refused in

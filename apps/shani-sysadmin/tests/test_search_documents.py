@@ -10,7 +10,7 @@ import stat
 
 import pytest
 
-from shani_chronoa.skills import search_documents as sd
+from shani_sysadmin.skills import search_documents as sd
 
 
 def _stub(bindir, name, script):

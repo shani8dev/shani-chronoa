@@ -48,6 +48,11 @@ MOVED_SKILLS = {
     "check_units", "scheduled_tasks", "graphics_stack", "permission_audit",
     "process_detail", "thread_activity", "cpu_frequency", "cpu_per_core",
     "oom_score",
+    # Third move (mirrored in tests/test_sysadmin_app_separation.py).
+    "files_by_name", "search_documents", "get_world_time", "cleanup_report",
+    "cleanup_apply", "temp_files", "duplicate_files", "broken_symlinks",
+    "stale_files", "empty_directories", "empty_trash", "set_timezone",
+    "set_sleep_inhibit",
 }
 
 
