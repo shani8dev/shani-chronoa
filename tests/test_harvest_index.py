@@ -2,8 +2,9 @@
 
 `harness-study/` holds the third-party studies. It is **not a git repository** -
 it was created with `git clone` per repo but nothing tracks the folder itself - so
-a harvest exists on one disk until that disk is reused. `AGENTS.md` is the index
-that tells a reader the study happened and what came of it.
+a harvest exists on one disk until that disk is reused. `AGENTS.md` remains the
+index that tells a reader the study happened and what came of it; dated audits
+were moved to `docs/AGENTS-HISTORY.md`, but this table stays in the index.
 
 Measured 2026-10-12: **four of twelve were named nowhere in `AGENTS.md`**, one of
 them a 286-line deep pass over edge0, and the whole set was invisible from the

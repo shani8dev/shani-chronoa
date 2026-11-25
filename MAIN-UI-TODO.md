@@ -580,8 +580,9 @@ Open, ranked:
   **Done:** the capabilities page is "What Chronoa can do" - one searchable
   view with plain names and "Try it" that fills the composer (see 11a). The
   Help window's "Everything Chronoa can do" is built from the same
-  `capabilities` registry, not a second list, and `/help` opens it; the
-  Inventory is "The anatomy", honest about being the map rather than the
+  `capabilities` registry, not a second list. `/help` opens the Skills surface
+  (`gui/commands.py`); the Help window stays on its header button and `?`.
+  The Inventory is "The anatomy", honest about being the map rather than the
   list. 11a still tracks the Workbench and "Make your own" half.
 - [x] **9k Palette as the universal door**: Settings sections (`show-page`),
   Setup, Find (Ctrl+F only), Body (Ctrl+Shift+B only), Browser, routines.
@@ -818,10 +819,12 @@ Open, by panel (worst first):
   whose gate label is the same sentence, and a "no sentence appears twice"
   rule would fail it - so the rule is about *a banner repeating itself*, not
   about repetition in general.
-- [ ] **10e Duplicates**: Skills and Workbench both list all 257 skills;
-  "What Chronoa can do" (Inventory) speaks the internal metaphor ("Immune
-  system", "Scar tissue"); Help, Inventory, Skills, /help are four answers to one
-  question. One searchable "What Chronoa can do" with Try it.
+- [ ] **10e Duplicates**: Skills and Workbench both list the whole registry
+  (257 when written; 222 at HEAD, so the count was stale); "What Chronoa can
+  do" (Inventory) speaks the internal metaphor ("Immune system", "Scar
+  tissue"); Help, Inventory and Skills are three answers to one question now
+  that `/help` opens Skills instead of the Help window. One searchable "What
+  Chronoa can do" with Try it.
   **Two of the three done 2026-10-21.** The Inventory was called "What
   Chronoa can do" while showing the body's organs - the name promised an
   answer the page did not give, and the answer itself had no name. **So
@@ -837,9 +840,9 @@ Open, by panel (worst first):
   palette's skill rows already used (`capabilities.effect_of()`), and
   the registry name and the full description moved to the tooltip. **The
   search still finds the name** - the haystack is unchanged.
-  **Still open**: the Workbench's built-in list, the Help window's
-  capability list and /help are still three more answers to the same
-  question, and the Workbench's list is the *developer's* view of the
+  **Still open**: the Workbench's built-in list and the Help window's
+  capability list are two more answers to the same question; `/help` now
+  opens Skills, not Help. The Workbench's list is the *developer's* view of the
   registry (its own words, on purpose) - which is what 11j's Developer
   switch would put somewhere honest.
 - [x] **10f Phone sprawl**: Phone, Phone link, Android, Devices, Wearables -
