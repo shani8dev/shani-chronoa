@@ -371,6 +371,13 @@ def read_event_signal(
     if rule.event_type == EVENT_DBUSPROP:
         return read_dbusprop(rule.source, now=now)
     if rule.event_type == EVENT_SCHEDULE:
+        # An RSS/Atom feed is an opt-in source on the existing schedule event:
+        # no new event type or consent key, and the reader itself insists on
+        # the web switch and privacy mode before it makes a request.
+        feed_url = params.get("feed_url")
+        if feed_url:
+            from shani_chronoa import feeds
+            return feeds.read_feed_signal(feed_url, now=now)
         return read_schedule(rule.source, grace_minutes=float(params.get("grace_minutes", SCHEDULE_GRACE_MINUTES)),
                              now=now)
     return _unavailable(

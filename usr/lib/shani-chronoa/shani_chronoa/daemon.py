@@ -69,7 +69,12 @@ def main() -> int:
     stop = threading.Event()
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: stop.set())
-    scheduler = AmbientScheduler(store=PerceptStore(), event_engine=EventEngine())
+    from shani_chronoa import rhythm
+    from shani_chronoa.senses import idle as idle_sense
+    store = PerceptStore()
+    # Rhythm is a percept, not a gate: rules and senses run in every state.
+    monitor = rhythm.RhythmMonitor(store=store, read_idle=idle_sense.read_idle_seconds)
+    scheduler = AmbientScheduler(store=store, event_engine=EventEngine())
     scheduler.start()
     logger.info("Chronoa background mode running (rules and ambient senses; no microphone)")
     # Sleep. Runs on a timer rather than on every tick, because consolidation
@@ -90,6 +95,7 @@ def main() -> int:
     next_sleep = time.monotonic() + SLEEP_FIRST_DELAY_SECONDS
     try:
         while not stop.wait(1.0):
+            monitor.tick()
             now = time.monotonic()
             if now >= next_sleep:
                 next_sleep = now + SLEEP_EVERY_SECONDS
