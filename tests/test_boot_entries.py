@@ -34,7 +34,7 @@ import sys
 _REPO = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
-from shani_chronoa.skills import boot_report as B  # noqa: E402
+from shani_sysadmin.skills import boot_report as B  # noqa: E402
 
 #: The captured list, verbatim from the slot run. Both entries, the blank line
 #: between them, and the `tries` line that says auto-tries is armed.

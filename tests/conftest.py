@@ -106,6 +106,9 @@ os.environ.setdefault("GSETTINGS_BACKEND", "keyfile")
 # imports happen inside fixtures/tests so PYTHONDONTWRITEBYTECODE=1 is already
 # in effect and no bytecode is ever written into the repo tree.
 sys.path.insert(0, str(PKG_DIR))
+# Root-suite tests that still exercise skills moved to shani-sysadmin import
+# that app's modules directly; both roots must be importable here.
+sys.path.insert(0, str(REPO_ROOT / "apps" / "shani-sysadmin"))
 
 
 @pytest.fixture(autouse=True)

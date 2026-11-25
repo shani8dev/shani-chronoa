@@ -1153,8 +1153,12 @@ def _kernel() -> Tuple[str, str]:
     `STATUS_UNKNOWN`, and only a ring read to be empty can go on to ask about
     warnings at all.
     """
-    from shani_chronoa.senses import kernel_log
-
+    try:
+        from shani_sysadmin.senses import kernel_log
+    except ImportError:
+        return STATUS_UNKNOWN, (
+            "the kernel ring reader lives in the shani-sysadmin app, which is "
+            "not installed here - this is not evidence that the kernel is quiet")
     errors = kernel_log.read_ring(3)
     if errors is None:
         return STATUS_UNKNOWN, (

@@ -23,7 +23,7 @@ _REPO = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
 from shani_chronoa.skills import download_file as DL  # noqa: E402
-from shani_chronoa.skills import user_driver as UD  # noqa: E402
+from shani_sysadmin.skills import user_driver as UD  # noqa: E402
 
 
 def _fake_binary(tmp_path, monkeypatch, name, body, code=0, out=""):

@@ -161,7 +161,12 @@ def run_command(arguments: dict) -> str:
         if not image:
             return ("Not run: a container needs an `image` (e.g. python:3.12, "
                     "node:22, rust:1). `podman images` lists those already here.")
-        from shani_chronoa.skills.container import _podman
+        try:
+            from shani_sysadmin.skills.container import _podman
+        except ImportError:
+            return ("Not run: container scope needs the shani-sysadmin app, "
+                    "which is not installed here. Install it or use the "
+                    "sandbox or machine scope.")
         proc, why = _podman(
             ["run", "--rm", "-i=false", "--userns=keep-id",
              f"--network={'slirp4netns' if network else 'none'}",

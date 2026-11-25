@@ -39,7 +39,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "usr/lib/shani-chronoa"))
 
 from shani_chronoa.gui.surfaces import diagnostics as D  # noqa: E402
-from shani_chronoa.senses import kernel_log  # noqa: E402
+from shani_sysadmin.senses import kernel_log  # noqa: E402
 
 
 def _ring(monkeypatch, *answers):
