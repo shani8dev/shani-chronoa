@@ -275,6 +275,7 @@ class ToolCallRecord:
         evidence: str = "",
         feedback: str = "",
         feedback_verdict: str = "",
+        reward: float = 0.0,
     ):
         self.tool_name = tool_name
         self.args = args
@@ -298,6 +299,9 @@ class ToolCallRecord:
         # because the person has not answered yet when the call is recorded.
         self.feedback = feedback
         self.feedback_verdict = feedback_verdict
+        # Advisory only: a recorded number, never an authority. Computed once
+        # from the outcome; see reward.py for the weights.
+        self.reward = reward
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -311,6 +315,7 @@ class ToolCallRecord:
             "evidence": self.evidence,
             "feedback": self.feedback,
             "feedback_verdict": self.feedback_verdict,
+            "reward": self.reward,
         }
 
     def to_log_dict(self) -> dict[str, Any]:
@@ -370,10 +375,14 @@ class ToolTracker:
         one. It defaults to None because a call that died before verification
         has no verdict, and inventing one would be worse than recording none.
         """
+        from shani_chronoa import reward as reward_module
+        outcome = {"verdict": verdict or "", "approved": origin == ORIGIN_APPROVED}
+        value = reward_module.reward_for(outcome)
         record = ToolCallRecord(
             tool_name, args, result, duration_ms, origin=origin,
             verdict=verdict, evidence=evidence,
             feedback=feedback, feedback_verdict=feedback_verdict,
+            reward=value,
         )
         self._calls.append(record)
         self._write_to_log(record)

@@ -33,7 +33,7 @@ import time
 import uuid
 from enum import Enum
 from pathlib import Path
-from typing import Callable, NamedTuple, Optional
+from typing import Callable, Iterable, NamedTuple, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -635,7 +635,9 @@ def describe_edits(run: GoalRun) -> str:
 
 
 def advance(run: GoalRun, execute: Callable[[PlannedStep, dict], str],
-            now: float = 0.0) -> GoalRun:
+            now: float = 0.0,
+            replan: Optional[Callable[[PlannedStep, dict], "Iterable[PlannedStep]"]] = None,
+            ) -> GoalRun:
     """One forward step of the run.
 
     `execute` runs one step against the settled variables and returns the
@@ -644,9 +646,18 @@ def advance(run: GoalRun, execute: Callable[[PlannedStep, dict], str],
     `execute` that raises fails the run rather than killing the queue: a
     queue that loses parked runs on one bad step is not durable.
 
+    `planner.priority_order` picks the highest-priority ready step first without
+    moving one above a dependency it needs; with no priorities the order is
+    unchanged. `replan`, when supplied, is the bounded failed-step repair from
+    `planner`; every replacement still goes through `execute` and its consent,
+    sandbox and verification. With no `replan`, failure behaves as before.
+
     `now` is injectable so a test can prove the *timestamps* rather than
     measuring how long a step took; it defaults to the clock.
     """
+    from shani_chronoa import planner
+
+    run = planner.priority_order(run)
     if run.phase in (Phase.COMPLETED, Phase.FAILED):
         return run
     if run.index >= len(run.steps):
@@ -659,7 +670,19 @@ def advance(run: GoalRun, execute: Callable[[PlannedStep, dict], str],
         output = execute(step, run.results)
     except Exception as exc:  # noqa: BLE001 - a bad step fails the run, not the queue
         logger.warning("goal %s failed at step %s: %s", run.id, step.variable_name, exc)
-        return run._replace(phase=Phase.FAILED)
+        failed = run._replace(phase=Phase.FAILED)
+        if replan is None:
+            return failed
+        from shani_chronoa import planner
+        repaired, why = planner.replan_failed(failed, replan, now=now)
+        if why or repaired.phase is not Phase.RUNNING:
+            logger.info("goal %s was not re-planned: %s", run.id, why or "no replacement")
+            return failed
+        # The replacement keeps the failed step's variable name, so later steps
+        # still have a producer. Re-enter this function rather than executing
+        # the replacement here: the retry budget, dependency check and stamp
+        # all stay in one place.
+        return advance(repaired, execute, now=now, replan=replan)
     results = {**run.results, step.variable_name: output}
     index = run.index + 1
     phase = Phase.COMPLETED if index >= len(run.steps) else Phase.RUNNING

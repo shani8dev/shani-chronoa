@@ -324,14 +324,83 @@ def evaluate(names: Sequence[str] = REFLEX_NAMES) -> List[Urgence]:
     return out
 
 
-def notify(urgences: Sequence[Urgence], dry_run: bool = False) -> List[str]:
+#: Held announcements, kept across ticks: `due()` has already stamped the
+#: cooldown, so without this queue a quiet room would eat one for 900 s.
+_PENDING_CAPACITY = 64
+_pending: "List[tuple[Urgence, float]]" = []
+
+
+def clear_pending() -> None:
+    """Forget held announcements. Only tests and an explicit reset call this."""
+    _pending.clear()
+
+
+def _do_not_disturb() -> bool:
+    """Do Not Disturb, read from the switch the skill writes. Unreadable is off."""
+    from shani_chronoa.skills import do_not_disturb
+    return do_not_disturb.is_on() is True
+
+
+def announce(urgences: Sequence[Urgence], *, do_not_disturb: "Optional[bool]" = None,
+             rhythm_state=None, now: "Optional[float]" = None) -> "List[tuple[Urgence, str]]":
+    """Score unattended urgences, bound them in a queue, apply the policy.
+
+    This is the unattended announcement path. It can only say "speak", "notify"
+    or "hold"; it never stops a rule or drops a held item. DND and the daemon's
+    rhythm can hold an announcement, and `notify` keeps the consent gate.
+    """
+    import time
+    from shani_chronoa import rhythm, salience
+
+    moment = time.time() if now is None else now
+    if do_not_disturb is None:
+        try:
+            do_not_disturb = _do_not_disturb()
+        except Exception:  # noqa: BLE001 - a broken policy read must not silence reflexes
+            do_not_disturb = False
+    if rhythm_state is None:
+        rhythm_state = rhythm.current_state()
+
+    queue = salience.PriorityQueue(capacity=_PENDING_CAPACITY)
+    candidates = [(urge, held_at) for urge, held_at in _pending]
+    candidates.extend((urge, moment) for urge in urgences)
+    for urge, held_at in candidates:
+        if moment - held_at >= _COOLDOWN_SECONDS:
+            continue  # a held announcement does not live forever
+        severity = "warning" if urge.urgency == URGENCY_HIGH else "info"
+        rules = (urge.subject,) if urge.subject else ()
+        value = salience.score(urge, changed=True, severity=severity, rules=rules)
+        queue.push((value, urge, held_at), value)
+
+    _pending.clear()
+    decided: "List[tuple[Urgence, str]]" = []
+    while len(queue):
+        value, urge, held_at = queue.pop()
+        decision = salience.policy(value, do_not_disturb=do_not_disturb,
+                                   rhythm_state=rhythm_state, unattended=True)
+        if decision == "hold":
+            _pending.append((urge, held_at))
+            continue
+        decided.append((urge, decision))
+    return decided
+
+
+def notify(urgences: Sequence[Urgence], dry_run: bool = False, *,
+           do_not_disturb: "Optional[bool]" = None, rhythm_state=None) -> List[str]:
     """Show what a reflex set would say, and optionally actually say it.
 
     `dry_run` is the default for every caller that is not the scheduler, so the
     honest report is never a side effect of being asked what would happen.
+    A held announcement is neither reported as said nor dropped: `announce`
+    keeps it for a later tick.
     """
+    # A dry run must not run any subprocess; the Do Not Disturb read shells out
+    # to gsettings, so assume it is off here. A real announcement reads it.
+    decided = announce(urgences,
+                       do_not_disturb=False if dry_run else do_not_disturb,
+                       rhythm_state=rhythm_state)
     sent: List[str] = []
-    for urge in urgences:
+    for urge, _decision in decided:
         line = f"{urge.subject}: {urge.detail}"
         sent.append(line)
         if dry_run:

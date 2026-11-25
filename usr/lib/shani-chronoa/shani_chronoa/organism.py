@@ -138,7 +138,9 @@ INVENTORY: Tuple[Organ, ...] = (
     Organ("balance", "Senses", "Vestibular sense",
           "balance: what deserves attention now, out of everything that happened",
           ("tool_select.py", "compression.py", "triggers/events.py"), PART,
-          missing="no salience or priority queue; selection is by tool relevance only"),
+          missing="salience scores unattended urgences in a bounded queue "
+                  "with a DND/rhythm interrupt policy; tool selection is "
+                  "still by relevance, not by that score"),
 
     # -- Action ----------------------------------------------------------
     Organ("mouth", "Action", "Mouth",
@@ -195,14 +197,14 @@ INVENTORY: Tuple[Organ, ...] = (
     Organ("homeostasis", "Regulation", "Hypothalamus",
           "setpoints: the conditions it should notice on its own",
           ("triggers/rules.py", "approvals.py"), PART,
-          missing="no built-in presets; a rule has to be armed by the user"),
+          missing="built-in off-by-default presets are proposed through "
+                  "manage_triggers; a preset still has to be armed by the "
+                  "user and never switches a consent key on"),
     Organ("pituitary", "Regulation", "Pituitary gland",
           "the master gland: the setpoints the hypothalamus has none of",
           ("triggers/rules.py", "approvals.py"), PART,
-          missing="nothing supplies a setpoint. The Hypothalamus below records "
-                  "the gap - 'a rule has to be armed by the user' - and this is "
-                  "the organ that would fill it: a default posture per context "
-                  "so a person sets a policy once rather than arming every rule"),
+          missing="setpoints.py supplies proposals only; the per-context "
+                  "default posture that would set a policy once is still absent"),
 
     Organ("brainstem", "Core", "Brainstem",
           "the involuntary: what keeps running when nobody is deciding",
@@ -256,7 +258,8 @@ INVENTORY: Tuple[Organ, ...] = (
     Organ("endocrine", "Memory and learning", "Endocrine system",
           "slow signals about how things are going: pain and reward",
           ("tool_tracking.py", "cues.py", "verification.py"), PART,
-          missing="faults and pressures are reported; there is no reward signal at all"),
+          missing="tool_tracking records a reward with every outcome; it is "
+                  "advisory only and changes no consent decision"),
 )
 
 

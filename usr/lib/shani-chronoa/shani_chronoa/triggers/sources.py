@@ -330,6 +330,29 @@ def _confine_to_home(raw: str) -> "tuple[Optional[Path], str]":
     return resolved, ""
 
 
+#: One watcher per resolved directory, for the life of the process. A new
+#: watcher on every poll would re-arm and report "nothing changed" forever,
+#: both for the polling baseline and for inotify's arm-then-report first call.
+_WATCHERS: "dict[str, Any]" = {}
+
+
+def _default_watcher(path: Path) -> Any:
+    """The inotify backend where it works, polling everywhere else.
+
+    Imported lazily: `inotify_watch` builds on this module, so a module-level
+    import would be a cycle. A machine without the symbols, or whose kernel
+    refuses an instance, keeps the original polling watcher.
+    """
+    from shani_chronoa.inotify_watch import build_watcher
+
+    key = str(path)
+    active = _WATCHERS.get(key)
+    if active is None:
+        active = build_watcher()
+        _WATCHERS[key] = active
+    return active
+
+
 def read_watched_path(
     raw_path: str, watcher: "Optional[Any]" = None, now: Optional[float] = None
 ) -> EventSignal:
@@ -350,7 +373,7 @@ def read_watched_path(
     if resolved is None:
         return _unavailable(EVENT_FSWATCH, raw_path, problem)
 
-    active = watcher if watcher is not None else PollingDirWatcher()
+    active = watcher if watcher is not None else _default_watcher(resolved)
     try:
         changed = list(active.poll(resolved))
     except WatcherError as exc:

@@ -117,6 +117,25 @@ def should_run_rules(state: Rhythm) -> bool:
     return True
 
 
+#: The last state the owner of the monitor observed. Plain data, not a lock:
+#: unattended announcement policy reads it from another thread and a stale
+#: reading can only hold an announcement for one tick, never grant one.
+_CURRENT_STATE = Rhythm.AWAKE
+
+
+def current_state() -> Rhythm:
+    """The last observed rhythm state, for interrupt policy. Never raises."""
+    return _CURRENT_STATE
+
+
+def note_state(state) -> None:
+    """Record an observed state. Accepts a `Rhythm` or a `RhythmState`."""
+    global _CURRENT_STATE
+    value = getattr(state, "state", state)
+    if isinstance(value, Rhythm):
+        _CURRENT_STATE = value
+
+
 def percept(state: RhythmState, now: Optional[float] = None) -> Percept:
     """Render a state as a transient percept for the context builder."""
     moment = time.time() if now is None else now
@@ -159,6 +178,7 @@ class RhythmMonitor:
                 signals["idle_seconds"] = idle
         before = self.state.state
         self.state = observe(self.state, **signals)
+        note_state(self.state)
         if self.store is not None and self.state.state is not before:
             try:
                 self.store.add(percept(self.state))
