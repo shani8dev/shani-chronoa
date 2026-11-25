@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "usr" / "lib" / "shani-chronoa"))
 
 from shani_chronoa import moyoung as m  # noqa: E402
+from shani_chronoa.capabilities import gate_label  # noqa: E402
 
 
 
@@ -49,7 +50,8 @@ def test_the_watch_skill_asks_nothing_while_its_switch_is_off(monkeypatch):
     monkeypatch.setattr(skill, "ChronoaConfig", Off)
     monkeypatch.setattr(m, "Watch", lambda *a, **k: pytest.fail("the watch was reached with the switch off"))
     out = skill._run({"action": "settings"})
-    assert "bluetooth-gatt-enabled" in out and "Nothing was asked" in out
+    assert gate_label("bluetooth-gatt-enabled") in out and "Nothing was asked" in out
+    assert "bluetooth-gatt-enabled" not in out, out
 
 
 

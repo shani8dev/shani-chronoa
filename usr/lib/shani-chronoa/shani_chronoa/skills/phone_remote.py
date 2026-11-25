@@ -9,6 +9,7 @@ switch that makes this computer advertise as "Chronoa Remote".
 
 from __future__ import annotations
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa import _link
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
@@ -23,7 +24,7 @@ KEYS = _engine.KEYS
 def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
     if not config.get_bool(_CONSENT_KEY, False):
         return False, (f"The phone remote is turned off. Nothing was pressed. Enable "
-                       f"'{_CONSENT_KEY}' in Settings, then pair 'Chronoa Remote' from the phone.")
+                       f"\u201c{gate_label(_CONSENT_KEY)}\u201d in Settings, then pair 'Chronoa Remote' from the phone.")
     return True, ""
 
 

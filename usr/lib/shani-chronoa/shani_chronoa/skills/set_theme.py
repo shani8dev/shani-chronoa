@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import re
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
 from shani_chronoa import desktop_session
@@ -133,7 +134,7 @@ def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
     if not config.get_bool(_CONSENT_KEY, False):
         return False, (
             f"changing the desktop appearance is turned off (enable "
-            f"'{_CONSENT_KEY}' in Settings). Reporting what is currently set "
+            f"\u201c{gate_label(_CONSENT_KEY)}\u201d in Settings). Reporting what is currently set "
             f"needs no such permission - only changing it does, because "
             f"restyling a desktop unasked is disruptive in a way that reading it "
             f"is not."

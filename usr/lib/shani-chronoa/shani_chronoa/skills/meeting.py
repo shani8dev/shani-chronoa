@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa import meeting
 from shani_chronoa.skills import Skill
 
@@ -29,7 +30,7 @@ _ACTIONS = ("status", "record", "notes")
 def _consent(config) -> "tuple[bool, str]":
     if not config.get_bool(_CONSENT_KEY, False):
         return False, (f"Recording a meeting is turned off. The microphone was not "
-                       f"opened. Enable '{_CONSENT_KEY}' in Settings to allow it.")
+                       f"opened. Enable \u201c{gate_label(_CONSENT_KEY)}\u201d in Settings to allow it.")
     return True, ""
 
 

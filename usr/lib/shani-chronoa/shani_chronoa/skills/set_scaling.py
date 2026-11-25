@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import shutil
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
 from shani_chronoa import desktop_session
@@ -78,7 +79,7 @@ def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
     if not config.get_bool(_CONSENT_KEY, False):
         return False, (
             "changing text scaling is turned off (enable "
-            f"'{_CONSENT_KEY}' in Settings). Reporting the current factor needs "
+            f"\u201c{gate_label(_CONSENT_KEY)}\u201d in Settings). Reporting the current factor needs "
             f"no such permission."
         )
     return True, ""

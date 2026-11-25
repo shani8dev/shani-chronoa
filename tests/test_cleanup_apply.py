@@ -40,6 +40,7 @@ _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
 from shani_chronoa.skills import cleanup_apply as C  # noqa: E402
+from shani_chronoa.capabilities import gate_label  # noqa: E402
 
 
 def _compile_schemas(directory: Path) -> None:
@@ -107,8 +108,9 @@ class TestTheSwitchIsRealAndShutByDefault:
     def test_it_refuses_and_names_the_switch(self, tmp_path, monkeypatch, cache):
         _backend(tmp_path, monkeypatch, granted=False)
         out = C._run({"target": "cache"})
-        assert C._CONSENT_KEY in out, (
-            f"the refusal does not name the switch: {out!r}")
+        assert gate_label(C._CONSENT_KEY) in out, (
+            f"the refusal does not name the row: {out!r}")
+        assert C._CONSENT_KEY not in out, out
         assert "Refusing" in out or "refusing" in out
 
     def test_nothing_is_removed_while_it_is_off(self, tmp_path, monkeypatch, cache):

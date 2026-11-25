@@ -15,6 +15,7 @@ turned off gets a refusal rather than a pop-up the user did not ask for.
 import shutil
 import subprocess
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
 
@@ -36,7 +37,7 @@ def _run(arguments: dict) -> str:
 
     if not ChronoaConfig().notification_enabled:
         return (
-            "Notifications are turned off (enable 'notification-enabled'); "
+            f"Notifications are turned off (enable \u201c{gate_label('notification-enabled')}\u201d); "
             "no notification was sent."
         )
 

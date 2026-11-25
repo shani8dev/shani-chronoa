@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
 
@@ -38,8 +39,8 @@ def _fp(*args, timeout=60):
 
 def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
     if not config.get_bool(_CONSENT_KEY, False):
-        return False, (f"Not done: installing and removing apps is switched off ('{_CONSENT_KEY}'). "
-                       "Turn on 'Let Chronoa install and remove apps' in Settings to allow it.")
+        return False, (f"Not done: installing and removing apps is switched off. "
+                       f"Turn on \u201c{gate_label(_CONSENT_KEY)}\u201d in Settings to allow it.")
     return True, ""
 
 

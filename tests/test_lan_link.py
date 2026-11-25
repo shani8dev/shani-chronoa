@@ -32,6 +32,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "usr" / "lib" / "shani-chronoa"))
 
 from shani_chronoa import lan_link  # noqa: E402
+from shani_chronoa.capabilities import gate_label  # noqa: E402
 
 PEER_ID = "a1b2c3d4e5f60718293a4b5c6d7e8f90"          # 32 chars, matches the spec
 
@@ -104,7 +105,8 @@ class TestTheSkillSurface:
     def test_the_switch_off_refuses_and_names_itself(self):
         from shani_chronoa.skills import lan_phone
         out = lan_phone._run({"action": "devices", "_config": self._config(False)})
-        assert "turned off" in out and "lan-phone-enabled" in out
+        assert "turned off" in out and gate_label("lan-phone-enabled") in out
+        assert "lan-phone-enabled" not in out, out
 
     def test_with_the_switch_on_the_actions_are_shani_links(self, monkeypatch):
         """The actions and their tests are shani-link's (shani_link/lan_phone.py,

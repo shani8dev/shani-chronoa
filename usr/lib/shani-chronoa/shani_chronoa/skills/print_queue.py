@@ -22,6 +22,7 @@ import shutil
 import subprocess
 from typing import List
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa import files
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
@@ -69,7 +70,7 @@ def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
         # while refusing to *hold a printer* contradicts itself. "A cancelled job
         # cannot be resumed" stays: it is why cancelling is not a trivial
         # reversal, and it is still true of cancelling.
-        return False, (f"print control is turned off (enable '{_CONSENT_KEY}' in "
+        return False, (f"print control is turned off (enable \u201c{gate_label(_CONSENT_KEY)}\u201d in "
                        f"Settings). A cancelled job cannot be resumed.")
     return True, ""
 

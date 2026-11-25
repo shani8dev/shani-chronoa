@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 import subprocess
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
 from shani_chronoa.skills.list_windows import session_problem
@@ -77,7 +78,7 @@ def _run(arguments: dict) -> str:
     if not config.input_control_enabled:
         return (
             "Refusing to press the key: input control is turned off (enable "
-            "'input-control-enabled' in Settings). A key combination can do "
+            f"\u201c{gate_label('input-control-enabled')}\u201d in Settings). A key combination can do "
             "anything a person at this machine could, including confirming a "
             "dialog the user cannot see."
         )

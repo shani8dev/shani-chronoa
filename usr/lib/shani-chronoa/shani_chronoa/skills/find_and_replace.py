@@ -30,6 +30,7 @@ import os
 from pathlib import Path
 from typing import List
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa import files
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
@@ -87,7 +88,7 @@ def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
     """Return (allowed, reason). Fail-closed: an undeclared key denies."""
     if not config.get_bool(_CONSENT_KEY, False):
         return False, (
-            f"bulk find-and-replace is turned off (enable '{_CONSENT_KEY}' in "
+            f"bulk find-and-replace is turned off (enable \u201c{gate_label(_CONSENT_KEY)}\u201d in "
             f"Settings). Reading and searching files needs no such permission, "
             f"and neither does writing one named file - this one rewrites every "
             f"file matching a pattern, and that is not knowable in advance."

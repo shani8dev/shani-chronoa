@@ -41,6 +41,7 @@ import pytest
 sys.path.insert(0, "usr/lib/shani-chronoa")
 
 from shani_chronoa.skills import nfc  # noqa: E402
+from shani_chronoa.capabilities import gate_label  # noqa: E402
 
 
 def record(tnf: int, typ: bytes, payload: bytes, short: bool = True,
@@ -147,7 +148,8 @@ class TestTheConsentGate:
         monkeypatch.setattr(nfc, "ChronoaConfig", _Off)
         for action in nfc._ACTIONS:
             out = nfc._run({"action": action, "url": "https://x.org"})
-            assert nfc._CONSENT_KEY in out, (action, out)
+            assert gate_label(nfc._CONSENT_KEY) in out, (action, out)
+            assert nfc._CONSENT_KEY not in out, (action, out)
 
     def test_the_sweep_can_drive_it(self):
         """`tests/test_question_presenter.py` calls `_consent(config)` and
@@ -155,7 +157,8 @@ class TestTheConsentGate:
         TypeError rather than a failure anyone reads."""
         allowed, reason = nfc._consent(type("C", (), {"get_bool": lambda s, k, d=False: False})())
         assert allowed is False
-        assert nfc._CONSENT_KEY in reason
+        assert gate_label(nfc._CONSENT_KEY) in reason
+        assert nfc._CONSENT_KEY not in reason, reason
 
 
 class TestWritingRefusesWhatWouldDestroySomething:

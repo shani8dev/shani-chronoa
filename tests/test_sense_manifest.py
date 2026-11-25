@@ -599,4 +599,4 @@ class TestEveryConsentGateNamesALiveSense:
             "usr/lib/shani-chronoa/shani_chronoa/skills/privacy.py")
         ).read_text()
         assert 'sense_allowed("capture")' in source
-        assert "capture-sense-enabled' in Settings" in source
+        assert "gate_label('capture-sense-enabled')" in source

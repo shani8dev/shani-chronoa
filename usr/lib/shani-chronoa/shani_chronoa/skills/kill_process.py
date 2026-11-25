@@ -24,6 +24,7 @@ import signal
 import time
 from pathlib import Path
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
 
@@ -61,7 +62,7 @@ def _consent(config: ChronoaConfig) -> tuple[bool, str]:
     """Return (allowed, reason). Fail-closed: an undeclared key denies."""
     if not config.get_bool(_CONSENT_KEY, False):
         return False, (
-            f"stopping processes is turned off (enable '{_CONSENT_KEY}' in "
+            f"stopping processes is turned off (enable \u201c{gate_label(_CONSENT_KEY)}\u201d in "
             f"Settings). Listing processes needs no such permission, and neither "
             f"does reading files or changing the volume."
         )

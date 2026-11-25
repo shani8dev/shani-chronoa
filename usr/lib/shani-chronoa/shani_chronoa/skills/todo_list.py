@@ -34,6 +34,7 @@ import os
 import time
 from pathlib import Path
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa import files
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
@@ -98,7 +99,7 @@ def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
     """Return (allowed, reason). Fail-closed: an undeclared key denies."""
     if not config.get_bool(_CONSENT_KEY, False):
         return False, (
-            f"keeping a task list is turned off (enable '{_CONSENT_KEY}' in "
+            f"keeping a task list is turned off (enable \u201c{gate_label(_CONSENT_KEY)}\u201d in "
             f"Settings). Reading files and listing folders needs no such "
             f"permission - this one writes something that persists."
         )

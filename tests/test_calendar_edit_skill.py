@@ -40,6 +40,7 @@ import pytest
 sys.path.insert(0, "usr/lib/shani-chronoa")
 
 from shani_chronoa.skills import calendar_edit as ce  # noqa: E402
+from shani_chronoa.capabilities import gate_label  # noqa: E402
 
 
 class _Cfg:
@@ -140,9 +141,10 @@ def test_the_write_switch_is_off_by_default_and_nothing_is_written():
     ChronoaConfig().set("calendar-write-enabled", "false")
     result = ce._run({"action": "create", "title": "Meeting", "start": "tomorrow 3pm"})
     assert "Refusing" in result, result
-    assert ce._WRITE_KEY in result, (
-        f"the refusal does not name the switch that would open it: {result}"
+    assert gate_label(ce._WRITE_KEY) in result, (
+        f"the refusal does not name the row that opens it: {result}"
     )
+    assert ce._WRITE_KEY not in result, result
 
 
 def test_a_move_or_cancel_needs_the_read_switch_as_well_as_the_write_one(monkeypatch):
@@ -156,9 +158,10 @@ def test_a_move_or_cancel_needs_the_read_switch_as_well_as_the_write_one(monkeyp
     for action in ("cancel", "move"):
         result = ce._run({"action": action, "title": "Meeting", "start": "tomorrow 3pm"})
         assert "Refusing" in result, f"{action} was allowed without read consent: {result}"
-        assert ce._READ_KEY in result, (
-            f"the {action} refusal does not name the missing read switch: {result}"
+        assert gate_label(ce._READ_KEY) in result, (
+            f"the {action} refusal does not name the missing read row: {result}"
         )
+        assert ce._READ_KEY not in result, result
 
 
 def test_granting_the_switch_reaches_the_calendar_service(granted):

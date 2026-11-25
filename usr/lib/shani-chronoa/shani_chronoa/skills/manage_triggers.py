@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import json
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
 from shani_chronoa.triggers import EVENT_TYPES, DEFAULT_COOLDOWN_SECONDS, DEFAULT_DEBOUNCE_SECONDS, MATCH_ANY, MATCH_KEYWORDS, MATCH_SUBSTRING, RETRY_POLICIES, RETRY_RETRYABLE, TRIGGER_CONTROL_KEY, EventEngine, EventRuleStore, RuleStoreError, TriggerEngine, build_event_rule, build_rule
@@ -192,7 +193,7 @@ def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
     if not config.get_bool(_CONSENT_KEY, False):
         return False, (
             f"arming or disarming automatic rules is turned off (enable "
-            f"'{_CONSENT_KEY}' in Settings). Listing what is already armed needs "
+            f"\u201c{gate_label(_CONSENT_KEY)}\u201d in Settings). Listing what is already armed needs "
             f"no such permission - only changing it does, because an armed rule "
             f"acts without asking again."
         )
@@ -400,7 +401,7 @@ def _setpoint_text(action: str, arguments: dict) -> str:
         return (
             "Built-in proposals, all off until you arm one:\n" + "\n".join(lines)
             + "\nUse arm-setpoint with a name. Arming still needs the "
-            f"'{_CONSENT_KEY}' switch and the preset's own switch."
+            f"\u201c{gate_label(_CONSENT_KEY)}\u201d switch and the preset's own switch."
         )
     name = (arguments.get("setpoint") or arguments.get("name") or "").strip()
     if not name:

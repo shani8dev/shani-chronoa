@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import shutil
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa import files
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
@@ -71,7 +72,7 @@ def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
     if not config.input_control_enabled:
         return False, (
             "acting on the keyboard is turned off (enable "
-            "'input-control-enabled' in Settings). The keyboard layout reuses "
+            f"\u201c{gate_label('input-control-enabled')}\u201d in Settings). The keyboard layout reuses "
             "that permission rather than having its own, because it decides what "
             "every later keystroke produces."
         )

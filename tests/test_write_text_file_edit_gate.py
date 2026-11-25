@@ -39,6 +39,7 @@ _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
 from shani_chronoa.skills import write_text_file as W  # noqa: E402
+from shani_chronoa.capabilities import gate_label  # noqa: E402
 
 
 def _compile_schemas(directory: Path) -> None:
@@ -93,8 +94,9 @@ def target(tmp_path, monkeypatch):
 class TestReplacingAFileIsAnEdit:
     def test_it_refuses_and_names_the_switch(self, editing_off, target):
         out = W._run({"path": str(target), "content": "gone", "overwrite": True})
-        assert "file-edit-enabled" in out, (
-            f"the refusal does not name the switch, so it cannot be acted on: {out!r}")
+        assert gate_label("file-edit-enabled") in out, (
+            f"the refusal does not name the row, so it cannot be acted on: {out!r}")
+        assert "file-edit-enabled" not in out, out
         assert "Refusing" in out or "refusing" in out
 
     def test_nothing_was_written(self, editing_off, target):

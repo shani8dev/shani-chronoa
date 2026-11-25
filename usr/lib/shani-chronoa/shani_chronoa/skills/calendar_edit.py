@@ -38,6 +38,7 @@ import re
 import time
 from datetime import date, datetime, timedelta
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa import approvals
 from shani_chronoa import eds_calendar as cal
 from shani_chronoa.config import ChronoaConfig
@@ -246,7 +247,7 @@ def _one_key(config, key: str) -> "tuple[bool, str]":
     if on:
         return True, ""
     what = "changing your calendar" if key == _WRITE_KEY else "reading your calendar"
-    return False, (f"Refusing: {what} is turned off (enable '{key}' in Settings). "
+    return False, (f"Refusing: {what} is turned off (enable \u201c{gate_label(key)}\u201d in Settings). "
                    "Nothing was changed.")
 
 

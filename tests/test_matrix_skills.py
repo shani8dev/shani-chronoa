@@ -29,6 +29,7 @@ sys.path.insert(0, str(_ROOT / "usr/lib/shani-chronoa"))
 sys.path.insert(0, str(_ROOT / "apps/shani-sysadmin"))
 
 from shani_chronoa import planmode, tools  # noqa: E402
+from shani_chronoa.capabilities import gate_label  # noqa: E402
 from shani_chronoa.verification import Verdict  # noqa: E402
 
 
@@ -601,7 +602,8 @@ def test_default_apps_set_is_refused_without_consent(bindir):
     fake(bindir, "xdg-mime", _XDG_MIME)
     _apps()
     _, text = call("default_apps", {"action": "set", "target": "pdf", "app": "Document Viewer"})
-    assert "Refusing" in text and "default-apps-enabled" in text
+    assert "Refusing" in text and gate_label("default-apps-enabled") in text
+    assert "default-apps-enabled" not in text, text
 
 
 def test_default_apps_set_resolves_by_name_and_verifies(bindir):
@@ -714,7 +716,8 @@ def test_print_queue_lists_and_cancel_needs_consent(bindir):
     _, text = call("print_queue", {})
     assert "2 job(s) waiting" in text and "Office_Laser-42" in text and "system default" in text
     _, text = call("print_queue", {"action": "cancel", "job": "Office_Laser-42"})
-    assert "Refusing" in text and "print-control-enabled" in text
+    assert "Refusing" in text and gate_label("print-control-enabled") in text
+    assert "print-control-enabled" not in text, text
     assert "Office_Laser-42" in (bindir / "queue").read_text()
 
 
@@ -773,7 +776,8 @@ def test_set_hostname_consent_rename_and_control(bindir):
     _, text = call("set_hostname", {})
     assert "named shanios" in text
     _, text = call("set_hostname", {"action": "set", "name": "kitchen-laptop"})
-    assert "Refusing" in text and "hostname-control-enabled" in text
+    assert "Refusing" in text and gate_label("hostname-control-enabled") in text
+    assert "hostname-control-enabled" not in text, text
     grant("hostname-control-enabled")
     outcome, text = call("set_hostname", {"action": "set", "name": "kitchen-laptop"})
     assert "now named kitchen-laptop (verified" in text and outcome.verdict is Verdict.VERIFIED
@@ -820,7 +824,8 @@ def test_set_locale_refuses_ungenerated_and_ungranted(bindir):
     grant("locale-control-enabled", False)
     fake(bindir, "localectl", _LOCALECTL)
     _, text = call("set_locale", {"action": "set", "locale": "de_DE.UTF-8"})
-    assert "Refusing" in text and "locale-control-enabled" in text
+    assert "Refusing" in text and gate_label("locale-control-enabled") in text
+    assert "locale-control-enabled" not in text, text
     grant("locale-control-enabled")
     _, text = call("set_locale", {"action": "set", "locale": "fr_FR.UTF-8"})
     assert "not generated on this machine" in text

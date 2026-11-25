@@ -58,6 +58,7 @@ from __future__ import annotations
 import os
 import time
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa import files
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
@@ -76,7 +77,7 @@ def _consent(config: ChronoaConfig) -> tuple[bool, str]:
     """Return (allowed, reason). Fail-closed: an undeclared key denies."""
     if not config.get_bool(_CONSENT_KEY, False):
         return False, (
-            f"deleting things is turned off (enable '{_CONSENT_KEY}' in Settings). "
+            f"deleting things is turned off (enable \u201c{gate_label(_CONSENT_KEY)}\u201d in Settings). "
             f"It moves things to the trash, where they can be restored - so this is "
             f"not a permanent-delete switch, it is the switch for removing something "
             f"from where it is. Reading and searching files needs no such "

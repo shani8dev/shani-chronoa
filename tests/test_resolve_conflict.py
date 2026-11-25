@@ -34,6 +34,7 @@ import pytest
 _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
+from shani_chronoa.capabilities import gate_label  # noqa: E402
 from shani_chronoa.skills import resolve_conflict as R  # noqa: E402
 
 
@@ -225,7 +226,8 @@ def test_reading_needs_the_git_sense(monkeypatch, repo):
     monkeypatch.setattr(R, "ChronoaConfig", Off)
     out = R._run({"action": "show", "path": str(repo)})
     assert "Refusing" in out
-    assert R._READ_KEY in out          # the key is named, so the refusal is actionable
+    assert gate_label(R._READ_KEY) in out  # the row is named, so the refusal is actionable
+    assert R._READ_KEY not in out, out
     # Nothing was read *or* changed by the refusal.
     assert _git(repo, "ls-files", "-u").stdout.strip(), "the refusal touched the index"
 
@@ -243,7 +245,8 @@ def test_changing_the_tree_needs_the_write_switch(monkeypatch, repo):
     assert "merge in progress" in R._run({"action": "show", "path": str(repo)})
     out = R._run({"action": "ours", "path": str(repo)})
     assert "Refusing" in out
-    assert R._WRITE_KEY in out
+    assert gate_label(R._WRITE_KEY) in out
+    assert R._WRITE_KEY not in out, out
     assert _git(repo, "ls-files", "-u").stdout.strip(), (
         "ours acted with the write switch off")
 

@@ -30,6 +30,7 @@ _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
 from shani_chronoa.skills import git_inspect as G  # noqa: E402)
+from shani_chronoa.capabilities import gate_label  # noqa: E402
 
 
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
@@ -241,4 +242,5 @@ class TestTheSkillAdvertisesWhatItHas:
         finally:
             G.ChronoaConfig = original
         assert "Refusing" in out
-        assert G._CONSENT_KEY in out
+        assert gate_label(G._CONSENT_KEY) in out, out
+        assert G._CONSENT_KEY not in out, out

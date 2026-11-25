@@ -731,6 +731,26 @@ _PROBES = {
 }
 
 
+def _gate_reason(config, key, name, module):
+    """(allowed, reason) from whichever consent shape the skill uses.
+
+    `email._consent` takes (config, key, what, nothing) and returns a string;
+    the ordinary skill gate takes config and returns a pair. The sweep must be
+    able to ask both, or it raises before it measures anything.
+    """
+    import inspect
+
+    gate = getattr(module, "_consent", None)
+    if gate is None:
+        probe = _PROBES.get(name)
+        assert probe is not None, f"{name} has no _consent() gate and no probe"
+        return False, module._run(probe)
+    arity = len(inspect.signature(gate).parameters)
+    result = (gate(config, key, "Doing that", "nothing was done") if arity > 2
+              else gate(config, key) if arity > 1 else gate(config))
+    return (False, result) if isinstance(result, str) else result
+
+
 def _names_the_switch(key: str, reason: str) -> bool:
     """Whether a refusal names the switch a person could actually turn on.
 
@@ -738,9 +758,9 @@ def _names_the_switch(key: str, reason: str) -> bool:
     is a refusal degrading into a bare *"the user did not allow"*, leaving the
     person with nothing to act on. Which of the two spellings is the right one is
     the subject of the conversion counted by the test beside it, and this sweep
-    must not be what silently decides it: **87 of the 92 gated refusals still
-    name the raw key and pass this**, so asserting the label here would turn a
-    green test out of work that has not been done.
+    must not be what silently decides it: this sweep passes on either spelling,
+    while the count beside it is what notices a conversion landing or a refusal
+    falling back to the key.
     """
     from shani_chronoa.capabilities import gate_label
 
@@ -810,18 +830,8 @@ class TestNobodyToAskSaysNobodyIsThere:
         for name, key, handler in gated:
             config.set(key, "false")
             module = importlib.import_module(handler.__module__)
-            gate = getattr(module, "_consent", None)
-            if gate is not None:
-                allowed, reason = gate(config)
-                if allowed or not _names_the_switch(key, reason):
-                    problems.append(f"{name}: {reason!r}")
-                continue
-            probe = _PROBES.get(name)
-            if probe is None:
-                problems.append(f"{name}: no _consent() gate and no probe")
-                continue
-            reason = module._run(probe)
-            if not _names_the_switch(key, reason):
+            allowed, reason = _gate_reason(config, key, name, module)
+            if allowed or not _names_the_switch(key, reason):
                 problems.append(f"{name}: {reason!r}")
 
         assert problems == [], (
@@ -860,14 +870,8 @@ class TestNobodyToAskSaysNobodyIsThere:
         for name, key, handler in _gated_tools():
             config.set(key, "false")
             module = importlib.import_module(handler.__module__)
-            gate = getattr(module, "_consent", None)
-            if gate is not None:
-                allowed, reason = gate(config)
-                assert not allowed, f"{name} was allowed with nobody to ask"
-            else:
-                probe = _PROBES.get(name)
-                assert probe is not None, f"{name} has no probe in this sweep"
-                reason = module._run(probe)
+            allowed, reason = _gate_reason(config, key, name, module)
+            assert not allowed, f"{name} was allowed with nobody to ask"
             labels = gate_label(key) in reason
             keys = key in reason
             counts["both" if labels and keys else
@@ -878,26 +882,15 @@ class TestNobodyToAskSaysNobodyIsThere:
             "a refusal named neither the key nor the row, so the person is "
             f"told nothing they can turn on: {counts}"
         )
-        # **A count, and it moves when a conversion lands.** Six of the
-        # refusals now name the Settings row instead of the key - the
-        # phone, android, bluetooth and calendar skills, and the two cloud
-        # voice engines - so the number is 61. 2026-10-23: scroll and drag joined
-        # move_pointer behind `input-control-enabled` (63), and that gate now names
-        # its Settings row too; the five of its seven tools this sweep reaches
-        # leave this count: 58. 2026-11-08: **`device_serial` joined** - a new
-        # gated tool from `0fd5cfc` (the serial-port reader), whose refusal
-        # names `i2c-write-enabled` and nothing else - so the count is **59**.
-        #
-        # **Measured, not assumed.** The sweep above is re-run over every
-        # gated tool with nobody to ask, and the number below is what it
-        # answers - so a conversion that lands shows up here as a failure
-        # rather than as a stale literal nobody notices. Measured against the
-        # tree at `ffc6aa4` (where it was 58): the difference is exactly
-        # `device_serial`, and **nothing else moved** - no refusal changed
-        # its wording, so the rise is a new gated tool and not a gate that
-        # stopped naming anything.
-        assert counts["key_only"] == 59, (
-            f"the raw-key count moved from 59 to {counts['key_only']} - either a "
+        # **A count, and it moves when a conversion lands.** The skill refusals
+        # that still sent a person after a raw key were converted to read
+        # `capabilities.gate_label()`; `device_serial` and the rest now name
+        # their Settings row too, so the count is **0**. The sweep above is
+        # re-run over every gated tool with nobody to ask, so a fall back to
+        # the key shows up here as a failure rather than as a stale literal
+        # nobody notices.
+        assert counts["key_only"] == 0, (
+            f"the raw-key count moved from 0 to {counts['key_only']} - either a "
             "skill now names the Settings row (update this, and the sweep "
             "beside it still holds), or a gate stopped naming anything at all"
         )

@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from shani_chronoa.skills import airplane_mode as air
+from shani_chronoa.capabilities import gate_label  # noqa: E402
 from shani_chronoa.skills import toggle_wifi as tw
 
 
@@ -87,7 +88,8 @@ def test_switching_is_refused_without_consent_and_nothing_runs(env, monkeypatch)
     monkeypatch.setattr(tw, "ChronoaConfig", _Off)
     _fake_nmcli(env, "enabled")
     out = tw._run({"action": "off"})
-    assert "Refusing" in out and "radio-control-enabled" in out
+    assert "Refusing" in out and gate_label("radio-control-enabled") in out
+    assert "radio-control-enabled" not in out, out
     assert "nmcli radio wifi off" not in _log(env)
     assert env["state"].read_text().strip() == "enabled"
 

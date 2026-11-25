@@ -47,6 +47,7 @@ import pytest
 sys.path.insert(0, "usr/lib/shani-chronoa")
 
 from shani_chronoa.skills import bluetooth_call as bc  # noqa: E402
+from shani_chronoa.capabilities import gate_label  # noqa: E402
 
 
 # `busctl --json=short` output. The first two shapes were captured live on
@@ -111,9 +112,10 @@ def test_it_is_gated_and_defaults_off():
         result = bc._run({"action": "status"})
     finally:
         bc.ChronoaConfig = original
-    assert bc._CONSENT_KEY in result, (
-        f"the refusal does not name the switch that would open it: {result}"
+    assert gate_label(bc._CONSENT_KEY) in result, (
+        f"the refusal does not name the row that opens it: {result}"
     )
+    assert bc._CONSENT_KEY not in result, result
 
 
 # --- parsing the real busctl rendering --------------------------------------

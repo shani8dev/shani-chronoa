@@ -44,6 +44,7 @@ import subprocess
 from pathlib import Path
 from typing import List, Optional
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa import pipewire
 from shani_chronoa.skills import Skill
@@ -294,7 +295,7 @@ def _set_camera(enable: bool, device: "Optional[str]" = None) -> dict:
                 "Refusing to enable a camera: the capture sense is turned off. "
                 "Turning a sensor on is the opposite of what this skill is "
                 "usually for, and it re-enables something that may have been "
-                "disabled on purpose. Enable 'capture-sense-enabled' in Settings "
+                f"disabled on purpose. Enable \u201c{gate_label('capture-sense-enabled')}\u201d in Settings "
                 "if you do want the assistant to use the camera at all. "
                 "Disabling one needs no permission and is always available."
             ), "changed": [], "unsupported": []}

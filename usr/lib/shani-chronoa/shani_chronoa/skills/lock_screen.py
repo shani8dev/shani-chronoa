@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import shutil
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
 from shani_chronoa import subproc
@@ -59,7 +60,7 @@ def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
     if not config.get_bool(_CONSENT_KEY, False):
         return False, (
             f"locking the screen is turned off (enable "
-            f"'{_CONSENT_KEY}' in Settings). This one needs its own permission "
+            f"\u201c{gate_label(_CONSENT_KEY)}\u201d in Settings). This one needs its own permission "
             f"rather than sharing the input-control key, because it does not act "
             f"on the interface - it ends the current session's access to the "
             f"machine."

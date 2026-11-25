@@ -11,6 +11,7 @@ rule), not by this hermetic suite.
 
 import shutil
 import subprocess
+from shani_chronoa.capabilities import gate_label  # noqa: E402
 
 
 
@@ -107,7 +108,8 @@ class TestInputControlConsent:
 
         # Then: it refuses with a clear, user-facing reason naming the key
         assert "not permitted" in result
-        assert "input-control-enabled" in result
+        assert gate_label("input-control-enabled") in result
+        assert "input-control-enabled" not in result, result
         assert "separate consent gate from the vision sense" in result
 
     def test_no_command_constructed_when_consent_off(self, chronoa_config, monkeypatch):

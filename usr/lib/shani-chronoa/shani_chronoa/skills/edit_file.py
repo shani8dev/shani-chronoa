@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import difflib
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa import provenance
 from shani_chronoa import files
 from shani_chronoa.config import ChronoaConfig
@@ -88,7 +89,7 @@ def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
     """Return (allowed, reason). Fail-closed: an undeclared key denies."""
     if not config.get_bool(_CONSENT_KEY, False):
         return False, (
-            f"editing a file is turned off (enable '{_CONSENT_KEY}' in "
+            f"editing a file is turned off (enable \u201c{gate_label(_CONSENT_KEY)}\u201d in "
             f"Settings). Reading files needs no such permission, and neither "
             f"does listing them - this one changes what a file says."
         )
