@@ -568,16 +568,21 @@ Open, ranked:
   mirror it**, because the tray is not built on a machine without
   `libappindicator` (`app/tray.py`'s `build()` returns None), so there is no
   icon to badge.
-- [ ] **9i A "Today" panel**: reminders, alarms, timers (Cancel, +5 min), notes,
+- [x] **9i A "Today" panel**: reminders, alarms, timers (Cancel, +5 min), notes,
   to-dos - all chat-only now; rail timers are read-only.
-- [ ] **9j One "What Chronoa can do"**: Help window, Inventory, Skills and /help
+  **Done:** `gui/surfaces/today.py` is registered and reads all five stores on
+  one page. Cancel and +5 min call the timer skill's own functions; the other
+  four stay chat-only because each write has its own consent gate. An empty
+  store reads OK; an unreadable one says so rather than reading as empty.
+- [x] **9j One "What Chronoa can do"**: Help window, Inventory, Skills and /help
   are four answers. One searchable view with plain names and "Try it" that
   fills the composer.
-  **The searchable view is done 2026-10-21** - the capabilities page,
-  which is now called "What Chronoa can do" and is the one that answers
-  it (see 11a). **What is left is the other three answers**: the Help
-  window's capability list, `/help`, and the Inventory - which is now
-  "The anatomy" and is honest about being the map rather than the list.
+  **Done:** the capabilities page is "What Chronoa can do" - one searchable
+  view with plain names and "Try it" that fills the composer (see 11a). The
+  Help window's "Everything Chronoa can do" is built from the same
+  `capabilities` registry, not a second list, and `/help` opens it; the
+  Inventory is "The anatomy", honest about being the map rather than the
+  list. 11a still tracks the Workbench and "Make your own" half.
 - [x] **9k Palette as the universal door**: Settings sections (`show-page`),
   Setup, Find (Ctrl+F only), Body (Ctrl+Shift+B only), Browser, routines.
   **Done 2026-10-20, and the item was two-thirds stale.** Measured, the
@@ -622,13 +627,14 @@ Open, ranked:
   2026-11-18: `_project_state_sentence` reads `git status --short --branch`
   in one subprocess, the Work chip's menu has "See what changed" to the Diff
   page, and `test_the_work_chip_says_which_project_it_is_on.py` passes 7/7.
-  **Still open, and split into its own item below**: a Git panel over
-  `git_write` / `git_push` behind their consent keys. No GUI surface
-  references those skills today.
-- [ ] **9n-4 A Git panel** over `git_write` / `git_push` behind their consent
-  keys (split from 9n, whose Work-chip half is done). Needs a decision about
-  which git actions a person reaches from the window — no GUI surface names
-  these skills today.
+  **The Git panel half is done too** (9n-4): `gui/surfaces/git_panel.py`
+  reads the Work chip's own `vcs_status`, and reaches commit and push only
+  through the chat path's `git_write` / `git_push` behind their keys.
+- [x] **9n-4 A Git panel** over `git_write` / `git_push` behind their consent
+  keys (split from 9n, whose Work-chip half is done). **Done:** the status uses
+  the Work chip's `vcs_status` reader, and commit and push are "Try it" buttons
+  that fill the composer with the real skills behind `git-write-enabled` and
+  `git-push-enabled` - no second path around the gates.
 
 - [x] **9n-1** Diff panel reads as code: monospace, one tight row per line,
   theme-coloured text on the tint; the per-line "select" button (stored,
@@ -852,8 +858,10 @@ Open, by panel (worst first):
   Delete or size grouping - the panel promises "clean up" and offers none.
   **Done (2026-10-15):** Open / Show / Move to Trash (asks; reversible), hash in the tooltip, Space used by category.
 
-- [ ] **10j Missing panels** (from the audit, 9h-9j): Today (reminders, alarms,
+- [x] **10j Missing panels** (from the audit, 9h-9j): Today (reminders, alarms,
   timers, notes), an activity bell for rules/proposals/approvals, a Git panel.
+  **All three now exist:** `gui/surfaces/today.py`, the header activity bell
+  (rules fired and proposals waiting), and `gui/surfaces/git_panel.py`.
 
 ### 11 — Information architecture: merge, split, move, surface (proposal, 2026-10-14)
 
@@ -877,9 +885,10 @@ is trying to do, with the live things on the main window.
   skills have a prompt that exercises them (`capabilities._EXAMPLES`);
   the button is on those thirty and on no other, because a button that
   puts a *label* in the box is a worse affordance than no button.
-  **Still open**: the Workbench's built-in list and the Help window's
-  capability list are still two more answers, and "Make your own" is not
-  an action in the palette yet.
+  **Still open**: the Workbench's built-in list is a second answer, and
+  "Make your own" is not an action in the palette yet. The Help window is no
+  longer a third answer - "Everything Chronoa can do" is built from the same
+  `capabilities` registry - and the Inventory is the anatomy map.
 - [x] **11b "Phone & devices"** = Phone + Phone link + Android + Devices +
   Wearables + Screen share: tabs Calls & messages / Files / Screen / Watch &
   Bluetooth / USB. One permission banner at the top for whichever tab is shut.

@@ -138,9 +138,10 @@ INVENTORY: Tuple[Organ, ...] = (
     Organ("balance", "Senses", "Vestibular sense",
           "balance: what deserves attention now, out of everything that happened",
           ("tool_select.py", "compression.py", "triggers/events.py"), PART,
-          missing="salience scores unattended urgences in a bounded queue "
-                  "with a DND/rhythm interrupt policy; tool selection is "
-                  "still by relevance, not by that score"),
+          missing="salience.py scores unattended urgences into a bounded "
+                  "priority queue and reflex.announce applies a DND/rhythm "
+                  "speak/notify/hold policy; percept selection is still by "
+                  "relevance, not by that score"),
 
     # -- Action ----------------------------------------------------------
     Organ("mouth", "Action", "Mouth",
@@ -182,7 +183,9 @@ INVENTORY: Tuple[Organ, ...] = (
     Organ("attention", "Core", "Reticular formation",
           "attention: deciding what is worth interrupting for",
           ("triggers/events.py", "cues.py", "speech.py"), PART,
-          missing="no interrupt policy; everything notable is announced equally"),
+          missing="salience.policy now decides speak, notify or hold under "
+                  "DND and rhythm, but barge-in is still the only interrupt "
+                  "inside a turn; a held item waits for the next one"),
 
     # -- Regulation ------------------------------------------------------
     Organ("heart", "Regulation", "Heart",
@@ -197,14 +200,15 @@ INVENTORY: Tuple[Organ, ...] = (
     Organ("homeostasis", "Regulation", "Hypothalamus",
           "setpoints: the conditions it should notice on its own",
           ("triggers/rules.py", "approvals.py"), PART,
-          missing="built-in off-by-default presets are proposed through "
-                  "manage_triggers; a preset still has to be armed by the "
-                  "user and never switches a consent key on"),
+          missing="setpoints.py offers built-in off-by-default presets "
+                  "through manage_triggers; a preset still has to be armed "
+                  "by the user and never switches a consent key on"),
     Organ("pituitary", "Regulation", "Pituitary gland",
           "the master gland: the setpoints the hypothalamus has none of",
           ("triggers/rules.py", "approvals.py"), PART,
-          missing="setpoints.py supplies proposals only; the per-context "
-                  "default posture that would set a policy once is still absent"),
+          missing="setpoints.py proposals are wired through manage_triggers; "
+                  "the per-context default posture that would set a policy "
+                  "once is still absent"),
 
     Organ("brainstem", "Core", "Brainstem",
           "the involuntary: what keeps running when nobody is deciding",
@@ -258,8 +262,9 @@ INVENTORY: Tuple[Organ, ...] = (
     Organ("endocrine", "Memory and learning", "Endocrine system",
           "slow signals about how things are going: pain and reward",
           ("tool_tracking.py", "cues.py", "verification.py"), PART,
-          missing="tool_tracking records a reward with every outcome; it is "
-                  "advisory only and changes no consent decision"),
+          missing="reward.py now supplies the per-outcome number that "
+                   "tool_tracking records; it is advisory only and changes "
+                   "no consent decision"),
 )
 
 
