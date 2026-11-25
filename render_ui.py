@@ -676,6 +676,15 @@ def _strip_states():
 
 def _composer_state(state: str):
     """The composer with something in it, or empty, or asking a question."""
+    # The state arrives as "composer-verdict", so compare its tail rather
+    # than the whole string (the other composer states keep their own path).
+    if state.rsplit("-", 1)[-1] == "verdict":
+        # The verdict choices live on the reply card, not in the composer, but
+        # they belong beside the permission prompt in this family of states:
+        # both are moments where a person is asked to trust Chronoa with an
+        # answer or an action. The builder returns the popover's own content,
+        # which is what a person actually reads, not the whole window.
+        return _verdict_popover_state(state)
     config = _Config()
     from shani_chronoa.gui.window import ChronoaWindow
     window = ChronoaWindow(_APP[0])
@@ -726,6 +735,44 @@ def _drive_composer(window, state: str) -> None:
         window._sync_from_state(AssistantState.THINKING)
 
 
+def _verdict_popover_state(state: str):
+    """The reply-card "That was wrong" popover, built by the real widget.
+
+    The popover's choices were driven in unit tests and never photographed:
+    the one moment a person tells Chronoa that an answer was wrong had no
+    picture, so nothing had ever shown whether it reads as a real choice. A
+    bare `Gtk.Popover` snapshotted detached has no surface to draw into and
+    reports NO NODE, so what is photographed is the popover's *own content box*
+    - the prompt, the optional-correction entry and both real buttons - built
+    through the same method the button's click handler uses. Not a lookalike
+    assembled from the labels, which would photograph the harness.
+    """
+    from shani_chronoa.gui.widgets import TranscriptView
+
+    view = TranscriptView(on_verdict=lambda verdict, text: None)
+    view.add_assistant_turn("The capital of France is Paris.")
+    button = next(
+        node for node in _walk(view, [])
+        if type(node).__name__ == "Button"
+        and node.get_tooltip_text() == "That was wrong"
+    )
+    # `popdown()` only happens if a choice is pressed, which this target never
+    # does; the content is the same widget a person sees once the button opens.
+    # It has to be unparented before a window can adopt it: `set_child` refuses
+    # a widget that still belongs to the popover, which left an empty window
+    # that rendered as a 248-byte picture of nothing while reporting WROTE.
+    content = view._build_verdict_popover(button).get_child()
+    content.unparent()
+    # Return a window, not the bare box: the `state:` branch keeps what the
+    # builder returns and removes that same object at teardown, so a wrapper
+    # created later would raise `ValueError: list.remove(x): x not in list`.
+    window = Gtk.Window()
+    window.set_decorated(False)
+    window.set_child(content)
+    window.set_default_size(420, 220)
+    return window, f"verdict popover: {state}"
+
+
 def _organ_state(state: str):
     """One organ light lit, driven through the register the strip reads.
 
@@ -763,7 +810,7 @@ def _all_states():
     out += _strip_states()
     out += [f"composer-{s}" for s in
             ("empty", "text", "multiline", "attachment", "question",
-             "permission", "speaking", "thinking")]
+             "permission", "speaking", "thinking", "verdict")]
     # **No bare `except` here, and the table is the one that exists.**
     # `ORGAN_ICONS` lives in `gui/organs.py`, not in `body` - so the first
     # version's `body.ORGAN_ICONS` raised `AttributeError`, the `except: pass`

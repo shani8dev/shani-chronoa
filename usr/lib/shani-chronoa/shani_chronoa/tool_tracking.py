@@ -162,50 +162,64 @@ def _annotate_last(fields: dict, tracker: Optional["ToolTracker"] = None,
     both events are rare, so a search from the end plus an atomic replace is
     cheaper and safer than a second log a reader would have to join by hand.
 
+    **Newest chunk first.** Rotation renames the active log into an archive and
+    starts a fresh one, so a verdict or restore arriving after a rotation finds
+    its call in `tool_calls.log.1` (or an older kept chunk), not in the active
+    file. `log_files()` is oldest-first, so it is reversed here; a search from
+    the end of each chunk still picks that chunk's newest record. Only one
+    record is annotated - the first valid one found, which is the newest call
+    on disk. The in-memory ring is updated to match when one is found.
+
     Returns whether a record was found and annotated. An absent log is `False`,
     not a newly created file: asking to annotate is not a request to record a
-    call that never happened. Only the active chunk is touched; if rotation
-    already moved the record, the durable feedback/journal store still holds
-    the event.
+    call that never happened. When no kept chunk holds a record the durable
+    feedback/journal store still holds the event - this write-back is an index
+    into the call log, not the record of the verdict or restore itself.
     """
     active = Path(log_dir) / "tool_calls.log" if log_dir is not None else log_dir() / "tool_calls.log"
-    done = False
-    try:
-        lines = active.read_text(encoding="utf-8").splitlines(keepends=True)
-    except OSError:
-        lines = []
-    for at in range(len(lines) - 1, -1, -1):
+    for chunk in reversed(log_files(active)):
         try:
-            record = json.loads(lines[at])
-        except ValueError:
+            lines = chunk.read_text(encoding="utf-8").splitlines(keepends=True)
+        except OSError:
             continue
-        if not isinstance(record, dict) or "tool_name" not in record:
+        at = None
+        found = None
+        for i in range(len(lines) - 1, -1, -1):
+            try:
+                candidate = json.loads(lines[i])
+            except ValueError:
+                continue
+            if isinstance(candidate, dict) and "tool_name" in candidate:
+                at, found = i, candidate
+                break
+        if at is None:
             continue
-        record.update(fields)
-        lines[at] = json.dumps(record, ensure_ascii=False, default=repr) + "\n"
-        done = True
-        break
-    if done:
-        tmp = active.with_name(f".{active.name}.{os.getpid()}.tmp")
+        found.update(fields)
+        lines[at] = json.dumps(found, ensure_ascii=False, default=repr) + "\n"
+        tmp = chunk.with_name(f".{chunk.name}.{os.getpid()}.tmp")
         try:
             fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 handle.writelines(lines)
-            os.replace(tmp, active)
-            files.restrict_file(active)
+            os.replace(tmp, chunk)
+            files.restrict_file(chunk)
         except OSError:
             logger.warning("could not write the annotated call log", exc_info=True)
             try:
                 tmp.unlink()
             except OSError:
                 pass
-            done = False
-    if done and tracker is not None:
-        for record in reversed(getattr(tracker, "_calls", ())):
-            for key, value in fields.items():
-                setattr(record, key, value)
-            break
-    return done
+            return False
+        # This ring holds this process's calls; newest first, so its last entry
+        # is the call just annotated on disk. An empty or unrelated ring is left
+        # alone rather than having a verdict attached to the wrong call.
+        if tracker is not None:
+            for record in reversed(getattr(tracker, "_calls", ())):
+                for key, value in fields.items():
+                    setattr(record, key, value)
+                break
+        return True
+    return False
 
 
 def annotate_last_feedback(
