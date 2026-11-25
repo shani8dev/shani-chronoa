@@ -78,7 +78,7 @@ def test_the_scheduler_skips_rules_only_while_the_gate_is_closed(monkeypatch):
         senses={},
         store=object(),
         event_engine=engine,
-        rule_gate=lambda: allowed[0],
+        rule_gate=lambda **_flags: allowed[0],
         reflex_layer=False,
     )
     scheduler._last_event_poll = 0.0
@@ -107,7 +107,9 @@ def no_dnd(monkeypatch):
 
 
 def test_a_held_announcement_is_surfaced_later(no_dnd, clean_pending):
-    urge = reflex.Urgence(True, reflex.URGENCY_HIGH, "Battery", "8 percent")
+    # A routine event waits in a busy state; a critical one is announced at
+    # once (see test_a_critical_event_speaks_under_a_closed_gate below).
+    urge = reflex.Urgence(True, reflex.URGENCY_LOW, "Battery", "8 percent")
     assert reflex.announce([urge], rhythm_state=rhythm.Rhythm.SLEEP, now=100.0) == []
     assert [h.urge.subject for h in reflex.pending()] == ["Battery"]
 
@@ -119,7 +121,7 @@ def test_a_held_announcement_is_surfaced_later(no_dnd, clean_pending):
 
 def test_clear_pending_forgets_held_announcements(no_dnd):
     reflex.clear_pending()
-    urge = reflex.Urgence(True, reflex.URGENCY_HIGH, "Battery", "8 percent")
+    urge = reflex.Urgence(True, reflex.URGENCY_LOW, "Battery", "8 percent")
     reflex.announce([urge], rhythm_state=rhythm.Rhythm.SLEEP, now=100.0)
     assert len(reflex.pending()) == 1
 
@@ -132,7 +134,7 @@ def test_the_pending_queue_stays_bounded(no_dnd, clean_pending, caplog):
     with caplog.at_level(logging.WARNING, logger=reflex.logger.name):
         for index in range(reflex._PENDING_CAPACITY + 10):
             reflex.announce(
-                [reflex.Urgence(True, reflex.URGENCY_HIGH, f"Event {index}", "detail")],
+                [reflex.Urgence(True, reflex.URGENCY_LOW, f"Event {index}", "detail")],
                 rhythm_state=rhythm.Rhythm.SLEEP,
                 now=100.0 + index,
             )
@@ -141,7 +143,7 @@ def test_the_pending_queue_stays_bounded(no_dnd, clean_pending, caplog):
 
 
 def test_an_expired_hold_is_logged_not_silently_dropped(no_dnd, clean_pending, caplog):
-    urge = reflex.Urgence(True, reflex.URGENCY_HIGH, "Battery", "8 percent")
+    urge = reflex.Urgence(True, reflex.URGENCY_LOW, "Battery", "8 percent")
     reflex.announce([urge], rhythm_state=rhythm.Rhythm.SLEEP, now=100.0)
     with caplog.at_level(logging.WARNING, logger=reflex.logger.name):
         decided = reflex.announce(
@@ -176,8 +178,107 @@ def test_critical_notifications_survive_a_closed_rule_gate(monkeypatch):
     scheduler = AmbientScheduler(
         senses={},
         store=object(),
-        rule_gate=lambda: False,
+        rule_gate=lambda **_flags: False,
         reflex_layer=Reflexes(),
     )
     scheduler._reflex_tick()
     assert sent == [urged], "a quiet rhythm silenced a critical notification"
+
+
+# ------------------------------------------------------- real carve-out flags
+
+
+class _Rule:
+    def __init__(self, actuator, event_type="git"):
+        self.enabled = True
+        self.actuator = actuator
+        self.event_type = event_type
+        self.name = actuator
+
+
+class _Engine:
+    def __init__(self, rules):
+        self._rules = rules
+        self.polls = 0
+
+    def store(self):
+        return self
+
+    def all(self):
+        return self._rules
+
+    def poll(self):
+        self.polls += 1
+        return []
+
+    def run_due(self):
+        return []
+
+
+def _scheduler_with(engine, gate):
+    return AmbientScheduler(
+        senses={},
+        store=object(),
+        event_engine=engine,
+        rule_gate=gate,
+        reflex_layer=False,
+    )
+
+
+def test_armed_rules_fire_in_sleep(observed_state, monkeypatch):
+    """An action the person armed is never held by the machine's rhythm."""
+    monkeypatch.setattr(runner_lock, "holds", lambda: True)
+    observed_state(rhythm.Rhythm.SLEEP)
+    engine = _Engine([_Rule("set_volume")])
+    scheduler = _scheduler_with(engine, daemon._rules_allowed)
+    scheduler._last_event_poll = 0.0
+    scheduler._poll_event_rules(now=100.0)
+    assert engine.polls == 1, "an armed action was held by sleep"
+
+
+def test_routine_notifications_wait_but_critical_ones_do_not(
+    observed_state, monkeypatch
+):
+    monkeypatch.setattr(runner_lock, "holds", lambda: True)
+    observed_state(rhythm.Rhythm.SLEEP)
+    routine = _Engine([_Rule("notify")])
+    routine_scheduler = _scheduler_with(routine, daemon._rules_allowed)
+    routine_scheduler._last_event_poll = 0.0
+    routine_scheduler._poll_event_rules(now=100.0)
+    assert routine.polls == 0, "a routine notification ran in sleep"
+
+    critical = _Engine([_Rule("notify", event_type="failure")])
+    critical_scheduler = _scheduler_with(critical, daemon._rules_allowed)
+    critical_scheduler._last_event_poll = 0.0
+    critical_scheduler._poll_event_rules(now=100.0)
+    assert critical.polls == 1, "a critical notification was held by sleep"
+
+
+def test_a_critical_event_speaks_under_a_closed_gate(no_dnd, clean_pending):
+    """Urgency reaches the person even in a state that holds routine rules."""
+    urge = reflex.Urgence(True, reflex.URGENCY_HIGH, "Battery", "8 percent")
+    decided = reflex.announce([urge], rhythm_state=rhythm.Rhythm.SLEEP, now=100.0)
+    assert [(u.subject, d) for u, d in decided] == [("Battery", "notify")]
+    assert decided[0][0] is urge
+    assert reflex.pending() == (), "a critical event was held behind the gate"
+
+
+def test_do_not_disturb_still_holds_a_critical_event(clean_pending):
+    urge = reflex.Urgence(True, reflex.URGENCY_HIGH, "Battery", "8 percent")
+    assert (
+        reflex.announce(
+            [urge], do_not_disturb=True, rhythm_state=rhythm.Rhythm.SLEEP, now=100.0
+        )
+        == []
+    )
+    assert [h.urge.subject for h in reflex.pending()] == ["Battery"]
+
+
+def test_an_idle_user_is_not_held_for_the_pending_ttl(no_dnd, clean_pending):
+    """Five minutes idle is a normal room, not a one-hour hold."""
+    urge = reflex.Urgence(True, reflex.URGENCY_HIGH, "Battery", "8 percent")
+    decided = reflex.announce(
+        [urge], rhythm_state=rhythm.Rhythm.IDLE, now=100.0 + 300.0
+    )
+    assert [(u.subject, d) for u, d in decided] == [("Battery", "notify")]
+    assert reflex.pending() == ()
