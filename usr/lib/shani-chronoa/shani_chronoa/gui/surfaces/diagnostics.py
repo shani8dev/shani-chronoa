@@ -1265,6 +1265,64 @@ _SECTIONS: Tuple[Tuple[str, str, Tuple[Tuple[str, Probe], ...]], ...] = (
     ),
 )
 
+
+def section_slug(heading: str) -> str:
+    """A render-target name derived from a section heading, never typed twice."""
+    return re.sub(r"[^a-z0-9]+", "-", heading.lower()).strip("-")
+
+
+def section_names() -> Tuple[str, ...]:
+    """The addressable sections, in the order a person reads them."""
+    return tuple(section_slug(heading) for heading, _description, _rows in _SECTIONS)
+
+
+def build_section(app: Any = None, name: str = "") -> Optional[Gtk.Widget]:
+    """Build **one** Diagnostics section, for a render target that can reach it.
+
+    The panel scrolls, and a capture of the whole page stops after the first
+    three sections - "Microphone and audio" was the last heading any photograph
+    held, so Screen and desktop, Optional extras and Model servers had never
+    been looked at. Scrolling the panel to a group would answer a different
+    question (the group shares a scroller with nine Download banners); building
+    the group alone photographs exactly the rows that were below the fold, from
+    the same probes and the same `_row` builder the full panel uses.
+
+    An unknown name returns `None` rather than a page of nothing: a render
+    target that silently photographs a different section is the absence-shaped
+    wrong answer this file already refuses in its probes.
+    """
+    for heading, description, rows in _SECTIONS:
+        if section_slug(heading) != name:
+            continue
+        page, set_content = common.surface(f"Diagnostics: {heading}", description)
+        body = common.page_body(18)
+        body.set_margin_top(12)
+        body.set_margin_bottom(12)
+        group = common.group(heading, description)
+        findings: List[Finding] = []
+        for title, probe in rows:
+            finding = _measure(title, probe)
+            findings.append(finding)
+            _add_row(group, _row(finding))
+        body.append(group)
+        recorder = common.StatusRecorder()
+        body.append(_status_row(recorder, findings))
+        # The same headline and read-once footer the whole panel carries: one
+        # section is still a diagnostic, and the sentence about what the probe
+        # did is part of its answer. They also give a capture enough painted
+        # surface to clear the render gate's 5% content floor - a 4% page of
+        # eight short rows is a real render that a sweep would reject.
+        body.append(_summary([f.status for f in findings]))
+        footer = Gtk.Label(xalign=0.0, wrap=True)
+        footer.add_css_class("dim-label")
+        footer.set_text(_text(_FOOTER))
+        body.append(footer)
+        page.status = recorder.status
+        set_content(common.scrolled(body))
+        return page
+    return None
+
+
 #: Every row title, in order. Exposed so a caller (and this module's own tests)
 #: can assert a row exists for each subsystem without walking a widget tree.
 ROW_TITLES: Tuple[str, ...] = tuple(
@@ -1414,7 +1472,8 @@ def build(app: Any = None) -> Gtk.Widget:
 
 
 __all__ = [
-    "TITLE", "ICON", "SECTION", "build",
+    "TITLE", "ICON", "SECTION", "build", "build_section",
+    "section_names", "section_slug",
     "ROW_CSS", "VALUE_CSS", "ROW_TITLES", "STATUS_WORDS",
     "STATUS_WORKING", "STATUS_NOT_WORKING", "STATUS_UNKNOWN",
     "Finding", "UNPROVABLE_NOTE", "SEARCH_PROVIDER_NAME", "PORTAL_BUS",

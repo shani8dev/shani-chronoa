@@ -47,22 +47,30 @@ MUTATIONS = [
         # designed to return: `read_text_file` legitimately hands back up to
         # 512 KiB. The floor has to be above every bound it stands behind.
         "label": "the floor is tighter than a deliberate per-skill bound",
-        "expect": ["test_the_limit_is_clear_of_every_deliberate_bound",
-                   "test_an_oversized_result_says_what_was_dropped"],
+        # `test_an_oversized_result_says_what_was_dropped` used to be named here
+        # and the runner reported "NOT caught by" it: a 4000-char floor still
+        # clips a 1 MiB result with a note, so that test passes either way. The
+        # floor-vs-bound claim belongs to one witness, and naming one that
+        # passes under the defect reads as coverage that is not there.
+        "expect": ["test_the_limit_is_clear_of_every_deliberate_bound"],
     },
     {
         "file": _ASM,
-        "old": "                result = clipped\n"
-               "                self._record({\"role\": \"tool\","
-               " \"tool_call_id\": call.get(\"id\", \"\"),\n"
-               "                              \"content\": provenance.fence(\n"
-               "                                  result, source).text},\n",
-        "new": "                result = clipped\n"
-               "                self._record({\"role\": \"tool\","
-               " \"tool_call_id\": call.get(\"id\", \"\"),\n"
-               "                              \"content\": provenance.fence(\n"
-               "                                  _clip_tool_result(result),"
-               " source).text},\n",
+        # **The fence shape changed after this set was written.** `fence()` plus
+        # an inline `.text` became `fence_and_note()` held in a `Fenced`, and
+        # `--check-anchors` reported the old anchor as rotted instead of letting
+        # the mutation match nothing. The mutation still asks the same question:
+        # clip *after* fencing, so the closing marker can be cut off and the
+        # withheld count is recomputed against an already-cut string.
+        "old": "                fenced = provenance.fence_and_note(result, source)\n"
+               "                self._record({\"role\": \"tool\", "
+               "\"tool_call_id\": call.get(\"id\", \"\"),\n"
+               "                              \"content\": fenced.text},\n",
+        "new": "                fenced = provenance.fence_and_note(result, source)\n"
+               "                self._record({\"role\": \"tool\", "
+               "\"tool_call_id\": call.get(\"id\", \"\"),\n"
+               "                              \"content\": _clip_tool_result("
+               "fenced.text)},\n",
         # The clip moved inside the fence - the ordering that loses the closing
         # marker, so untrusted content is shown with no marker on it. This is the
         # security property, and it is why the call sits where it does.

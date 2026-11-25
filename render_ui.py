@@ -703,23 +703,23 @@ def _drive_composer(window, state: str) -> None:
         # and a third instance was sitting in the same function, in the same
         # costume.
         window.add_attachments([Path("screenshot.png"), Path("notes.txt")])
-    elif state == "question":
-        # **There is no `_question_entry`.** The question is a `Gtk.Box` that
-        # `gui/questions.py` appends a label to, and the render used to call
-        # `window._question_entry.get_buffer()` - which raised, under a bare
-        # `except`. So the row was made visible and left **empty**, and
-        # `composer-question` photographed the empty state.
+    elif state in ("question", "permission"):
+        # **Drive the interactive presenter, not the `ask_user` one.** The old
+        # branch appended a bare label the way `gui/questions.py` does and made
+        # the row visible, but the composer's own placeholder logic hid it again
+        # on the next buffer change - so `composer-question` photographed the
+        # empty state and there was no target at all for a permission prompt,
+        # the one moment a person is asked to trust Chronoa with an action.
         #
-        # Built the way `questions.make_question_presenter` builds it
-        # (`questions.py:128-137`), because that is the real path and a lookalike
-        # would be a picture of the harness rather than of the product.
-        window._clear_question_widgets()
-        label = Gtk.Label(label="Delete this file?")
-        label.set_wrap(True)
-        label.set_xalign(0.0)
-        window._question_widgets.append(label)
-        window._question_row.append(label)
-        window._question_row.set_visible(True)
+        # `AskingMixin.show_question()` is what a real approval draws: the
+        # question, its Details, the preview, the real option buttons from
+        # `permissions`, and the hint. Photographing that answers whether the
+        # trust moment is legible; photographing a label in a box does not.
+        from shani_chronoa import permissions
+        request = permissions.ApprovalRequest(
+            "delete_file", "~/Documents/notes.txt", "file-delete-enabled")
+        window.show_question(request.question, request.options_with_cancel(),
+                             lambda _answer: None)
     elif state == "speaking":
         window._sync_from_state(AssistantState.SPEAKING)
     elif state == "thinking":
@@ -763,7 +763,7 @@ def _all_states():
     out += _strip_states()
     out += [f"composer-{s}" for s in
             ("empty", "text", "multiline", "attachment", "question",
-             "speaking", "thinking")]
+             "permission", "speaking", "thinking")]
     # **No bare `except` here, and the table is the one that exists.**
     # `ORGAN_ICONS` lives in `gui/organs.py`, not in `body` - so the first
     # version's `body.ORGAN_ICONS` raised `AttributeError`, the `except: pass`
@@ -823,6 +823,34 @@ def on_activate(app):
             app.quit()
             return False
         GLib.timeout_add(int(os.environ.get("RENDER_SETTLE_MS", "2500")), capture_alone)
+        GLib.timeout_add(20000, lambda: (app.quit(), False)[1])
+        return None
+    if WHICH.startswith("section:"):
+        # One Diagnostics section, by its slug: `section:model-servers`.
+        #
+        # The panel scrolls and a full-page photograph stops after the third
+        # section, so Screen and desktop, Optional extras, Model servers and
+        # The kernel had never been looked at. This is the `section:<name>`
+        # addressing form the work order asked for. It builds the section from
+        # the same probes and row builder as the full panel, in a plain window,
+        # so there is no outer scroller to position and no model-download
+        # banners above the findings.
+        from shani_chronoa.gui.surfaces import diagnostics
+
+        name = WHICH.split(":", 1)[1]
+        page = diagnostics.build_section(app, name)
+        if page is None:
+            print(f"REFUSED section {name!r}; try --list sections", flush=True)
+            app.quit()
+            return None
+        window = Adw.ApplicationWindow(
+            application=app, default_width=WIDTH, default_height=HEIGHT)
+        toolbar = Adw.ToolbarView(content=page)
+        toolbar.add_top_bar(Adw.HeaderBar())
+        window.set_content(toolbar)
+        window.present()
+        GLib.timeout_add(int(os.environ.get("RENDER_SETTLE_MS", "2500")),
+                         lambda: _render(window, WIDTH, HEIGHT, OUT, own_size=True))
         GLib.timeout_add(20000, lambda: (app.quit(), False)[1])
         return None
     if WHICH.startswith("panel:"):
@@ -930,7 +958,7 @@ def on_activate(app):
         _KEEP.append(app.hold())
         window = _in_a_window(window)
         window.present()
-        hold = _KEEP.pop()
+        _KEEP.pop()  # the hold; released by `app.release()` at teardown
 
         def capture():
             _render(window, WIDTH, HEIGHT, OUT, own_size=True)
@@ -944,7 +972,12 @@ def on_activate(app):
             # rather than as a leak.
             window.destroy()
             _KEEP.remove(window)
-            app.release(hold)
+            # `app.hold()` returns None, so `app.release(hold)` passed a second
+            # argument and raised `TypeError` at capture teardown - after the
+            # PNG was written, which is why a target could print WROTE and then
+            # die with no summary. The hold is already paired by its own count;
+            # release it with no argument.
+            app.release()
             app.quit()
             return False
 
@@ -1164,8 +1197,14 @@ if len(sys.argv) > 1 and sys.argv[1] == "--list":
         from shani_chronoa.gui import surfaces
         for _name in surfaces.SURFACE_IDS:
             print("panel:" + _name)
+    elif _KIND == "sections":
+        from shani_chronoa.gui.surfaces import diagnostics
+
+        for _name in diagnostics.section_names():
+            print("section:" + _name)
     else:
-        print(f"unknown kind {_KIND!r}; try states or panels", file=sys.stderr)
+        print(f"unknown kind {_KIND!r}; try states, panels or sections",
+              file=sys.stderr)
         sys.exit(2)
     sys.exit(0)
 

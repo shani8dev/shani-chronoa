@@ -24,9 +24,21 @@ TEST_FILE = "tests/test_sense_budget.py"
 
 _SCHED = "usr/lib/shani-chronoa/shani_chronoa/senses/scheduler.py"
 
-G_LINE = '                              f"timed out after {exc.seconds:g}s; the result was "\n'
-RETURN_FALSE = "            return PollResult(name, False, None,\n"
-RETURN_TRUE = "            return PollResult(name, True, None,\n"
+# **The timeout return is a multi-line call now, and the anchors followed it.**
+# They used to be single-line `return PollResult(name, False, None, ...)` shapes;
+# a timeout path that also names the failure grew into a four-line call, and
+# `--check-anchors` reported both as rotted rather than letting the mutations
+# silently match nothing. The two anchors below are the *whole* head of that
+# call plus its message line, so a mutation can flip `False` to `True` in the
+# timeout branch without touching any of the other `PollResult(..., False, ...)`
+# exits in `poll()`.
+TIMEOUT_RETURN_HEAD = (
+    "            return PollResult(\n"
+    "                name,\n"
+    "                False,\n"
+    "                None,\n"
+)
+G_LINE = '                f"timed out after {exc.seconds:g}s; the result was "\n'
 
 MUTATIONS = [
     {
@@ -98,11 +110,13 @@ MUTATIONS = [
     },
     {
         "file": _SCHED,
-        "old": RETURN_FALSE + G_LINE,
-        "new": RETURN_TRUE + G_LINE,
+        "old": TIMEOUT_RETURN_HEAD + G_LINE,
+        "new": TIMEOUT_RETURN_HEAD.replace("False", "True") + G_LINE,
         # `ok` is the honesty of the result: ok=True says a percept was deposited.
         # A timeout deposits nothing, so marking it ok would put a green row in
-        # the history for a sense that never answered.
+        # the history for a sense that never answered. The replacement is scoped
+        # to this one multi-line return, not to every `False` in the file - the
+        # consent and reactive-only exits must keep reporting failure.
         "label": "a timeout is recorded as a success",
         "expect": ["test_the_hung_sense_reports_a_timeout_rather_than_a_crash"],
     },

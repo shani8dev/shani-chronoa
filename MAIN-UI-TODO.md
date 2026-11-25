@@ -1229,9 +1229,15 @@ Phone & devices · Meetings · My files · Models · Privacy & permissions · He
   gnome-shell). Original note:
   Wide main-window layouts unphotographable (structural: `_deepest_node` finds
   only composites that paint no children; `CHRONOA_FORCE_SIZE=1` blanks `main`).
-- No render target for a permission prompt; `composer-question` drives
-  `gui/questions.py` and the row never appears.
-- Diagnostics sections 3-5 absent from every capture (needs `section:<name>`).
+- ~~No render target for a permission prompt; `composer-question` drives
+  `gui/questions.py` and the row never appears.~~ **Closed:** both
+  `composer-question` and the new `composer-permission` state drive
+  `AskingMixin.show_question()` with the real option list, so the trust moment
+  has a picture. Measured at the app's own 460x640: 40% content, a real render.
+- ~~Diagnostics sections 3-5 absent from every capture (needs `section:<name>`).~~
+  **Closed:** `section:<name>` builds one section from the panel's own probes
+  and row builder; `--list sections` enumerates all seven from `_SECTIONS`.
+  Measured: `section:model-servers` is a real capture (61,710 bytes).
 - Pre-existing split-view overflow at 380 wide (requested 403px).
 - Item 3 of the original design review (the acceptor for
   `consolidation.Digest.candidates`) is **landed**: `decide_candidate()` in
