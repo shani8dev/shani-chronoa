@@ -325,14 +325,37 @@ def evaluate(names: Sequence[str] = REFLEX_NAMES) -> List[Urgence]:
 
 
 #: Held announcements, kept across ticks: `due()` has already stamped the
-#: cooldown, so without this queue a quiet room would eat one for 900 s.
+#: cooldown, so without this queue a quiet room would eat one for 900 s. The
+#: queue is bounded and each entry carries its own deadline - see `Held`.
 _PENDING_CAPACITY = 64
-_pending: "List[tuple[Urgence, float]]" = []
+#: How long a notable announcement waits for a quiet moment. This is
+#: deliberately NOT `_COOLDOWN_SECONDS`: that stops a condition that stays true
+#: from nagging, while this bounds how long an event nobody can hear yet stays
+#: available to be surfaced. An expiry or an eviction is logged, never silent.
+_PENDING_TTL_SECONDS = 3600.0
+_pending: "List[Held]" = []
+
+
+class Held(NamedTuple):
+    """One announcement waiting for a room that will let it speak.
+
+    `expires_at` is anchored to the *first* hold and is not refreshed on every
+    tick, so a room that never quiets cannot hold an event forever.
+    """
+
+    urge: Urgence
+    held_at: float
+    expires_at: float
 
 
 def clear_pending() -> None:
     """Forget held announcements. Only tests and an explicit reset call this."""
     _pending.clear()
+
+
+def pending() -> "tuple[Held, ...]":
+    """A read-only view of the queue, so a caller can see what is still held."""
+    return tuple(_pending)
 
 
 def _do_not_disturb() -> bool:
@@ -362,15 +385,24 @@ def announce(urgences: Sequence[Urgence], *, do_not_disturb: "Optional[bool]" = 
         rhythm_state = rhythm.current_state()
 
     queue = salience.PriorityQueue(capacity=_PENDING_CAPACITY)
-    candidates = [(urge, held_at) for urge, held_at in _pending]
+    # Re-offer everything still waiting, keeping its original hold time so the
+    # interrupt policy sees an old event as old rather than as fresh news.
+    candidates: "List[tuple[Urgence, float]]" = []
+    for held in _pending:
+        if moment >= held.expires_at:
+            logger.warning(
+                "held reflex announcement reached its %.0fs TTL unspoken: %s",
+                _PENDING_TTL_SECONDS, held.urge.subject)
+            continue
+        candidates.append((held.urge, held.held_at))
     candidates.extend((urge, moment) for urge in urgences)
+    pushed = 0
     for urge, held_at in candidates:
-        if moment - held_at >= _COOLDOWN_SECONDS:
-            continue  # a held announcement does not live forever
         severity = "warning" if urge.urgency == URGENCY_HIGH else "info"
         rules = (urge.subject,) if urge.subject else ()
         value = salience.score(urge, changed=True, severity=severity, rules=rules)
         queue.push((value, urge, held_at), value)
+        pushed += 1
 
     _pending.clear()
     decided: "List[tuple[Urgence, str]]" = []
@@ -379,9 +411,14 @@ def announce(urgences: Sequence[Urgence], *, do_not_disturb: "Optional[bool]" = 
         decision = salience.policy(value, do_not_disturb=do_not_disturb,
                                    rhythm_state=rhythm_state, unattended=True)
         if decision == "hold":
-            _pending.append((urge, held_at))
+            _pending.append(Held(urge, held_at, held_at + _PENDING_TTL_SECONDS))
             continue
         decided.append((urge, decision))
+    dropped = pushed - len(decided) - len(_pending)
+    if dropped:
+        logger.warning(
+            "reflex announcement queue was full: %d notable event(s) dropped "
+            "at a capacity of %d", dropped, _PENDING_CAPACITY)
     return decided
 
 

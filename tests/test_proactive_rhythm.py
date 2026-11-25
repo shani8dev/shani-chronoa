@@ -14,10 +14,16 @@ def test_the_states_are_the_documented_six():
     }
 
 
-def test_rules_run_in_every_state():
-    # An idle state that stopped the engine would silence the rules that are
-    # meant to fire when nobody is at the desk.
-    assert all(rhythm.should_run_rules(s) for s in rhythm.Rhythm)
+def test_rules_run_in_presence_states_and_wait_in_quiet_ones():
+    # A quiet room is exactly when most background rules are meant to fire, so
+    # IDLE must never stop them. Only states where the machine is already doing
+    # the work (sleep, an offline dream, maintenance) hold routine rules.
+    assert all(rhythm.should_run_rules(s) for s in (
+        rhythm.Rhythm.ACTIVE, rhythm.Rhythm.AWAKE, rhythm.Rhythm.IDLE,
+    ))
+    assert not any(rhythm.should_run_rules(s) for s in (
+        rhythm.Rhythm.SLEEP, rhythm.Rhythm.DREAM, rhythm.Rhythm.MAINTENANCE,
+    ))
 
 
 def test_recent_input_is_active_and_idle_time_is_not_guessed():
