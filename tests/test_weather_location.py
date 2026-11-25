@@ -113,7 +113,7 @@ from shani_chronoa.skills import convert_currency as cc  # noqa: E402
 from shani_chronoa.skills import convert_units as cu  # noqa: E402
 from shani_chronoa.skills import lookup as lk  # noqa: E402
 from shani_chronoa.skills import media_control as mc  # noqa: E402
-from shani_chronoa.skills import world_clock as wc  # noqa: E402
+from shani_sysadmin.skills import world_clock as wc  # noqa: E402
 
 
 @pytest.mark.parametrize("place, zone", [("Tokyo", "Asia/Tokyo"), ("mumbai", "Asia/Kolkata"),
