@@ -152,6 +152,72 @@ def __getattr__(name: str) -> Path:
     raise AttributeError(name)
 
 
+def annotate_last_feedback(
+    text: str,
+    verdict: str = "wrong",
+    tracker: Optional["ToolTracker"] = None,
+    log_dir: Optional[Path] = None,
+) -> bool:
+    """Write a person's judgement back onto the newest call record.
+
+    Feedback arrives *after* the answer, so the record it describes was written
+    earlier and cannot be changed by `record_call`. This rewrites that one line
+    in place - the whole file is small (it is capped and rotated) and feedback
+    is rare, so a search from the end plus an atomic replace is cheaper and
+    safer than a second log that a reader would have to join by hand.
+
+    Returns whether a record was found and annotated. An absent log is `False`,
+    not a newly created file: asking to annotate is not a request to record a
+    call that never happened. The in-memory ring is updated too when a tracker
+    is passed, so a panel reading `get_calls()` sees the same answer as the log.
+
+    Only the active chunk is touched. Feedback is written moments after an
+    answer, so the call was almost certainly made in that chunk; if rotation
+    already moved it, the durable feedback file still holds the judgement.
+    Rewriting archives for a rare late annotation would cost more than it
+    returns.
+    """
+    active = Path(log_dir) / "tool_calls.log" if log_dir is not None else log_dir() / "tool_calls.log"
+    done = False
+    try:
+        lines = active.read_text(encoding="utf-8").splitlines(keepends=True)
+    except OSError:
+        lines = []
+    for at in range(len(lines) - 1, -1, -1):
+        try:
+            record = json.loads(lines[at])
+        except ValueError:
+            continue
+        if not isinstance(record, dict) or "tool_name" not in record:
+            continue
+        record["feedback"] = text
+        record["feedback_verdict"] = verdict
+        lines[at] = json.dumps(record, ensure_ascii=False, default=repr) + "\n"
+        done = True
+        break
+    if done:
+        tmp = active.with_name(f".{active.name}.{os.getpid()}.tmp")
+        try:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.writelines(lines)
+            os.replace(tmp, active)
+            files.restrict_file(active)
+        except OSError:
+            logger.warning("could not write the annotated call log", exc_info=True)
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+            done = False
+    if done and tracker is not None:
+        for record in reversed(getattr(tracker, "_calls", ())):
+            record.feedback = text
+            record.feedback_verdict = verdict
+            break
+    return done
+
+
 # Who asked for this call. The audit trail's whole point for the trigger
 # engine is being able to tell a user-initiated actuation from an
 # unattended one: an armed rule that fires `notify-send` unprompted is the
@@ -207,6 +273,8 @@ class ToolCallRecord:
         origin: str = ORIGIN_USER,
         verdict: Optional[str] = None,
         evidence: str = "",
+        feedback: str = "",
+        feedback_verdict: str = "",
     ):
         self.tool_name = tool_name
         self.args = args
@@ -225,6 +293,11 @@ class ToolCallRecord:
         # worked; without the evidence here the log reads "All done
         # successfully." next to verdict=failed and never says why.
         self.evidence = evidence
+        # A person's judgement on the answer this call helped produce. Written
+        # back by `feedback.record_answer` after the turn, not at dispatch time,
+        # because the person has not answered yet when the call is recorded.
+        self.feedback = feedback
+        self.feedback_verdict = feedback_verdict
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -236,6 +309,8 @@ class ToolCallRecord:
             "origin": self.origin,
             "verdict": self.verdict,
             "evidence": self.evidence,
+            "feedback": self.feedback,
+            "feedback_verdict": self.feedback_verdict,
         }
 
     def to_log_dict(self) -> dict[str, Any]:
@@ -282,6 +357,8 @@ class ToolTracker:
         origin: str = ORIGIN_USER,
         verdict: Optional[str] = None,
         evidence: str = "",
+        feedback: str = "",
+        feedback_verdict: str = "",
     ) -> ToolCallRecord:
         """Record a tool call.
 
@@ -296,6 +373,7 @@ class ToolTracker:
         record = ToolCallRecord(
             tool_name, args, result, duration_ms, origin=origin,
             verdict=verdict, evidence=evidence,
+            feedback=feedback, feedback_verdict=feedback_verdict,
         )
         self._calls.append(record)
         self._write_to_log(record)
@@ -317,7 +395,7 @@ class ToolTracker:
             writer = csv.writer(f)
             writer.writerow(
                 ["timestamp", "tool_name", "args", "result", "duration_ms",
-                 "origin", "verdict", "evidence"]
+                 "origin", "verdict", "evidence", "feedback", "feedback_verdict"]
             )
             for record in self._calls:
                 writer.writerow([
@@ -329,6 +407,8 @@ class ToolTracker:
                     record.origin,
                     record.verdict or "",
                     record.evidence,
+                    record.feedback,
+                    record.feedback_verdict,
                 ])
         logger.info("Exported %d calls to %s", len(self._calls), output_path)
 

@@ -1251,6 +1251,19 @@ def decide_candidate(session_id: str, index: int, accept: bool,
                                    "to store")
 
     target = _target(store)
+    # A link proposal becomes a link, not a free-standing sentence about the
+    # user. Same consent check as above (it is already past), same write path as
+    # an explicit `link` operation, and the same "agreed but not written"
+    # outcome if the store refuses it. Reading `relation` off the candidate
+    # rather than re-parsing its text keeps one answer to "what triple is this".
+    relation = getattr(candidate, "relation", None)
+    if isinstance(relation, (list, tuple)) and len(relation) == 3:
+        subject, rel, obj = (str(part) for part in relation)
+        stored, why = link_entities(subject, rel, obj, store=target)
+        if stored is None:
+            return ("kept-unrecorded",
+                    why or "the link could not be stored")
+        return ("kept", "")
     # **Built once.** The first version called `_fact_from_candidate` again for
     # the write, which is two constructions of one value and the shape two
     # answers drift apart from - and it is a value whose `key` and `source`

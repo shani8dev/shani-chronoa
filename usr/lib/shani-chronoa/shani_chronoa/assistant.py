@@ -422,6 +422,51 @@ class Assistant:
                 [m for m in self._history if m.get("role") != "system"], self._session_path)
         return (question if isinstance(question, str) else ""), (previous or "")
 
+    def mark_last_answer(self, verdict: str, correction: str = ""):
+        """Record that a person rejected the last answer, or corrected it.
+
+        Returns the `feedback.Feedback` written, so a caller can say what it
+        recorded. This is a *record*, not an instruction to the model: the
+        history it is sent on the next turn is untouched, and the correction
+        reaches the model only if the person sends it as their next message.
+        A button that re-asks should call `drop_last_reply()` separately, which
+        is the existing door for "ask that again".
+
+        The judgement is written in two places, answering two questions: the
+        feedback log is the durable record, and the saved transcript carries it
+        beside the answer it describes so reading the conversation later says
+        what the person thought of it. The most recent call record is annotated
+        too, by `feedback.record_answer`, because the call log is where the
+        learning layer looks for outcomes.
+        """
+        from shani_chronoa import feedback
+
+        session_id = ""
+        if self._session_path is not None:
+            candidate = self._session_path.stem
+            from shani_chronoa import conversation_store
+            if conversation_store.valid_id(candidate):
+                session_id = candidate
+        index = -1
+        if self._session_path is not None:
+            from shani_chronoa import conversation_store
+            messages = conversation_store.load(self._session_path)
+            for at in range(len(messages) - 1, -1, -1):
+                if messages[at].get("role") == "assistant":
+                    index = at
+                    break
+        written = feedback.record_answer(verdict, correction,
+                                         session_id=session_id,
+                                         message_index=index)
+        if self._session_path is not None and index >= 0:
+            from shani_chronoa import conversation_store
+            messages = conversation_store.load(self._session_path)
+            if 0 <= index < len(messages):
+                messages[index]["feedback"] = written.to_dict()
+                conversation_store.rewrite(messages, self._session_path)
+        self.last_feedback = written
+        return written
+
     @staticmethod
     def _tool_source(call: dict) -> str:
         """Where a tool's output came from, for the provenance fence.
@@ -1180,6 +1225,17 @@ class Assistant:
             # The window this turn sized its tools to is this turn's alone.
             tool_select.set_window(0, local=True)
 
+    async def _check_confidence(self, name: str, arguments):
+        """Ask the cheap self-check about one proposed call.
+
+        Wrapped in one method rather than inlined so a caller can patch the
+        seam without patching the whole tool loop, and so the trust rule lives
+        in one place: the judge never sees a cloud backend.
+        """
+        from shani_chronoa import confidence
+        return await confidence.judge(name, arguments,
+                                      llm=self.llm, config=self.config)
+
     async def _run_turn(
         self,
         text: str,
@@ -1326,6 +1382,19 @@ class Assistant:
                 # turn before the Nth call, and then claim N calls in a row when only
                 # N-1 had happened.
                 loop.repeat(name, arguments)
+                # A cheap self-check before a risky action. It is additive:
+                # the consent key, the approval and the sandbox below are
+                # untouched for every call this clears, and a low verdict
+                # skips the call rather than overriding a gate. The tool
+                # result is synthesized in-band with the call's own id, so
+                # the history stays valid and the model hears "not sure"
+                # instead of a traceback or an unexplained refusal.
+                check = await self._check_confidence(name, arguments)
+                if not check.confident:
+                    logger.info("Not running %s: %s", name, check.reason)
+                    self._turn_tools.append(name)
+                    self._record(history_repair.synthesized_tool_result(call, "uncertain"))
+                    continue
                 if on_tool_call:
                     try:
                         on_tool_call(name, arguments)
