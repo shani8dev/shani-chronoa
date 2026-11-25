@@ -16,11 +16,20 @@ What it does, and what it deliberately does not:
   `AGENTS.md`'s consent model exists to prevent, and sleeping is precisely when
   nobody is watching. `Sleep` can therefore only ever *propose*.
 
-The model is not called. Consolidation runs from a timer and rules, on a machine
+No model is required. Consolidation runs from a timer and rules, on a machine
 that may be a laptop on battery with no model server up; a summariser that needs
 an LLM is a summariser that never runs. The digest is extractive - it picks the
 sentences that carry the most new information - and it says so, rather than
-dressing a heuristic up as understanding.
+dressing a heuristic up as understanding. A caller may supply an `enrich`
+callable backed by the *already-running* local server; when it is absent or
+fails, the extractive digest stands. That callable is built in
+`conversation_learning`, not here, so the timer path has no model import.
+
+Entities and subject-relation-object links are extracted as *proposals* beside
+the facts, and the conversation search index is refreshed after each digest.
+Both stay inside this data directory; neither writes a memory. Proposals become
+memory only through the consent-gated acceptor in the memory sense; this module
+never imports it.
 """
 
 from __future__ import annotations
@@ -61,6 +70,30 @@ _TRANSIENT = (
 
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 _WORD = re.compile(r"[a-z0-9']+")
+
+#: A name is a capitalised word after the first word of a sentence, which is
+#: where English puts an ordinary sentence opener. Kept deliberately naive:
+#: this is a *candidate* for a person to confirm, never a fact written while
+#: nobody is watching.
+_ENTITY = re.compile(r"\b([A-Z][\w'-]+)\b")
+_ENTITY_STOP = frozenset("""
+    I My We Our The A An And But So If Then This That These Those There Their
+    It Its He She They You Your Please Can Could Would Should Do Does Did Not
+    No Yes One Two Three First Next Last Now Today Tomorrow Yesterday Also
+""".split())
+
+#: Relations a sentence can state about the user. Each pattern's whole match
+#: is kept verbatim as the proposal text, so a person can check it against the
+#: conversation; the groups become the (subject, relation, object) triple that
+#: `senses.memory.link_entities` understands. A relation is stored only after a
+#: person accepts the proposal, through that consent-gated function.
+_LINK_PATTERNS = (
+    (re.compile(r"\bmy name is ([A-Z][\w'-]+)", re.I), "named", False),
+    (re.compile(r"\bi (?:live|lives?) in ([A-Z][\w'-]+)", re.I), "lives_in", False),
+    (re.compile(r"\bi work (?:at|on|in) ([A-Z][\w'-]+)", re.I), "works_on", False),
+    (re.compile(r"\b([A-Z][\w'-]+) (?:works at|lives in|owns|likes) ([A-Z][\w'-]+)"),
+     "", True),
+)
 
 #: English stopwords, for scoring. Short on purpose: this is a frequency filter,
 #: not an attempt at understanding.
@@ -120,11 +153,16 @@ class Candidate:
     #: Set when a person rejects it, so the same sentence is not proposed again
     #: every night for the rest of the conversation's life.
     rejected: bool = False
+    #: When this is a memory *link* rather than a free-standing fact, the
+    #: (subject, relation, object) it becomes if a person agrees. `text` stays
+    #: the verbatim sentence so accepting one is checkable against the source.
+    relation: Optional[tuple] = None
 
     def to_dict(self) -> Dict:
         return {"text": self.text, "source_index": self.source_index,
                 "source_role": self.source_role, "accepted": self.accepted,
-                "rejected": self.rejected}
+                "rejected": self.rejected,
+                "relation": list(self.relation) if self.relation else None}
 
 
 @dataclass
@@ -134,6 +172,9 @@ class Digest:
     session_id: str
     summary: str
     candidates: List[Candidate] = field(default_factory=list)
+    #: Names noticed in what the person said. Not facts, and never written to
+    #: memory on their own - they are the entities a future "about X" can name.
+    entities: List[str] = field(default_factory=list)
     message_count: int = 0
     #: When this was produced, so a stale digest can be recognised as stale.
     created: float = field(default_factory=time.time)
@@ -141,6 +182,7 @@ class Digest:
     def to_dict(self) -> Dict:
         return {"session_id": self.session_id, "summary": self.summary,
                 "candidates": [c.to_dict() for c in self.candidates],
+                "entities": list(self.entities),
                 "message_count": self.message_count, "created": self.created}
 
     @classmethod
@@ -151,6 +193,7 @@ class Digest:
             candidates=[Candidate(**{k: v for k, v in c.items()
                                      if k in Candidate.__dataclass_fields__})
                         for c in data.get("candidates", [])],
+            entities=[str(e) for e in data.get("entities", [])],
             message_count=int(data.get("message_count", 0)),
             created=float(data.get("created", 0.0)))
 
@@ -235,8 +278,77 @@ def propose_facts(messages: Sequence[Dict],
     return found
 
 
-def consolidate(session_id: str, messages: Sequence[Dict]) -> Optional[Digest]:
+def extract_entities(messages: Sequence[Dict], limit: int = 10) -> List[str]:
+    """Names the person used, in the order they first appeared.
+
+    Only user messages are read: a name the assistant invented in its own
+    answer is not evidence that the person ever said it. A capitalised word
+    after the first word of a sentence is the cheap signal; a word list drops
+    the ordinary sentence openers that would otherwise swamp it.
+    """
+    found: List[str] = []
+    seen = set()
+    for message in messages:
+        if not isinstance(message, dict) or message.get("role", "user") != "user":
+            continue
+        for sentence in _sentences(_message_text(message)):
+            for word in _ENTITY.findall(sentence)[1:]:
+                if word in seen or word in _ENTITY_STOP or len(word) < 2:
+                    continue
+                seen.add(word)
+                found.append(word)
+                if len(found) >= limit:
+                    return found
+    return found
+
+
+def extract_links(messages: Sequence[Dict], limit: int = 8) -> List[Candidate]:
+    """Subject-relation-object candidates, as proposals rather than writes.
+
+    Each `Candidate.text` is the sentence fragment the pattern actually
+    matched, so "where did this come from?" has an answer the person can check.
+    The triple is kept beside it and is only ever used by the consent-gated
+    `senses.memory.link_entities` after a person agrees.
+    """
+    found: List[Candidate] = []
+    seen = set()
+    for index, message in enumerate(messages):
+        if not isinstance(message, dict) or message.get("role", "user") != "user":
+            continue
+        for sentence in _sentences(_message_text(message)):
+            for pattern, fixed, two in _LINK_PATTERNS:
+                for match in pattern.finditer(sentence):
+                    span = match.group(0).strip()
+                    groups = [g for g in match.groups() if g]
+                    if not groups:
+                        continue
+                    subject = "user" if not two else groups[0]
+                    relation = fixed if fixed else (
+                        "lives_in" if "lives in" in span.lower()
+                        else "works_at" if "works at" in span.lower()
+                        else "owns" if "owns" in span.lower() else "likes")
+                    obj = groups[0] if not two else groups[-1]
+                    triple = (subject, relation, obj)
+                    key = tuple(part.lower() for part in triple)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    found.append(Candidate(text=span, source_index=index,
+                                           relation=triple))
+                    if len(found) >= limit:
+                        return found
+    return found
+
+
+def consolidate(session_id: str, messages: Sequence[Dict],
+                enrich=None) -> Optional[Digest]:
     """Turn one conversation into a digest and a queue of proposed facts.
+
+    `enrich`, when given, is an optional local-model callable that returns a
+    short summary. It never replaces the extractive fallback: consolidation
+    runs from a timer on a machine that may have no model server up, and the
+    caller supplies the callable only when one is available. Whatever it
+    returns is still a proposal, and the links it extracts still need a person.
 
     Returns None for a conversation too short to be worth the work, rather than
     a digest of "hi" / "hello".
@@ -246,8 +358,21 @@ def consolidate(session_id: str, messages: Sequence[Dict]) -> Optional[Digest]:
     summary = summarise(messages)
     if not summary:
         return None
+    if enrich is not None:
+        try:
+            better = enrich(messages, summary)
+        except Exception:  # noqa: BLE001 - the model is optional, sleep is not
+            logger.info("the local enricher failed; keeping the extractive digest",
+                        exc_info=True)
+            better = ""
+        if isinstance(better, str) and better.strip():
+            summary = better.strip()
+    facts = propose_facts(messages)
+    links = [c for c in extract_links(messages)
+             if c.text not in {f.text for f in facts}]
     return Digest(session_id=session_id, summary=summary,
-                  candidates=propose_facts(messages),
+                  candidates=facts + links,
+                  entities=extract_entities(messages),
                   message_count=len(messages))
 
 
@@ -378,20 +503,61 @@ def sessions_needing_sleep(root: Optional[Path] = None,
     return out
 
 
+def refresh_index(session_id: str, root: Optional[Path] = None,
+                  embed=None) -> bool:
+    """Bring the conversation search index up to date after a sleep pass.
+
+    The JSONL files stay the record; the SQLite index is a cache that can be
+    deleted and rebuilt. `_search_db` is incremental, so this does not re-read
+    the whole history - it picks up whatever was appended since the last pass.
+    Vectors are filled only when Chronoa's own embedding model is configured,
+    through the existing `local_embed.embed` path: no new dependency, no new
+    server, and no request off the machine. A missing index (SQLite without
+    FTS5) is `False`, never an invented success.
+    """
+    from . import conversation_store
+    base = Path(root) if root is not None else conversation_store.session_dir()
+    if not base.is_dir():
+        return False
+    db = conversation_store._search_db(base)
+    if db is None:
+        return False
+    try:
+        if embed is None:
+            from . import local_embed
+            if local_embed.configured():
+                embed = local_embed.embed
+        if embed is not None:
+            conversation_store._fill_vectors(db, embed)
+    except Exception:  # noqa: BLE001 - a stale index must not stop the sleep
+        logger.info("could not refresh vectors for %s", session_id, exc_info=True)
+    finally:
+        try:
+            db.close()
+        except Exception:  # noqa: BLE001
+            pass
+    return True
+
+
 def sleep_now(root: Optional[Path] = None, minimum_age: float = 3600.0,
               on_digest: Optional[Callable[[Digest], None]] = None,
-              directory: Optional[Path] = None) -> List[Digest]:
+              directory: Optional[Path] = None,
+              enrich=None,
+              refresh: bool = True) -> List[Digest]:
     """Consolidate every conversation that is over. Returns what it produced.
 
     This is the entry point a timer calls. It reads and writes only inside
-    Chronoa's own data directory, calls no model, and sends nothing anywhere.
+    Chronoa's own data directory, calls no model unless the caller supplies an
+    `enrich` callable backed by the already-running local server, and sends
+    nothing anywhere. The index refresh is best effort: a digest that was
+    written is not undone because its cache could not be updated.
     """
     produced: List[Digest] = []
     for session_id in sessions_needing_sleep(root, minimum_age, directory):
         from . import conversation_store
         path = (Path(root) if root is not None else conversation_store.session_dir())
         messages = conversation_store.load(path / f"{session_id}.jsonl")
-        digest = consolidate(session_id, messages)
+        digest = consolidate(session_id, messages, enrich=enrich)
         if digest is None:
             continue
         try:
@@ -401,8 +567,11 @@ def sleep_now(root: Optional[Path] = None, minimum_age: float = 3600.0,
                            exc_info=True)
             continue
         produced.append(digest)
-        logger.info("slept on %s: %d messages, %d proposed facts",
-                    session_id, digest.message_count, len(digest.candidates))
+        logger.info("slept on %s: %d messages, %d proposed facts, %d entities",
+                    session_id, digest.message_count, len(digest.candidates),
+                    len(digest.entities))
+        if refresh and not refresh_index(session_id, path):
+            logger.info("the search index could not be refreshed for %s", session_id)
         if on_digest is not None:
             try:
                 on_digest(digest)

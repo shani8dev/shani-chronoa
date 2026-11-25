@@ -94,7 +94,13 @@ def main() -> int:
             if now >= next_sleep:
                 next_sleep = now + SLEEP_EVERY_SECONDS
                 try:
-                    slept = consolidation.sleep_now()
+                    # An optional summary from the local server if it is
+                    # already up; `None` keeps the extractive digest, so a
+                    # machine with no model still sleeps. The index refresh
+                    # happens in the sleep pass itself.
+                    from shani_chronoa import conversation_learning
+                    slept = consolidation.sleep_now(
+                        enrich=conversation_learning.local_enricher())
                     if slept:
                         logger.info("slept on %d conversation(s)", len(slept))
                 except Exception:

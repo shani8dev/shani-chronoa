@@ -113,6 +113,11 @@ _REASON_PHRASE = {
         "not executed: no call matching it was found in the conversation, so "
         "there is no output for it."
     ),
+    "uncertain": (
+        "not executed: I'm not sure about that one. The action did not run. "
+        "Tell the user plainly that you are not sure and what you were about "
+        "to do, then ask them whether to go ahead."
+    ),
     "limit": (
         "not executed: this turn has already used this tool's whole budget, so "
         "it was not run again. Do not call it again in this turn, and do not "

@@ -385,7 +385,7 @@ Paths are relative to `usr/lib/shani-chronoa/shani_chronoa/`.
 | Motivation | 🟡 | todo list, reminders, timers, scheduled triggers; no goal manager |
 | Language | ✅ | LLM, STT, TTS, translation; **cloud STT as a fallback** (`cloud_voice.CloudSTT`, opt-in, and **only when no local model can listen**) - every cloud speech route measured needs a key, so it is never anonymous |
 | Learning | 🟡 | memory facts and history; verification verdicts reorder the tools already allowed (`learning.py`), and a **distilled routing student** (`distill.py`) can narrow them further - measured 62% on held-out requests vs a 12% baseline, from a teacher that agreed with the human label 47/54. Still no preference learning from what you liked, and no skill learning |
-| Taste / Evaluate | 🟡 | post-condition verification, guardrail, history repair, schema refusal; no judge or confidence |
+| Taste / Evaluate | 🟡 | post-condition verification, guardrail, history repair, schema refusal; a cheap self-check (`confidence.py`) now judges destructive calls and answers "I'm not sure" by skipping the action, opt-in through the existing `thinking` setting |
 | Decision | ✅ | permissions, approvals, plan mode, presets, guardrail |
 | Reflex | ✅ | 18 event types, wake word, barge-in |
 | Hands | ✅ | D-Bus, systemd, GNOME and Plasma backends, portals, AT-SPI, typed input; no generic shell (on purpose) |
@@ -478,7 +478,7 @@ Paths are relative to `usr/lib/shani-chronoa/shani_chronoa/`.
 |---|---|---|
 | Event bus | 🟡 | the trigger engine (`triggers/`) is the only bus: sources produce events and rules consume them. Nothing else subscribes |
 | Context fusion | ✅ | `senses/context.py` assembles live percepts into one turn; `local_llm.normalize_messages` |
-| Entity extraction | ❌ | nothing; memory links are stated explicitly, not extracted |
+| Entity extraction | 🟡 | `consolidation.extract_entities` and `extract_links` propose names and subject–relation–object triples from finished conversations; a person accepts each link through the memory sense's consent-gated acceptor |
 | Temporal context | 🟡 | `senses/timebase.py`, `senses/latch.py` (change detection), timestamps on percepts |
 | Multimodal context | 🟡 | attachments, OCR and vision text go into the turn as text |
 | Rust / Tokio | 🚫 | Chronoa is Python with GLib and asyncio (`asyncbridge.py`); a rewrite is not justified |
@@ -542,7 +542,7 @@ Paths are relative to `usr/lib/shani-chronoa/shani_chronoa/`.
 | Translation | ✅ | `skills/translate_text.py` |
 | NLU / NLG | ✅ | through the LLM; `markdown_lite.py` shapes spoken output |
 | Embeddings | ❌ | — |
-| Feedback loop / evaluation | ❌ | approvals and denials are not recorded as a signal |
+| Feedback loop / evaluation | 🟡 | approvals and denials are recorded in `tool_tracking`; a person's "wrong"/correction is now persisted by `feedback.py` and written back onto the newest call record |
 | Experience / adaptation / preference store | 🟡 | `senses/memory.py` stores stated preferences ("my editor is vim"); nothing inferred |
 | Skill learning | 🚫 | new skills are code a person adds (`~/.config/shani-chronoa/skills/`); a self-written skill would break the whitelist |
 
@@ -555,8 +555,8 @@ Paths are relative to `usr/lib/shani-chronoa/shani_chronoa/`.
 | Schema validator | ✅ | bad JSON arguments are refused in the turn (`assistant.py`); `local_llm.recover_tool_calls` |
 | Test runner | ❌ | — |
 | Action verifier | ✅ | `verification.py`, `guardrail.py` |
-| LLM-as-judge | ❌ | — |
-| User feedback | ❌ | — |
+| LLM-as-judge | 🟡 | `confidence.py` asks the already-running local model for one SURE/UNSURE word; no cloud route, no new model, off unless `thinking` is set, with a hard timeout |
+| User feedback | 🟡 | `feedback.py` persists a wrong-answer verdict or correction; `Assistant.mark_last_answer` records it beside the answer and on the call log; no UI surface here (owned elsewhere) |
 | Planner | 🟡 | see Brain |
 | Policy / risk / permission / confirmation | ✅ | `sandbox/profiles.py`, `guardrail.py`, `permissions.py`, `approvals.py`, `capabilities.py` presets |
 
@@ -683,6 +683,11 @@ real version of it.
    model that reads this log is fitted and refuses to over-claim - see
    `learning.py`'s own report - so the *learning* half has moved further than the
    *recording* half, which is the opposite of the order the item assumes.
+   **Three of the four records now exist (2026-11-25).** `feedback.py` persists
+   "wrong" or a correction and `tool_tracking.annotate_last_feedback` writes it
+   back onto the newest call record in the same JSONL log, so a reversal a
+   person made is no longer invisible. The user *undoing* an action is still
+   not written back; that half remains open.
 3. **Embeddings and RAG in SQLite** (Memory). `llama-server --embedding` with a
    small GGUF embedding model, vectors stored next to FTS5, with hybrid
    bm25-plus-vector search over conversations, memory facts and opted-in
@@ -711,6 +716,13 @@ real version of it.
    things this item names for the useful part has landed. Recorded as the wrong
    label being worse than a missing one: writing "mostly built" here would point
    a reader at three capabilities that do not exist.
+   **All three named parts now land in `consolidation.py` (2026-11-25).** A
+   slept conversation produces an extractive summary (optionally a short one
+   from the already-running local server through `conversation_learning`),
+   entity and memory-link *proposals*, and an incremental refresh of the FTS5
+   index with vectors from the existing `local_embed` path when configured.
+   Nothing is written to durable memory without a person's consent, and `dream`
+   remains a separate pass over the tool log - no dream engine was added.
 5. **Salience and an interrupt policy** (Attention). Score percepts and events
    by change, severity and the user's own rules; decide speak now, notify, or
    hold for the next turn. Do-not-disturb and the rhythm state gate it.
@@ -732,6 +744,12 @@ real version of it.
 8. **Confidence and a judge** (Taste). A cheap self-check pass on the local
    model for actions above a risk level, and "I'm not sure" when it fails.
    Measure the latency cost first on CPU; it may need to be opt-in.
+   **Built as the opt-in the item allowed for (2026-11-25).** `confidence.py`
+   derives risk from the existing consent table, checks for a missing target
+   deterministically, then asks the already-running local model for one
+   SURE/UNSURE word only when the existing `thinking` setting is on; cloud
+   backends are never asked. A failed check skips the call and hands the model
+   a truthful "I'm not sure" tool result, leaving every gate in place.
 9. **An inotify backend** for `PollingDirWatcher` (Ingest), as the subclass
    its docstring already plans for. Do it only if polling measurably costs
    something.
