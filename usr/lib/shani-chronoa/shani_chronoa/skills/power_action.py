@@ -11,6 +11,7 @@ active seat user may do it, exactly as the desktop's own power menu.
 import shutil
 import subprocess
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
 
@@ -33,8 +34,8 @@ _SCHEMA = {
 def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
     """Whether power actions are allowed, and the refusal naming the switch if not."""
     if not config.get_bool(_CONSENT_KEY, False):
-        return False, (f"Not done: power actions are switched off ('{_CONSENT_KEY}'). Turn on "
-                       "'Let Chronoa suspend, restart or shut down' in Settings to allow it.")
+        return False, (f"Not done: power actions are switched off. Turn on "
+                       f"\u201c{gate_label(_CONSENT_KEY)}\u201d in Settings to allow it.")
     return True, ""
 
 

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import time
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa import files, conversation_store
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
@@ -51,7 +52,7 @@ SCHEMA = {
 
 def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
     if not config.get_bool(_CONSENT_KEY, False):
-        return False, f"deleting is turned off (enable '{_CONSENT_KEY}' in Settings)"
+        return False, f"deleting is turned off (enable \u201c{gate_label(_CONSENT_KEY)}\u201d in Settings)"
     return True, ""
 
 

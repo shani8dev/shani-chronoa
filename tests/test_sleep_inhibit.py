@@ -33,6 +33,7 @@ _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
 from shani_chronoa.capabilities import MUTATING_TOOLS, tool_annotations  # noqa: E402
+from shani_chronoa.capabilities import gate_label  # noqa: E402
 from shani_chronoa.skills import set_sleep_inhibit as S  # noqa: E402
 
 
@@ -273,7 +274,8 @@ class TestConsent:
         state, spawned = wired
         state["granted"] = False
         out = S._run({"action": "hold", "seconds": 60})
-        assert S._CONSENT_KEY in out
+        assert gate_label(S._CONSENT_KEY) in out, out
+        assert S._CONSENT_KEY not in out, out
         assert not spawned
 
     def test_releasing_is_refused_without_consent(self, wired):
@@ -282,7 +284,7 @@ class TestConsent:
         # machine awake, and one function does all three actions.
         state, _ = wired
         state["granted"] = False
-        assert S._CONSENT_KEY in S._run({"action": "release"})
+        assert gate_label(S._CONSENT_KEY) in S._run({"action": "release"})
 
     def test_the_key_is_its_own_not_the_idle_timeout(self):
         assert S._CONSENT_KEY != "idle-timeout-enabled"

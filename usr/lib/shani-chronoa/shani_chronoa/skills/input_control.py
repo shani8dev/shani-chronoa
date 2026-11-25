@@ -62,8 +62,8 @@ def _consent(config: ChronoaConfig) -> tuple[bool, str]:
         from shani_chronoa.capabilities import gate_label
         return False, (
             f"input control is turned off - turn on "
-            f"\u201c{gate_label(_CONSENT_KEY)}\u201d in Settings "
-            f"('{_CONSENT_KEY}'); this is a separate consent gate from the "
+            f"\u201c{gate_label(_CONSENT_KEY)}\u201d in Settings; "
+            "this is a separate consent gate from the "
             "vision sense"
         )
     return True, ""

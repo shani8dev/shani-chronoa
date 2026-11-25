@@ -39,6 +39,7 @@ import sys
 import pytest
 
 sys.path.insert(0, "usr/lib/shani-chronoa")
+from shani_chronoa.capabilities import gate_label  # noqa: E402
 
 SCHEMA = pathlib.Path("usr/share/glib-2.0/schemas/org.shani.chronoa.gschema.xml")
 
@@ -148,10 +149,11 @@ def test_calendar_edit_refuses_until_the_write_key_is_granted(tmp_path) -> None:
             "with the default (off) the skill must refuse, or this test is "
             f"asserting nothing: {refused!r}"
         )
-        assert "calendar-write-enabled" in refused, (
-            "the refusal should name the switch that would open it, so a person "
+        assert gate_label("calendar-write-enabled") in refused, (
+            "the refusal should name the row that opens it, so a person "
             f"can act on it: {refused!r}"
         )
+        assert "calendar-write-enabled" not in refused, refused
 
         config = _config()
         config.set("calendar-write-enabled", "true")

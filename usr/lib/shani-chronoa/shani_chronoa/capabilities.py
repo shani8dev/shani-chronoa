@@ -716,6 +716,7 @@ GATE_NAMES: dict[str, str] = {
     "mic-control-enabled": "Let Chronoa mute the microphone",
     "screen-lock-enabled": "Let Chronoa lock this session",
     "trash-empty-enabled": "Let Chronoa empty the trash",
+    "cleanup-enabled": "Let Chronoa clear caches and unused Flatpak runtimes",
     "document-search-enabled": "Let Chronoa search inside your files",
     "calendar-read-enabled": "Let Chronoa read your calendar",
     "calendar-sense-enabled": "Let Chronoa act before calendar events",

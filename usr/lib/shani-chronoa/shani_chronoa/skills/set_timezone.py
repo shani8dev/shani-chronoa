@@ -28,6 +28,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
 
@@ -70,7 +71,7 @@ def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
     if not config.get_bool(_CONSENT_KEY, False):
         return False, (
             f"changing the system timezone is turned off (enable "
-            f"'{_CONSENT_KEY}' in Settings). It is system-wide and moves every "
+            f"\u201c{gate_label(_CONSENT_KEY)}\u201d in Settings). It is system-wide and moves every "
             f"timestamp on the machine at once, so it is not something to "
             f"discover after the fact."
         )

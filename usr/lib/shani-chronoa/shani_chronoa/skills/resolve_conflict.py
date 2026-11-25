@@ -39,6 +39,7 @@ import pathlib
 import shutil
 from typing import List, Optional
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa import files
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
@@ -356,10 +357,10 @@ def _run(args: dict) -> str:
 
 _REFUSAL_REASON = (
     "conflicted file names and their contents are your work, not the machine's "
-    f"state, which is why '{_READ_KEY}' is off by default")
+    f"state, which is why \u201c{gate_label(_READ_KEY)}\u201d is off by default")
 _WRITE_REASON = (
     "taking one side of a conflict and marking files resolved change the working "
-    f"tree, which is what '{_WRITE_KEY}' says")
+    f"tree, which is what \u201c{gate_label(_WRITE_KEY)}\u201d says")
 
 _SCHEMA = {
     "type": "function",

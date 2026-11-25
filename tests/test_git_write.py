@@ -39,6 +39,7 @@ _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
 from shani_chronoa import permissions  # noqa: E402
+from shani_chronoa.capabilities import gate_label  # noqa: E402
 from shani_chronoa.skills import git_push as PUSH  # noqa: E402
 from shani_chronoa.skills import git_write as W  # noqa: E402
 
@@ -209,7 +210,8 @@ class TestTheSwitchesAreReal:
         monkeypatch.setattr(W, "ChronoaConfig", Off)
         out = W._run({"action": "commit", "path": str(repo),
                       "files": ["named.txt"], "message": "should not happen"})
-        assert W._CONSENT_KEY in out and "Refusing" in out, out
+        assert gate_label(W._CONSENT_KEY) in out and "Refusing" in out, out
+        assert W._CONSENT_KEY not in out, out
         assert _git(repo, "log", "--format=%s").stdout.splitlines()[0] == "first", (
             "the commit landed while the switch was off")
 

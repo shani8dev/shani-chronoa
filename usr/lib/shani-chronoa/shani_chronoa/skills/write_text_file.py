@@ -18,6 +18,7 @@ Honesty rules:
 from __future__ import annotations
 
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa import files, provenance
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
@@ -107,7 +108,7 @@ def _run(arguments: dict) -> str:
             return (
                 f"Refusing to replace {target}: replacing what a file already "
                 f"says is an edit, and editing your files is turned off (enable "
-                f"'{_EDIT_KEY}' in Settings). Writing a *new* file, and adding to "
+                f"\u201c{gate_label(_EDIT_KEY)}\u201d in Settings). Writing a *new* file, and adding to "
                 f"the end of one, need no such permission. Nothing was written."
             )
     if existed and not append and not overwrite:

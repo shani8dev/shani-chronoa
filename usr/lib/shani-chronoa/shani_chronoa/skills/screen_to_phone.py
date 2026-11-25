@@ -31,6 +31,7 @@ import shutil
 import subprocess
 from typing import Optional
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa.skills import Skill
 
 logger = logging.getLogger(__name__)
@@ -52,7 +53,7 @@ def _consent(config) -> "tuple[bool, str]":
     """(allowed, why-not) - the house signature every gated tool returns."""
     if not config.get_bool(_CONSENT_KEY, False):
         return False, (f"Sharing this screen is turned off. Nothing was sent. "
-                       f"Enable '{_CONSENT_KEY}' in Settings to allow it.")
+                       f"Enable \u201c{gate_label(_CONSENT_KEY)}\u201d in Settings to allow it.")
     return True, ""
 
 

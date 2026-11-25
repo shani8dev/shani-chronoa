@@ -2,6 +2,7 @@
 
 import inspect
 from shani_chronoa import daemon, goals, inotify_watch, planner, reflex, rhythm, tool_tracking
+from shani_chronoa.capabilities import gate_label  # noqa: E402
 from shani_chronoa.skills import manage_triggers
 from shani_chronoa.triggers import sources
 
@@ -14,7 +15,9 @@ def test_setpoint_actions_are_advertised():
 
 def test_arm_setpoint_keeps_the_trigger_control_gate():
     text = manage_triggers._run({"action": "arm-setpoint", "setpoint": "disk-nearly-full"})
-    assert "Refusing to change armed rules" in text and "trigger-control-enabled" in text
+    assert "Refusing to change armed rules" in text
+    assert gate_label("trigger-control-enabled") in text, text
+    assert "trigger-control-enabled" not in text, text
 
 def test_arm_setpoint_uses_the_ordinary_rule_builder(monkeypatch, tmp_path):
     from shani_chronoa.triggers.rules import RuleStore

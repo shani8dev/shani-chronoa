@@ -9,6 +9,7 @@ with no consent step; every name it has is reachable here.
 
 from __future__ import annotations
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa import _link
 from shani_chronoa.skills import Skill
 
@@ -23,7 +24,7 @@ def _consent(config) -> "tuple[bool, str]":
     """(allowed, why-not) - the house signature every gated tool returns."""
     if not config.get_bool(_CONSENT_KEY, False):
         return False, (f"Finding phones on this network is turned off. Nothing "
-                       f"was sent. Enable '{_CONSENT_KEY}' in Settings to allow "
+                       f"was sent. Enable \u201c{gate_label(_CONSENT_KEY)}\u201d in Settings to allow "
                        f"it.")
     return True, ""
 

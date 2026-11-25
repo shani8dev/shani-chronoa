@@ -52,6 +52,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa import files
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
@@ -89,7 +90,7 @@ def _consent(config: ChronoaConfig) -> tuple[bool, str]:
     if not config.get_bool(_CONSENT_KEY, False):
         return False, (
             f"freeing disk space this way is turned off (enable "
-            f"'{_CONSENT_KEY}' in Settings). Looking is not: `cleanup_report` "
+            f"\u201c{gate_label(_CONSENT_KEY)}\u201d in Settings). Looking is not: `cleanup_report` "
             f"will still tell you what is taking the space and the safe way to "
             f"free it."
         )

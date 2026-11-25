@@ -68,6 +68,7 @@ import subprocess
 import time
 from pathlib import Path
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
 from shani_chronoa import files
@@ -244,10 +245,10 @@ def _status() -> str:
 def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
     if not config.get_bool(_CONSENT_KEY, False):
         return False, (
-            f"holding the machine awake is turned off (enable '{_CONSENT_KEY}' in "
+            f"holding the machine awake is turned off (enable \u201c{gate_label(_CONSENT_KEY)}\u201d in "
             "Settings). Reporting what is holding sleep right now needs no such "
             "permission. It has its own key rather than sharing "
-            "'idle-timeout-enabled', because a bounded hold for the next few minutes is "
+            f"\u201c{gate_label('idle-timeout-enabled')}\u201d, because a bounded hold for the next few minutes is "
             "a different decision from changing the machine's idle policy."
         )
     return True, ""

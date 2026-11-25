@@ -7,6 +7,7 @@ reachable here, so the assistant's code and tests see one module's worth.
 """
 from __future__ import annotations
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa import _link
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
@@ -21,7 +22,7 @@ _CONSENT_KEY = "bluetooth-gatt-enabled"
 def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
     if not config.get_bool(_CONSENT_KEY, False):
         return False, (f"Reaching your watch is turned off. Nothing was asked or sent. "
-                       f"Enable '{_CONSENT_KEY}' in Settings to allow it.")
+                       f"Enable \u201c{gate_label(_CONSENT_KEY)}\u201d in Settings to allow it.")
     return True, ""
 
 

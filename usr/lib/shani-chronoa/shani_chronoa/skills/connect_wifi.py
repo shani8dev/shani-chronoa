@@ -21,6 +21,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa import files
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
@@ -55,7 +56,7 @@ def _consent(config: ChronoaConfig) -> tuple[bool, str]:
     """Return (allowed, reason). Fail-closed: an undeclared key denies."""
     if not config.get_bool(_CONSENT_KEY, False):
         return False, (
-            f"changing WiFi connections is turned off (enable '{_CONSENT_KEY}' "
+            f"changing WiFi connections is turned off (enable \u201c{gate_label(_CONSENT_KEY)}\u201d "
             f"in Settings). Listing nearby networks needs no such permission - "
             f"only joining or leaving one does."
         )

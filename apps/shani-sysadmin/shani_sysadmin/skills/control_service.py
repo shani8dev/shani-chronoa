@@ -21,6 +21,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa import files
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
@@ -37,7 +38,7 @@ def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
     """Return (allowed, reason). Fail-closed: an undeclared key denies."""
     if not config.get_bool(_CONSENT_KEY, False):
         return False, (
-            f"changing system services is turned off (enable '{_CONSENT_KEY}' "
+            f"changing system services is turned off (enable \u201c{gate_label(_CONSENT_KEY)}\u201d "
             f"in Settings). Listing services and reading their logs need no such "
             f"permission - only changing them does, because these are "
             f"root-owned units and the wrong one can take down something "

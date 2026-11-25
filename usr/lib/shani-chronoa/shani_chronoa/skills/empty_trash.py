@@ -32,6 +32,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
 
@@ -65,7 +66,7 @@ def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
     """Return (allowed, reason). Fail-closed: an undeclared key denies."""
     if not config.get_bool(_CONSENT_KEY, False):
         return False, (
-            f"emptying the trash is turned off (enable '{_CONSENT_KEY}' in "
+            f"emptying the trash is turned off (enable \u201c{gate_label(_CONSENT_KEY)}\u201d in "
             f"Settings). This is not the same permission as deleting files: "
             f"everything here was already removed from where it was and is "
             f"recoverable, and emptying the trash is the step that makes it "

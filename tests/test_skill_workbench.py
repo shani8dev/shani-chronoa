@@ -355,7 +355,10 @@ class TestGitInspectIsGatedOnTheGitSensesOwnKey:
     def test_it_refuses_when_the_git_sense_is_off(self, home, shut):
         out = git_inspect._run({"path": str(home / "work")})
         assert "Refusing" in out
-        assert GIT_KEY in out, "the refusal must name the key the user can change"
+        assert capabilities.gate_label(GIT_KEY) in out, (
+            "the refusal must name the row the user can change"
+        )
+        assert GIT_KEY not in out, out
 
     def test_the_gate_is_consulted_before_the_path_is_even_resolved(self, shut):
         out = git_inspect._run({"path": "/nonexistent-path-anywhere"})
@@ -588,7 +591,8 @@ class TestTodoListNeverReportsACorruptStoreAsEmpty:
 class TestTodoListIsGatedForMutationsButNotForReading:
     def test_adding_is_refused_when_shut(self, home, shut):
         out = todo_list._run({"action": "add", "content": "x"})
-        assert "Refusing" in out and TODO_KEY in out
+        assert "Refusing" in out and capabilities.gate_label(TODO_KEY) in out
+        assert TODO_KEY not in out, out
         assert not (Path(os.environ["XDG_STATE_HOME"]) / "shani-chronoa" / "todos.json").exists(), (
             "a refused add still created the store"
         )
@@ -597,7 +601,8 @@ class TestTodoListIsGatedForMutationsButNotForReading:
         todo_list._run({"action": "add", "content": "x"})
         ChronoaConfig().set(TODO_KEY, "false")
         out = todo_list._run({"action": "clear"})
-        assert "Refusing" in out and TODO_KEY in out
+        assert "Refusing" in out and capabilities.gate_label(TODO_KEY) in out
+        assert TODO_KEY not in out, out
         assert "x" in todo_list._run({"action": "list"}), (
             "a refused clear emptied the list anyway"
         )
@@ -685,7 +690,8 @@ class TestUndoIsGated:
         target.write_text("before\n", encoding="utf-8")
         out = undo_last_change._run({"path": str(target)})
         assert "Refusing" in out
-        assert FILE_EDIT_KEY in out
+        assert capabilities.gate_label(FILE_EDIT_KEY) in out, out
+        assert FILE_EDIT_KEY not in out, out
 
     def test_a_refused_restore_leaves_the_file_alone(self, home, granted):
         """The gate is shut *after* the edit, so a real pre-image exists.
@@ -702,7 +708,8 @@ class TestUndoIsGated:
         ChronoaConfig().set(FILE_EDIT_KEY, "false")
 
         out = undo_last_change._run({"path": str(target)})
-        assert "Refusing" in out and FILE_EDIT_KEY in out
+        assert "Refusing" in out and capabilities.gate_label(FILE_EDIT_KEY) in out
+        assert FILE_EDIT_KEY not in out, out
         assert target.read_text(encoding="utf-8") == "after\n", (
             "a refused restore rewrote the file"
         )
@@ -814,7 +821,8 @@ class TestEditIsGated:
         out = edit_file._run({"path": str(target), "old_string": "alpha",
                               "new_string": "beta"})
         assert "Refusing" in out
-        assert FILE_EDIT_KEY in out
+        assert capabilities.gate_label(FILE_EDIT_KEY) in out, out
+        assert FILE_EDIT_KEY not in out, out
         assert target.read_text(encoding="utf-8") == "alpha\n", (
             "a refused edit still changed the file"
         )
@@ -1020,7 +1028,8 @@ class TestManageTriggersMakesTheEngineReachable:
                 "action": "add", "name": "x", "sense": "power",
                 "match_mode": "keywords", "keywords": ["battery low"],
                 "actuator": "notify", "arguments": {"summary": "s"}})
-            assert "Refusing" in out and TRIGGER_KEY in out
+            assert "Refusing" in out and capabilities.gate_label(TRIGGER_KEY) in out
+            assert TRIGGER_KEY not in out, out
             assert not triggers.rules.rules_file().exists(), (
                 "a refused arm still wrote a rule that will fire unattended"
             )

@@ -30,6 +30,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]
                        / "usr" / "lib" / "shani-chronoa"))
 
 from shani_chronoa import file_index as F  # noqa: E402
+from shani_chronoa.capabilities import gate_label  # noqa: E402
 
 @pytest.fixture(autouse=True)
 def _own_index(tmp_path, monkeypatch):
@@ -220,7 +221,8 @@ class TestTheSkillSurface:
         root, _ = corpus
         out = S._run({"action": "search", "query": "wifi",
                       "path": str(root), "_config": self._config(False)})
-        assert "turned off" in out and "file-index-enabled" in out
+        assert "turned off" in out and gate_label("file-index-enabled") in out
+        assert "file-index-enabled" not in out, out
 
     def test_a_wrong_action_is_refused_not_ignored(self):
         from shani_chronoa.skills import search_my_files as S

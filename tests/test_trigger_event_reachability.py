@@ -383,9 +383,10 @@ class TestTheConsentGate:
         _shut(TRIGGER_CONTROL_KEY)
         out = _arm(repo)
         assert "Refusing to change armed rules" in out
-        assert TRIGGER_CONTROL_KEY in out, (
-            "the refusal must name the key, or a user cannot act on it"
+        assert gate_label(TRIGGER_CONTROL_KEY) in out, (
+            "the refusal must name the row, or a user cannot act on it"
         )
+        assert TRIGGER_CONTROL_KEY not in out, out
         assert EventRuleStore().all() == []
 
     def test_revoking_the_arming_key_stops_an_already_armed_rule(

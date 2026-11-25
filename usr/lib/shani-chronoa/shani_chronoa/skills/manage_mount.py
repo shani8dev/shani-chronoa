@@ -26,6 +26,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa import files
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
@@ -67,7 +68,7 @@ def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
     """Return (allowed, reason). Fail-closed: an undeclared key denies."""
     if not config.get_bool(_CONSENT_KEY, False):
         return False, (
-            f"changing mounts is turned off (enable '{_CONSENT_KEY}' in "
+            f"changing mounts is turned off (enable \u201c{gate_label(_CONSENT_KEY)}\u201d in "
             f"Settings). Listing what is mounted needs no such permission - only "
             f"mounting or unmounting does, because mounting runs code from a "
             f"device that was not there a moment ago."

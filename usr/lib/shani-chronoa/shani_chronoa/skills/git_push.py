@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa import files
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
@@ -81,9 +82,9 @@ def _consent(config: ChronoaConfig) -> tuple[bool, str]:
     """Return (allowed, reason). Fail-closed: an undeclared key denies."""
     if not config.get_bool(_CONSENT_KEY, False):
         return False, (
-            f"pushing to a remote is turned off (enable '{_CONSENT_KEY}' in "
+            f"pushing to a remote is turned off (enable \u201c{gate_label(_CONSENT_KEY)}\u201d in "
             f"Settings). Recording commits locally is a different switch "
-            f"('git-write-enabled') and is unaffected."
+            f"(\u201c{gate_label('git-write-enabled')}\u201d) and is unaffected."
         )
     return True, ""
 

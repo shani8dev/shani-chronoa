@@ -26,6 +26,7 @@ from __future__ import annotations
 import shutil
 from typing import Optional, Tuple
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa import files
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.pipewire import mute_state, run_wpctl
@@ -61,7 +62,7 @@ def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
     if not config.get_bool(_CONSENT_KEY, False):
         return False, (
             f"changing the microphone is turned off (enable "
-            f"'{_CONSENT_KEY}' in Settings). Reporting whether it is muted "
+            f"\u201c{gate_label(_CONSENT_KEY)}\u201d in Settings). Reporting whether it is muted "
             f"needs no such permission - only changing it does."
         )
     return True, ""
