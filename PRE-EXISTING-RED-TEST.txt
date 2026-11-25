@@ -1,3 +1,22 @@
+RESOLVED AT BASE 6020542 (2026-11-25). Every failure recorded below was
+re-run and is GREEN on this branch:
+
+  tests/test_question_presenter.py (both)      -> pass  (_consent(config) caller
+                                                  and the raw-key count updated)
+  test_no_enforcement_control_is_unwired       -> pass  (_UNDERSTOOD is empty;
+                                                  each orphan declares itself)
+  test_stale_cross_references                  -> pass  (alias pass resolves
+                                                  lan_link -> shani_link)
+  test_skill_gates_are_enforced                -> pass  (vision_sense_enabled
+                                                  is in _CONSENT_NAMES)
+  test_mutation_harness_can_fail               -> pass  (inventory reads the
+                                                  directory, not a tuple)
+  test_vision_sense capture-hang               -> pass  (fake 'import' is
+                                                  shadowed first, a5e7117)
+
+The notes below are kept as the dated record of why each test was red, not as
+a current status. README number drift is green too (269 tools, 53 sense rows).
+
 PRE-EXISTING RED TEST (not from my work): tests/test_question_presenter.py::
 TestNobodyToAskSaysNobodyIsThere::test_every_gated_tool_names_its_consent_key_with_nobody_to_ask
 
