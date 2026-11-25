@@ -205,6 +205,11 @@ _IMPL = {
     "office_document": "shani_chronoa.skills.office_document",
     "ui_elements": "shani_chronoa.skills.ui_elements",
     "android_device": "shani_chronoa.skills.android_device",
+    # The two new opt-in skills: one uses the hearing sense's own key, the
+    # other the same phone key as android_device. Both consult it through
+    # `_consent`, which is already in `_CONSENT_NAMES`.
+    "speaker_id": "shani_chronoa.skills.speaker_id",
+    "adb_workflow": "shani_chronoa.skills.adb_workflow",
     # The Siri/Google parity skills. Each consults a gate through a helper or the
     # sense API, which is why `_CONSENT_NAMES` carries `_consent` and
     # `sense_allowed` rather than this test knowing each file's spelling.

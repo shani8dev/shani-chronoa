@@ -442,6 +442,11 @@ def test_the_hint_table_has_no_value_that_is_its_own_binary():
         "ydotool",
         "yt-dlp",
         "zbar",
+        # Both verified against Arch's own package file lists on 2026-11-25:
+        # borg 1.4.5 ships /usr/bin/borg, zint 2.16 ships /usr/bin/zint. The
+        # two optional integrations name them in their refusals.
+        "borg",
+        "zint",
     }
     for binary, hint in files._PACKAGE_HINTS.items():
         assert hint == "?" or hint in real_packages, (

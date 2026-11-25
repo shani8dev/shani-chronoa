@@ -239,6 +239,15 @@ GATED: dict[str, str] = {
     # only for two genuinely different acts. `list` rides the same gate: it is
     # one door into one decision, and two doors are two things to keep in step.
     "review_proposals": "memory-sense-enabled",
+    # Voice identity is the hearing sense's own data class: a person's voice.
+    # A second switch would let somebody permit transcribing speech while
+    # refusing to recognize who spoke it, which is not a choice either gate
+    # can express. The per-person agreement is checked in the skill itself.
+    "speaker_id": "hearing-sense-enabled",
+    # The ADB workflow shares every other phone skill's key; a second one
+    # would let a fresh install copy files off a phone while saying it cannot
+    # reach one. File copies ask again, on this call only.
+    "adb_workflow": "phone-control-enabled",
 }
 
 # The per-event-type trigger gates are *not* in `GATED` above, and deliberately
@@ -308,6 +317,12 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # later: that one shows what is held, this one shows what was noticed and
     # deliberately not held.
     "review_proposals": ("What Chronoa knows", "What it noticed but did not keep"),
+    # The same facts, carried by a file the person moves themselves. No relay,
+    # no account, no network call; enrolments and voice clips never travel.
+    "device_sync": (
+        "What Chronoa knows",
+        "Carry conversations, preferences and memory to another machine in a file",
+    ),
     "compute_hash": ("Files", "Checksum a file"),
     "manage_mount": ("Files", "Mount or unmount"),
     "get_battery_status": ("Power and screen", "Battery status"),
@@ -399,6 +414,10 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "photo_video": ("Seeing", "Find faces and objects in a photo or video, add effects, or go through a video"),
     "photos": ("Photos and video", "Find your photos by what is in them, what is written on them, or when they were taken"),
     "recording": ("Sounds and recordings", "What a sound is, or who said what in a recording"),
+    "speaker_id": (
+        "Sounds and recordings",
+        "Enrol a voice and name who spoke, using the local speaker model",
+    ),
     "translate_text": ("Languages", "Translate text"),
     "encode_text": ("Everyday tools", "Encode or decode text"),
     "convert_color": ("Everyday tools", "Colour codes"),
@@ -571,12 +590,21 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "whois_lookup": ("System", "Look up who a domain or address is registered to"),
     "ui_elements": ("Pointer and keyboard",
                    "Press buttons, fill fields and open menus in other apps, and drive them visible"),
+    "adb_workflow": ("Devices", "Pair an Android phone and copy one file over adb"),
     "android_device": ("Devices", "Battery, screenshot, apps and files of a phone connected with adb"),
     "qr_code": ("Everyday tools", "Read a QR code or barcode, or make a QR code"),
+    # The linear half: a Code 128 tag, beside the QR code that reads it.
+    "barcode": ("Everyday tools", "Make a Code 128 barcode or read codes in an image"),
     # The 2026-10-07 matrix skills.
     "snapshot_status": ("System", "Can this machine roll back, and which slot is it on"),
     # Read-only: restic snapshots + `restic check`. Never init/backup/prune/forget.
     "backup_status": ("System", "Whether this machine has an off-machine backup, and when"),
+    # The optional adapters around that one honest reader. `plan` asks first
+    # and never runs the command it prints.
+    "backup_adapters": (
+        "System",
+        "Check a backup repository or print a backup command without running it",
+    ),
     # Transfers data between two machines and writes nothing. Not gated: it
     # discards what it sends, exactly like speed_test.
     "bandwidth_to_host": ("System", "How fast this machine talks to another machine"),

@@ -786,6 +786,11 @@ _PACKAGE_HINTS = {
     # `curl` with "On Arch it comes from the 'the package that provides
     # it' package". These 74 are the ones the matrices name outright.
     "adb": "android-tools",
+    # The two optional integrations on the chronoa-skills2 branch. Both names
+    # were checked against Arch's own file listing, not guessed: borg 1.4.5
+    # ships /usr/bin/borg, and zint 2.16 ships /usr/bin/zint (2026-11-25).
+    "borg": "borg",
+    "zint": "zint",
     "avahi-browse": "avahi",
     "balooctl6": "baloo",
     "bc": "bc",

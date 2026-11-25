@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**251 skills in 24 groups.** Each is a named, schema-typed module; the model
+**256 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. The whitelist *is* the design, so a new capability is a
 new named skill. The one exception is `run_command`, for running a project's
 tests and builds: off by default, sandboxed (no network, nothing outside the
@@ -37,7 +37,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**87 of 251 are consent-gated and 16 are destructive.**
+**89 of 256 are consent-gated and 16 are destructive.**
 
 ## Files
 
@@ -108,6 +108,7 @@ Processes, packages, updates, containers, vms, disks, network.
 | Skill | What it does | Before it runs |
 |---|---|---|
 | `autostart_entries` | What starts on this machine automatically, at login and on a schedule | — |
+| `backup_adapters` | Check a backup repository or print a backup command without running it | — |
 | `backup_status` | Whether this machine has an off-machine backup, and when | — |
 | `bandwidth_to_host` | How fast this machine talks to another machine | — |
 | `check_internet` | Is the internet working? | — |
@@ -163,6 +164,7 @@ Hardware, peripherals, sensors and their state.
 
 | Skill | What it does | Before it runs |
 |---|---|---|
+| `adb_workflow` | Pair an Android phone and copy one file over adb | needs `phone-control-enabled` |
 | `airplane_mode` | Report the radios, or turn airplane mode on or off | needs `radio-control-enabled` |
 | `android_device` | Battery, screenshot, apps and files of a phone connected with adb | needs `phone-control-enabled` |
 | `bluetooth_call` | Call through a paired phone, on this computer's speakers | needs `bluetooth-call-enabled` |
@@ -192,6 +194,7 @@ The small things a person asks for most.
 | Skill | What it does | Before it runs |
 |---|---|---|
 | `ask_user` | Ask a clarifying question | — |
+| `barcode` | Make a Code 128 barcode or read codes in an image | — |
 | `calculate` | Calculation | — |
 | `convert_color` | Colour codes | — |
 | `convert_units` | Convert units | — |
@@ -351,6 +354,19 @@ Drive the desktop without the keyboard.
 | `edit_video` | Trim, resize, rotate, or mute a video | — |
 | `generate_image` | Make a new picture from a description, on this computer | — |
 
+## What Chronoa knows
+
+Memory, percepts and what it has decided.
+
+| Skill | What it does | Before it runs |
+|---|---|---|
+| `conversations` | Search, reopen, copy or export earlier conversations | **asks first, always** · needs `file-delete-enabled` |
+| `device_sync` | Carry conversations, preferences and memory to another machine in a file | — |
+| `kundali` | Read the birth chart, panchang and planetary yogas of a person | — |
+| `list_capabilities` | What it can do right now | — |
+| `list_percepts` | What it perceives | — |
+| `review_proposals` | What it noticed but did not keep | needs `memory-sense-enabled` |
+
 ## Services and logs
 
 Systemd units and the journal.
@@ -362,18 +378,6 @@ Systemd units and the journal.
 | `crash_report` | What crashed recently | needs `coredumps-sense-enabled` |
 | `list_services` | System services | — |
 | `read_logs` | Read the system log | — |
-
-## What Chronoa knows
-
-Memory, percepts and what it has decided.
-
-| Skill | What it does | Before it runs |
-|---|---|---|
-| `conversations` | Search, reopen, copy or export earlier conversations | **asks first, always** · needs `file-delete-enabled` |
-| `kundali` | Read the birth chart, panchang and planetary yogas of a person | — |
-| `list_capabilities` | What it can do right now | — |
-| `list_percepts` | What it perceives | — |
-| `review_proposals` | What it noticed but did not keep | needs `memory-sense-enabled` |
 
 ## Apps
 
@@ -430,6 +434,15 @@ Turn the disclosure switches.
 | `capture_video` | Record a short video from the camera | — |
 | `photo_video` | Find faces and objects in a photo or video, add effects, or go through a video | — |
 
+## Sounds and recordings
+
+Who spoke, and what was said.
+
+| Skill | What it does | Before it runs |
+|---|---|---|
+| `recording` | What a sound is, or who said what in a recording | — |
+| `speaker_id` | Enrol a voice and name who spoke, using the local speaker model | needs `hearing-sense-enabled` |
+
 ## Languages
 
 Translate, spell and read text.
@@ -445,12 +458,4 @@ Capture and describe the screen.
 | Skill | What it does | Before it runs |
 |---|---|---|
 | `screenshot` | Screenshot | needs `vision-sense-enabled` |
-
-## Sounds and recordings
-
-Who spoke, and what was said.
-
-| Skill | What it does | Before it runs |
-|---|---|---|
-| `recording` | What a sound is, or who said what in a recording | — |
 
