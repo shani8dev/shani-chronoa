@@ -38,9 +38,11 @@ from shani_chronoa.config import _SENSE_CONSENT_KEYS
 from shani_chronoa.gui.surfaces import common
 from shani_chronoa.capabilities import sense_title
 
-TITLE = "Privacy"
+from shani_chronoa.gui.locale import _
+
+TITLE = _("Privacy")
 ICON = "security-high-symbolic"
-SUBTITLE = "What leaves this machine, and what Chronoa is allowed to read."
+SUBTITLE = _("What leaves this machine, and what Chronoa is allowed to read.")
 
 
 def _sense_names() -> list:

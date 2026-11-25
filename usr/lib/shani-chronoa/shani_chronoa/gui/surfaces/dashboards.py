@@ -22,11 +22,13 @@ from gi.repository import Gdk, Gtk
 from shani_chronoa import dashboard
 from shani_chronoa.gui.surfaces import common
 
-TITLE = "Dashboards"
+from shani_chronoa.gui.locale import _
+
+TITLE = _("Dashboards")
 ICON = "view-grid-symbolic"
 SECTION = "Acting"
-SUBTITLE = ("Pages of charts Chronoa built. Ask it for a dashboard and it "
-            "appears here; open one to see it in Chronoa's browser.")
+SUBTITLE = (_("Pages of charts Chronoa built. Ask it for a dashboard and it "
+            "appears here; open one to see it in Chronoa's browser."))
 
 
 def _pretty(stem: str) -> str:

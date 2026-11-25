@@ -77,9 +77,11 @@ from shani_chronoa import conversation_store, markdown_lite  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 from shani_chronoa.words import plural
 
+from shani_chronoa.gui.locale import _
+
 logger = logging.getLogger(__name__)
 
-TITLE = "Export"
+TITLE = _("Export")
 ICON = "document-save-symbolic"
 #: `surfaces.sections()` reads this off the module and files the panel under it;
 #: it is deliberately its own sentence rather than "Desktop and system",
@@ -87,9 +89,9 @@ ICON = "document-save-symbolic"
 SECTION = "Making"
 
 SUBTITLE = (
-    "Chronoa keeps your conversation and your facts in your own data "
+    _("Chronoa keeps your conversation and your facts in your own data "
     "directory. These write them out as files you choose, and name what is "
-    "in each one."
+    "in each one.")
 )
 
 # ---------------------------------------------------------------------------

@@ -56,11 +56,13 @@ from shani_chronoa import tool_tracking  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 from shani_chronoa.words import plural
 
+from shani_chronoa.gui.locale import _
+
 logger = logging.getLogger(__name__)
 
-TITLE = "Activity"
+TITLE = _("Activity")
 ICON = "view-continuous-symbolic"
-SUBTITLE = "Every skill Chronoa ran, newest first, from its own tool-call log."
+SUBTITLE = _("Every skill Chronoa ran, newest first, from its own tool-call log.")
 
 
 def _clip(text: Any, limit: int = 80) -> str:

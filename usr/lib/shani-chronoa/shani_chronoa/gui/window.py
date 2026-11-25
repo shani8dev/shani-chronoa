@@ -46,6 +46,7 @@ from . import context_bar as context_bar_module
 from . import task_card as task_card
 from . import timers as timers_module
 from .organs import OrganPanel, OrganStrip, ORGAN_IDLE_CSS
+from .locale import _
 
 logger = logging.getLogger(__name__)
 
@@ -1911,7 +1912,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
                 row.append(charts.stat(title, value, detail))
             if missing:
                 tile = charts.stat("Extras", f"{len(missing)} to add", "vision, voice, memory…")
-                add = Gtk.Button(label="Set up", halign=Gtk.Align.START, margin_start=12,
+                add = Gtk.Button(label=_("Set up"), halign=Gtk.Align.START, margin_start=12,
                                  margin_bottom=10)
                 add.add_css_class("pill")
                 add.connect("clicked", activate("setup-page", GLib.Variant("s", "extras")))
@@ -2162,7 +2163,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         settings_button.set_icon_name("emblem-system-symbolic")
         settings_button.add_css_class("flat")
         settings_button.set_valign(Gtk.Align.CENTER)
-        settings_button.set_tooltip_text("Settings")
+        settings_button.set_tooltip_text(_("Settings"))
         settings_button.set_action_name("app.open-settings")
 
         # Setup: the wizard that installs the model, the ears and the voice.

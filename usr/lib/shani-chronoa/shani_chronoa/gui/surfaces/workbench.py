@@ -98,13 +98,15 @@ from gi.repository import Adw, Gtk  # noqa: E402
 from shani_chronoa import markdown_lite, skills, verification  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 
+from shani_chronoa.gui.locale import _
+
 logger = logging.getLogger(__name__)
 
-TITLE = "Workbench"
+TITLE = _("Workbench")
 ICON = "object-select-symbolic"
 SECTION = "Acting"
 
-SUBTITLE = "Turn a command into a skill of your own, and see what that joined."
+SUBTITLE = _("Turn a command into a skill of your own, and see what that joined.")
 
 #: Markers a test can find in the built tree, so no assertion has to read a
 #: count back out of the object being counted.
@@ -1010,7 +1012,7 @@ class _Workbench:
                   "always be built again from this panel; anything you wrote by "
                   "hand cannot."),
         )
-        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("cancel", _("Cancel"))
         dialog.add_response("remove", "Remove it")
         dialog.set_response_appearance("remove", Adw.ResponseAppearance.DESTRUCTIVE)
         dialog.set_default_response("cancel")

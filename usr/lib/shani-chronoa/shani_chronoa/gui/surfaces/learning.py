@@ -56,7 +56,9 @@ from gi.repository import GLib, Gtk, Pango  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 from shani_chronoa.words import plural
 
-TITLE = "What it has learned"
+from shani_chronoa.gui.locale import _
+
+TITLE = _("What it has learned")
 #: `brain` is not in the icon theme - measured: `Gtk.IconTheme.has_icon("brain")`
 #: is False while every other icon name in the surfaces resolves, so this row
 #: rendered as a blank. `weather-clear-night-symbolic` is what this machine has
@@ -64,8 +66,8 @@ TITLE = "What it has learned"
 #: is a claim about the desktop's theme, and the theme is the user's.
 ICON = "weather-clear-night-symbolic"
 SECTION = "Thinking"
-SUBTITLE = ("Facts, which tools actually worked, and the two models fitted from "
-            "them - with what each one can and cannot do")
+SUBTITLE = (_("Facts, which tools actually worked, and the two models fitted from "
+            "them - with what each one can and cannot do"))
 
 #: The rows, in order: **the title a person reads, and what the row is
 #: called in the code**.

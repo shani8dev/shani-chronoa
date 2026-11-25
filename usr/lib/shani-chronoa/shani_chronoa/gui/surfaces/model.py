@@ -105,15 +105,17 @@ from shani_chronoa.gui.surfaces import common  # noqa: E402
 from shani_chronoa.opencv import runtime as opencv_runtime  # noqa: E402
 from shani_chronoa.words import plural
 
+from shani_chronoa.gui.locale import _
+
 logger = logging.getLogger(__name__)
 
 # "Answering now", not "Model": it sat directly beside "Models" in the sidebar,
 # and the two are different questions - which backend is answering this
 # conversation, versus every model Chronoa could run.
-TITLE = "Answering now"
+TITLE = _("Answering now")
 ICON = "media-playback-start-symbolic"
-SUBTITLE = ("Local state only. The cloud row is read from configuration and is never contacted; "
-            "the two local probes ask a service running on this computer.")
+SUBTITLE = (_("Local state only. The cloud row is read from configuration and is never contacted; "
+            "the two local probes ask a service running on this computer."))
 
 #: Longest detail a row shows before it is cut. Model names, paths and provider
 #: lists are short, but an `OSError` string from a probe is not.

@@ -1,0 +1,238 @@
+# Shani Chronoa GTK UI - hi.
+# 48 of 76 strings translated. Untranslated entries are
+# intentional: copy this file, fill the empty msgstrs and compile with msgfmt.
+msgid ""
+msgstr ""
+"Project-Id-Version: shani-chronoa\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: hi\n"
+
+msgid "Activity"
+msgstr "गतिविधि"
+
+msgid "Every skill Chronoa ran, newest first, from its own tool-call log."
+msgstr ""
+
+msgid "Artifacts"
+msgstr "कलाकृतियाँ"
+
+msgid "Where models, voices, documents and exports are stored. Browse, search, download and clean up your local files."
+msgstr ""
+
+msgid "Cancel"
+msgstr "रद्द करें"
+
+msgid "Calendar"
+msgstr "कैलेंडर"
+
+msgid "What is on your calendars, read from the same Evolution Data Server sources the calendar_events skill and the calendar trigger read. Read-only: nothing here changes an event, and nothing is read while the consent key below is off."
+msgstr ""
+
+msgid "Ready"
+msgstr "तैयार"
+
+msgid "Needs attention"
+msgstr "ध्यान चाहिए"
+
+msgid "Could not determine"
+msgstr "निर्धारित नहीं कर सके"
+
+msgid "Turned off"
+msgstr "बंद"
+
+msgid "Search"
+msgstr "खोजें"
+
+msgid "Download"
+msgstr "डाउनलोड"
+
+msgid "Turn on"
+msgstr "चालू करें"
+
+msgid "Reload"
+msgstr "फिर से लोड करें"
+
+msgid "Details"
+msgstr "विवरण"
+
+msgid "Compare"
+msgstr "तुलना"
+
+msgid "What changed between two conversations, by the questions you asked. Replies are not compared: the same question answered twice gives two different answers."
+msgstr ""
+
+msgid "Connections"
+msgstr "कनेक्शन"
+
+msgid "Other apps and chat channels that can use Chronoa, and how to connect them. Read-only: nothing here starts anything."
+msgstr ""
+
+msgid "Conversations"
+msgstr "बातचीत"
+
+msgid "Every saved conversation, newest first."
+msgstr "हर सहेजी गई बातचीत, नई से पुरानी।"
+
+msgid "Background mode"
+msgstr "पृष्ठभूमि मोड"
+
+msgid "Dashboards"
+msgstr "डैशबोर्ड"
+
+msgid "Pages of charts Chronoa built. Ask it for a dashboard and it appears here; open one to see it in Chronoa's browser."
+msgstr ""
+
+msgid "Desktop"
+msgstr "डेस्कटॉप"
+
+msgid "Is Chronoa actually hooked into this desktop right now? Every row is read from the thing that would make it true, and says which."
+msgstr ""
+
+msgid "Diagnostics"
+msgstr "निदान"
+
+msgid "One question per row: is this part of Chronoa working right now, and if not, why not? Every answer is read from the module that would make the thing true. A row that could not be answered says so rather than showing a clean answer."
+msgstr ""
+
+msgid "Diff"
+msgstr "अंतर"
+
+msgid "What Chronoa changed on this machine, file by file, with line numbers. These writes already happened; to put one back, ask it to undo."
+msgstr ""
+
+msgid "Driving"
+msgstr "नियंत्रण"
+
+msgid "What Chronoa can do with a mouse and a keyboard on this desktop, and where it has to say it cannot."
+msgstr ""
+
+msgid "Editor"
+msgstr "संपादक"
+
+msgid "Export"
+msgstr "निर्यात"
+
+msgid "Chronoa keeps your conversation and your facts in your own data directory. These write them out as files you choose, and name what is in each one."
+msgstr ""
+
+msgid "Goals"
+msgstr "लक्ष्य"
+
+msgid "Plans Chronoa saved for later, one step at a time. Each step runs exactly as a chat request would, asking for the same things."
+msgstr ""
+
+msgid "The anatomy"
+msgstr "शरीर संरचना"
+
+msgid "What it has learned"
+msgstr "इसने क्या सीखा"
+
+msgid "Facts, which tools actually worked, and the two models fitted from them - with what each one can and cannot do"
+msgstr ""
+
+msgid "Transcribe"
+msgstr "प्रतिलेखन"
+
+msgid "Machine"
+msgstr "मशीन"
+
+msgid "What this machine is doing, read once from its own machine-state senses. A sense that could not answer says so in its row; it is never shown as one that did."
+msgstr ""
+
+msgid "Meetings"
+msgstr "बैठकें"
+
+msgid "Record a whole meeting, keep it, and read the transcript and notes back whenever you want them."
+msgstr ""
+
+msgid "What it remembers"
+msgstr "इसे क्या याद है"
+
+msgid "What Chronoa has remembered: the facts you told it, and the readings its senses took. Nothing here reaches a model by being displayed."
+msgstr ""
+
+msgid "Answering now"
+msgstr "अभी उत्तर दे रहा है"
+
+msgid "Local state only. The cloud row is read from configuration and is never contacted; the two local probes ask a service running on this computer."
+msgstr ""
+
+msgid "Models"
+msgstr "मॉडल"
+
+msgid "Everything Chronoa can run, what each one costs, and which are already here"
+msgstr ""
+
+msgid "My files"
+msgstr "मेरी फ़ाइलें"
+
+msgid "Search your own documents and notes, by keyword and - where the embedding model is installed - by meaning."
+msgstr ""
+
+msgid "Notices"
+msgstr "सूचनाएँ"
+
+msgid "What Chronoa noticed on its own, newest first. Dismissing one keeps it from nagging again for the same thing."
+msgstr ""
+
+msgid "Privacy"
+msgstr "गोपनीयता"
+
+msgid "What leaves this machine, and what Chronoa is allowed to read."
+msgstr "इस मशीन से क्या बाहर जाता है, और Chronoa को क्या पढ़ने की अनुमति है।"
+
+msgid "What's running"
+msgstr "क्या चल रहा है"
+
+msgid "Everything Chronoa started, and the button that stops each one. Nothing here runs unless you turned it on."
+msgstr ""
+
+msgid "Routines"
+msgstr "दिनचर्या"
+
+msgid "One phrase that stands for a whole request. Say \"good morning\" and it asks for the weather, the day's calendar and the news - planned by the model like anything you typed, so every tool still meets its own gate."
+msgstr ""
+
+msgid "Sandbox"
+msgstr "सैंडबॉक्स"
+
+msgid "Where Chronoa runs commands, and a test of what they can reach."
+msgstr ""
+
+msgid "Senses"
+msgstr "इंद्रियाँ"
+
+msgid "Every sense Chronoa has, and whether you have agreed to let it run. One switch per sense; a sense that is off is never invoked at all."
+msgstr ""
+
+msgid "What Chronoa can do"
+msgstr "Chronoa क्या कर सकता है"
+
+msgid "Everything Chronoa can be asked to do, read from the same live registry the model is handed. Each row says what it touches, a gate here writes the same key Settings does, and a row with a question offers it in the composer."
+msgstr ""
+
+msgid "Triggers"
+msgstr "ट्रिगर"
+
+msgid "The trigger rules this assistant could act on, read from the same two rule files the engines fire from. Arm or remove rules here; nothing on this page fires one."
+msgstr ""
+
+msgid "Speaking voice"
+msgstr "बोलने की आवाज़"
+
+msgid "Pick the voice Chronoa speaks with, hear it, and set its speed and pitch. Downloads open Setup on its Voice page."
+msgstr ""
+
+msgid "Workbench"
+msgstr "कार्यक्षेत्र"
+
+msgid "Turn a command into a skill of your own, and see what that joined."
+msgstr ""
+
+msgid "Set up"
+msgstr "सेट अप करें"
+
+msgid "Settings"
+msgstr "सेटिंग्स"
+

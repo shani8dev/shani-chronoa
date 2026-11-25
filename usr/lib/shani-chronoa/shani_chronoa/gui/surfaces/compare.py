@@ -30,9 +30,11 @@ from shani_chronoa import conversation_diff as diff_module  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 from shani_chronoa.words import plural
 
+from shani_chronoa.gui.locale import _
+
 logger = logging.getLogger(__name__)
 
-TITLE = "Compare"
+TITLE = _("Compare")
 #: `document-compare-symbolic` and `edit-compare-symbolic` are both absent from
 #: Adwaita - checked with `rglob` over the theme directory, because an icon name
 #: the theme lacks renders as an empty box that reads as a bug rather than as a
@@ -48,9 +50,9 @@ TITLE = "Compare"
 ICON = "view-dual-symbolic"
 SECTION = "Remembering"
 
-SUBTITLE = ("What changed between two conversations, by the questions you asked. "
+SUBTITLE = (_("What changed between two conversations, by the questions you asked. "
             "Replies are not compared: the same question answered twice gives two "
-            "different answers.")
+            "different answers."))
 
 NEED_TWO = "Pick two conversations to compare."
 ONLY_ONE = "There is only one conversation to compare."

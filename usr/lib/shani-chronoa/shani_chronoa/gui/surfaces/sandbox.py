@@ -25,12 +25,14 @@ from gi.repository import GLib, Gtk  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 from shani_chronoa.sandbox import selfcheck  # noqa: E402
 
+from shani_chronoa.gui.locale import _
+
 logger = logging.getLogger(__name__)
 
-TITLE = "Sandbox"
+TITLE = _("Sandbox")
 ICON = "security-medium-symbolic"
 SECTION = "Health and trust"
-SUBTITLE = "Where Chronoa runs commands, and a test of what they can reach."
+SUBTITLE = _("Where Chronoa runs commands, and a test of what they can reach.")
 
 SECCOMP_KEY = "sandbox-seccomp-enabled"
 

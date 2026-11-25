@@ -49,15 +49,17 @@ from gi.repository import Adw, GLib, Gtk, Pango
 from shani_chronoa import conversation_store, history_repair, markdown_lite
 from shani_chronoa.gui.surfaces import common
 
+from shani_chronoa.gui.locale import _
+
 logger = logging.getLogger(__name__)
 
-TITLE = "Conversations"
+TITLE = _("Conversations")
 ICON = "view-list-symbolic"
 
 #: The page's own line above its header bar, saying which way the list runs: a
 #: list with a date on every row and no order stated is one people re-sort by
 #: hand, in the store, forever.
-SUBTITLE = "Every saved conversation, newest first."
+SUBTITLE = _("Every saved conversation, newest first.")
 
 NO_MATCHES = "No conversation matches the filter."
 NOTHING_YET = "No conversations yet"

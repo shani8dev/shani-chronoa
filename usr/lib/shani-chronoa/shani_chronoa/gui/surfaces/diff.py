@@ -40,9 +40,11 @@ from gi.repository import Gdk, Gtk  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 from shani_chronoa.words import plural
 
+from shani_chronoa.gui.locale import _
+
 logger = logging.getLogger(__name__)
 
-TITLE = "Diff"
+TITLE = _("Diff")
 #: `diff-symbolic` is not a glyph this theme ships (checked with
 #: `Gtk.IconTheme.has_icon`, which is what
 #: `tests/test_surface_health_status.py::TestSidebarIcons` checks). An icon
@@ -53,8 +55,8 @@ ICON = "document-edit-symbolic"
 SECTION = "Making"
 
 SUBTITLE = (
-    "What Chronoa changed on this machine, file by file, with line numbers. "
-    "These writes already happened; to put one back, ask it to undo."
+    _("What Chronoa changed on this machine, file by file, with line numbers. "
+    "These writes already happened; to put one back, ask it to undo.")
 )
 
 

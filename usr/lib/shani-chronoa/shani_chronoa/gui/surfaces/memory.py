@@ -69,6 +69,8 @@ from shani_chronoa import egress  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 from shani_chronoa.words import plural
 
+from shani_chronoa.gui.locale import _
+
 logger = logging.getLogger(__name__)
 
 #: **What it remembers** - the question the page is opened for, and the
@@ -77,14 +79,14 @@ logger = logging.getLogger(__name__)
 #: person told Chronoa, and the readings its senses took - so the
 #: subtitle says both, because it used to claim only the first while
 #: showing mostly the second.
-TITLE = "What it remembers"
+TITLE = _("What it remembers")
 # A bookmark - facts it was asked to keep - rather than a generic page, which
 # in Adwaita is near-identical to the Artifacts glyph two rows away.
 ICON = "user-bookmarks-symbolic"
 
 SUBTITLE = (
-    "What Chronoa has remembered: the facts you told it, and the readings "
-    "its senses took. Nothing here reaches a model by being displayed."
+    _("What Chronoa has remembered: the facts you told it, and the readings "
+    "its senses took. Nothing here reaches a model by being displayed.")
 )
 
 #: Markers a test can find in the built tree, so no assertion has to read a

@@ -46,13 +46,15 @@ from gi.repository import Adw, GLib, Gtk, Pango  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 from shani_chronoa.words import plural
 
+from shani_chronoa.gui.locale import _
+
 logger = logging.getLogger(__name__)
 
-TITLE = "Models"
+TITLE = _("Models")
 ICON = "preferences-desktop-font-symbolic"
 SECTION = "Thinking"
-SUBTITLE = ("Everything Chronoa can run, what each one costs, and which are "
-            "already here")
+SUBTITLE = (_("Everything Chronoa can run, what each one costs, and which are "
+            "already here"))
 
 #: One card per model. `(kind, key, label, size_bytes, installed, note)`.
 #: Read from the engines themselves rather than a list kept in step by hand, so

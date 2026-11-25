@@ -34,15 +34,17 @@ from gi.repository import GLib, Gtk  # noqa: E402
 from shani_chronoa import routines  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 
+from shani_chronoa.gui.locale import _
+
 logger = logging.getLogger(__name__)
 
-TITLE = "Routines"
+TITLE = _("Routines")
 ICON = "appointment-soon-symbolic"
 SECTION = "Acting"
-SUBTITLE = ("One phrase that stands for a whole request. Say \"good morning\" "
+SUBTITLE = (_("One phrase that stands for a whole request. Say \"good morning\" "
             "and it asks for the weather, the day's calendar and the news - "
             "planned by the model like anything you typed, so every tool still "
-            "meets its own gate.")
+            "meets its own gate."))
 
 
 def _request_of(routine: Any) -> str:

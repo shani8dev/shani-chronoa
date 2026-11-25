@@ -42,6 +42,8 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 from shani_chronoa.words import plural
 
+from shani_chronoa.gui.locale import _
+
 SURFACE_ID = "listening"
 #: Listening was the only panel with no section, so it landed in the catch-all -
 #: measured on the real sidebar: six sections, and "Everything else" holding
@@ -57,7 +59,7 @@ SECTION = "Sensing"
 #: microphone. "Listening" in an app whose centrepiece is a microphone orb means
 #: the microphone, so this sat beside **Voice** under a name that pointed at
 #: neither of the two things it is.
-TITLE = "Transcribe"
+TITLE = _("Transcribe")
 #: Required by `surfaces.all_surfaces()` (TITLE, ICON, build) - a surface
 #: without one raises AttributeError inside that loop, which takes the
 #: whole registry down rather than just this page. Found by walking the

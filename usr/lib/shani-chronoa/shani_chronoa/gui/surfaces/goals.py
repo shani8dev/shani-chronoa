@@ -28,13 +28,15 @@ from shani_chronoa import goals  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 from shani_chronoa.words import plural
 
+from shani_chronoa.gui.locale import _
+
 logger = logging.getLogger(__name__)
 
-TITLE = "Goals"
+TITLE = _("Goals")
 ICON = "view-list-ordered-symbolic"
 SECTION = "Acting"
-SUBTITLE = ("Plans Chronoa saved for later, one step at a time. Each step runs "
-            "exactly as a chat request would, asking for the same things.")
+SUBTITLE = (_("Plans Chronoa saved for later, one step at a time. Each step runs "
+            "exactly as a chat request would, asking for the same things."))
 
 _PHASE_WORD = {
     goals.Phase.PENDING: "not started",

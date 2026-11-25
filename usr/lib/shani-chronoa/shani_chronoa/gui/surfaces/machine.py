@@ -77,9 +77,11 @@ from shani_chronoa.gui.surfaces import common  # noqa: E402
 from shani_chronoa.senses import Percept, discover_senses  # noqa: E402
 from shani_chronoa.words import plural
 
+from shani_chronoa.gui.locale import _
+
 logger = logging.getLogger(__name__)
 
-TITLE = "Machine"
+TITLE = _("Machine")
 ICON = "computer-symbolic"
 
 #: Every other panel carries one of these and this was the only one without, so
@@ -87,9 +89,9 @@ ICON = "computer-symbolic"
 #: explained itself in one line first. Same shape as the others, and it says the
 #: thing that matters here: the readings are a snapshot, not a live feed.
 SUBTITLE = (
-    "What this machine is doing, read once from its own machine-state senses. "
+    _("What this machine is doing, read once from its own machine-state senses. "
     "A sense that could not answer says so in its row; it is never shown as one "
-    "that did."
+    "that did.")
 )
 
 #: The rows this panel shows, grouped, in the order it shows them. Read
