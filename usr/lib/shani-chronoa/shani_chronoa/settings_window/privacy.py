@@ -554,7 +554,7 @@ class PrivacyPage:
              "reaches beyond this machine - every address is private.",
              "lab_network_create and lab_network_destroy refuse while this is off"),
             # Its own row, and the wording is the point: the network sense and
-            # interface_counters read the kernel's *counters*, this reads what is
+            # the moved interface diagnostics read kernel *counters*; this reads what is
             # inside the packets. Putting it under the network row would read as
             # "it already knows about the network", which is exactly the
             # misunderstanding that matters here.

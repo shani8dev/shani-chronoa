@@ -26,4 +26,5 @@ packages = [
     "shani_sysadmin",
     "shani_sysadmin.skills",
     "shani_sysadmin.senses",
+    "shani_sysadmin.ml_harness",
 ]

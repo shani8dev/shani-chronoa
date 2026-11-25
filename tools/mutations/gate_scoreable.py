@@ -20,7 +20,7 @@ A mutation that applies is not a mutation that measures.
 
 TEST_FILE = 'tests/test_cultivation.py'
 
-_GATE = 'apps/shani-sysadmin/shani_sysadmin/cultivation.py'
+_GATE = 'apps/shani-sysadmin/shani_sysadmin/ml_harness/cultivation.py'
 
 MUTATIONS = [
     {

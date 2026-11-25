@@ -30,9 +30,9 @@ import sys
 
 import pytest
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "usr/lib/shani-chronoa"))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[3] / "usr/lib/shani-chronoa"))
 
-from shani_chronoa.skills import discover_hosts as dh  # noqa: E402
+from shani_sysadmin.skills import discover_hosts as dh  # noqa: E402
 
 #: The shape of `avahi-browse --all --terminate --resolve` output: `=`
 ## progress lines, the same service appearing more than once as different

@@ -22,9 +22,9 @@ zero, and the default adjustment is not a deliberate one.
 
 from __future__ import annotations
 
-TEST_FILE = "tests/test_oom_score.py"
+TEST_FILE = "apps/shani-sysadmin/tests/test_oom_score.py"
 
-_SKILL = "usr/lib/shani-chronoa/shani_chronoa/skills/oom_score.py"
+_SKILL = "apps/shani-sysadmin/shani_sysadmin/skills/oom_score.py"
 
 MUTATIONS = [
     # ---- the two shipped defects ----------------------------------------

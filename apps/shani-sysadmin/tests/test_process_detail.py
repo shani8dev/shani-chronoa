@@ -27,10 +27,10 @@ import sys
 
 import pytest
 
-_REPO = pathlib.Path(__file__).resolve().parents[1]
+_REPO = pathlib.Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
-from shani_chronoa.skills import process_detail as PD  # noqa: E402
+from shani_sysadmin.skills import process_detail as PD  # noqa: E402
 
 #: Real `/proc/<pid>/status` field shapes, captured on this machine.
 STATUS_SLEEPING = """Name:\tsleep
@@ -203,7 +203,7 @@ def test_it_never_attaches_or_traces_anything():
     the module looks like any other reader - and a future "let us just strace
     it" would leave no failing test behind.
     """
-    source = (_REPO / "usr/lib/shani-chronoa/shani_chronoa/skills"
+    source = (_REPO / "apps/shani-sysadmin/shani_sysadmin/skills"
               / "process_detail.py").read_text()
     code = "\n".join(line for line in source.splitlines()
                      if not line.lstrip().startswith("#"))

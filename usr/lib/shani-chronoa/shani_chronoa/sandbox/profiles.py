@@ -277,7 +277,7 @@ class AgentProfile:
 #: reads exactly like a tool that is broken.
 #:
 #: Deliberately excluded, and the reason is in each case:
-#: - every network tool (`web_search`, `translate_text`, `scan_network`,
+#: - every network tool (`web_search`, `translate_text`,
 #:   `check_updates`, `recommend_model`): the unattended profile also forbids
 #:   network, and an allowlist that admitted a tool the profile's other policy
 #:   forbids would be a contradiction rather than a policy.

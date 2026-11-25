@@ -38,13 +38,66 @@ MOVED_SKILLS = {
     "list_containers",
     "list_vms",
     "vm",
+    # Second move: deep system, network and forensics diagnostics.
+    "routing_table",
+    "neighbour_table",
+    "interface_counters",
+    "port_owner",
+    "trace_route",
+    "dns_lookup",
+    "whois_lookup",
+    "tailscale_status",
+    "network_watch",
+    "scan_network",
+    "discover_hosts",
+    "network_activity",
+    "check_port",
+    "ping_host",
+    "bandwidth_to_host",
+    "tls_certificate",
+    "speed_test",
+    "open_files",
+    "file_locks",
+    "system_history",
+    "log_files",
+    "crash_report",
+    "disk_layout",
+    "disk_activity",
+    "space_by_type",
+    "check_units",
+    "scheduled_tasks",
+    "graphics_stack",
+    "permission_audit",
+    "process_detail",
+    "thread_activity",
+    "cpu_frequency",
+    "cpu_per_core",
+    "oom_score",
+}
+
+#: The plain-answer diagnostics that deliberately stayed in Chronoa.
+KEPT_SKILLS = {
+    "disk_usage",
+    "system_info",
+    "list_processes",
+    "process_cost",
+    "login_history",
+    "check_internet",
+    "my_ip_address",
+    "data_usage",
+    "run_command",
 }
 
 
 def test_chronoa_does_not_register_moved_skills():
     _, handlers = skills.discover_skills()
     assert not (set(handlers) & MOVED_SKILLS)
-    assert "run_command" in handlers  # the documented exception stays here
+    assert KEPT_SKILLS <= set(handlers)  # the plain answers stay here
+
+
+def test_the_app_registers_every_moved_skill():
+    _, handlers = __import__("shani_sysadmin").discover_skills()
+    assert MOVED_SKILLS <= set(handlers)
 
 
 def test_moved_names_are_absent_from_every_registration_table():
@@ -67,21 +120,19 @@ def test_kernellog_sense_is_no_longer_polled_by_chronoa():
 
 def test_moved_skill_and_sense_files_left_the_canonical_package():
     package = REPO / "usr/lib/shani-chronoa/shani_chronoa"
-    for module in (
-        "capture_packets",
-        "dissect_traffic",
-        "binary_hardening",
-        "inspect_binary",
-        "driver_dev",
-        "user_driver",
-        "container",
-        "vm",
-        "lab_network",
-        "boot_report",
-        "compression_savings",
+    modules = {
+        "capture_packets", "dissect_traffic", "binary_hardening",
+        "inspect_binary", "driver_dev", "user_driver", "container", "vm",
+        "lab_network", "boot_report", "compression_savings",
         "bridge_topology",
-    ):
+    } | {n for n in MOVED_SKILLS if n not in {
+        "lab_network_create", "lab_network_destroy", "lab_network_list",
+        "lab_network_status", "device_probe", "device_serial", "device_i2c",
+        "driver_status", "driver_scaffold", "driver_build",
+    }}
+    for module in modules:
         assert not (package / "skills" / f"{module}.py").exists(), module
+        assert (APP / "shani_sysadmin" / "skills" / f"{module}.py").is_file(), module
     assert not (package / "senses" / "kernel_log.py").exists()
 
 
@@ -96,7 +147,7 @@ def test_app_skeleton_exists():
 
 
 def test_ml_modules_are_shims_to_the_app():
-    """Chronoa still has two callers, so import names remain; code does not."""
+    """Names remain in Chronoa so its two real callers keep working; code does not."""
     for name in (
         "distill",
         "merge",
@@ -109,7 +160,9 @@ def test_ml_modules_are_shims_to_the_app():
             REPO / "usr/lib/shani-chronoa/shani_chronoa" / f"{name}.py"
         ).read_text()
         assert "sys.modules[__name__] = _impl" in source, name
-        assert (APP / "shani_sysadmin" / f"{name}.py").is_file(), name
+        assert f"shani_sysadmin.ml_harness.{name}" in source, name
+        assert (APP / "shani_sysadmin" / "ml_harness" / f"{name}.py").is_file(), name
+        assert not (APP / "shani_sysadmin" / f"{name}.py").exists(), name
 
 
 def test_documented_counts_match_the_registry():

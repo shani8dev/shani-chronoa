@@ -21,8 +21,8 @@ import subprocess
 
 import pytest
 
-from shani_chronoa import capabilities
-from shani_chronoa.skills import discover_skills, scan_network
+from shani_sysadmin.skills import scan_network
+from shani_sysadmin.skills import discover_skills
 
 NMAP_NO_DNS = """Starting Nmap 7.95 ( https://nmap.org )
 Nmap scan report for 192.168.31.1
@@ -245,13 +245,13 @@ class TestParsing:
 
 
 class TestRegistry:
-    def test_it_is_discovered_and_grouped(self):
+    def test_it_is_discovered_by_the_app_and_not_by_chronoa(self):
         tools, _ = discover_skills()
         names = [t["function"]["name"] for t in tools]
-        assert "scan_network" in names, "the skill loads but is not in the registry"
-        grouped = {c.tool: c.group for c in capabilities.find_capabilities(tools)}
-        assert grouped.get("scan_network"), "scan_network is ungrouped, so help hides it"
-        assert grouped["scan_network"] in capabilities.GROUP_ORDER
+        assert "scan_network" in names
+        from shani_chronoa.skills import discover_skills as chronoa_skills
+        chronoa_names = {t["function"]["name"] for t in chronoa_skills()[0]}
+        assert "scan_network" not in chronoa_names, "the deep scan left Chronoa's whitelist"
 
     def test_its_schema_is_valid(self):
         schema = scan_network._SCHEMA

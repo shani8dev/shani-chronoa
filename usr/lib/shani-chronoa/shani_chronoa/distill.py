@@ -1,4 +1,4 @@
-"""Import shim: the implementation lives in ``shani_sysadmin.distill``.
+"""Import shim: the implementation lives in ``shani_sysadmin.ml_harness.distill``.
 
 The router-harness module moved out of Chronoa with the other sysadmin/ML
 tooling. Chronoa still calls it from ``app/brain.py`` and ``tool_select.py``,
@@ -12,6 +12,6 @@ import sys
 
 from shani_chronoa import _sysadmin_path  # noqa: F401
 import shani_sysadmin  # noqa: F401
-import shani_sysadmin.distill as _impl
+import shani_sysadmin.ml_harness.distill as _impl
 
 sys.modules[__name__] = _impl

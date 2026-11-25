@@ -652,7 +652,7 @@ _PACKAGE_HINTS = {
     "socat": "socat",
     # Read out of `commands[].package` in both image matrices, 2026-10-10.
     # `sar` is in **sysstat**, the same package as the iostat and mpstat
-    # that `disk_activity` and `cpu_per_core` already use - so this is a
+    # that the moved disk/CPU diagnostics use - so this is a
     # question of reading a package already installed, not a new one.
     "sar": "sysstat",
     "sensors": "lm_sensors",

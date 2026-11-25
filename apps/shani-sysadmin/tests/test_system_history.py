@@ -34,10 +34,10 @@ import sys
 
 import pytest
 
-_REPO = pathlib.Path(__file__).resolve().parents[1]
+_REPO = pathlib.Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
-from shani_chronoa.skills import system_history as SH  # noqa: E402
+from shani_sysadmin.skills import system_history as SH  # noqa: E402
 
 #: Captured on a real slot. The banner is on its own line, then a BLANK line,
 #: then the header whose first cell is a time-format label.

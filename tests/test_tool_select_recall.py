@@ -78,7 +78,7 @@ CASES = json.loads((_REPO / "tools" / "eval_cases.json").read_text())["cases"]
 #: Floors, not the measured values. A metric asserted at its current number
 #: fails the first time a skill lands and says nothing about regressions, which
 #: is the stale-label failure this repository records about dead code.
-RECALL_FLOOR = 0.88
+RECALL_FLOOR = 0.80  # re-derived after 34 diagnostics moved out (188/228)
 FIRST_FLOOR = 0.70
 
 
@@ -175,11 +175,12 @@ class TestWhatTheMissesActuallyAre:
         this and should not turn the suite red for it."""
         misses = self._misses()
         scored = [s for _, _, s in misses if s > 0.0]
-        # The floor moved from 0.60 to 0.30 when 22 sysadmin skills left the
-        # registry: requests that name one of them now score zero because the
-        # tool is not offered at all, which is a different cause than a
-        # vocabulary gap. The floor still catches the remedy changing back.
-        assert len(scored) / len(misses) >= 0.30, (
+        # The floor moved 0.60 -> 0.30 after the first 22 skills left, then
+        # 0.30 -> 0.15 after the second move (7 of 40): those requests now
+        # score zero because the tool is not offered at all, which is a
+        # different cause than a vocabulary gap. The floor still catches the
+        # remedy changing back.
+        assert len(scored) / len(misses) >= 0.15, (
             "%d of %d misses score above zero - if this drops, the misses have "
             "become a vocabulary problem and the remedy changed"
             % (len(scored), len(misses)))
@@ -512,6 +513,6 @@ class TestTheSynonymTableBuysAccuracyWithoutAModel:
             "the nineteen are worth only %d of 220 top-1 (%d with, %d without); "
             "they were added on a measurement of +17, so something else changed"
             % (with_them - without_them, with_them, without_them))
-        assert with_them >= 180, (
-            "top-1 with the table as it stands is %d/220, below the 180 "
-            "measured after the sysadmin skills moved out" % with_them)
+        assert with_them >= 160, (
+            "top-1 with the table as it stands is %d/220, below the 162 "
+            "measured after the second sysadmin move" % with_them)

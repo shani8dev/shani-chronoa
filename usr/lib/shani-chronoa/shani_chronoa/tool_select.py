@@ -1439,7 +1439,6 @@ _CUES = {name: re.compile(cue) for name, cue in {
     "android_device": r"\bandroid\b|\badb\b|\bphone\b|\bmobile\b|\btablet\b",
     "install_model": r"\bmodels?\b|\bllm\b|\bqwen|\bllama|\bai\b",
     "recommend_model": r"\bmodels?\b|\bllm\b|\bqwen|\bllama|\bai\b",
-    "speed_test": r"\bspeed|\bbandwidth|\bslow|\bfast|\bmbps|\binternet",
     "compute_hash": r"\bhash|\bchecksum|\bsha|\bmd5|\bverif|\bintegrity",
     "undo_last_change": r"\bundo|\brevert|\bput (?:it )?back|\brestore",
 }.items()}

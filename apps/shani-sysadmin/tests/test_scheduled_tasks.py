@@ -33,10 +33,10 @@ import sys
 
 import pytest
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "usr/lib/shani-chronoa"))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[3] / "usr/lib/shani-chronoa"))
 
 from shani_chronoa import tools  # noqa: E402
-from shani_chronoa.skills import scheduled_tasks as st  # noqa: E402
+from shani_sysadmin.skills import scheduled_tasks as st  # noqa: E402
 
 USER_CRONTAB = """\
 # m h dom mon dow  command
@@ -331,24 +331,25 @@ def test_a_bad_source_is_refused_by_name(fake):
 
 # ── reachability ────────────────────────────────────────────────────────────
 
-def test_the_skill_is_registered():
-    names = {t["function"]["name"] for t in tools.TOOLS}
+def test_the_skill_is_registered_by_the_app():
+    import shani_sysadmin
+    names = {t["function"]["name"] for t in shani_sysadmin.discover_skills()[0]}
     assert "scheduled_tasks" in names
 
 
-def test_it_is_in_help_and_not_in_the_other_group():
+def test_it_is_not_in_chronoa_help_any_more():
+    """The move is the point: a diagnosis nobody asks for daily left the whitelist."""
     from shani_chronoa import capabilities
-    group, label = capabilities._GROUPS["scheduled_tasks"]
-    assert group != "Other", group
-    assert label
+    assert "scheduled_tasks" not in capabilities._GROUPS
 
 
 def test_it_is_a_read_and_needs_no_permission():
-    """What the machine has scheduled describes the machine, not the person's world."""
+    """Reads crontabs and timers; no consent key and nothing written."""
     from shani_chronoa import capabilities
     assert "scheduled_tasks" not in capabilities.GATED
+    assert "scheduled_tasks" not in capabilities.READ_ONLY_TOOLS
     assert "scheduled_tasks" not in capabilities.MUTATING_TOOLS
-    assert "scheduled_tasks" in capabilities.READ_ONLY_TOOLS
+    assert not capabilities.gated_by("scheduled_tasks", st.SKILLS[0].schema["function"]["description"])
 
 
 @pytest.mark.parametrize("request_", [
@@ -359,24 +360,17 @@ def test_it_is_a_read_and_needs_no_permission():
     "show my scheduled tasks",
     "is there a crontab",
 ])
-def test_the_router_offers_it_for_the_plainest_phrasings(request_):
-    """`CONVERSATIONAL` matches "what is " and sends it to `ask_user` alone.
-
-    Its machine-subject lookahead names `timer` and not `cron`, so a first
-    version of this list could not reach the skill at all by that phrasing.
-    Asserted per phrasing: 3-of-6 is a green-looking score over a mostly-broken
-    feature, which is the shape of failure this repository keeps meeting.
-    """
+def test_the_router_no_longer_offers_it(request_):
+    """Chronoa now gives a clear unknown-tool refusal for this diagnosis."""
     from shani_chronoa import tool_select
     names = [t["function"]["name"] for t in tool_select.select_tools(request_, tools.TOOLS)]
-    assert "scheduled_tasks" in names, f"{request_!r} -> {names[:5]}"
+    assert "scheduled_tasks" not in names, f"{request_!r} -> {names[:5]}"
 
 
 def test_it_schedules_nothing_itself():
     """The name is close to `alarm`, which creates timers. This one only reads."""
     from shani_chronoa import capabilities
     assert "scheduled_tasks" not in capabilities.DESTRUCTIVE_CONSENT_KEYS
-    assert "scheduled_tasks" != capabilities._GROUPS and True
 
 def test_the_rendered_timers_say_which_will_fire_and_which_will_not(fake):
     """The dead/live distinction has to reach the *answer*, not just the rows.

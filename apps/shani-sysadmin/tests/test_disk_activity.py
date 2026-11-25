@@ -23,10 +23,10 @@ import sys
 
 import pytest
 
-_REPO = pathlib.Path(__file__).resolve().parents[1]
+_REPO = pathlib.Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
-from shani_chronoa.skills import disk_activity as DA  # noqa: E402
+from shani_sysadmin.skills import disk_activity as DA  # noqa: E402
 
 #: Real `iostat -x 1 2` output: the since-boot report, then the live one, with
 #: an `avg-cpu` line between them that is not part of the device table.

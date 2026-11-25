@@ -38,6 +38,16 @@ MOVED_SKILLS = {
     "list_containers",
     "list_vms",
     "vm",
+    # Second move (mirrored in tests/test_sysadmin_app_separation.py).
+    "routing_table", "neighbour_table", "interface_counters", "port_owner",
+    "trace_route", "dns_lookup", "whois_lookup", "tailscale_status",
+    "network_watch", "scan_network", "discover_hosts", "network_activity",
+    "check_port", "ping_host", "bandwidth_to_host", "tls_certificate",
+    "speed_test", "open_files", "file_locks", "system_history", "log_files",
+    "crash_report", "disk_layout", "disk_activity", "space_by_type",
+    "check_units", "scheduled_tasks", "graphics_stack", "permission_audit",
+    "process_detail", "thread_activity", "cpu_frequency", "cpu_per_core",
+    "oom_score",
 }
 
 
@@ -80,7 +90,7 @@ def test_cli_list_and_check_agree_with_the_loader():
         cwd=APP_ROOT,
     )
     report = json.loads(check.stdout)
-    assert report["skill_count"] == 22
+    assert report["skill_count"] == len(MOVED_SKILLS)
     assert report["senses"] == ["kernellog"]
 
 

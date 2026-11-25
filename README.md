@@ -10,7 +10,7 @@ Pair the phone, read the watch, keep your rules running while you're away.<br>
 With a local model your data never leaves the desk, every action can be undone, and it asks before anything risky.</p>
 
 <p align="center">
-  <a href="CAPABILITIES.md">256 skills</a> ·
+  <a href="CAPABILITIES.md">222 skills</a> ·
   free (GPL-3.0) ·
   runs offline ·
   no account, no telemetry ·
@@ -33,7 +33,7 @@ through skills you can read, switch off, and undo.
   voice (Kokoro or Piper) that you pick and preview in the app.
 - 🛠️ **It does things, not just chats.** Files, apps, windows, settings,
   calendar, reminders, network, Bluetooth, screenshots, documents, images,
-  git — [256 skills](CAPABILITIES.md), each a small, typed, auditable module.
+  git — [222 skills](CAPABILITIES.md), each a small, typed, auditable module.
 - 💻 **Builds with you.** Point it at a project folder: it edits with inline
   diffs, runs your tests in a sandbox, commits, and reverts a whole turn with
   one click. Plan mode, subagents, and MCP servers in both directions.
@@ -149,16 +149,22 @@ its own **Download** button.
 - **Local speech-to-text** — whisper.cpp; runs on CPU or CUDA.
 - **On-device LLM** — tool-calling via llama.cpp `llama-server` by default
   (the `ollama` package is also supported), so Chronoa can act on your machine
-  rather than just chatting about it. **256 callable
+  rather than just chatting about it. **222 callable
   skills**, every one a named, schema-typed module under `skills/`. The
   whitelist is the design; the one command runner (`run_command`, for a
   project's tests and builds) is sandboxed, off by default, and asks each time.
   **They are all listed in [`CAPABILITIES.md`](CAPABILITIES.md)**, grouped by
   what they are for, each with the consent switch it needs and whether the
-  assistant asks before running it — 85 are consent-gated and 16 are
+  assistant asks before running it — 87 are consent-gated and 16 are
   destructive. That file is generated from `capabilities._GROUPS`, the same
   table the Help window renders, so it cannot drift from what the build does;
-  `tests/check_capabilities_doc.py` fails if it does.
+  `tests/check_capabilities_doc.py` fails if it does. The deep system,
+  network and forensics diagnostics are **not** in this list any more: they
+  moved to the `shani-sysadmin` app and are run deliberately from its CLI.
+  The plain questions a person asks an assistant stay here — disk full,
+  what is running and why it is slow, who logged in, is the internet working,
+  what is my IP, what this machine is, how much data I have used — along with
+  `run_command`, the documented sandbox exception.
 - **Local text-to-speech** — espeak-ng by default; a Piper voice is used
   verbatim when one is provisioned — the voice directory, down to the voice
   name, is configurable.

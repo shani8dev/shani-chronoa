@@ -121,7 +121,7 @@ ROUTES: Dict[str, Tuple[Route, ...]] = {
     ),
     "lsof": (
         Route("install the 'lsof' package", ("lsof",), "install"),
-        Route("read /proc directly - port_owner already does exactly this and "
+        Route("read /proc directly - a sysadmin app skill does exactly this and "
               "needs nothing installed", ()),
     ),
     "rsync": (

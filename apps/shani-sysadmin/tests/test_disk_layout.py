@@ -21,7 +21,7 @@ import subprocess
 
 import pytest
 
-from shani_chronoa.skills import disk_layout
+from shani_sysadmin.skills import disk_layout
 
 #: The real capture, trimmed to the fields the reader asks for.
 REAL_DEVICE = {
