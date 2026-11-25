@@ -114,6 +114,20 @@ def test_all_surface_titles_and_subtitles_are_marked():
             ), f"{path.name}: {node.targets[0].id} is not extracted with _()"
 
 
+def _write_header_only_mo(path: Path) -> None:
+    """A valid compiled catalog with no messages, so gettext returns msgids."""
+    import struct
+
+    meta = b"Content-Type: text/plain; charset=UTF-8\n"
+    key_table, val_table, strings = 28, 36, 44
+    blob = struct.pack(
+        "<7I", 0x950412DE, 0, 1, key_table, val_table, 0, strings + 1 + len(meta)
+    )
+    blob += struct.pack("<2I", 0, strings)
+    blob += struct.pack("<2I", len(meta), strings + 1)
+    path.write_bytes(blob + b"\0" + meta)
+
+
 # --- catalogs ---------------------------------------------------------------
 
 
@@ -166,6 +180,26 @@ def test_an_empty_catalog_is_not_a_translated_locale(tmp_path, monkeypatch):
     assert not locale.is_translated("en"), "English is the source, not a translation"
 
 
+def test_a_single_translated_string_is_not_enough(tmp_path, monkeypatch):
+    """A stub with one msgstr is catalog work, not a translated locale."""
+    root = tmp_path / "locale"
+    stub = root / "stub" / "LC_MESSAGES"
+    stub.mkdir(parents=True)
+    ids = locale.catalog_ids()
+    body = "\n\n".join(
+        f'msgid "{msgid.replace(chr(34), chr(92) + chr(34))}"\n'
+        f'msgstr "{"x" if n == 0 else ""}"'
+        for n, msgid in enumerate(ids)
+    )
+    (stub / "shani-chronoa.po").write_text(body, encoding="utf-8")
+    shutil.copy2(locale._catalog_path("hi", ".mo"), stub / "shani-chronoa.mo")
+    monkeypatch.setattr(locale, "LOCALE_ROOT", root)
+
+    assert locale.translation_coverage("stub") < locale.MIN_TRANSLATION_COVERAGE
+    assert not locale.is_translated("stub")
+    assert "stub" not in locale.translated_locales()
+
+
 def test_only_real_catalogs_are_listed(tmp_path, monkeypatch):
     root = tmp_path / "locale"
     for code in ("hi", "xx"):
@@ -176,6 +210,12 @@ def test_only_real_catalogs_are_listed(tmp_path, monkeypatch):
             shutil.copy2(locale._catalog_path("hi", ".mo"), target / "shani-chronoa.mo")
     monkeypatch.setattr(locale, "LOCALE_ROOT", root)
     assert locale.translated_locales() == ["hi"]
+
+
+def test_the_hindi_catalog_is_complete_and_advertised():
+    assert locale.translation_coverage("hi") == 1.0
+    assert locale.is_translated("hi")
+    assert "hi" in locale.translated_locales()
 
 
 # --- behavior ---------------------------------------------------------------
@@ -198,21 +238,33 @@ def test_hindi_is_used_from_the_system_locale(monkeypatch):
     assert locale.translate("Diagnostics") == "निदान"
 
 
-def test_dev_mode_surfaces_gaps_but_normal_mode_does_not(monkeypatch):
-    missing = locale.untranslated("hi")
-    assert missing, "Hindi catalog is complete; this control needs a gap"
+def test_dev_mode_surfaces_gaps_but_normal_mode_does_not(tmp_path, monkeypatch):
+    """A catalog with a gap marks it in dev mode and shows English otherwise."""
+    root = tmp_path / "locale"
+    stub = root / "gap" / "LC_MESSAGES"
+    stub.mkdir(parents=True)
+    ids = locale.catalog_ids()
+    missing = ids[0]
+    body = "\n\n".join(
+        f'msgid "{msgid.replace(chr(34), chr(92) + chr(34))}"\n'
+        f'msgstr "{"" if n == 0 else "x"}"'
+        for n, msgid in enumerate(ids)
+    )
+    (stub / "shani-chronoa.po").write_text(body, encoding="utf-8")
+    _write_header_only_mo(stub / "shani-chronoa.mo")
+    monkeypatch.setattr(locale, "LOCALE_ROOT", root)
     monkeypatch.delenv("LANGUAGE", raising=False)
     monkeypatch.delenv("LC_ALL", raising=False)
     monkeypatch.delenv("LC_MESSAGES", raising=False)
-    monkeypatch.setenv("LANG", "hi_IN.UTF-8")
+    monkeypatch.setenv("LANG", "gap_IN.UTF-8")
 
     monkeypatch.setenv(locale.DEV_ENV, "1")
     locale.configure()
-    assert locale.translate(missing[0]).startswith("[untranslated:hi] ")
+    assert locale.translate(missing).startswith("[untranslated:gap] ")
 
     monkeypatch.setenv(locale.DEV_ENV, "0")
     locale.configure()
-    assert locale.translate(missing[0]) == missing[0]
+    assert locale.translate(missing) == missing
 
 
 def test_missing_catalog_warns_and_does_not_claim_a_locale(monkeypatch):

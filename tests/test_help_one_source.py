@@ -33,11 +33,47 @@ def test_all_four_surfaces_read_the_shared_registry():
     assert "capabilities.help_label()" in _source("gui/window.py")
 
 
-def test_slash_help_uses_the_shared_prompt_and_window():
+def test_slash_help_uses_the_shared_prompt_and_the_skills_surface():
     source = _source("gui/commands.py")
     assert "caps.help_prompt()" in source
-    assert "window.open_help()" in source
+    assert 'window._show_surface("skills")' in source
+    assert "window.open_help()" not in source, (
+        "/help must not open the older HelpWindow: Skills is the one data source"
+    )
     assert commands.commands()["help"].summary == capabilities.help_label()
+
+
+def test_help_window_still_has_its_own_ui_route():
+    """Removing the command's HelpWindow call must not orphan HelpWindow."""
+    window = _source("gui/window.py")
+    assert "def open_help(" in window
+    assert "handler=lambda _b: self.open_help()" in window, (
+        "the header Help button is the remaining route to the capability list"
+    )
+
+
+def test_slash_help_opens_skills_and_an_argument_only_fills_the_composer():
+    class _Window:
+        def __init__(self):
+            self.surfaces = []
+            self.input = ""
+
+        def _show_surface(self, name):
+            self.surfaces.append(name)
+
+        def set_input_text(self, text):
+            self.input = text
+
+    help_command = commands.commands()["help"]
+    window = _Window()
+    assert help_command.run(window, "") is None
+    assert window.surfaces == ["skills"]
+    assert window.input == ""
+
+    window = _Window()
+    assert help_command.run(window, "what can you do?") is None
+    assert window.surfaces == [], "an argument must not also switch panels"
+    assert window.input == capabilities.help_prompt()
 
 
 def test_live_capabilities_matches_the_registry():

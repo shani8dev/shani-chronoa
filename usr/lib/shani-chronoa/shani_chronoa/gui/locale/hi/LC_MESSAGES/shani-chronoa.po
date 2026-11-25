@@ -1,126 +1,133 @@
 # Shani Chronoa GTK UI - hi.
-# 54 of 140 strings translated. Untranslated entries are
-# intentional: copy this file, fill the empty msgstrs and compile with msgfmt.
+# 140 of 140 strings translated.
+# Compile with msgfmt after editing.
 msgid ""
 msgstr ""
 "Project-Id-Version: shani-chronoa\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-11-26 00:00+0000\n"
+"PO-Revision-Date: 2026-11-26 00:00+0000\n"
+"Last-Translator: Shani Chronoa contributors\n"
+"Language: hi\n"
+"Language-Team: hi\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"Language: hi\n"
 
 msgid "Say or type your answer…"
-msgstr ""
+msgstr "अपना उत्तर बोलें या टाइप करें…"
 
 msgid "Tap an option, or just say your answer."
-msgstr ""
+msgstr "किसी विकल्प पर टैप करें, या अपना उत्तर बोल दें।"
 
 msgid "Play or pause"
-msgstr ""
+msgstr "चलाएँ या रोकें"
 
 msgid "Why this tool"
-msgstr ""
+msgstr "यह टूल क्यों"
 
 msgid "Show what this ran, and what came back"
-msgstr ""
+msgstr "दिखाएँ कि क्या चला और क्या लौटा"
 
 msgid "Open this change in the Diff panel"
-msgstr ""
+msgstr "यह बदलाव Diff पैनल में खोलें"
 
 msgid "Rendered"
-msgstr ""
+msgstr "प्रस्तुत"
 
 msgid "Source"
-msgstr ""
+msgstr "स्रोत"
 
 msgid "Set start"
-msgstr ""
+msgstr "शुरुआत तय करें"
 
 msgid "Set end"
-msgstr ""
+msgstr "अंत तय करें"
 
 msgid "Add to message"
-msgstr ""
+msgstr "संदेश में जोड़ें"
 
 msgid "No part marked"
-msgstr ""
+msgstr "कोई हिस्सा चिह्नित नहीं"
 
 msgid "Chronoa says this call did not succeed. Its answer below explains why, if it did."
-msgstr ""
+msgstr "Chronoa के अनुसार यह कॉल सफल नहीं हुई। नीचे दिया उत्तर बताता है कि ऐसा क्यों हुआ, अगर वह जान सका।"
 
 msgid "Show full diff"
-msgstr ""
+msgstr "पूरा अंतर दिखाएँ"
 
 msgid "No line changed"
-msgstr ""
+msgstr "कोई पंक्ति नहीं बदली"
 
 msgid "did not work"
-msgstr ""
+msgstr "काम नहीं किया"
 
 msgid "Open"
-msgstr ""
+msgstr "खोलें"
 
 msgid "Show what changed"
-msgstr ""
+msgstr "दिखाएँ कि क्या बदला"
 
 msgid "the end must come after the start"
-msgstr ""
+msgstr "अंत शुरुआत के बाद ही हो सकता है"
 
 msgid "Chronoa Browser"
-msgstr ""
+msgstr "Chronoa ब्राउज़र"
 
 msgid "Search or enter an address"
-msgstr ""
+msgstr "खोजें या पता दर्ज करें"
 
 msgid "Page actions"
-msgstr ""
+msgstr "पेज क्रियाएँ"
 
 msgid "part of this conversation was already dropped to make the request fit"
-msgstr ""
+msgstr "अनुरोध को फिट करने के लिए इस बातचीत का कुछ हिस्सा पहले ही हटाया गया था"
 
 msgid "Go to a panel, a command, a skill..."
-msgstr ""
+msgstr "किसी पैनल, कमांड या कौशल पर जाएँ..."
 
 msgid "Nothing matches that."
-msgstr ""
+msgstr "इससे कुछ मेल नहीं खाता।"
 
 msgid "Quick Ask"
-msgstr ""
+msgstr "त्वरित प्रश्न"
 
 msgid "Ask something…"
-msgstr ""
+msgstr "कुछ पूछें…"
 
 msgid "Off: the question and answer are not saved anywhere. On: they are added to the open conversation as a normal turn."
-msgstr ""
+msgstr "बंद: प्रश्न और उत्तर कहीं सहेजे नहीं जाते। चालू: वे खुली बातचीत में एक सामान्य चरण के रूप में जोड़े जाते हैं।"
 
 msgid "Keep in the conversation"
-msgstr ""
+msgstr "बातचीत में रखें"
 
 msgid "Close"
-msgstr ""
+msgstr "बंद करें"
 
 msgid "Ask"
-msgstr ""
+msgstr "पूछें"
 
 msgid "Search panels"
-msgstr ""
+msgstr "पैनल खोजें"
 
 msgid "Close the panel list (F9)"
-msgstr ""
+msgstr "पैनल सूची बंद करें (F9)"
 
 msgid "Panels"
-msgstr ""
+msgstr "पैनल"
 
 msgid "Activity"
 msgstr "गतिविधि"
 
 msgid "Every skill Chronoa ran, newest first, from its own tool-call log."
-msgstr ""
+msgstr "Chronoa ने जो कौशल चलाए, सबसे नया पहले, उसके अपने टूल-कॉल लॉग से।"
 
 msgid "Artifacts"
 msgstr "कलाकृतियाँ"
 
 msgid "Where models, voices, documents and exports are stored. Browse, search, download and clean up your local files."
-msgstr ""
+msgstr "जहाँ मॉडल, आवाज़ें, दस्तावेज़ और निर्यात रखे जाते हैं। अपनी स्थानीय फ़ाइलें देखें, खोजें, डाउनलोड करें और साफ़ करें।"
 
 msgid "Cancel"
 msgstr "रद्द करें"
@@ -129,19 +136,19 @@ msgid "Automation"
 msgstr "स्वचालन"
 
 msgid "Saved phrases, rules that fire on their own, plans, and the switch that lets any of them run with the window closed."
-msgstr ""
+msgstr "सहेजे गए वाक्यांश, अपने आप चलने वाले नियम, योजनाएँ, और वह स्विच जो उन्हें विंडो बंद रहने पर भी चलने देता है।"
 
 msgid "Calendar"
 msgstr "कैलेंडर"
 
 msgid "What is on your calendars, read from the same Evolution Data Server sources the calendar_events skill and the calendar trigger read. Read-only: nothing here changes an event, and nothing is read while the consent key below is off."
-msgstr ""
+msgstr "आपके कैलेंडर में क्या है — उन्हीं Evolution Data Server स्रोतों से जो calendar_events कौशल और कैलेंडर ट्रिगर पढ़ते हैं। केवल पढ़ना: यहाँ किसी इवेंट में बदलाव नहीं किया जाता, और नीचे दी अनुमति बंद रहने पर कुछ भी नहीं पढ़ा जाता।"
 
 msgid "Changes"
 msgstr "परिवर्तन"
 
 msgid "What Chronoa wrote and made: the diff of each change, an editor to open it in, and the files it produced."
-msgstr ""
+msgstr "Chronoa ने क्या लिखा और बनाया: हर बदलाव का अंतर, उसे खोलने वाला संपादक, और उसकी बनाई फ़ाइलें।"
 
 msgid "Ready"
 msgstr "तैयार"
@@ -174,13 +181,13 @@ msgid "Compare"
 msgstr "तुलना"
 
 msgid "What changed between two conversations, by the questions you asked. Replies are not compared: the same question answered twice gives two different answers."
-msgstr ""
+msgstr "दो बातचीतों में क्या बदला, आपके पूछे गए प्रश्नों के आधार पर। उत्तरों की तुलना नहीं की जाती: एक ही प्रश्न का दो बार उत्तर अलग-अलग हो सकता है।"
 
 msgid "Connections"
 msgstr "कनेक्शन"
 
 msgid "Other apps and chat channels that can use Chronoa, and how to connect them. Read-only: nothing here starts anything."
-msgstr ""
+msgstr "अन्य ऐप्स और चैट चैनल जो Chronoa का उपयोग कर सकते हैं, और उन्हें कैसे जोड़ें। केवल पढ़ना: यहाँ से कुछ भी शुरू नहीं किया जाता।"
 
 msgid "Conversations"
 msgstr "बातचीत"
@@ -195,31 +202,31 @@ msgid "Dashboards"
 msgstr "डैशबोर्ड"
 
 msgid "Pages of charts Chronoa built. Ask it for a dashboard and it appears here; open one to see it in Chronoa's browser."
-msgstr ""
+msgstr "Chronoa के बनाए चार्टों के पेज। उससे डैशबोर्ड माँगें और वह यहाँ आ जाएगा; देखने के लिए उसे Chronoa के ब्राउज़र में खोलें।"
 
 msgid "Desktop"
 msgstr "डेस्कटॉप"
 
 msgid "Is Chronoa actually hooked into this desktop right now? Every row is read from the thing that would make it true, and says which."
-msgstr ""
+msgstr "क्या Chronoa इसी वक्त इस डेस्कटॉप से जुड़ा है? हर पंक्ति उसी चीज़ से पढ़ी जाती है जिससे यह सत्य होगा, और बताती है कि कौन सी।"
 
 msgid "Diagnostics"
 msgstr "निदान"
 
 msgid "One question per row: is this part of Chronoa working right now, and if not, why not? Every answer is read from the module that would make the thing true. A row that could not be answered says so rather than showing a clean answer."
-msgstr ""
+msgstr "हर पंक्ति में एक प्रश्न: क्या Chronoa का यह हिस्सा अभी काम कर रहा है, और यदि नहीं, तो क्यों? हर उत्तर उसी मॉड्यूल से पढ़ा जाता है जिससे बात सत्य होगी। जिस पंक्ति का उत्तर न मिल सके, वह साफ़ उत्तर दिखाने के बजाय ऐसा कहती है।"
 
 msgid "Diff"
 msgstr "अंतर"
 
 msgid "What Chronoa changed on this machine, file by file, with line numbers. These writes already happened; to put one back, ask it to undo."
-msgstr ""
+msgstr "Chronoa ने इस मशीन पर क्या बदला, फ़ाइल दर फ़ाइल, पंक्ति क्रमांक सहित। ये परिवर्तन हो चुके हैं; किसी को वापस करने के लिए उसे undo कहें।"
 
 msgid "Driving"
 msgstr "नियंत्रण"
 
 msgid "What Chronoa can do with a mouse and a keyboard on this desktop, and where it has to say it cannot."
-msgstr ""
+msgstr "Chronoa इस डेस्कटॉप पर माउस और कीबोर्ड से क्या कर सकता है, और जहाँ उसे कहना पड़ता है कि वह नहीं कर सकता।"
 
 msgid "Editor"
 msgstr "संपादक"
@@ -228,25 +235,25 @@ msgid "Export"
 msgstr "निर्यात"
 
 msgid "Chronoa keeps your conversation and your facts in your own data directory. These write them out as files you choose, and name what is in each one."
-msgstr ""
+msgstr "Chronoa आपकी बातचीत और तथ्य आपके अपने डेटा फ़ोल्डर में रखता है। ये उन्हें आपके चुने गए फ़ाइलों में लिखते हैं, और बताते हैं कि हर एक में क्या है।"
 
 msgid "Git"
 msgstr "गिट"
 
 msgid "The repository Chronoa is working in, and the two git writes. Committing and pushing both ask in chat, behind their own switches."
-msgstr ""
+msgstr "वह रिपॉज़िटरी जिस पर Chronoa काम कर रहा है, और दो git लिखने वाले काम। Commit और push दोनों चैट में पूछते हैं, अपने-अपने स्विच के पीछे।"
 
 msgid "Goals"
 msgstr "लक्ष्य"
 
 msgid "Plans Chronoa saved for later, one step at a time. Each step runs exactly as a chat request would, asking for the same things."
-msgstr ""
+msgstr "Chronoa ने बाद के लिए सहेजी योजनाएँ, एक-एक चरण में। हर चरण वैसे ही चलता है जैसे चैट का अनुरोध, और वही अनुमति माँगता है।"
 
 msgid "Health"
 msgstr "स्वास्थ्य"
 
 msgid "Whether Chronoa can see and drive this desktop, what the machine is reporting, and what it left running."
-msgstr ""
+msgstr "क्या Chronoa इस डेस्कटॉप को देख और चला सकता है, मशीन क्या बता रही है, और उसने क्या चलता छोड़ा है।"
 
 msgid "The anatomy"
 msgstr "शरीर संरचना"
@@ -255,7 +262,7 @@ msgid "What it has learned"
 msgstr "इसने क्या सीखा"
 
 msgid "Facts, which tools actually worked, and the two models fitted from them - with what each one can and cannot do"
-msgstr ""
+msgstr "तथ्य, कौन से टूल वास्तव में काम किए, और उनसे फिट किए गए दो मॉडल — यह बताते हुए कि हर एक क्या कर सकता है और क्या नहीं।"
 
 msgid "Transcribe"
 msgstr "प्रतिलेखन"
@@ -264,46 +271,46 @@ msgid "Machine"
 msgstr "मशीन"
 
 msgid "What this machine is doing, read once from its own machine-state senses. A sense that could not answer says so in its row; it is never shown as one that did."
-msgstr ""
+msgstr "यह मशीन क्या कर रही है, उसकी अपनी मशीन-स्थिति इंद्रियों से एक बार पढ़ा गया। जिस इंद्रिय का उत्तर न मिले, वह अपनी पंक्ति में ऐसा कहती है; उसे कभी ऐसा नहीं दिखाया जाता जैसे उत्तर मिल गया हो।"
 
 msgid "Meetings"
 msgstr "बैठकें"
 
 msgid "Record a whole meeting, keep it, and read the transcript and notes back whenever you want them."
-msgstr ""
+msgstr "पूरी बैठक रिकॉर्ड करें, रखें, और प्रतिलेख तथा नोट्स जब चाहें वापस पढ़ें।"
 
 msgid "What it remembers"
 msgstr "इसे क्या याद है"
 
 msgid "What Chronoa has remembered: the facts you told it, and the readings its senses took. Nothing here reaches a model by being displayed."
-msgstr ""
+msgstr "Chronoa ने क्या याद रखा: आपके बताए तथ्य, और उसकी इंद्रियों ने जो पढ़ा। यहाँ कुछ भी दिखाने मात्र से मॉडल तक नहीं पहुँचता।"
 
 msgid "Answering now"
 msgstr "अभी उत्तर दे रहा है"
 
 msgid "Local state only. The cloud row is read from configuration and is never contacted; the two local probes ask a service running on this computer."
-msgstr ""
+msgstr "केवल स्थानीय स्थिति। क्लाउड पंक्ति कॉन्फ़िगरेशन से पढ़ी जाती है और उससे संपर्क नहीं किया जाता; दो स्थानीय जाँचें इसी कंप्यूटर पर चल रही सेवा से पूछती हैं।"
 
 msgid "Models"
 msgstr "मॉडल"
 
 msgid "Everything Chronoa can run, what each one costs, and which are already here"
-msgstr ""
+msgstr "Chronoa जो कुछ चला सकता है, हर एक की कीमत, और कौन से पहले से यहाँ हैं"
 
 msgid "What answers now and what is installed: the live answer first, the catalogue underneath."
-msgstr ""
+msgstr "अभी क्या उत्तर दे रहा है और क्या इंस्टॉल है: पहले जीवंत उत्तर, नीचे सूची।"
 
 msgid "My files"
 msgstr "मेरी फ़ाइलें"
 
 msgid "Search your own documents and notes, by keyword and - where the embedding model is installed - by meaning."
-msgstr ""
+msgstr "अपने दस्तावेज़ और नोट्स खोजें, कीवर्ड से और — जहाँ एम्बेडिंग मॉडल इंस्टॉल हो — अर्थ से।"
 
 msgid "Notices"
 msgstr "सूचनाएँ"
 
 msgid "What Chronoa noticed on its own, newest first. Dismissing one keeps it from nagging again for the same thing."
-msgstr ""
+msgstr "Chronoa ने अपने आप क्या नोटिस किया, सबसे नया पहले। किसी को खारिज करने से वह उसी बात पर फिर नहीं ज़िद करता।"
 
 msgid "Privacy"
 msgstr "गोपनीयता"
@@ -315,112 +322,112 @@ msgid "Privacy & permissions"
 msgstr "गोपनीयता और अनुमतियाँ"
 
 msgid "What Chronoa may read, do and send: the switches, the senses and the full consent table, in one place."
-msgstr ""
+msgstr "Chronoa क्या पढ़, कर और भेज सकता है: स्विच, इंद्रियाँ और पूरी अनुमति सारणी, एक जगह।"
 
 msgid "What's running"
 msgstr "क्या चल रहा है"
 
 msgid "Everything Chronoa started, and the button that stops each one. Nothing here runs unless you turned it on."
-msgstr ""
+msgstr "Chronoa ने जो कुछ शुरू किया, और हर एक को रोकने वाला बटन। आपके चालू किए बिना यहाँ कुछ नहीं चलता।"
 
 msgid "Routines"
 msgstr "दिनचर्या"
 
 msgid "One phrase that stands for a whole request. Say \"good morning\" and it asks for the weather, the day's calendar and the news - planned by the model like anything you typed, so every tool still meets its own gate."
-msgstr ""
+msgstr "एक वाक्यांश जो पूरा अनुरोध मान लेता है। \"good morning\" कहें और वह मौसम, आज का कैलेंडर और समाचार माँगेगा — मॉडल उसे वैसे योजनाबद्ध करता है जैसे आपने टाइप किया हो, इसलिए हर टूल अपनी अनुमति से गुजरता है।"
 
 msgid "Sandbox"
 msgstr "सैंडबॉक्स"
 
 msgid "Where Chronoa runs commands, and a test of what they can reach."
-msgstr ""
+msgstr "जहाँ Chronoa कमांड चलाता है, और परीक्षण कि वे कहाँ तक पहुँच सकती हैं।"
 
 msgid "Senses"
 msgstr "इंद्रियाँ"
 
 msgid "Every sense Chronoa has, and whether you have agreed to let it run. One switch per sense; a sense that is off is never invoked at all."
-msgstr ""
+msgstr "Chronoa की हर इंद्रिय, और क्या आपने उसे चलाने की अनुमति दी है। हर इंद्रिय का एक स्विच; बंद इंद्रिय को कभी नहीं चलाया जाता।"
 
 msgid "What Chronoa can do"
 msgstr "Chronoa क्या कर सकता है"
 
 msgid "Everything Chronoa can be asked to do, read from the same live registry the model is handed. Each row says what it touches, a gate here writes the same key Settings does, and a row with a question offers it in the composer."
-msgstr ""
+msgstr "Chronoa से जो कुछ माँगा जा सकता है, उसी जीवंत रजिस्ट्री से जो मॉडल को दी जाती है। हर पंक्ति बताती है कि वह किसे छूती है, यहाँ का स्विच वही कुंजी लिखता है जो Settings लिखती है, और प्रश्न वाली पंक्ति उसे कंपोज़र में पेश करती है।"
 
 msgid "Today"
 msgstr "आज"
 
 msgid "Reminders, alarms, timers, notes and to-dos on one page - what is due or waiting, read from the same stores the assistant uses. Only a timer can be changed here; the rest are started by asking."
-msgstr ""
+msgstr "रिमाइंडर, अलार्म, टाइमर, नोट्स और कार्य एक पेज पर — क्या देय है या लंबित है, उन्हीं स्टोर से जो सहायक इस्तेमाल करता है। यहाँ सिर्फ़ टाइमर बदला जा सकता है; बाकी पूछकर शुरू किए जाते हैं।"
 
 msgid "Triggers"
 msgstr "ट्रिगर"
 
 msgid "The trigger rules this assistant could act on, read from the same two rule files the engines fire from. Arm or remove rules here; nothing on this page fires one."
-msgstr ""
+msgstr "ट्रिगर नियम जिन पर यह सहायक काम कर सकता है, उन्हीं दो नियम फ़ाइलों से जो इंजन चलाते हैं। यहाँ नियम लगाएँ या हटाएँ; इस पेज से कोई नियम नहीं चलता।"
 
 msgid "Speaking voice"
 msgstr "बोलने की आवाज़"
 
 msgid "Pick the voice Chronoa speaks with, hear it, and set its speed and pitch. Downloads open Setup on its Voice page."
-msgstr ""
+msgstr "Chronoa की बोलने वाली आवाज़ चुनें, सुनें, और उसकी गति तथा स्वर ऊँचाई तय करें। डाउनलोड Setup के Voice पेज पर खुलते हैं।"
 
 msgid "Workbench"
 msgstr "कार्यक्षेत्र"
 
 msgid "Turn a command into a skill of your own, and see what that joined."
-msgstr ""
+msgstr "किसी कमांड को अपना कौशल बनाएँ, और देखें कि उससे क्या जुड़ा।"
 
 msgid "Find something Chronoa can do"
-msgstr ""
+msgstr "Chronoa क्या कर सकता है, खोजें"
 
 msgid "Jump to the newest message"
-msgstr ""
+msgstr "नवीनतम संदेश पर जाएँ"
 
 msgid "What Shani Chronoa can do"
-msgstr ""
+msgstr "Shani Chronoa क्या कर सकता है"
 
 msgid "Nothing matches. Try a shorter word."
-msgstr ""
+msgstr "कुछ मेल नहीं खाता। छोटा शब्द आज़माएँ।"
 
 msgid "Everything Chronoa can do"
-msgstr ""
+msgstr "Chronoa जो कुछ कर सकता है"
 
 msgid "What you can do"
-msgstr ""
+msgstr "आप क्या कर सकते हैं"
 
 msgid "Get things done"
-msgstr ""
+msgstr "काम पूरा करें"
 
 msgid "Say what you want done, the way you would ask a person. Chronoa works out the steps, asks before anything that pays or deletes, and tells you what it did."
-msgstr ""
+msgstr "कहें कि आपको क्या करवाना है, जैसे आप किसी व्यक्ति से पूछेंगे। Chronoa चरण निकालता है, भुगतान या हटाने से पहले पूछता है, और बताता है कि उसने क्या किया।"
 
 msgid "Edit this and rerun from here"
-msgstr ""
+msgstr "इसे संपादित करें और यहीं से फिर चलाएँ"
 
 msgid "Everything after it is removed"
-msgstr ""
+msgstr "इसके बाद का सब कुछ हटा दिया जाता है"
 
 msgid "Ask something, or press the orb to speak."
-msgstr ""
+msgstr "कुछ पूछें, या बोलने के लिए गोले को दबाएँ।"
 
 msgid "Ctrl+K for anything else  ·  Ctrl+F to find in this conversation  ·  ? for what Chronoa can do"
-msgstr ""
+msgstr "बाकी सब के लिए Ctrl+K  ·  इस बातचीत में खोजने के लिए Ctrl+F  ·  Chronoa के कामों के लिए ?"
 
 msgid "Open the panel that lists the files this turn changed, with the changed lines in each one."
-msgstr ""
+msgstr "वह पैनल खोलें जो इस चरण में बदली गई फ़ाइलें दिखाता है, हर एक में बदली पंक्तियों सहित।"
 
 msgid "Ask that again"
-msgstr ""
+msgstr "वह दोबारा पूछें"
 
 msgid "Try"
-msgstr ""
+msgstr "आज़माएँ"
 
 msgid "See the changes"
-msgstr ""
+msgstr "बदलाव देखें"
 
 msgid "Try it"
-msgstr ""
+msgstr "इसे आज़माएँ"
 
 msgid "Settings"
 msgstr "सेटिंग्स"

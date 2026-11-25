@@ -8,10 +8,11 @@ module:
   gettext uses (`LANGUAGE`, `LC_ALL`, `LC_MESSAGES`, `LANG`). This is not the
   `language` setting (whisper's speech language) and not the `set_locale` skill
   (which changes the *system* locale): neither is repurposed here.
-- **A locale is translated only when a compiled catalog has real translations.**
-  An empty or missing `.po` never makes a language appear in
-  `translated_locales()`. Normal mode may show the English msgid, but it logs
-  that fact and never claims the locale is translated.
+- **A locale is translated only when a compiled catalog covers most strings.**
+  An empty, missing or stub `.po` never makes a language appear in
+  `translated_locales()`; see `MIN_TRANSLATION_COVERAGE`. Normal mode may show
+  the English msgid, but it logs that fact and never claims the locale is
+  translated.
 - **Dev mode shows what is missing.** With `SHANI_CHRONOA_DEV_LOCALE=1`, or the
   `debug-mode` setting, a msgid with no translation is returned with a visible
   `[untranslated:<lang>]` marker instead of looking like a finished locale.
@@ -33,6 +34,9 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 DOMAIN = "shani-chronoa"
+#: A stub with one filled msgstr is a catalog to finish, not a translated UI.
+#: A locale is advertised only at this share of the template's strings.
+MIN_TRANSLATION_COVERAGE = 0.9
 #: Catalogs ship with the GUI, not in ~/.local: they are code-sized and
 #: read-only, unlike the downloaded OCR/voice data `languages.py` manages.
 LOCALE_ROOT = Path(__file__).parent / "locale"
@@ -111,18 +115,28 @@ def untranslated(lang: str) -> "list[str]":
     return [msgid for msgid in catalog_ids() if not have.get(msgid)]
 
 
-def is_translated(lang: str) -> bool:
-    """True only for a locale with a compiled catalog containing real messages.
+def translation_coverage(lang: str) -> float:
+    """Share of extracted strings this locale actually translates (0.0..1.0)."""
+    ids = catalog_ids()
+    if not ids:
+        return 0.0
+    have = _entries(_catalog_path(lang))
+    return sum(1 for msgid in ids if have.get(msgid)) / len(ids)
 
-    A `.po` skeleton with empty `msgstr`s, or a `.po` nobody compiled, is a
-    catalog *to fill in*, not a translated locale. This is the check that keeps
-    the UI from advertising English as if it were another language's work.
+
+def is_translated(lang: str) -> bool:
+    """True only for a compiled catalog that covers most extracted strings.
+
+    A `.po` skeleton with empty `msgstr`s, a stub with a single translation, or
+    a `.po` nobody compiled is a catalog *to fill in*, not a translated locale.
+    One `msgstr` used to be enough to advertise a language and leave the rest
+    of its UI in English; the coverage floor keeps that claim honest.
     """
     if lang in ("", "en"):
         return False  # English is the source language, not a translation
     if not _catalog_path(lang, ".mo").is_file():
         return False
-    return any(_entries(_catalog_path(lang)).values())
+    return translation_coverage(lang) >= MIN_TRANSLATION_COVERAGE
 
 
 def translated_locales() -> "list[str]":
