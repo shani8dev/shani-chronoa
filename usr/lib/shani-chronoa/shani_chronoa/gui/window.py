@@ -1755,14 +1755,11 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         list, not the window. Both surfaces are additive, so the failure mode
         is a plainer window rather than a window that will not open.
         """
-        try:
-            from shani_chronoa.skills import discover_skills
-            tools, _handlers = discover_skills()
-        except Exception:
-            logger.warning("skill registry unavailable; no suggestions or help",
-                           exc_info=True)
-            return []
-        return capabilities.find_capabilities(tools)
+        caps, error = capabilities.live_capabilities()
+        if error:
+            logger.warning(
+                "skill registry unavailable; no suggestions or help: %s", error)
+        return caps
 
     def _apply_organ_css(self) -> None:
         """The strip's colours, which are the one thing on it that must not
@@ -2164,9 +2161,9 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         help_button.set_icon_name("help-browser-symbolic")
         help_button.add_css_class("flat")
         help_button.set_valign(Gtk.Align.CENTER)
-        help_button.set_tooltip_text("What can Chronoa do?")
+        help_button.set_tooltip_text(capabilities.help_label())
         help_button.update_property(
-            [Gtk.AccessibleProperty.LABEL], ["What can Chronoa do?"]
+            [Gtk.AccessibleProperty.LABEL], [capabilities.help_label()]
         )
         help_button.connect("clicked", lambda _b: self.open_help())
 
@@ -3009,7 +3006,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         item("Ask one quick question", "mail-message-new-symbolic", action="app.quick-ask")
         self._overflow_browser = item("Browse the web", "web-browser-symbolic",
                                       action="app.open-browser")
-        item("What can Chronoa do?", "help-browser-symbolic",
+        item(capabilities.help_label(), "help-browser-symbolic",
              handler=lambda _b: self.open_help())
         button.set_popover(popover)
         button.set_visible(False)

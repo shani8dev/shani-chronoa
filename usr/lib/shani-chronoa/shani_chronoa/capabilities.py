@@ -1180,6 +1180,34 @@ def find_capabilities(tools) -> list[Capability]:
     return found
 
 
+def live_registry(reader=None) -> "tuple[list, dict, str]":
+    """The one live skill registry, shared by every help surface.
+
+    The Help window, the capabilities page and the Workbench must answer the
+    same question about what this build can do. Each used to call
+    ``discover_skills()`` on its own and keep its own copy of the failure
+    handling; a skill that failed to load then made them disagree. Returns
+    ``(schemas, handlers, error)``; an unreadable registry is an error, never
+    an empty whitelist presented as a fact.
+    """
+    try:
+        if reader is None:
+            from shani_chronoa.skills import discover_skills
+            reader = discover_skills
+        schemas, handlers = reader()
+        return list(schemas or ()), dict(handlers or {}), ""
+    except Exception as exc:                               # noqa: BLE001 - GUI must open
+        return [], {}, f"{type(exc).__name__}: {exc}"
+
+
+def live_capabilities() -> "tuple[list[Capability], str]":
+    """The capability list every help surface renders, and why it is empty."""
+    schemas, _handlers, error = live_registry()
+    if error:
+        return [], error
+    return find_capabilities(schemas), ""
+
+
 def startup_suggestions(capabilities: list[Capability]) -> list[str]:
     """The prompts offered on an empty transcript.
 
@@ -1310,6 +1338,19 @@ def task_needs(task: "EverydayTask", config) -> list:
 def help_prompt() -> str:
     """The prompt that opens the capability list rather than answering in text."""
     return _HELP_SUGGESTION
+
+
+#: The label of the one help door: the slash command, the header button, the
+#: palette row and the Help window all name it from here. A second literal in
+#: one of those surfaces would be a second answer to one question.
+HELP_LABEL = "What can Chronoa do?"
+
+
+def help_label() -> str:
+    """The shared wording of the help control."""
+    return HELP_LABEL
+
+
 #: Consent keys whose capability cannot be undone. This is the set that earns a
 #: client-side "this will change something permanently" warning, so it is written
 #: out explicitly rather than inferred from a name pattern - an inferred rule that

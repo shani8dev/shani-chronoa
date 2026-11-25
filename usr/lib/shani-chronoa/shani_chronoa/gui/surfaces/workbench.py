@@ -276,15 +276,12 @@ def builtin_schemas(exclude: Optional["set[str]"] = None) -> Tuple[List[Any], Op
     says *built-in* is the one thing this panel exists to prevent. Taking those
     names out is what makes the two groups mean what they say.
     """
-    try:
-        found, _handlers = skills.discover_skills()
-    except Exception as exc:  # noqa: BLE001 - the window must still open
-        logger.warning("the skill registry could not be read", exc_info=True)
-        return [], f"{type(exc).__name__}: {exc}"
-    try:
-        schemas = list(found or ())
-    except TypeError:
-        return [], "the registry returned something that is not a list of schemas"
+    from shani_chronoa import capabilities
+
+    schemas, _handlers, error = capabilities.live_registry()
+    if error:
+        logger.warning("the skill registry could not be read: %s", error)
+        return [], error
     if not exclude:
         return schemas, None
     kept = []

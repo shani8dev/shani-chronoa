@@ -12,6 +12,7 @@ gi.require_version('GLib', '2.0')
 from gi.repository import Gtk, Gdk, GLib, Pango, GObject
 
 from shani_chronoa import capabilities
+from shani_chronoa.gui.locale import _
 from shani_chronoa.words import plural
 
 from . import blocks as reply_blocks
@@ -444,7 +445,7 @@ class HelpWindow(Gtk.Window):
         super().__init__(
             transient_for=parent,
             modal=True,
-            title="What Shani Chronoa can do",
+            title=_("What Shani Chronoa can do"),
         )
         self.set_default_size(520, 620)
         self._caps = caps
@@ -459,9 +460,9 @@ class HelpWindow(Gtk.Window):
         # a search instead, because the list is over a hundred rows long and
         # scrolling it for "timer" was the only way to find the timer.
         self._search = Gtk.SearchEntry()
-        self._search.set_placeholder_text("Find something Chronoa can do")
+        self._search.set_placeholder_text(_("Find something Chronoa can do"))
         self._search.update_property(
-            [Gtk.AccessibleProperty.LABEL], ["Find something Chronoa can do"])
+            [Gtk.AccessibleProperty.LABEL], [_("Find something Chronoa can do")])
         self._search.set_margin_top(12)
         self._search.set_margin_start(14)
         self._search.set_margin_end(14)
@@ -482,7 +483,7 @@ class HelpWindow(Gtk.Window):
 
         #: (group box, [(row, haystack)]) for `filter()`.
         self._index: list = []
-        self._empty = Gtk.Label(label="Nothing matches. Try a shorter word.")
+        self._empty = Gtk.Label(label=_("Nothing matches. Try a shorter word."))
         self._empty.add_css_class("dim-label")
         self._empty.set_margin_top(24)
         self._empty.set_visible(False)
@@ -530,7 +531,7 @@ class HelpWindow(Gtk.Window):
 
         rows.append(self._build_tasks(config))
         rows.append(self._build_shortcuts(config))
-        everything = Gtk.Label(label="Everything Chronoa can do")
+        everything = Gtk.Label(label=_("Everything Chronoa can do"))
         everything.add_css_class("title-4")
         everything.set_halign(Gtk.Align.START)
         everything.set_margin_start(14)
@@ -592,7 +593,7 @@ class HelpWindow(Gtk.Window):
         """
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         box.add_css_class("help-group")
-        heading = Gtk.Label(label="What you can do")
+        heading = Gtk.Label(label=_("What you can do"))
         heading.add_css_class("help-group-heading")
         heading.set_halign(Gtk.Align.START)
         box.append(heading)
@@ -639,13 +640,13 @@ class HelpWindow(Gtk.Window):
         box.add_css_class("help-group")
         box.set_margin_start(14)
         box.set_margin_end(14)
-        heading = Gtk.Label(label="Get things done")
+        heading = Gtk.Label(label=_("Get things done"))
         heading.add_css_class("title-4")
         heading.set_halign(Gtk.Align.START)
         box.append(heading)
-        intro = Gtk.Label(label="Say what you want done, the way you would ask a person. "
+        intro = Gtk.Label(label=_("Say what you want done, the way you would ask a person. "
                                 "Chronoa works out the steps, asks before anything that "
-                                "pays or deletes, and tells you what it did.")
+                                "pays or deletes, and tells you what it did."))
         intro.add_css_class("dim-label")
         intro.set_wrap(True)
         intro.set_xalign(0.0)
@@ -676,7 +677,7 @@ class HelpWindow(Gtk.Window):
                 text.append(gate)
             card.append(text)
             if self._on_try is not None:
-                try_button = Gtk.Button(label="Try it")
+                try_button = Gtk.Button(label=_("Try it"))
                 try_button.add_css_class("suggested-action")
                 try_button.set_valign(Gtk.Align.CENTER)
                 try_button.set_margin_end(10)
@@ -724,7 +725,7 @@ class HelpWindow(Gtk.Window):
             text.append(gate)
 
         if capability.example and self._on_try is not None:
-            try_button = Gtk.Button(label="Try")
+            try_button = Gtk.Button(label=_("Try"))
             try_button.add_css_class("flat")
             try_button.add_css_class("circular")
             try_button.set_valign(Gtk.Align.CENTER)
@@ -791,8 +792,8 @@ class TranscriptView(Gtk.ScrolledWindow):
         jump.set_icon_name("go-down-symbolic")
         jump.add_css_class("flat")
         jump.add_css_class("circular")
-        jump.set_tooltip_text("Jump to the newest message")
-        jump.update_property([Gtk.AccessibleProperty.LABEL], ["Jump to the newest message"])
+        jump.set_tooltip_text(_("Jump to the newest message"))
+        jump.update_property([Gtk.AccessibleProperty.LABEL], [_("Jump to the newest message")])
         jump.set_halign(Gtk.Align.END)
         jump.set_valign(Gtk.Align.END)
         jump.set_visible(False)
@@ -1093,9 +1094,9 @@ class TranscriptView(Gtk.ScrolledWindow):
         box.set_margin_bottom(8)
         box.set_margin_start(10)
         box.set_margin_end(10)
-        button = Gtk.Button(label="Edit this and rerun from here")
+        button = Gtk.Button(label=_("Edit this and rerun from here"))
         button.set_valign(Gtk.Align.START)
-        note = Gtk.Label(label="Everything after it is removed")
+        note = Gtk.Label(label=_("Everything after it is removed"))
         note.add_css_class("dim-label")
         note.set_wrap(True)
         note.set_max_width_chars(32)
@@ -1153,7 +1154,7 @@ class TranscriptView(Gtk.ScrolledWindow):
         # is indistinguishable from a stray row that a cleared transcript grew -
         # so the sentence went **into** the placeholder instead. One widget
         # fewer, and the invariant survives untouched.
-        label = Gtk.Label(label="Ask something, or press the orb to speak.")
+        label = Gtk.Label(label=_("Ask something, or press the orb to speak."))
         label.add_css_class("transcript-placeholder")
         label.set_wrap(True)
         label.set_halign(Gtk.Align.CENTER)
@@ -1178,8 +1179,8 @@ class TranscriptView(Gtk.ScrolledWindow):
         # uses, and `test_window_ux`'s invariant is taught the second
         # deliberate row rather than weakened.
         keys = Gtk.Label(
-            label="Ctrl+K for anything else  ·  Ctrl+F to find in this "
-                  "conversation  ·  ? for what Chronoa can do")
+            label=_("Ctrl+K for anything else  ·  Ctrl+F to find in this "
+                  "conversation  ·  ? for what Chronoa can do"))
         keys.add_css_class("dim-label")
         keys.set_wrap(True)
         keys.set_halign(Gtk.Align.CENTER)
@@ -1344,14 +1345,14 @@ class TranscriptView(Gtk.ScrolledWindow):
         # renamed, and it is true of the panel whatever it is called.
         show_diff = getattr(self, "_on_show_diff", None)
         if changed and callable(show_diff):
-            button = Gtk.Button(label="See the changes")
+            button = Gtk.Button(label=_("See the changes"))
             button.add_css_class("flat")
             button.add_css_class("caption")
             button.set_halign(Gtk.Align.START)
             button.set_margin_start(28)
             button.set_tooltip_text(
-                "Open the panel that lists the files this turn changed, with "
-                "the changed lines in each one.")
+                _("Open the panel that lists the files this turn changed, with "
+                "the changed lines in each one."))
             button.connect("clicked", lambda *_: show_diff())
             row.append(button)
 
@@ -1493,8 +1494,8 @@ class TranscriptView(Gtk.ScrolledWindow):
             again.set_icon_name("edit-undo-symbolic")
             again.add_css_class("flat")
             again.add_css_class("circular")
-            again.set_tooltip_text("Ask that again")
-            again.update_property([Gtk.AccessibleProperty.LABEL], ["Ask that again"])
+            again.set_tooltip_text(_("Ask that again"))
+            again.update_property([Gtk.AccessibleProperty.LABEL], [_("Ask that again")])
             again.connect("clicked", self._on_regenerate_clicked)
             buttons.append(again)
         if self._on_verdict is not None:
@@ -1895,9 +1896,9 @@ class TranscriptView(Gtk.ScrolledWindow):
             again.set_icon_name("edit-undo-symbolic")
             again.add_css_class("flat")
             again.add_css_class("circular")
-            again.set_tooltip_text("Ask that again")
+            again.set_tooltip_text(_("Ask that again"))
             again.update_property([Gtk.AccessibleProperty.LABEL],
-                                  ["Ask that again"])
+                                  [_("Ask that again")])
             again.connect("clicked", self._on_regenerate_clicked)
             row.append(again)
         # **Recorded for search, against the turn it is inside.** Computed after

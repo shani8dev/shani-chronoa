@@ -1,5 +1,5 @@
 # Shani Chronoa GTK UI - en.
-# 76 of 76 strings translated. Untranslated entries are
+# 140 of 140 strings translated. Untranslated entries are
 # intentional: copy this file, fill the empty msgstrs and compile with msgfmt.
 msgid ""
 msgstr ""
@@ -7,6 +7,108 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Language: en\n"
+
+msgid "Say or type your answer…"
+msgstr ""
+
+msgid "Tap an option, or just say your answer."
+msgstr ""
+
+msgid "Play or pause"
+msgstr ""
+
+msgid "Why this tool"
+msgstr ""
+
+msgid "Show what this ran, and what came back"
+msgstr ""
+
+msgid "Open this change in the Diff panel"
+msgstr ""
+
+msgid "Rendered"
+msgstr ""
+
+msgid "Source"
+msgstr ""
+
+msgid "Set start"
+msgstr ""
+
+msgid "Set end"
+msgstr ""
+
+msgid "Add to message"
+msgstr ""
+
+msgid "No part marked"
+msgstr ""
+
+msgid "Chronoa says this call did not succeed. Its answer below explains why, if it did."
+msgstr ""
+
+msgid "Show full diff"
+msgstr ""
+
+msgid "No line changed"
+msgstr ""
+
+msgid "did not work"
+msgstr ""
+
+msgid "Open"
+msgstr ""
+
+msgid "Show what changed"
+msgstr ""
+
+msgid "the end must come after the start"
+msgstr ""
+
+msgid "Chronoa Browser"
+msgstr ""
+
+msgid "Search or enter an address"
+msgstr ""
+
+msgid "Page actions"
+msgstr ""
+
+msgid "part of this conversation was already dropped to make the request fit"
+msgstr ""
+
+msgid "Go to a panel, a command, a skill..."
+msgstr ""
+
+msgid "Nothing matches that."
+msgstr ""
+
+msgid "Quick Ask"
+msgstr ""
+
+msgid "Ask something…"
+msgstr ""
+
+msgid "Off: the question and answer are not saved anywhere. On: they are added to the open conversation as a normal turn."
+msgstr ""
+
+msgid "Keep in the conversation"
+msgstr ""
+
+msgid "Close"
+msgstr ""
+
+msgid "Ask"
+msgstr ""
+
+msgid "Search panels"
+msgstr ""
+
+msgid "Close the panel list (F9)"
+msgstr ""
+
+msgid "Panels"
+msgstr ""
 
 msgid "Activity"
 msgstr ""
@@ -23,10 +125,22 @@ msgstr ""
 msgid "Cancel"
 msgstr ""
 
+msgid "Automation"
+msgstr ""
+
+msgid "Saved phrases, rules that fire on their own, plans, and the switch that lets any of them run with the window closed."
+msgstr ""
+
 msgid "Calendar"
 msgstr ""
 
 msgid "What is on your calendars, read from the same Evolution Data Server sources the calendar_events skill and the calendar trigger read. Read-only: nothing here changes an event, and nothing is read while the consent key below is off."
+msgstr ""
+
+msgid "Changes"
+msgstr ""
+
+msgid "What Chronoa wrote and made: the diff of each change, an editor to open it in, and the files it produced."
 msgstr ""
 
 msgid "Ready"
@@ -116,10 +230,22 @@ msgstr ""
 msgid "Chronoa keeps your conversation and your facts in your own data directory. These write them out as files you choose, and name what is in each one."
 msgstr ""
 
+msgid "Git"
+msgstr ""
+
+msgid "The repository Chronoa is working in, and the two git writes. Committing and pushing both ask in chat, behind their own switches."
+msgstr ""
+
 msgid "Goals"
 msgstr ""
 
 msgid "Plans Chronoa saved for later, one step at a time. Each step runs exactly as a chat request would, asking for the same things."
+msgstr ""
+
+msgid "Health"
+msgstr ""
+
+msgid "Whether Chronoa can see and drive this desktop, what the machine is reporting, and what it left running."
 msgstr ""
 
 msgid "The anatomy"
@@ -164,6 +290,9 @@ msgstr ""
 msgid "Everything Chronoa can run, what each one costs, and which are already here"
 msgstr ""
 
+msgid "What answers now and what is installed: the live answer first, the catalogue underneath."
+msgstr ""
+
 msgid "My files"
 msgstr ""
 
@@ -180,6 +309,12 @@ msgid "Privacy"
 msgstr ""
 
 msgid "What leaves this machine, and what Chronoa is allowed to read."
+msgstr ""
+
+msgid "Privacy & permissions"
+msgstr ""
+
+msgid "What Chronoa may read, do and send: the switches, the senses and the full consent table, in one place."
 msgstr ""
 
 msgid "What's running"
@@ -212,6 +347,12 @@ msgstr ""
 msgid "Everything Chronoa can be asked to do, read from the same live registry the model is handed. Each row says what it touches, a gate here writes the same key Settings does, and a row with a question offers it in the composer."
 msgstr ""
 
+msgid "Today"
+msgstr ""
+
+msgid "Reminders, alarms, timers, notes and to-dos on one page - what is due or waiting, read from the same stores the assistant uses. Only a timer can be changed here; the rest are started by asking."
+msgstr ""
+
 msgid "Triggers"
 msgstr ""
 
@@ -230,48 +371,60 @@ msgstr ""
 msgid "Turn a command into a skill of your own, and see what that joined."
 msgstr ""
 
-msgid "Set up"
+msgid "Find something Chronoa can do"
+msgstr ""
+
+msgid "Jump to the newest message"
+msgstr ""
+
+msgid "What Shani Chronoa can do"
+msgstr ""
+
+msgid "Nothing matches. Try a shorter word."
+msgstr ""
+
+msgid "Everything Chronoa can do"
+msgstr ""
+
+msgid "What you can do"
+msgstr ""
+
+msgid "Get things done"
+msgstr ""
+
+msgid "Say what you want done, the way you would ask a person. Chronoa works out the steps, asks before anything that pays or deletes, and tells you what it did."
+msgstr ""
+
+msgid "Edit this and rerun from here"
+msgstr ""
+
+msgid "Everything after it is removed"
+msgstr ""
+
+msgid "Ask something, or press the orb to speak."
+msgstr ""
+
+msgid "Ctrl+K for anything else  ·  Ctrl+F to find in this conversation  ·  ? for what Chronoa can do"
+msgstr ""
+
+msgid "Open the panel that lists the files this turn changed, with the changed lines in each one."
+msgstr ""
+
+msgid "Ask that again"
+msgstr ""
+
+msgid "Try"
+msgstr ""
+
+msgid "See the changes"
+msgstr ""
+
+msgid "Try it"
 msgstr ""
 
 msgid "Settings"
 msgstr ""
 
-
-msgid "Automation"
+msgid "Set up"
 msgstr ""
 
-msgid "Saved phrases, rules that fire on their own, plans, and the switch that lets any of them run with the window closed."
-msgstr ""
-
-msgid "Changes"
-msgstr ""
-
-msgid "What Chronoa wrote and made: the diff of each change, an editor to open it in, and the files it produced."
-msgstr ""
-
-msgid "Git"
-msgstr ""
-
-msgid "The repository Chronoa is working in, and the two git writes. Committing and pushing both ask in chat, behind their own switches."
-msgstr ""
-
-msgid "Health"
-msgstr ""
-
-msgid "Whether Chronoa can see and drive this desktop, what the machine is reporting, and what it left running."
-msgstr ""
-
-msgid "What answers now and what is installed: the live answer first, the catalogue underneath."
-msgstr ""
-
-msgid "Privacy & permissions"
-msgstr ""
-
-msgid "What Chronoa may read, do and send: the switches, the senses and the full consent table, in one place."
-msgstr ""
-
-msgid "Today"
-msgstr ""
-
-msgid "Reminders, alarms, timers, notes and to-dos on one page - what is due or waiting, read from the same stores the assistant uses. Only a timer can be changed here; the rest are started by asking."
-msgstr ""

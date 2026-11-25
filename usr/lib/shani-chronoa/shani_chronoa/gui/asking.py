@@ -10,6 +10,7 @@ gi.require_version('Gdk', '4.0')
 gi.require_version('GLib', '2.0')
 
 from gi.repository import Gtk
+from shani_chronoa.gui.locale import _
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +146,7 @@ class AskingMixin:
         self._question_widgets.extend(extras)
         self._question_row.append(buttons)
 
-        hint = Gtk.Label(label="Tap an option, or just say your answer.")
+        hint = Gtk.Label(label=_("Tap an option, or just say your answer."))
         hint.add_css_class("dim-label")
         hint.set_xalign(0.0)
         self._question_widgets.append(hint)
@@ -167,7 +168,7 @@ class AskingMixin:
         # `Gtk.Overlay` around the entry, shown by `_on_input_changed` whenever
         # the buffer is empty. So this sets that label's text and lets the
         # existing logic show it; there is no second placeholder to invent.
-        self._input_placeholder.set_label("Say or type your answer…")
+        self._input_placeholder.set_label(_("Say or type your answer…"))
         self._on_input_changed(self._input_entry.get_buffer())
         self._pending_question = resolve
         self._pending_options = list(options)

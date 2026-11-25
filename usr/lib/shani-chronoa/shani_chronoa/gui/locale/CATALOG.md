@@ -13,7 +13,7 @@ not a translated language; it is never advertised as one.
 | Locale | State | Notes |
 | --- | --- | --- |
 | en | source | msgids are English; no catalog needed |
-| hi | partial | 48 of 76 strings: every panel title, shared status words and controls, two common subtitles. Remaining `msgstr ""` entries are intentional; they are not compiled into the `.mo`, so those labels show the English msgid rather than a blank. |
+| hi | partial | 54 of 89 strings before the GUI-wide extraction; the template now has 140 entries, of which 54 are translated. Every panel title, shared status word and control is translated. Remaining `msgstr ""` entries are intentional; they are not compiled into the `.mo`, so those labels show the English msgid rather than a blank. |
 | others | not started | Copy `messages.pot`; nothing is marked translated until a compiled catalog has real messages. |
 
 The UI follows the **system** locale (`LANGUAGE`, `LC_ALL`, `LC_MESSAGES`,

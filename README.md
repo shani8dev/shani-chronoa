@@ -116,7 +116,7 @@ real, layered, and tested by running them:
 | **Landlock (ABI up to 8)** | Kernel-enforced file rules pinned to file descriptors, plus scoping that blocks abstract-socket and signal escapes — and it still applies where user namespaces are unavailable. |
 | **seccomp** | An optional filter denying 28 syscalls (mount, kexec, bpf, ptrace, io_uring, unshare, …); with it on, a machine that cannot install it runs nothing. Under bubblewrap it is skipped, because bubblewrap's own setup needs `mount` — there the namespaces stand in. |
 | **Containers and VMs** | Run a project's commands in a rootless podman container with no network, or in a systemd-nspawn / vmspawn machine. |
-| **Consent per switch, per action** | 85 skills sit behind a named switch; the 16 destructive ones ask first, showing the exact command or the diff it will apply. "Allow for this turn" covers one turn, never a session. |
+| **Consent per switch, per action** | 76 skills sit behind a named switch in `capabilities.GATED`; the 14 destructive consent keys ask first, showing the exact command or the diff it will apply. "Allow for this turn" covers one turn, never a session. |
 | **Remote turns need the desk** | A message from your phone or a chat app can ask, but cannot edit, delete or run commands unless someone at the computer approves it. |
 | **Undo** | Every file Chronoa writes is snapshotted; revert one file or a whole turn. |
 | **Limits you set** | Memory, time limit and CPU for project commands, and whether they run at low priority (on by default: nice 10, idle disk), on the Sandbox page. |
@@ -155,8 +155,11 @@ its own **Download** button.
   project's tests and builds) is sandboxed, off by default, and asks each time.
   **They are all listed in [`CAPABILITIES.md`](CAPABILITIES.md)**, grouped by
   what they are for, each with the consent switch it needs and whether the
-  assistant asks before running it — 87 are consent-gated and 16 are
-  destructive. That file is generated from `capabilities._GROUPS`, the same
+  assistant asks before running it — 73 are consent-gated and 14 are
+  destructive (the counts from `capabilities.GATED` and
+  `DESTRUCTIVE_CONSENT_KEYS`). The generated `CAPABILITIES.md` also counts
+  skills that gate themselves, so its line reads 86 of 222 consent-gated and
+  16 destructive. That file is generated from `capabilities._GROUPS`, the same
   table the Help window renders, so it cannot drift from what the build does;
   `tests/check_capabilities_doc.py` fails if it does. The deep system,
   network and forensics diagnostics are **not** in this list any more: they
