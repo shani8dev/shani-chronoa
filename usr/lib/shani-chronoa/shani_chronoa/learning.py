@@ -1454,6 +1454,41 @@ def is_success(verdict: Optional[str]) -> bool:
     return str(verdict).strip().lower() in SUCCESS
 
 
+def outcome_features(record) -> dict:
+    """Map one tool-call record into the outcome features learning scores.
+
+    `tool_tracking` writes `verdict` at dispatch, then `feedback_verdict` and
+    `feedback` when a person rejects the answer (`feedback.record_answer`),
+    and `undone` when a restore consumes the change (`undo_ring.note_undo`).
+    Reading `verdict` alone cannot tell "verified and accepted" from "verified,
+    then the person said wrong or put it back" - the two are opposite lessons.
+
+    Returns a dict with the raw `verdict`, the `corrected` / `undone` flags, a
+    single advisory `reward` from the one policy table in `reward.py`, and a
+    `label` for training (`failed` when a person rejected a verified call).
+    Nothing here grants, refuses or changes a tool; it only says what was
+    learned from a record that already exists.
+    """
+    from shani_chronoa import reward
+
+    if isinstance(record, dict):
+        get = record.get
+    else:
+        def get(key, default=None):
+            return getattr(record, key, default)
+    verdict = str(get("verdict") or "").lower()
+    feedback_verdict = str(get("feedback_verdict") or "").lower()
+    undone = (get("undone") is True
+              or str(get("undone") or "").lower() in ("yes", "true"))
+    outcome: dict = {"verdict": verdict, "undone": undone}
+    if feedback_verdict in ("wrong", "correction"):
+        outcome["corrected"] = True
+    outcome["reward"] = reward.reward_for(outcome)
+    outcome["label"] = ("failed" if outcome.get("corrected") and verdict in SUCCESS
+                        else verdict)
+    return outcome
+
+
 def reliability(records: Iterable) -> float:
     """The share of calls that verified, shrunk towards `NEUTRAL`.
 
@@ -1466,9 +1501,9 @@ def reliability(records: Iterable) -> float:
     total = 0
     good = 0
     for record in records:
-        verdict = (record.get("verdict") if isinstance(record, dict)
-                   else getattr(record, "verdict", None))
-        if verdict is None:
+        outcome = outcome_features(record)
+        verdict = outcome["verdict"]
+        if not verdict:
             # The call never reached verification, so nothing was observed. It
             # is counted as neither a success nor a failure - a skill that
             # crashed before its post-condition ran is not evidence about
@@ -1476,7 +1511,11 @@ def reliability(records: Iterable) -> float:
             continue
         total += 1
         if is_success(verdict):
-            good += 1
+            # A rejected or reverted "verified" call was still a real call, but
+            # it is not an unqualified win. `reward` is the one policy table
+            # that says how much of a win it is: plain verified is unchanged,
+            # "done then undone" is neutral, and a correction is discounted.
+            good += (outcome["reward"] + 1) / 2
     return ((good + PRIOR_STRENGTH * NEUTRAL) / (total + PRIOR_STRENGTH))
 
 
@@ -2184,7 +2223,7 @@ def evaluate_bandit(records: Optional[Sequence[dict]] = None,
     successes: Counter = Counter()
     attempts: Counter = Counter()
     for row in rows:
-        verdict = str(row.get("verdict") or "").lower()
+        verdict = outcome_features(row)["label"]
         tool = str(row.get("tool_name") or "")
         if verdict == "verified":
             successes[tool] += 1
@@ -2204,7 +2243,7 @@ def evaluate_bandit(records: Optional[Sequence[dict]] = None,
     runner = Bandit()
     for row in rows:
         tool = str(row.get("tool_name") or "")
-        verdict = str(row.get("verdict") or "").lower()
+        verdict = outcome_features(row)["label"]
         if tool and verdict in ("verified", "failed"):
             runner.update(tool, verdict)
 
@@ -2592,7 +2631,7 @@ def _tally_from_log(records: Optional[Sequence[dict]] = None) -> Dict[str, dict]
     out: Dict[str, Dict[str, int]] = {}
     for row in (records if records is not None else _entries()):
         tool = str(row.get("tool_name") or "")
-        verdict = str(row.get("verdict") or "").lower()
+        verdict = outcome_features(row)["label"]
         if not tool or verdict not in ("verified", "failed"):
             continue
         slot = out.setdefault(tool, {"verified": 0, "failed": 0})
@@ -2639,7 +2678,7 @@ def lessons(records: Optional[Sequence[dict]] = None) -> List[Dict[str, object]]
     shapes: Dict[str, Counter] = defaultdict(Counter)
     for row in rows:
         tool = str(row.get("tool_name") or "")
-        verdict = str(row.get("verdict") or "").lower()
+        verdict = outcome_features(row)["label"]
         if not tool:
             continue
         calls[tool] += 1
@@ -3732,7 +3771,10 @@ def load(path: Optional[Path] = None, limit: int = 200_000,
                     continue
                 if not isinstance(record, dict) or not record.get("tool_name"):
                     continue
-                verdict = str(record.get("verdict") or "").lower()
+                # A wrong-answer verdict is an outcome, not a change to what the
+                # model was told. Folding it into the label here is what makes a
+                # person's correction change what the outcome model learns.
+                verdict = outcome_features(record)["label"]
                 if verdict not in VERDICTS:
                     continue
                 if only_tools is not None and str(record.get("tool_name")) not in only_tools:

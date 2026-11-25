@@ -393,6 +393,7 @@ def restore_content(path: "Path | str", raw: bytes) -> str:
         target.write_bytes(raw)
     except OSError as exc:
         return exc.strerror or str(exc)
+    undo_ring.note_undo()
     return ""
 
 
@@ -441,6 +442,8 @@ def revert_turn(turn: str) -> "tuple[list[str], list[str]]":
             skipped.append(f"{path}: {exc.strerror or exc}")
             continue
         restored.append(path)
+    if restored:
+        undo_ring.note_undo()
     return restored, skipped
 
 

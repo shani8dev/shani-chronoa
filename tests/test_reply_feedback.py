@@ -130,3 +130,133 @@ class TestMarkingAnAnswer:
         bot = assistant_mod.Assistant(_LLM())
         written = bot.mark_last_answer(feedback.WRONG)
         assert written.verdict == feedback.WRONG
+
+
+class TestTheReplyVerdictControl:
+    """A reply carries the affordance; the app owns the recorder behind it."""
+
+    @staticmethod
+    def _walk(widget, kind):
+        stack, out = [widget], []
+        while stack:
+            node = stack.pop(0)
+            if type(node).__name__ == kind:
+                out.append(node)
+            child = node.get_first_child()
+            while child is not None:
+                stack.append(child)
+                child = child.get_next_sibling()
+        return out
+
+    @classmethod
+    def _buttons(cls, widget):
+        return {
+            b.get_tooltip_text(): b
+            for b in cls._walk(widget, "Button")
+            if b.get_tooltip_text()
+        }
+
+    def test_no_handler_means_no_control(self):
+        gi = pytest.importorskip("gi")
+        gi.require_version("Gtk", "4.0")
+        from shani_chronoa.gui.widgets import TranscriptView
+
+        view = TranscriptView()
+        view.add_assistant_turn("38G free")
+        assert "That was wrong" not in self._buttons(view)
+
+    def test_the_control_offers_a_bare_verdict_and_a_correction(self):
+        gi = pytest.importorskip("gi")
+        gi.require_version("Gtk", "4.0")
+        from shani_chronoa.gui.widgets import TranscriptView
+
+        said = []
+        view = TranscriptView(
+            on_verdict=lambda verdict, text: said.append((verdict, text))
+        )
+        view.add_assistant_turn("38G free")
+        assert "That was wrong" in self._buttons(view)
+
+        # The same choices the button's popover shows, built without mapping a
+        # popover on a display-less test runner. No model is called by the widget.
+        choices = view._build_verdict_popover(self._buttons(view)["That was wrong"])
+        assert choices is not None
+        buttons = {b.get_label(): b for b in self._walk(choices, "Button")}
+        assert set(buttons) >= {"That was wrong", "Send correction"}
+        buttons["That was wrong"].emit("clicked")
+        assert said == [("wrong", "")]
+
+        # A typed correction is passed through verbatim, for the next user turn.
+        choices = view._build_verdict_popover(self._buttons(view)["That was wrong"])
+        self._walk(choices, "Entry")[0].set_text("use the trash")
+        buttons = {b.get_label(): b for b in self._walk(choices, "Button")}
+        buttons["Send correction"].emit("clicked")
+        assert said[-1] == ("correction", "use the trash")
+
+
+class TestTheCorrectionIsTheNextTurn:
+    """The handler records a judgement and leaves a visible user turn, not a
+    silent change to the prompt."""
+
+    def test_a_correction_is_put_in_the_composer_not_the_history(self, tmp_path):
+        from shani_chronoa.app.conversation import ConversationMixin
+
+        bot, session = TestMarkingAnAnswer._assistant(self, tmp_path)
+        history_before = [dict(m) for m in bot._history]
+        window = type(
+            "Window",
+            (),
+            {
+                "set_input_text": lambda self, text: setattr(self, "text", text),
+                "set_status": lambda self, text: setattr(self, "status", text),
+            },
+        )()
+        host = type("Host", (), {"assistant": bot, "window": window})()
+        ConversationMixin._mark_answer(host, feedback.CORRECTION, "use the trash")
+        assert bot._history == history_before, "feedback must not be a prompt injection"
+        assert window.text == "use the trash"
+        assert (
+            conversation_store.load(session)[-1]["feedback"]["verdict"]
+            == feedback.CORRECTION
+        )
+
+    def test_a_bare_wrong_is_a_question_the_person_can_send(self, tmp_path):
+        from shani_chronoa.app.conversation import ConversationMixin
+
+        bot, _session = TestMarkingAnAnswer._assistant(self, tmp_path)
+        window = type(
+            "Window",
+            (),
+            {
+                "set_input_text": lambda self, text: setattr(self, "text", text),
+                "set_status": lambda self, text: setattr(self, "status", text),
+            },
+        )()
+        host = type("Host", (), {"assistant": bot, "window": window})()
+        ConversationMixin._mark_answer(host, feedback.WRONG)
+        assert "wrong" in window.text.lower()
+        assert bot.last_feedback.verdict == feedback.WRONG
+
+    def test_the_app_attaches_the_handler_only_with_an_assistant(self):
+        from shani_chronoa.app.conversation import ConversationMixin
+
+        seen = []
+        window = type(
+            "Window",
+            (),
+            {"set_verdict_handler": lambda self, handler: seen.append(handler)},
+        )()
+        host = type(
+            "Host",
+            (),
+            {
+                "assistant": object(),
+                "window": window,
+                "_mark_answer": lambda self, verdict, correction="": None,
+            },
+        )()
+        ConversationMixin.attach_feedback(host)
+        assert len(seen) == 1 and callable(seen[0])
+        host.assistant = None
+        ConversationMixin.attach_feedback(host)
+        assert seen[-1] is None
