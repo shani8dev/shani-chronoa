@@ -387,11 +387,11 @@ class ConversationMixin:
             GLib.source_remove(_src)
             self._stream_idle_source = None
         if self._turn_queue:
-            text, channel = self._turn_queue.pop(0)
+            text, channel, speaker = self._turn_queue.pop(0)
             logger.info(f"Starting the next of {len(self._turn_queue) + 1} queued")
-            self._start_turn(text, channel)
+            self._start_turn(text, channel, speaker)
 
-    def _submit(self, text: str, channel: str = "") -> None:
+    def _submit(self, text: str, channel: str = "", speaker: str = "") -> None:
         """Send text through the assistant's tool-calling pipeline.
 
         `channel` says which surface asked. The typed window passes the
@@ -427,7 +427,7 @@ class ConversationMixin:
         logger.info(f"User input: {text}")
 
         if self._turn_in_flight or self._turn_queue:
-            self._turn_queue.append((text, channel))
+            self._turn_queue.append((text, channel, speaker))
             if self._turn_in_flight:
                 if self.window:
                     waiting = len(self._turn_queue)
@@ -444,9 +444,9 @@ class ConversationMixin:
             # ones never.
             self._turn_finished()
             return
-        self._start_turn(text, channel)
+        self._start_turn(text, channel, speaker)
 
-    def _start_turn(self, text: str, channel: str = "") -> None:
+    def _start_turn(self, text: str, channel: str = "", speaker: str = "") -> None:
         """Begin one turn, unconditionally. `_submit` decides *whether* now."""
 
         if not self.assistant or not self.llm or not self.llm.is_available():
@@ -463,7 +463,7 @@ class ConversationMixin:
 
                 def ready() -> None:
                     self._turn_in_flight = False
-                    self._start_turn(text, channel)
+                    self._start_turn(text, channel, speaker)
 
                 def gave_up() -> None:
                     self._turn_in_flight = False
@@ -488,6 +488,9 @@ class ConversationMixin:
         self._stream_idle_source = GLib.timeout_add(
             STREAM_IDLE_POLL_MS, self._flush_idle_words)
         self._turn_channel = channel
+        # A neutral diarization label for this turn, or "". It travels with
+        # the turn so memory capture can attribute its fact under the same gates.
+        self._turn_speaker = speaker
         self._turn_future = self._async.run(
             self.assistant.handle(text, sink=self.event_sink(),
                                   channel=channel),
@@ -534,7 +537,8 @@ class ConversationMixin:
         # asked. If there's no assistant reply yet (error path), skip.
         combined = f"User: {asked}\nAssistant: {response}"
         _, reason = memory.remember_from_turn(
-            combined, force=False, channel=getattr(self, "_turn_channel", ""))
+            combined, force=False, channel=getattr(self, "_turn_channel", ""),
+            speaker=getattr(self, "_turn_speaker", ""))
         if reason and reason != "":
             logger.debug("Memory capture skipped: %s", reason)
 
