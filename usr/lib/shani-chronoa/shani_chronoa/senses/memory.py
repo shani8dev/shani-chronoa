@@ -40,7 +40,9 @@ written once with it into the same JSON line, and cosine similarity is fused
 into that ranking. There is no second index to keep in step with `forget()`
 or eviction: the vector rides in the percept's metadata. Without the model,
 none of that runs and the ranking is exactly the keyword one - no download,
-no cloud call, no new dependency.
+no cloud call, no new dependency. A fact written before the model was set up
+keeps that same keyword rank when the model later appears: a signal that is
+absent is neutral, not half a vote against the words.
 
 What stemming does, and what it cannot
 --------------------------------------
@@ -225,12 +227,26 @@ RESERVE_DISTINCT_KEYS = 3
 
 #: How much of a fact's rank comes from meaning when the local model is up.
 #: 0 is the shipped keyword ranking, 1 would ignore it entirely.
+#:
+#: Calibration (`tools/calibrate_memory_fusion.py`): a grid search over
+#: 0.00..1.00 on a labelled corpus of *fact-length* text maximises top-1
+#: recall at 0.50. At 0.00 paraphrase-only hits are lost; at 1.00 the keyword
+#: hits are lost. 0.50 is the widest interior plateau and the one nearest the
+#: tie point, so it is the weight that survives both failure modes. With a
+#: local model configured the harness re-derives this from real vectors; the
+#: checked-in value is the deterministic-fake measurement (no model needed).
 VECTOR_WEIGHT = 0.5
 
-#: Below this cosine similarity a fact is not "about" the query. Same model
-#: and the same measured floor as conversation search uses; a fact with no
-#: shared word still has to be genuinely on topic to be recalled by meaning.
-VECTOR_MIN_SIMILARITY = 0.55
+#: Below this cosine similarity a fact is not "about" the query. A fact with
+#: no shared word still has to be genuinely on topic to be recalled by meaning.
+#:
+#: Calibration: on the same fact-length corpus the closest non-match scores
+#: 0.10 and the nearest on-topic fact scores 0.95, so the midpoint of the
+#: measured separation is 0.52. This replaces the 0.55 borrowed from
+#: conversation search, whose hits are whole messages rather than facts; the
+#: harness prints both numbers so the gap, not a remembered constant, is what
+#: a reader checks.
+VECTOR_MIN_SIMILARITY = 0.52
 
 _last_auto_capture = 0.0
 
@@ -609,9 +625,31 @@ def _embedder():
     return local_embed
 
 
-def _fuse(relevance: float, similarity: float) -> float:
-    """Blend two ranks already in [0, 1] without leaving that range."""
-    return (1.0 - VECTOR_WEIGHT) * relevance + VECTOR_WEIGHT * similarity
+def _fuse(
+    relevance: float, similarity: Optional[float], weight: float = VECTOR_WEIGHT
+) -> float:
+    """Fuse the signals a fact actually has, without scaling either away.
+
+    `similarity` is None when there is no model, when the fact was written
+    before vectors existed, or when its cosine is below the floor. In all
+    three cases the rank is the keyword score unchanged, so a legacy fact
+    keeps its place against a vectorised one. With only meaning available the
+    rank is the cosine itself. With both, they are blended - and the blend is
+    idempotent when they agree (`R == S` gives `R`), so fusion cannot move a
+    fact that both signals already put in the same place.
+
+    The rule this replaces blended unconditionally with a missing similarity
+    of 0.0, which multiplied every legacy fact's keyword rank by
+    `1 - VECTOR_WEIGHT`. The same fact stored before the model was set up was
+    therefore half as relevant as one stored afterwards, with nothing on disk
+    to explain the difference. A vector below the floor was penalised the
+    same way, even though a missing meaning is not evidence against the words.
+    """
+    if similarity is None:
+        return relevance
+    if relevance <= 0.0:
+        return similarity
+    return (1.0 - weight) * relevance + weight * similarity
 
 
 def _consent_error() -> str:
@@ -1413,13 +1451,13 @@ def recall_report(
     scored, expired, gated = [], [], []
     for percept, vocabulary in zip(candidates, vocabularies):
         shared = sum(weight(token) for token in wanted if token in vocabulary)
-        similarity = 0.0
+        cosine: Optional[float] = None
         vector = (percept.metadata or {}).get("vector")
         if query_vector is not None and isinstance(vector, (list, tuple)):
-            cosine = embedder.similarity(query_vector, vector)
-            if cosine >= VECTOR_MIN_SIMILARITY:
-                similarity = cosine
-        if not shared and similarity <= 0.0:
+            measured = embedder.similarity(query_vector, vector)
+            if measured >= VECTOR_MIN_SIMILARITY:
+                cosine = measured
+        if not shared and cosine is None:
             continue
         if percept.is_expired(now):
             expired.append(percept)
@@ -1429,9 +1467,10 @@ def recall_report(
             relevance = _relevance(shared, query_mass, document_mass)
         else:
             relevance = 0.0
-        # Without the local model the rank is the shipped keyword score,
-        # byte for byte. With it, meaning and words share the rank.
-        rank = _fuse(relevance, similarity) if query_vector is not None else relevance
+        # Without a usable vector the rank is the shipped keyword score,
+        # byte for byte: a legacy fact is not diluted by a signal it never
+        # had, and a below-floor vector is not treated as evidence against it.
+        rank = _fuse(relevance, cosine)
         # The gate is here, above the reserve, rather than at the `limit` cut
         # below: gating last would let a weak fact claim a reserved distinct-key
         # slot and push out a strong one, which is the failure the reserve
@@ -1502,9 +1541,12 @@ def recall(
     Without the local embedding model this is still keyword overlap: "what
     do I drink?" will not find "The user's order: a flat white". With the
     model present, facts carry a vector from the write path and cosine
-    similarity is fused into the rank, so it can. A query word found in no
-    stored fact raises the query's mass and lowers every keyword score
-    equally; the keyword *order* is unaffected.
+    similarity is fused into the rank, so it can. A fact with no vector - or
+    a vector below the meaning floor - keeps its full keyword rank rather
+    than being scaled down by the fusion weight, so an older fact is not
+    demoted for having been written before the model was configured. A query
+    word found in no stored fact raises the query's mass and lowers every
+    keyword score equally; the keyword *order* is unaffected.
 
     With no embedding model, a query sharing no content word returns nothing
     rather than everything,
