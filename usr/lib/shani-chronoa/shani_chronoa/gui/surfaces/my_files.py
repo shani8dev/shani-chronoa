@@ -52,9 +52,11 @@ from shani_chronoa import file_index
 from shani_chronoa.gui.surfaces import common
 from shani_chronoa.words import plural
 
+from shani_chronoa.gui.locale import _
+
 logger = logging.getLogger(__name__)
 
-TITLE = "My files"
+TITLE = _("My files")
 #: **`folder-search-symbolic` is not a glyph this theme ships** - measured
 #: with `Gtk.IconTheme.has_icon`, and the check is
 #: `tests/test_ui_layout_contract.py::test_every_surface_icon_exists_on_this_machine`.
@@ -62,8 +64,8 @@ TITLE = "My files"
 #: reads as a rendering bug rather than as a missing glyph.
 ICON = "edit-find-replace-symbolic"
 SECTION = "Remembering"
-SUBTITLE = ("Search your own documents and notes, by keyword and - where the "
-            "embedding model is installed - by meaning.")
+SUBTITLE = (_("Search your own documents and notes, by keyword and - where the "
+            "embedding model is installed - by meaning."))
 
 CONSENT_KEY = "file-index-enabled"
 

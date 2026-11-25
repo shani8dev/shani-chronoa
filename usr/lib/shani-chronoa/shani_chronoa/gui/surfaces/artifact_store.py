@@ -39,20 +39,20 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, Gtk, Pango  # noqa: E402
 
 from shani_chronoa.gui.surfaces import common  # noqa: E402
+
+from shani_chronoa.gui.locale import _
 from shani_chronoa.words import plural
 
 logger = logging.getLogger(__name__)
 
-TITLE = "Artifacts"
+TITLE = _("Artifacts")
 # Not the download arrow: Export uses `document-save-symbolic`, which Adwaita
 # draws as the same arrow, so the two neighbouring rows had one glyph.
 ICON = "folder-documents-symbolic"
 SECTION = "Making"
 
-SUBTITLE = (
-    "Where models, voices, documents and exports are stored. "
-    "Browse, search, download and clean up your local files."
-)
+SUBTITLE = _("Where models, voices, documents and exports are stored. "
+            "Browse, search, download and clean up your local files.")
 
 
 # ---------------------------------------------------------------------------
@@ -379,7 +379,7 @@ class _ArtifactRow(Gtk.Box):
             heading=f"Move {artifact.name} to the Trash?",
             body=(f"{self._format_size(artifact.size)} - {artifact.description}. "
                   "You can restore it from the Trash."))
-        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("cancel", _("Cancel"))
         dialog.add_response("trash", "Move to Trash")
         dialog.set_response_appearance("trash", Adw.ResponseAppearance.DESTRUCTIVE)
         dialog.set_default_response("cancel")

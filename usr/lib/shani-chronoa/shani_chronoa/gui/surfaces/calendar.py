@@ -70,19 +70,21 @@ from shani_chronoa.gui.surfaces import common  # noqa: E402
 from shani_chronoa.skills import calendar_events as skill_calendar  # noqa: E402
 from shani_chronoa.words import plural
 
+from shani_chronoa.gui.locale import _
+
 logger = logging.getLogger(__name__)
 
-TITLE = "Calendar"
+TITLE = _("Calendar")
 # `x-office-calendar`: Adwaita has no `office-calendar-symbolic`, so on GNOME
 # this row drew a blank box. Present in Adwaita and Yaru alike.
 ICON = "x-office-calendar-symbolic"
 SECTION = "Sensing"
 
 SUBTITLE = (
-    "What is on your calendars, read from the same Evolution Data Server "
+    _("What is on your calendars, read from the same Evolution Data Server "
     "sources the calendar_events skill and the calendar trigger read. "
     "Read-only: nothing here changes an event, and nothing is read while the "
-    "consent key below is off."
+    "consent key below is off.")
 )
 
 #: The skill's own consent key, repeated because a panel must not fail open if

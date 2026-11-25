@@ -31,10 +31,12 @@ from shani_chronoa import notices
 from shani_chronoa.gui.surfaces import common
 from shani_chronoa.words import plural
 
-TITLE = "Notices"
+from shani_chronoa.gui.locale import _
+
+TITLE = _("Notices")
 ICON = "mail-unread-symbolic"
-SUBTITLE = ("What Chronoa noticed on its own, newest first. Dismissing one "
-            "keeps it from nagging again for the same thing.")
+SUBTITLE = (_("What Chronoa noticed on its own, newest first. Dismissing one "
+            "keeps it from nagging again for the same thing."))
 
 
 def _when(at: float) -> str:

@@ -65,9 +65,11 @@ from shani_chronoa.gui.surfaces import common  # noqa: E402
 from shani_chronoa.skills import undo_last_change  # noqa: E402
 from shani_chronoa import tools  # noqa: E402
 
+from shani_chronoa.gui.locale import _
+
 logger = logging.getLogger(__name__)
 
-TITLE = "Editor"
+TITLE = _("Editor")
 #: Already used by `artifact_store`, so `test_ui_layout_contract.py`'s
 #: icon-existence check has measured this name on this machine rather than
 #: taking this string's word for it.

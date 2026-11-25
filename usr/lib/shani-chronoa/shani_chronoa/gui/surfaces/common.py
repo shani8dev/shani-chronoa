@@ -33,6 +33,8 @@ gi.require_version("Pango", "1.0")
 
 from gi.repository import Adw, GLib, Gtk, Pango  # type: ignore
 
+from shani_chronoa.gui.locale import _
+
 logger = logging.getLogger(__name__)
 
 #: Adwaita needs initialising before a single Adw widget is constructed, and it
@@ -251,10 +253,10 @@ STATUS_OFF = "off"
 #: green, the same red, the same amber - so the whole app has one visual
 #: language for health rather than one per panel.
 STATUS_WORDS = {
-    STATUS_OK: "Ready",
-    STATUS_ATTENTION: "Needs attention",
-    STATUS_UNKNOWN: "Could not determine",
-    STATUS_OFF: "Turned off",
+    STATUS_OK: _("Ready"),
+    STATUS_ATTENTION: _("Needs attention"),
+    STATUS_UNKNOWN: _("Could not determine"),
+    STATUS_OFF: _("Turned off"),
 }
 
 STATUS_CLASSES = {
@@ -816,7 +818,7 @@ def model_banner(app: Any, kind: str, needed_for: str = "") -> "Optional[Gtk.Wid
     info = model_status.KINDS[kind]
     why = needed_for or info.enables
     return banner(f"{info.label} is not downloaded yet, so Chronoa cannot {why}.",
-                  "Download", lambda: open_setup(app, page=info.setup_page),
+                  _("Download"), lambda: open_setup(app, page=info.setup_page),
                   "Opens Setup on its page, where the download size is shown")
 
 
@@ -912,12 +914,12 @@ def details_button(text: str, tooltip: str = "Where this was measured") -> Gtk.W
     goes through `set_subtitle`, which is Pango markup, so `row()` escapes it
     there.)
     """
-    button = Gtk.MenuButton(label="Details")
+    button = Gtk.MenuButton(label=_("Details"))
     button.add_css_class("flat")
     button.set_valign(Gtk.Align.CENTER)
     button.set_tooltip_text(tooltip)
     button.update_property(
-        [Gtk.AccessibleProperty.LABEL], ["Details"])
+        [Gtk.AccessibleProperty.LABEL], [_("Details")])
     popover = Gtk.Popover()
     label = Gtk.Label(label=home_paths(text), xalign=0.0, wrap=True)
     label.set_use_markup(False)
@@ -1038,7 +1040,7 @@ def consent_banner(app: Any, key: str, why: str,
         if on_change is not None:
             on_change()
 
-    return banner(f"“{name}” is off. {why}", "Turn on", turn_on,
+    return banner(f"“{name}” is off. {why}", _("Turn on"), turn_on,
                   f"Turns on “{name}”, the same switch as in Settings")
 
 
@@ -1058,7 +1060,7 @@ def read_banner(on_reload: Callable[[], None]) -> Gtk.Widget:
     says *when* and "not live" says it will not update itself, which is all
     the long sentences were for. `restamp(banner)` after a reload.
     """
-    widget = banner(_read_text(), "Reload", lambda: (on_reload(), restamp(widget)),
+    widget = banner(_read_text(), _("Reload"), lambda: (on_reload(), restamp(widget)),
                     "Read everything on this page again")
     return widget
 
@@ -1265,7 +1267,7 @@ def _escape(text: str) -> str:
     return markdown_lite.escape(str(text))
 
 
-def search_entry(placeholder: str = "Search",
+def search_entry(placeholder: str = _("Search"),
                  on_changed: Optional[Callable[[str], None]] = None) -> Gtk.Widget:
     """A search field wired to `on_changed`.
 
@@ -1279,7 +1281,7 @@ def search_entry(placeholder: str = "Search",
     entry.set_hexpand(True)
     if placeholder:
         entry.set_placeholder_text(placeholder)
-    entry.update_property([Gtk.AccessibleProperty.LABEL], [placeholder or "Search"])
+    entry.update_property([Gtk.AccessibleProperty.LABEL], [placeholder or _("Search")])
     if on_changed is not None:
         entry.connect("search-changed", lambda e: on_changed(e.get_text()))
     return entry

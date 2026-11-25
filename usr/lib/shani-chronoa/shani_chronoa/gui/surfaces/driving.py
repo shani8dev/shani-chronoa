@@ -38,9 +38,11 @@ from gi.repository import GLib, Gtk
 from shani_chronoa import ui_driver
 from shani_chronoa.gui.surfaces import common
 
+from shani_chronoa.gui.locale import _
+
 logger = logging.getLogger(__name__)
 
-TITLE = "Driving"
+TITLE = _("Driving")
 ICON = "input-gaming-symbolic"
 SECTION = "Acting"
 #: **Built when opened, not at start.** Its rows run their probes on the GTK
@@ -52,8 +54,8 @@ SECTION = "Acting"
 #: `_portal_row` and `portal.RemoteInput`; this keeps the probes off start-up.
 #: The same arrangement `diagnostics.py` uses.
 PREBUILD = False
-SUBTITLE = ("What Chronoa can do with a mouse and a keyboard on this desktop, "
-            "and where it has to say it cannot.")
+SUBTITLE = (_("What Chronoa can do with a mouse and a keyboard on this desktop, "
+            "and where it has to say it cannot."))
 
 
 class Row:

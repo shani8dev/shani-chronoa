@@ -83,17 +83,19 @@ from shani_chronoa.triggers import (  # noqa: E402
 )
 from shani_chronoa.words import plural  # noqa: E402
 
+from shani_chronoa.gui.locale import _
+
 logger = logging.getLogger(__name__)
 
-TITLE = "Triggers"
+TITLE = _("Triggers")
 ICON = "preferences-system-time-symbolic"
 
 # Not "read-only" any more: the Arm a rule form below arms through the chat
 # skill. Nothing on this page *fires* a rule - firing is the engine's.
 SUBTITLE = (
-    "The trigger rules this assistant could act on, read from the same two rule "
+    _("The trigger rules this assistant could act on, read from the same two rule "
     "files the engines fire from. Arm or remove rules here; nothing on this page "
-    "fires one."
+    "fires one.")
 )
 
 #: Markers a test can find in the built tree, so no assertion has to read a

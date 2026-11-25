@@ -87,17 +87,19 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 from shani_chronoa import sherpa, stt, stt_provision, tts, voices  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 
+from shani_chronoa.gui.locale import _
+
 logger = logging.getLogger(__name__)
 
 #: **"Speaking voice", not "Voice".** *"What Chronoa is speaking with, and what
 #: else is installed"* - this is the speech-synthesis side. Paired with App
 #: audio and the microphone, "Voice" claimed all three at once and named none,
 #: which is how two panels in one section stayed indistinguishable.
-TITLE = "Speaking voice"
+TITLE = _("Speaking voice")
 ICON = "audio-volume-high-symbolic"
 SECTION = "Sensing"
-SUBTITLE = ("Pick the voice Chronoa speaks with, hear it, and set its speed and pitch. "
-            "Downloads open Setup on its Voice page.")
+SUBTITLE = (_("Pick the voice Chronoa speaks with, hear it, and set its speed and pitch. "
+            "Downloads open Setup on its Voice page."))
 
 #: The row vocabulary, borrowed from `model.py` so no panel here can invent a
 #: fourth word for the same three states.

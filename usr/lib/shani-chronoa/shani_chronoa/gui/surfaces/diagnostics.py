@@ -69,16 +69,18 @@ from shani_chronoa import markdown_lite  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 from shani_chronoa.words import plural
 
+from shani_chronoa.gui.locale import _
+
 logger = logging.getLogger(__name__)
 
-TITLE = "Diagnostics"
+TITLE = _("Diagnostics")
 ICON = "dialog-information-symbolic"
 SECTION = "Health and trust"
 
 SUBTITLE = (
-    "One question per row: is this part of Chronoa working right now, and if not, "
+    _("One question per row: is this part of Chronoa working right now, and if not, "
     "why not? Every answer is read from the module that would make the thing true. "
-    "A row that could not be answered says so rather than showing a clean answer."
+    "A row that could not be answered says so rather than showing a clean answer.")
 )
 
 #: The closed vocabulary. Three words, and a row may not use a fourth.

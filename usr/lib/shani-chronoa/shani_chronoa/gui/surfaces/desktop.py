@@ -97,15 +97,17 @@ from shani_chronoa.capabilities import gate_label  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 from shani_chronoa.words import plural
 
+from shani_chronoa.gui.locale import _
+
 logger = logging.getLogger(__name__)
 
-TITLE = "Desktop"
+TITLE = _("Desktop")
 ICON = "applications-system-symbolic"
 SECTION = "Health and trust"
 
 SUBTITLE = (
-    "Is Chronoa actually hooked into this desktop right now? Every row is read "
-    "from the thing that would make it true, and says which."
+    _("Is Chronoa actually hooked into this desktop right now? Every row is read "
+    "from the thing that would make it true, and says which.")
 )
 
 #: The D-Bus name the search provider owns. The same constant

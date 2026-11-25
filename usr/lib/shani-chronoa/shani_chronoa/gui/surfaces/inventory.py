@@ -34,6 +34,8 @@ from gi.repository import Gtk  # type: ignore
 from ... import organism
 from . import common
 
+from shani_chronoa.gui.locale import _
+
 #: **The anatomy, and it says so.** This panel was called "What Chronoa can
 #: do" while showing the body's organs - Skin, Immune system, Scar tissue -
 #: and the name promised an answer the page did not give. A newcomer who
@@ -47,7 +49,7 @@ from . import common
 #: (`organism.py` calls these organs, and `organ.anatomy` holds their
 #: names) and a panel that renames them would be a page about nothing.
 #: It is a page for whoever wants the map, and it now says that.
-TITLE = "The anatomy"
+TITLE = _("The anatomy")
 ICON = "applications-utilities-symbolic"
 SECTION = "Health and trust"
 

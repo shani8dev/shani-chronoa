@@ -51,9 +51,11 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 from shani_chronoa import background as running  # noqa: E402  # noqa: F401
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 
+from shani_chronoa.gui.locale import _
+
 logger = logging.getLogger(__name__)
 
-TITLE = "What's running"
+TITLE = _("What's running")
 #: `applications-system` is not a name Adwaita ships (measured against
 #: `/usr/share/icons/Adwaita`), so on GNOME it drew a blank box; the
 #: `-symbolic` one is the theme's own name for the same thing.
@@ -69,8 +71,8 @@ TITLE = "What's running"
 #: a sidebar row's icon is the fastest thing to match when scanning.
 ICON = "emblem-system-symbolic"
 SECTION = "Health and trust"
-SUBTITLE = ("Everything Chronoa started, and the button that stops each one. "
-            "Nothing here runs unless you turned it on.")
+SUBTITLE = (_("Everything Chronoa started, and the button that stops each one. "
+            "Nothing here runs unless you turned it on."))
 
 _STOP_ALL_HEADING = "Stop everything?"
 _STOP_ALL_BODY = ("Takes back your microphone, the local model server, the phone "

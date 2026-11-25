@@ -67,9 +67,11 @@ from gi.repository import Gtk  # noqa: E402
 from shani_chronoa import markdown_lite
 from shani_chronoa.gui.surfaces import common
 
+from shani_chronoa.gui.locale import _
+
 logger = logging.getLogger(__name__)
 
-TITLE = "Background mode"
+TITLE = _("Background mode")
 # A repeat, for "keeps running". It was `emblem-system`: the same gear as the
 # header's Settings button, and beside Desktop's gear in the same section.
 ICON = "media-playlist-repeat-symbolic"

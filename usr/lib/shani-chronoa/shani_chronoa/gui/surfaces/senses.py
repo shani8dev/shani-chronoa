@@ -64,14 +64,16 @@ from shani_chronoa.gui.surfaces import common  # noqa: E402
 from shani_chronoa.capabilities import sense_title  # noqa: E402
 from shani_chronoa.senses import discover_senses  # noqa: E402
 
+from shani_chronoa.gui.locale import _
+
 logger = logging.getLogger(__name__)
 
-TITLE = "Senses"
+TITLE = _("Senses")
 ICON = "preferences-desktop-screensaver-symbolic"
 
 SUBTITLE = (
-    "Every sense Chronoa has, and whether you have agreed to let it run. "
-    "One switch per sense; a sense that is off is never invoked at all."
+    _("Every sense Chronoa has, and whether you have agreed to let it run. "
+    "One switch per sense; a sense that is off is never invoked at all.")
 )
 
 #: Markers a test can find in the built tree, so no assertion has to read a

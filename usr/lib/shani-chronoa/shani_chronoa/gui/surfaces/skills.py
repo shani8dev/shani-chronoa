@@ -81,6 +81,8 @@ from shani_chronoa import capabilities, markdown_lite  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 from shani_chronoa.skills import discover_skills, is_valid_schema  # noqa: E402
 
+from shani_chronoa.gui.locale import _
+
 logger = logging.getLogger(__name__)
 
 #: **The plain answer to "what can this thing do?"** - which is what the
@@ -88,14 +90,14 @@ logger = logging.getLogger(__name__)
 #: The Inventory panel was called "What Chronoa can do" and showed the
 #: anatomy; this one showed the 260 capabilities under the name "Skills".
 #: One page, one name, one answer.
-TITLE = "What Chronoa can do"
+TITLE = _("What Chronoa can do")
 ICON = "system-run-symbolic"
 
 SUBTITLE = (
-    "Everything Chronoa can be asked to do, read from the same live registry "
+    _("Everything Chronoa can be asked to do, read from the same live registry "
     "the model is handed. Each row says what it touches, a gate here writes "
     "the same key Settings does, and a row with a question offers it in the "
-    "composer."
+    "composer.")
 )
 
 #: Markers a test can find in the built tree, so no assertion has to read a

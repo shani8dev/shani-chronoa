@@ -32,13 +32,15 @@ from gi.repository import Gtk, Pango  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 from shani_chronoa.words import plural
 
+from shani_chronoa.gui.locale import _
+
 logger = logging.getLogger(__name__)
 
-TITLE = "Connections"
+TITLE = _("Connections")
 ICON = "network-server-symbolic"
 SECTION = "Phone and remote"
-SUBTITLE = ("Other apps and chat channels that can use Chronoa, and how to "
-            "connect them. Read-only: nothing here starts anything.")
+SUBTITLE = (_("Other apps and chat channels that can use Chronoa, and how to "
+            "connect them. Read-only: nothing here starts anything."))
 
 MCP_BINARY = "shani-chronoa-mcp"
 BRIDGE_BINARY = "shani-chronoa-bridge"

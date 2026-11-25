@@ -45,16 +45,18 @@ from shani_chronoa import markdown_lite, meeting
 from shani_chronoa.gui.surfaces import common
 from shani_chronoa.words import plural
 
+from shani_chronoa.gui.locale import _
+
 logger = logging.getLogger(__name__)
 
-TITLE = "Meetings"
+TITLE = _("Meetings")
 #: **`audio-microphone-symbolic` is not a glyph this theme ships** (measured
 #: with `Gtk.IconTheme.has_icon`); `audio-input-microphone-symbolic` is, and is
 #: the name the Voice panel already uses for the same idea.
 ICON = "media-record-symbolic"
 SECTION = "Remembering"
-SUBTITLE = ("Record a whole meeting, keep it, and read the transcript and notes "
-            "back whenever you want them.")
+SUBTITLE = (_("Record a whole meeting, keep it, and read the transcript and notes "
+            "back whenever you want them."))
 
 CONSENT_KEY = "meeting-enabled"
 
