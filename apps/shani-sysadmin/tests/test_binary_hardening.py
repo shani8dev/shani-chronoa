@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import pytest
 
-from shani_chronoa.skills import binary_hardening as bh
+from shani_sysadmin.skills import binary_hardening as bh
 
 # --- captured: /bin/ls (all five present) -----------------------------------
 LS_HEADER = """\

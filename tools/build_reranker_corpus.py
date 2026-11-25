@@ -62,8 +62,14 @@ def build():
     from shani_chronoa import tool_select as S
 
     cases = json.loads(CASES.read_text())["cases"]
+    registered = {t["function"]["name"] for t in T.TOOLS}
+    # A case whose expected tool left the registry cannot be a ranking case:
+    # there is no schema to score against. Twenty-two sysadmin skills moved to
+    # shani-sysadmin, and keeping their cases here made the corpus name tools
+    # the assistant cannot call.
     usable = [c for c in cases
-              if c.get("expect") and c["expect"][0].get("tool")]
+              if c.get("expect") and c["expect"][0].get("tool")
+              and c["expect"][0]["tool"] in registered]
     rows = []
     stats = {"offered": 0, "not_offered": 0, "with_args": 0}
 
@@ -151,12 +157,12 @@ def main() -> int:
                   "crowd out the answer are the ones it already rates highest."),
         "limit": (
             "Evidence for tool RANKING, and for arguments on the "
-            "111 of 220 cases that carry them. `ascension_gate` scores "
-            "right tool AND right arguments, so a run graded by it is "
-            "answerable on 111 rows and NOT on the 109 with no "
-            "arguments - a verdict drawn from those 111 is a verdict "
-            "about argument-bearing requests and says nothing about "
-            "the rest."),
+            f"{stats['with_args']} of {len(rows)} cases that carry them. "
+            "`ascension_gate` scores right tool AND right arguments, so a run "
+            f"graded by it is answerable on {stats['with_args']} rows and NOT "
+            f"on the {len(rows) - stats['with_args']} with no arguments - a "
+            "verdict drawn from those rows is a verdict about "
+            "argument-bearing requests and says nothing about the rest."),
         "seed": SEED,
         "counts": {"requests": len(rows), "pairs": pairs,
                    "train": len(train), "held_out": len(held)},
@@ -171,8 +177,9 @@ def main() -> int:
           f"{stats['offered']}, outside it: {stats['not_offered']}")
     print(f"  carrying arguments: {stats['with_args']}")
     print(f"  wrote {_shown(OUT, REPO)}")
-    print("\nLIMIT: 109 of 220 cases carry no arguments, so an argument-level score"
-          "\n      over the whole corpus is a score over 111 rows.")
+    print(f"\nLIMIT: {len(rows) - stats['with_args']} of {len(rows)} cases carry no "
+          "arguments, so an argument-level score over the whole corpus is a "
+          f"score over {stats['with_args']} rows.")
     return 0
 
 

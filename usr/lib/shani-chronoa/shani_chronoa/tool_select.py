@@ -360,7 +360,6 @@ _SYNONYMS: Dict[str, str] = {
     # container's app reaches nothing: the skill exists, is gated, has a
     # numbered-control observation shaped for a small model, and the router has
     # no reason to offer it. Measured over five phrasings after adding these.
-    "container": "container image run command",
     "containers": "container image run command",
     "docker": "container image run command",
     "podman": "container image run command",

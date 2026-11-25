@@ -36,7 +36,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "usr/lib/shani-chronoa"))
 
-from shani_chronoa.skills import lab_network as lab  # noqa: E402
+from shani_sysadmin import run_skill
+from shani_sysadmin.skills import lab_network as lab  # noqa: E402
 
 CONSENT_KEY = lab.CONSENT_KEY
 

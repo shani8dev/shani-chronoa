@@ -25,11 +25,12 @@ from shani_chronoa import tools  # noqa: E402
 
 def test_the_driving_pair_can_be_nested_without_a_refusal() -> None:
     """Equal, and the reason is the ceiling only ever tightening."""
-    assert tools._SLOW_TOOLS["ui_elements"] == tools._SLOW_TOOLS["container"] >= 300
+    assert tools._SLOW_TOOLS["ui_elements"] >= 300
+    assert "container" not in tools._SLOW_TOOLS  # moved to shani-sysadmin
 
 
 def test_the_default_is_smaller_than_everything_that_actually_waits() -> None:
-    for name in ("container", "ui_elements", "vm", "watch", "bluetooth_gatt"):
+    for name in ("ui_elements", "watch", "bluetooth_gatt"):
         assert tools._SLOW_TOOLS[name] > 30, name
 
 

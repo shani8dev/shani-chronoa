@@ -42,6 +42,12 @@ from 257 schemas, and it is still spending a third of a small budget on
 irrelevant ones. The ordering itself is sound - **1 inversion in 2,202 adjacent
 pairs** - so this is dilution, not mis-ranking.
 
+**The population changed on 2026-11-25.** Twenty-two sysadmin skills moved to
+the `shani-sysadmin` app, so cases whose expected tool was one of them are now
+genuinely unanswerable by this selector. The floors above were re-measured
+against the smaller registry rather than lowered to make a failing number go
+away; the historical table keeps the figures from before the split.
+
 **What this suite does and does not cover, stated because a mutation proved
 it.** The recall, top-1 and dilution assertions are **floors**. A mutation that
 *improves* them is therefore invisible, and one was run: adding the word-overlap
@@ -72,7 +78,7 @@ CASES = json.loads((_REPO / "tools" / "eval_cases.json").read_text())["cases"]
 #: Floors, not the measured values. A metric asserted at its current number
 #: fails the first time a skill lands and says nothing about regressions, which
 #: is the stale-label failure this repository records about dead code.
-RECALL_FLOOR = 0.90
+RECALL_FLOOR = 0.88
 FIRST_FLOOR = 0.70
 
 
@@ -169,7 +175,11 @@ class TestWhatTheMissesActuallyAre:
         this and should not turn the suite red for it."""
         misses = self._misses()
         scored = [s for _, _, s in misses if s > 0.0]
-        assert len(scored) / len(misses) >= 0.60, (
+        # The floor moved from 0.60 to 0.30 when 22 sysadmin skills left the
+        # registry: requests that name one of them now score zero because the
+        # tool is not offered at all, which is a different cause than a
+        # vocabulary gap. The floor still catches the remedy changing back.
+        assert len(scored) / len(misses) >= 0.30, (
             "%d of %d misses score above zero - if this drops, the misses have "
             "become a vocabulary problem and the remedy changed"
             % (len(scored), len(misses)))
@@ -502,6 +512,6 @@ class TestTheSynonymTableBuysAccuracyWithoutAModel:
             "the nineteen are worth only %d of 220 top-1 (%d with, %d without); "
             "they were added on a measurement of +17, so something else changed"
             % (with_them - without_them, with_them, without_them))
-        assert with_them >= 190, (
-            "top-1 with the table as it stands is %d/220, below the 192 it was "
-            "measured at" % with_them)
+        assert with_them >= 180, (
+            "top-1 with the table as it stands is %d/220, below the 180 "
+            "measured after the sysadmin skills moved out" % with_them)

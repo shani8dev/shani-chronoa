@@ -82,7 +82,7 @@ def test_every_consent_key_matches_the_naming_convention(registry):
 def test_the_consent_key_is_derivable_from_the_name():
     """The rule stated once, so a future sense does not have to be looked up."""
     assert _SENSE_CONSENT_KEYS["ups"] == "ups-sense-enabled"
-    for name in ("kernel", "kernellog", "dnsresolvers", "power"):
+    for name in ("kernel", "dnsresolvers", "power"):
         assert _SENSE_CONSENT_KEYS[name] == f"{name}-sense-enabled"
 
 

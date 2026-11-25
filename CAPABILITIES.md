@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**269 skills in 24 groups.** Each is a named, schema-typed module; the model
+**247 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. The whitelist *is* the design, so a new capability is a
 new named skill. The one exception is `run_command`, for running a project's
 tests and builds: off by default, sandboxed (no network, nothing outside the
@@ -37,74 +37,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**98 of 269 are consent-gated and 17 are destructive.**
-
-## System
-
-Processes, packages, updates, containers, vms, disks, network.
-
-| Skill | What it does | Before it runs |
-|---|---|---|
-| `autostart_entries` | What starts on this machine automatically, at login and on a schedule | — |
-| `backup_status` | Whether this machine has an off-machine backup, and when | — |
-| `bandwidth_to_host` | How fast this machine talks to another machine | — |
-| `binary_hardening` | Whether a program has the protections that make it safe to run | — |
-| `boot_report` | Why booting is slow, and whether it shut down cleanly | needs `boots-sense-enabled` |
-| `bridge_topology` | Which interfaces are bridges, and what is plugged into them | — |
-| `capture_packets` | Watch the packets crossing an interface | needs `packet-capture-enabled` |
-| `check_internet` | Is the internet working? | — |
-| `check_port` | Whether a host accepts connections on a port | — |
-| `check_updates` | Check for waiting package updates | — |
-| `cloud_files` | What is in this machine's cloud storage remotes | — |
-| `compression_savings` | How much space btrfs compression is saving | needs `filesystems-sense-enabled` |
-| `connect_wifi` | Join a WiFi network | needs `wifi-connect-enabled` |
-| `content_discovery` | Which paths a local web server answers on | — |
-| `cpu_frequency` | The CPU governor, its speed, and its hardware range | — |
-| `cpu_per_core` | Which processor cores are busy right now | — |
-| `data_usage` | Data used | — |
-| `discover_hosts` | Who is on this network right now | — |
-| `disk_activity` | How hard the disks are working right now | needs `storage-sense-enabled` |
-| `disk_usage` | Report filesystem and directory space use | — |
-| `dissect_traffic` | Dissect traffic into protocol fields | needs `packet-capture-enabled` |
-| `dns_lookup` | Look a name up in DNS, or read its mail, name or certificate records | — |
-| `file_locks` | Who holds a file lock, and on what | — |
-| `firmware_updates` | List firmware updates for this machine's devices | — |
-| `graphics_stack` | Whether the graphics are hardware accelerated or falling back to software | — |
-| `inspect_binary` | What a program is, and what it needs to run | — |
-| `interface_counters` | How much traffic each interface has carried | — |
-| `lab_network_create` | Build an isolated lab network with named subnets | needs `network-provision-enabled` |
-| `lab_network_destroy` | Remove a lab network this machine built | needs `network-provision-enabled` |
-| `lab_network_list` | List the lab networks built on this machine | needs `network-provision-enabled` |
-| `lab_network_status` | Check what a lab network can actually reach | needs `network-provision-enabled` |
-| `list_wifi_networks` | WiFi networks | — |
-| `log_files` | Which logs are biggest, still growing, and unrotated | — |
-| `login_history` | Who logged in recently | needs `sessions-sense-enabled` |
-| `machine_capabilities` | What this machine can actually do | — |
-| `my_ip_address` | IP address | — |
-| `neighbour_table` | Which addresses on this link have answered, and which never have | — |
-| `network_activity` | What is using this machine's network right now, per program | — |
-| `network_watch` | Watch for new devices on one interface | — |
-| `open_files` | Which programs have a file or socket open | — |
-| `open_settings` | Open the system Settings at a page | — |
-| `permission_audit` | What other users on this machine can read or write | — |
-| `ping_host` | Ping a host | — |
-| `port_owner` | Which program is using a port | — |
-| `print_file` | Print a file | — |
-| `process_detail` | What one running process is waiting on | — |
-| `routing_table` | The machine's routing table | — |
-| `scan_network` | Find other devices on the local network | — |
-| `scheduled_tasks` | What is scheduled to run: cron jobs and systemd timers | — |
-| `security_status` | Secure Boot, TPM and firewall status | needs `security-sense-enabled` |
-| `set_hostname` | This computer's name | needs `hostname-control-enabled` |
-| `snapshot_status` | Can this machine roll back, and which slot is it on | needs `snapshots-sense-enabled` |
-| `system_history` | What this machine was doing earlier today | — |
-| `system_info` | Describe this machine | — |
-| `tailscale_status` | Tailscale | — |
-| `thread_activity` | Which thread of a process is using the CPU, or waiting | — |
-| `tls_certificate` | Inspect a TLS certificate | — |
-| `trace_route` | Trace the network path to a host | — |
-| `vpn_control` | VPN connections | needs `wifi-connect-enabled` |
-| `whois_lookup` | Look up who a domain or address is registered to | — |
+**85 of 247 are consent-gated and 16 are destructive.**
 
 ## Files
 
@@ -164,6 +97,62 @@ Read, write, move, archive and undo files.
 | `undo_last_change` | Undo Chronoa's last change to a file | **asks first, always** · needs `file-edit-enabled` |
 | `write_text_file` | Write a text file | needs `file-edit-enabled` to replace a file that already has content |
 
+## System
+
+Processes, packages, updates, containers, vms, disks, network.
+
+| Skill | What it does | Before it runs |
+|---|---|---|
+| `autostart_entries` | What starts on this machine automatically, at login and on a schedule | — |
+| `backup_status` | Whether this machine has an off-machine backup, and when | — |
+| `bandwidth_to_host` | How fast this machine talks to another machine | — |
+| `check_internet` | Is the internet working? | — |
+| `check_port` | Whether a host accepts connections on a port | — |
+| `check_updates` | Check for waiting package updates | — |
+| `cloud_files` | What is in this machine's cloud storage remotes | — |
+| `connect_wifi` | Join a WiFi network | needs `wifi-connect-enabled` |
+| `content_discovery` | Which paths a local web server answers on | — |
+| `cpu_frequency` | The CPU governor, its speed, and its hardware range | — |
+| `cpu_per_core` | Which processor cores are busy right now | — |
+| `data_usage` | Data used | — |
+| `discover_hosts` | Who is on this network right now | — |
+| `disk_activity` | How hard the disks are working right now | needs `storage-sense-enabled` |
+| `disk_usage` | Report filesystem and directory space use | — |
+| `dns_lookup` | Look a name up in DNS, or read its mail, name or certificate records | — |
+| `file_locks` | Who holds a file lock, and on what | — |
+| `firmware_updates` | List firmware updates for this machine's devices | — |
+| `graphics_stack` | Whether the graphics are hardware accelerated or falling back to software | — |
+| `interface_counters` | How much traffic each interface has carried | — |
+| `list_wifi_networks` | WiFi networks | — |
+| `log_files` | Which logs are biggest, still growing, and unrotated | — |
+| `login_history` | Who logged in recently | needs `sessions-sense-enabled` |
+| `machine_capabilities` | What this machine can actually do | — |
+| `my_ip_address` | IP address | — |
+| `neighbour_table` | Which addresses on this link have answered, and which never have | — |
+| `network_activity` | What is using this machine's network right now, per program | — |
+| `network_watch` | Watch for new devices on one interface | — |
+| `open_files` | Which programs have a file or socket open | — |
+| `open_settings` | Open the system Settings at a page | — |
+| `permission_audit` | What other users on this machine can read or write | — |
+| `ping_host` | Ping a host | — |
+| `port_owner` | Which program is using a port | — |
+| `print_file` | Print a file | — |
+| `process_detail` | What one running process is waiting on | — |
+| `routing_table` | The machine's routing table | — |
+| `scan_network` | Find other devices on the local network | — |
+| `scheduled_tasks` | What is scheduled to run: cron jobs and systemd timers | — |
+| `security_status` | Secure Boot, TPM and firewall status | needs `security-sense-enabled` |
+| `set_hostname` | This computer's name | needs `hostname-control-enabled` |
+| `snapshot_status` | Can this machine roll back, and which slot is it on | needs `snapshots-sense-enabled` |
+| `system_history` | What this machine was doing earlier today | — |
+| `system_info` | Describe this machine | — |
+| `tailscale_status` | Tailscale | — |
+| `thread_activity` | Which thread of a process is using the CPU, or waiting | — |
+| `tls_certificate` | Inspect a TLS certificate | — |
+| `trace_route` | Trace the network path to a host | — |
+| `vpn_control` | VPN connections | needs `wifi-connect-enabled` |
+| `whois_lookup` | Look up who a domain or address is registered to | — |
+
 ## Devices
 
 Hardware, peripherals, sensors and their state.
@@ -175,14 +164,7 @@ Hardware, peripherals, sensors and their state.
 | `bluetooth_call` | Call through a paired phone, on this computer's speakers | needs `bluetooth-call-enabled` |
 | `bluetooth_devices` | Bluetooth devices | — |
 | `bluetooth_gatt` | Read a watch or band's battery, sensors and firmware | needs `bluetooth-gatt-enabled` |
-| `device_i2c` | Read or write an I2C device register | **asks first, always** · needs `i2c-write-enabled` |
-| `device_probe` | User-space driver routes: I2C buses, video, FUSE | — |
-| `device_serial` | Read from or write to a serial device | — |
 | `disk_health` | Drive health and disk encryption | needs `storage-sense-enabled` |
-| `driver_build` | Compile a kernel module with Kbuild | needs `driver-build-enabled` |
-| `driver_info` | Which driver each device uses | — |
-| `driver_scaffold` | Write an out-of-tree kernel module project | — |
-| `driver_status` | Whether this machine can build a kernel driver | — |
 | `find_device` | Make a lost watch or band buzz so you can find it | needs `bluetooth-gatt-enabled` |
 | `fm_radio` | Listen to FM radio through a USB receiver | needs `fm-radio-enabled` |
 | `ir_remote` | Send or receive infrared remote-control codes | needs `ir-remote-enabled` |
@@ -339,21 +321,6 @@ Theme, wallpaper, scaling and the screen's own look.
 | `set_wallpaper` | Change the desktop wallpaper | needs `appearance-control-enabled` |
 | `toggle_night_light` | Turn the blue-light filter on or off | needs `appearance-control-enabled` |
 
-## Apps
-
-Launch, list and find applications.
-
-| Skill | What it does | Before it runs |
-|---|---|---|
-| `container` | Run containers and nspawn machines | needs `container-control-enabled` |
-| `default_apps` | Which app opens a kind of file, and the default browser | needs `default-apps-enabled` |
-| `install_app` | Install and remove apps | needs `app-install-enabled` |
-| `list_apps` | List installed applications | — |
-| `list_containers` | Distroboxes and containers | needs `containers-sense-enabled` |
-| `list_vms` | Virtual machines | — |
-| `open_application` | Open an app | — |
-| `vm` | Run and drive a virtual machine | needs `vm-control-enabled` |
-
 ## Pointer and keyboard
 
 Drive the desktop without the keyboard.
@@ -403,6 +370,17 @@ Memory, percepts and what it has decided.
 | `list_capabilities` | What it can do right now | — |
 | `list_percepts` | What it perceives | — |
 | `review_proposals` | What it noticed but did not keep | needs `memory-sense-enabled` |
+
+## Apps
+
+Launch, list and find applications.
+
+| Skill | What it does | Before it runs |
+|---|---|---|
+| `default_apps` | Which app opens a kind of file, and the default browser | needs `default-apps-enabled` |
+| `install_app` | Install and remove apps | needs `app-install-enabled` |
+| `list_apps` | List installed applications | — |
+| `open_application` | Open an app | — |
 
 ## Photos and video
 

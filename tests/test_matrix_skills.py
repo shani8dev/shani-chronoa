@@ -24,7 +24,9 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "usr/lib/shani-chronoa"))
+_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_ROOT / "usr/lib/shani-chronoa"))
+sys.path.insert(0, str(_ROOT / "apps/shani-sysadmin"))
 
 from shani_chronoa import planmode, tools  # noqa: E402
 from shani_chronoa.verification import Verdict  # noqa: E402
@@ -116,8 +118,19 @@ def grant(key: str, value: bool = True):
     Gio.Settings.sync()
 
 
+_SYSADMIN_SKILLS = {
+    "list_containers", "list_vms", "boot_report", "driver_info",
+    "capture_packets", "dissect_traffic", "binary_hardening", "inspect_binary",
+    "container", "vm", "bridge_topology", "compression_savings",
+}
+
+
 def call(name: str, arguments: dict):
-    outcome = tools.execute_tool_outcome(name, arguments)
+    if name in _SYSADMIN_SKILLS:
+        from shani_sysadmin import run_skill
+        outcome = run_skill(name, arguments)
+    else:
+        outcome = tools.execute_tool_outcome(name, arguments)
     text = getattr(outcome, "text", None) or getattr(outcome, "result", None) or str(outcome)
     assert "Traceback" not in text, text
     return outcome, text
@@ -125,8 +138,8 @@ def call(name: str, arguments: dict):
 
 def test_every_new_skill_is_registered():
     names = {t["function"]["name"] for t in tools.TOOLS}
-    new = {"snapshot_status", "security_status", "list_containers", "list_vms", "boot_report",
-           "disk_health", "temperatures", "usb_devices", "driver_info", "list_fonts",
+    new = {"snapshot_status", "security_status",
+           "disk_health", "temperatures", "usb_devices", "list_fonts",
            "photo_metadata", "crash_report", "login_history", "audio_output", "default_apps",
            "pdf_pages", "print_queue", "set_hostname", "set_locale", "speed_test"}
     assert new <= names, f"not registered: {sorted(new - names)}"
@@ -316,7 +329,7 @@ def test_usb_devices_flags_an_unauthorised_dock(bindir):
 # ── 9. driver_info ───────────────────────────────────────────────────────────
 
 def test_driver_info_tells_loaded_from_built_in_from_absent(tmp_path):
-    from shani_chronoa.skills import driver_info as d
+    from shani_sysadmin.skills import driver_info as d
     proc = tmp_path / "modules"
     proc.write_text("iwlwifi 512000 1 iwlmvm, Live 0x0\nnvidia 61000000 2 nvidia_modeset,nvidia_drm, Live 0x0\n")
     sysmod = tmp_path / "sysmodule"
@@ -331,7 +344,7 @@ def test_driver_info_tells_loaded_from_built_in_from_absent(tmp_path):
 
 
 def test_driver_info_reads_the_device_driver_link(tmp_path):
-    from shani_chronoa.skills import driver_info as d
+    from shani_sysadmin.skills import driver_info as d
     drv = tmp_path / "drivers" / "iwlwifi"
     drv.mkdir(parents=True)
     dev = tmp_path / "class" / "net" / "wlan0" / "device"

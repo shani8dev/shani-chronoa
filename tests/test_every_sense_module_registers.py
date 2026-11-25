@@ -97,12 +97,12 @@ def test_the_package_actually_has_sense_modules():
     assert len(declared) > 20, (
         f"only {len(declared)} modules declare a named sense, so this file's "
         f"scan is probably not matching what it should")
-    assert declared.get("kernel_log") == "kernellog", (
-        f"kernel_log.py declares {declared.get('kernel_log')!r}; this file "
-        f"expects 'kernellog', so if the sense was renamed again the naming "
+    assert declared.get("dns_resolvers") == "dnsresolvers", (
+        f"dns_resolvers.py declares {declared.get('dns_resolvers')!r}; this file "
+        f"expects 'dnsresolvers', so if the sense was renamed again the naming "
         f"below needs re-reading")
-    assert (_SENSES_PKG / "kernel_log.py").exists(), (
-        "the kernel-ring sense module is gone; if it was renamed, this file's "
+    assert (_SENSES_PKG / "dns_resolvers.py").exists(), (
+        "the DNS-resolver sense module is gone; if it was renamed, this file's "
         "own fixtures need re-reading")
 
 
@@ -127,24 +127,6 @@ def test_every_sense_module_registers(caplog):
         + "\nThe loader's reason is in the warnings above. The two it has hit "
           "are a schema function name that differs from the sense name, and a "
           "sensitivity outside {personal, private, public}.")
-
-
-def test_the_kernel_ring_sense_is_registered():
-    """Named specifically, because it is the one that broke.
-
-    The general guard above would catch it too; this says *which* sense is meant
-    to exist, so a rename cannot retire the capability silently.
-    """
-    from shani_chronoa.senses import discover_senses
-
-    registry = discover_senses()
-    assert "kernellog" in registry, (
-        "the kernel-ring sense is not registered. Its consent key is "
-        "'kernellog-sense-enabled' and the sense name must equal the schema's "
-        "function name - the two drifted apart when the name changed for the "
-        "gschema '_' rule, and the loader skipped it with a warning rather than "
-        "failing")
-    assert registry["kernellog"].schema["function"]["name"] == "kernellog"
 
 
 def test_every_registered_sense_consent_key_is_legal_in_a_gschema_key():

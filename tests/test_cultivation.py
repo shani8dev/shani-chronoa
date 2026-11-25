@@ -118,7 +118,9 @@ def test_every_resource_names_a_function_that_exists():
     for name, entry in cultivation.RESOURCES.items():
         extra = entry.get("judged_by", "")
         if extra and "/" in extra:
-            target = Path(cultivation.__file__).resolve().parents[4] / extra
+            # Resolve from the test, not the module: cultivation.py moved to
+            # apps/shani-sysadmin, whose parent chain no longer reaches root.
+            target = Path(__file__).resolve().parents[1] / extra
             if not target.is_file():
                 missing.append("%s: judged_by names %s, which is not a file"
                                % (name, extra))

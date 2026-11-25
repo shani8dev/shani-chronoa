@@ -1876,6 +1876,10 @@ def drive(action: str, app: str = "", image: str = "", title: str = "",
         name = app or program
         from shani_chronoa import tools
 
+        if "container" not in tools._HANDLER_FNS:
+            raise GuiUnavailable(
+                "container is no longer a Chronoa skill. Run it with "
+                "shani-sysadmin: python3 -m shani_sysadmin run container ...")
         out = tools.execute_tool_outcome("container", {
             "action": "run", "image": image, "name": name,
             "detach": True, "display": "x11", "share_bus": True,

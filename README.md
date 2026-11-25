@@ -10,7 +10,7 @@ Pair the phone, read the watch, keep your rules running while you're away.<br>
 With a local model your data never leaves the desk, every action can be undone, and it asks before anything risky.</p>
 
 <p align="center">
-  <a href="CAPABILITIES.md">269 skills</a> ·
+  <a href="CAPABILITIES.md">247 skills</a> ·
   free (GPL-3.0) ·
   runs offline ·
   no account, no telemetry ·
@@ -33,7 +33,7 @@ through skills you can read, switch off, and undo.
   voice (Kokoro or Piper) that you pick and preview in the app.
 - 🛠️ **It does things, not just chats.** Files, apps, windows, settings,
   calendar, reminders, network, Bluetooth, screenshots, documents, images,
-  git — [269 skills](CAPABILITIES.md), each a small, typed, auditable module.
+  git — [247 skills](CAPABILITIES.md), each a small, typed, auditable module.
 - 💻 **Builds with you.** Point it at a project folder: it edits with inline
   diffs, runs your tests in a sandbox, commits, and reverts a whole turn with
   one click. Plan mode, subagents, and MCP servers in both directions.
@@ -92,7 +92,7 @@ plan. Chronoa is a different bet:
 | Account, telemetry, training on your chats | **None** | Account required; training is opt-out |
 | Works offline | **Yes**, local model by default | No |
 | Price | **Free**, GPL-3.0 | Free tier, then paid plans |
-| What it may do | 269 typed skills you can read and switch off | Whatever the vendor's integrations allow |
+| What it may do | 247 typed skills you can read and switch off | Whatever the vendor's integrations allow |
 | Risky actions | Asks first, **sandboxed** (bubblewrap, Landlock, seccomp) | Asks first |
 | Undo | **Revert a file or a whole turn** | — |
 | Code | Edits, tests, diffs and revert in Build mode | Usually not the focus |
@@ -116,7 +116,7 @@ real, layered, and tested by running them:
 | **Landlock (ABI up to 8)** | Kernel-enforced file rules pinned to file descriptors, plus scoping that blocks abstract-socket and signal escapes — and it still applies where user namespaces are unavailable. |
 | **seccomp** | An optional filter denying 28 syscalls (mount, kexec, bpf, ptrace, io_uring, unshare, …); with it on, a machine that cannot install it runs nothing. Under bubblewrap it is skipped, because bubblewrap's own setup needs `mount` — there the namespaces stand in. |
 | **Containers and VMs** | Run a project's commands in a rootless podman container with no network, or in a systemd-nspawn / vmspawn machine. |
-| **Consent per switch, per action** | 94 skills sit behind a named switch; the 17 destructive ones ask first, showing the exact command or the diff it will apply. "Allow for this turn" covers one turn, never a session. |
+| **Consent per switch, per action** | 85 skills sit behind a named switch; the 16 destructive ones ask first, showing the exact command or the diff it will apply. "Allow for this turn" covers one turn, never a session. |
 | **Remote turns need the desk** | A message from your phone or a chat app can ask, but cannot edit, delete or run commands unless someone at the computer approves it. |
 | **Undo** | Every file Chronoa writes is snapshotted; revert one file or a whole turn. |
 | **Limits you set** | Memory, time limit and CPU for project commands, and whether they run at low priority (on by default: nice 10, idle disk), on the Sandbox page. |
@@ -149,13 +149,13 @@ its own **Download** button.
 - **Local speech-to-text** — whisper.cpp; runs on CPU or CUDA.
 - **On-device LLM** — tool-calling via llama.cpp `llama-server` by default
   (the `ollama` package is also supported), so Chronoa can act on your machine
-  rather than just chatting about it. **269 callable
+  rather than just chatting about it. **247 callable
   skills**, every one a named, schema-typed module under `skills/`. The
   whitelist is the design; the one command runner (`run_command`, for a
   project's tests and builds) is sandboxed, off by default, and asks each time.
   **They are all listed in [`CAPABILITIES.md`](CAPABILITIES.md)**, grouped by
   what they are for, each with the consent switch it needs and whether the
-  assistant asks before running it — 94 are consent-gated and 17 are
+  assistant asks before running it — 85 are consent-gated and 16 are
   destructive. That file is generated from `capabilities._GROUPS`, the same
   table the Help window renders, so it cannot drift from what the build does;
   `tests/check_capabilities_doc.py` fails if it does.
@@ -163,30 +163,31 @@ its own **Download** button.
   verbatim when one is provisioned — the voice directory, down to the voice
   name, is configurable.
 - **Barge-in support** — interrupt a long reply mid-sentence.
-- **Senses** — a perception layer beside `skills/`. **53 senses** deposit
-  *percepts* the assistant can reason about: **25 default on, 28 default
+- **Senses** — a perception layer beside `skills/`. **52 senses** deposit
+  *percepts* the assistant can reason about: **25 default on, 27 default
   off**. The split is deliberate and machine-readable, see
   [the table below](#senses-percepts-and-consent).
 
-  Those two numbers are about the **53 senses that are modules today**, which is
-  what the table lists. The schema holds **78** `<name>-sense-enabled` keys, and
-  they decompose as 53 senses + 19 *trigger event* types + 7 **retired** keys
-  **− `git`, which is both a sense module and an event type** (78, not 79 — one
+  Those two numbers are about the **52 senses that are modules today**, which is
+  what the table lists. The schema holds **77** `<name>-sense-enabled` keys, and
+  they decompose as 52 senses + 19 *trigger event* types + 7 **retired** keys
+  **− `git`, which is both a sense module and an event type** (77, not 78 — one
   name is counted twice by that sum). The retired keys (`camera`, `contention`,
   `cooling`, `link`, `monitors`, `smart`, `thermal`) are kept because a rename
   would silently revoke somebody's permission; they still grant their successor
-  through `config._SENSE_CONSENT_ALIASES`. Measured: **25 of the 78 default on,
-  and all 25 are senses** — no event type defaults on. So "25 on / 28 off" is true
-  of the senses and "25 on / 53 off" is true of every key. Stating both once here
+  through `config._SENSE_CONSENT_ALIASES`. Measured: **25 of the 77 default on,
+  and all 25 are senses** — no event type defaults on. So "25 on / 27 off" is true
+  of the senses and "25 on / 52 off" is true of every key. Stating both once here
   rather than leaving a reader to work out which one a given number describes.
 
   These numbers are read out of the tree, not trusted from prose:
   `python3 tests/check_readme_numbers.py` re-derives every one of them from
   `discover_senses()` and the schema, and fails if they drift. It reported **five
   problems** when it was last run by hand, four of them counts like these and one
-  the serious one: **`kernellog`, `monitoring`, `polkitpolicy` and `ups` were
+  the serious one: **`monitoring`, `polkitpolicy` and `ups` were
   absent from the table entirely**, so `ups` defaulted on with nothing on the
-  page saying so.
+  page saying so. `kernellog` used to be listed here too; it moved to the
+  `shani-sysadmin` app with the rest of the kernel-level tooling.
 - **Actuators** — the outbound side, as ordinary whitelisted skills:
   `speak`, `notify`, `clipboard`, `screenshot`, plus pointer/click/type
   behind their own `input-control-enabled` key. There is deliberately no
@@ -296,7 +297,6 @@ presence defaults off: `sessions`, `git`, `web`, `capture`, `vision`,
 | `hearing` | utterance | off |
 | `hwmon` | machine-state | off |
 | `idle` | machine-state | off |
-| `kernellog` | machine-state | off |
 | `labnetworks` | machine-state | off |
 | `listeners` | machine-state | off |
 | `location` | machine-state | off |

@@ -22,7 +22,8 @@ import subprocess
 
 import pytest
 
-from shani_chronoa.skills import vm
+from shani_sysadmin.skills import vm
+from shani_sysadmin import run_skill
 
 recorded: "list[list[str]]" = []
 
@@ -89,7 +90,7 @@ def test_gate_refuses_then_opens(tmp_path, monkeypatch) -> None:
         assert config.get_bool("vm-control-enabled", True) is False, (
             "the shut half did not take, so the refusal below proves nothing")
 
-        refused = tools.execute_tool_outcome("vm", {"action": "list"}).text
+        refused = run_skill("vm", {"action": "list"}).text
         assert "Refusing" in refused, f"the gate did not shut: {refused!r}"
         # **Either spelling.** `04316cc` made refusals name the Settings row
         # rather than the raw key; what this has to catch is a refusal that
@@ -105,7 +106,7 @@ def test_gate_refuses_then_opens(tmp_path, monkeypatch) -> None:
         assert config.get_bool("vm-control-enabled", False) is True, (
             "the grant did not take, so everything after this would be vacuous")
 
-        after = tools.execute_tool_outcome("vm", {"action": "list"}).text
+        after = run_skill("vm", {"action": "list"}).text
         assert "Refusing to run virtual machines" not in after, (
             f"the gate is still closed after it was granted: {after!r}")
     finally:
@@ -342,24 +343,24 @@ def test_a_real_vm_is_driven_end_to_end(tmp_path, monkeypatch) -> None:
     (tmp_path / "config").mkdir()
     try:
         ChronoaConfig().set("vm-control-enabled", "true")
-        started = tools.execute_tool_outcome(
+        started = run_skill(
             "vm", {"action": "launch", "name": "probe", "memory_mb": 256, "display": "none"})
         assert started.ran, "the skill never ran"
         assert "Started probe" in started.text, started.text
 
         # The screendump is real pixels: QMP writes a P6 file whose header
         # names the dimensions, so reading them back proves the round trip.
-        screen = tools.execute_tool_outcome("vm", {"action": "screen", "name": "probe"})
+        screen = run_skill("vm", {"action": "screen", "name": "probe"})
         assert "Photographed probe's screen" in screen.text, screen.text
         path = screen.text.split(": ", 1)[1].split(" (", 1)[0]
         with open(path, "rb") as h:
             assert h.read(2) == b"P6", "the screendump is not a real PPM"
 
-        typed = tools.execute_tool_outcome(
+        typed = run_skill(
             "vm", {"action": "type", "name": "probe", "text": "hi"})
         assert "Typed 2 character(s)" in typed.text, typed.text
 
-        stopped = tools.execute_tool_outcome("vm", {"action": "stop", "name": "probe"})
+        stopped = run_skill("vm", {"action": "stop", "name": "probe"})
         assert stopped.ran
         assert "Stopped probe" in stopped.text, stopped.text
     finally:
