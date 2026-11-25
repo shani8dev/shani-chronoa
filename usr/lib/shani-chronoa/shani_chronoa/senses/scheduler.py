@@ -119,6 +119,18 @@ _IDLE_TICK_SECONDS = 1.0
 # bucket and a poll cannot alias into double-reporting the same transition.
 _EVENT_POLL_SECONDS = 15.0
 
+# Event types whose transition is urgent enough to bypass a quiet rhythm. A
+# failed unit or a power change is not a speculative background rule: it is
+# something the person must be told even while the machine is asleep. Spelled
+# as literals rather than imported from `triggers`, which this module must not
+# depend on (it is injected by the caller). The set is deliberately small: an
+# ordinary file change is not critical just because a rule was armed for it.
+_CRITICAL_EVENT_TYPES = frozenset({"failure", "powerstate"})
+
+# A rule whose actuator is `notify` only announces; it does not act on the
+# machine. An armed *action* is the other carve-out in the rhythm gate.
+_NOTIFY_ACTUATOR = "notify"
+
 # A sense that raises is logged at ERROR once, then at DEBUG until it starts
 # succeeding again. An ambient sense that fails on every tick would otherwise
 # write one stack trace per interval, which is how a real fault gets missed.
@@ -640,6 +652,31 @@ class AmbientScheduler:
         # `seconds_until_next_due()` stayed at 0.0. Six tests caught that. The
         # question is about acquiring, not about possession.
 
+    def _rule_gate_flags(self) -> "tuple[bool, bool]":
+        """The `(critical, armed)` flags to ask the rhythm gate with.
+
+        The gate is a plain predicate owned by whoever runs the scheduler, so
+        the scheduler is the only place that can see *what* is about to be
+        polled. A rule that acts on the machine is armed by the person who
+        wrote it and must run even in sleep; a critical notification is one
+        they must not miss. A routine notification is neither, and waits with
+        the other speculative rules. Deriving both from the rules keeps the
+        daemon's two escape flags real instead of always defaulting to False.
+        """
+        store = getattr(self._event_engine, "store", None)
+        rules = store().all() if callable(store) else ()
+        critical = any(
+            rule.enabled
+            and getattr(rule, "actuator", None) == _NOTIFY_ACTUATOR
+            and getattr(rule, "event_type", None) in _CRITICAL_EVENT_TYPES
+            for rule in rules
+        )
+        armed = any(
+            rule.enabled and getattr(rule, "actuator", None) != _NOTIFY_ACTUATOR
+            for rule in rules
+        )
+        return critical, armed
+
     def _poll_event_rules(self, now: float) -> "list[object]":
         """Re-read every armed event rule's signal, and dispatch what fired.
 
@@ -676,9 +713,14 @@ class AmbientScheduler:
         self._last_event_poll = time.monotonic()
         # The clock is stamped before this gate for the same reason it is
         # stamped before the runner-lock gate: returning before the stamp
-        # makes the countdown hit zero every tick and spins the loop.
-        if self._rule_gate is not None and not self._rule_gate():
-            return []
+        # makes the countdown hit zero every tick and spins the loop. Ask with
+        # what is being polled, not with no arguments: the daemon's gate only
+        # holds routine rules, and an armed action or a critical notification
+        # has to reach the person even while the machine is asleep.
+        if self._rule_gate is not None:
+            critical, armed = self._rule_gate_flags()
+            if not self._rule_gate(critical=critical, armed=armed):
+                return []
         from shani_chronoa import runner_lock
 
         if not runner_lock.holds():

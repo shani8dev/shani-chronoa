@@ -52,10 +52,10 @@ def test_dnd_holds_an_announcement_without_dropping_it(monkeypatch):
     assert [(u.subject, d) for u, d in again] == [("Battery", "notify")]
     reflex.clear_pending()
 
-def test_a_sleeping_rhythm_holds_everything(monkeypatch):
+def test_a_sleeping_rhythm_holds_routine_announcements(monkeypatch):
     reflex.clear_pending()
     monkeypatch.setattr(reflex, "_do_not_disturb", lambda: False)
-    urge = reflex.Urgence(True, reflex.URGENCY_HIGH, "Battery", "8 percent")
+    urge = reflex.Urgence(True, reflex.URGENCY_LOW, "Clock", "unsynchronised")
     assert reflex.announce([urge], rhythm_state=rhythm.Rhythm.SLEEP, now=100.0) == []
     reflex.clear_pending()
 

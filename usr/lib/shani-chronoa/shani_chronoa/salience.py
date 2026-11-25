@@ -118,17 +118,32 @@ def policy(
     do_not_disturb: bool = False,
     rhythm_state: Optional[object] = None,
     unattended: bool = False,
+    critical: bool = False,
 ) -> str:
     """`speak`, `notify` or `hold`.
 
-    Do-not-disturb and a sleeping rhythm hold everything except nothing: even
-    a critical event is not spoken into an empty room. `unattended` means no
-    person is at the desk, so a high score still only notifies - there is no
-    one to interrupt. A held item is not dropped; it is for the next turn.
+    Do-not-disturb is a person's explicit refusal to be interrupted and always
+    wins, including over a critical event. Rhythm is different: it holds only
+    the states in which the machine is already doing work the announcement
+    would interrupt, and IDLE is deliberately not one of them - a person five
+    minutes at a standing desk is not a reason to hold an alert for an hour.
+    The vocabulary comes from `rhythm.should_run_rules`, so policy and the
+    rule gate cannot disagree about which states are quiet. A critical event
+    bypasses rhythm but never DND. `unattended` means no person is at the
+    desk, so a high score still only notifies.
     """
-    state = getattr(rhythm_state, "value", rhythm_state)
-    quiet = do_not_disturb or state in ("sleep", "idle")
-    if quiet:
+    from shani_chronoa import rhythm
+
+    state = getattr(rhythm_state, "state", rhythm_state)
+    if isinstance(state, str):
+        try:
+            state = rhythm.Rhythm(state)
+        except ValueError:
+            state = None
+    quiet = not rhythm.should_run_rules(state)
+    if do_not_disturb:
+        return "hold"
+    if quiet and not critical:
         return "hold"
     if value >= SPEAK_ABOVE and not unattended:
         return "speak"

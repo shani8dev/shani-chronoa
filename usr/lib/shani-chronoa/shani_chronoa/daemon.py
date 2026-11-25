@@ -126,9 +126,10 @@ def main() -> int:
     try:
         while not stop.wait(1.0):
             # Consult the rule gate with the state just observed instead of
-            # discarding it. The scheduler's poller asks the same question
-            # through `current_state`; this line makes the observed decision
-            # visible in the log. Interrupt policy reads the same state.
+            # discarding it. This line asks about *routine* rules, so no flags:
+            # the scheduler's poller asks the same gate through `current_state`
+            # with the armed/critical flags derived from the rules it reads.
+            # Interrupt policy reads the same state.
             state = monitor.tick().state
             if not rhythm.should_run_rules(state):
                 logger.debug("rhythm %s holds routine rules this tick", state.value)

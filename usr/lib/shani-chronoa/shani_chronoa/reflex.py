@@ -398,18 +398,20 @@ def announce(urgences: Sequence[Urgence], *, do_not_disturb: "Optional[bool]" = 
     candidates.extend((urge, moment) for urge in urgences)
     pushed = 0
     for urge, held_at in candidates:
-        severity = "warning" if urge.urgency == URGENCY_HIGH else "info"
+        critical = urge.urgency == URGENCY_HIGH
+        severity = "critical" if critical else "info"
         rules = (urge.subject,) if urge.subject else ()
         value = salience.score(urge, changed=True, severity=severity, rules=rules)
-        queue.push((value, urge, held_at), value)
+        queue.push((value, urge, held_at, critical), value)
         pushed += 1
 
     _pending.clear()
     decided: "List[tuple[Urgence, str]]" = []
     while len(queue):
-        value, urge, held_at = queue.pop()
+        value, urge, held_at, critical = queue.pop()
         decision = salience.policy(value, do_not_disturb=do_not_disturb,
-                                   rhythm_state=rhythm_state, unattended=True)
+                                   rhythm_state=rhythm_state, unattended=True,
+                                   critical=critical)
         if decision == "hold":
             _pending.append(Held(urge, held_at, held_at + _PENDING_TTL_SECONDS))
             continue
