@@ -106,15 +106,40 @@ def observe(
     return state.with_state(target, moment)
 
 
-def should_run_rules(state: Rhythm) -> bool:
-    """Always True. The daemon never stops its rules to save a state.
+#: Routine background rules wait only while the machine is already doing the
+#: work the daemon would otherwise interrupt. A quiet room is deliberately NOT
+#: here: IDLE is exactly when most background rules are meant to fire.
+_QUIET_RULE_STATES = frozenset({
+    Rhythm.SLEEP,
+    Rhythm.DREAM,
+    Rhythm.MAINTENANCE,
+})
 
-    A state that stopped the engine would make an armed rule silently missing
-    every time the machine happened to be idle - which is exactly when most
-    background rules are meant to fire. Interrupt policy may *hold an
-    announcement*; it may not stop a rule.
+
+def should_run_rules(
+    state,
+    *,
+    critical: bool = False,
+    armed: bool = False,
+) -> bool:
+    """Whether *routine* background rules may run in this state.
+
+    Rules keep running while somebody is here (ACTIVE) and while the room is
+    merely quiet (AWAKE, IDLE). They wait during an offline pass (DREAM), a
+    maintenance window, or sleep - states in which acting would interrupt work
+    the machine is already doing for the person.
+
+    The two escapes are not preferences. `critical` is an urgent event the
+    person must not miss; `armed` is an unattended action they set up
+    explicitly to happen without them. Neither is ever suppressed by rhythm -
+    only speculative, routine rules wait. Interrupt policy (`salience.policy`)
+    and the reflex queue are separate paths; this gate does not touch their
+    consent, do-not-disturb or approval checks.
     """
-    return True
+    if critical or armed:
+        return True
+    value = getattr(state, "state", state)
+    return value not in _QUIET_RULE_STATES
 
 
 #: The last state the owner of the monitor observed. Plain data, not a lock:

@@ -357,6 +357,7 @@ class AmbientScheduler:
         event_engine=None,
         event_poll_seconds: float = _EVENT_POLL_SECONDS,
         reflex_layer=None,
+        rule_gate=None,
     ) -> None:
         # The reflex layer is a constructor argument so a test can substitute
         # one and so an embedding application can switch it off - but the
@@ -414,6 +415,12 @@ class AmbientScheduler:
         # means exactly what it meant before this existed: no event rules are
         # read, and every existing construction site is unchanged.
         self._event_engine = event_engine
+        # A caller that owns the rhythm monitor (the daemon) can supply a
+        # predicate here. `None` means the old behaviour: routine rules poll in
+        # every state. It is consulted only for armed rules - senses, reflexes
+        # and the approval path keep running, so a quiet state cannot silence
+        # a critical notification or bypass a consent check.
+        self._rule_gate = rule_gate
         self._event_seconds = max(0.0, float(event_poll_seconds))
         self._last_event_poll = (
             ((now - self._event_seconds) if poll_immediately else now)
@@ -667,6 +674,11 @@ class AmbientScheduler:
         if now - self._last_event_poll < self._event_seconds:
             return []
         self._last_event_poll = time.monotonic()
+        # The clock is stamped before this gate for the same reason it is
+        # stamped before the runner-lock gate: returning before the stamp
+        # makes the countdown hit zero every tick and spins the loop.
+        if self._rule_gate is not None and not self._rule_gate():
+            return []
         from shani_chronoa import runner_lock
 
         if not runner_lock.holds():

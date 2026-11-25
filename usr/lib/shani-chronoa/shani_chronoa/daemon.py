@@ -31,6 +31,22 @@ SLEEP_FIRST_DELAY_SECONDS = 60.0
 SLEEP_EVERY_SECONDS = 600.0
 
 
+def _rules_allowed(*, critical: bool = False, armed: bool = False) -> bool:
+    """The scheduler thread's view of the rhythm rule gate.
+
+    `RhythmMonitor.tick` records its observation through `rhythm.note_state`,
+    so the poller reads the same state the once-a-second loop used - a stale
+    reading can hold a routine rule for one more tick, never grant one early.
+    Critical notifications and unattended actions the person explicitly armed
+    pass their flag and are never held here.
+    """
+    from shani_chronoa import rhythm
+
+    return rhythm.should_run_rules(
+        rhythm.current_state(), critical=critical, armed=armed
+    )
+
+
 def _dream_tick() -> None:
     """One dream pass, and a log line for every outcome it can have.
 
@@ -76,9 +92,16 @@ def main() -> int:
     from shani_chronoa.senses import idle as idle_sense
 
     store = PerceptStore()
-    # Rhythm is a percept, not a gate: rules and senses run in every state.
     monitor = rhythm.RhythmMonitor(store=store, read_idle=idle_sense.read_idle_seconds)
-    scheduler = AmbientScheduler(store=store, event_engine=EventEngine())
+    # The scheduler owns the polling thread, so the rhythm decision has to be
+    # visible there: routine rules wait in sleep/dream/maintenance while senses
+    # and the reflex layer keep running. Consent and approvals are re-read per
+    # event in the engine and are not bypassed by this gate.
+    scheduler = AmbientScheduler(
+        store=store,
+        event_engine=EventEngine(),
+        rule_gate=_rules_allowed,
+    )
     scheduler.start()
     logger.info(
         "Chronoa background mode running (rules and ambient senses; no microphone)"
@@ -103,11 +126,12 @@ def main() -> int:
     try:
         while not stop.wait(1.0):
             # Consult the rule gate with the state just observed instead of
-            # discarding it. Today it is always True; interrupt policy reads
-            # the same state through rhythm.current_state().
+            # discarding it. The scheduler's poller asks the same question
+            # through `current_state`; this line makes the observed decision
+            # visible in the log. Interrupt policy reads the same state.
             state = monitor.tick().state
             if not rhythm.should_run_rules(state):
-                logger.debug("rhythm %s holds rules this tick", state.value)
+                logger.debug("rhythm %s holds routine rules this tick", state.value)
             now = time.monotonic()
             if now >= next_sleep:
                 next_sleep = now + SLEEP_EVERY_SECONDS
