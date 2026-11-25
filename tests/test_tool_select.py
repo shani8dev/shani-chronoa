@@ -536,26 +536,27 @@ class TestAOneWordMatchDoesNotOutrankAConversation:
         assert "explain_command" in self._sent("Explain a command.")
 
     def test_a_body_match_counts_even_though_no_name_word_matched(self):
-        """`usb_devices` scores 0 on `ranked()`'s name-hit field for this.
+        """`login_history` scores 0 on `ranked()`'s name-hit field for this.
 
-        Its name is `usb` + `devices` and the request says "plugged" and
-        "Thunderbolt", so a rule keyed on name hits - the obvious thing to use
-        here - drops the tool for a question it answers exactly.
+        Its name is `login_history` and the request says "logged in", so a
+        rule keyed on name hits - the obvious thing to use here - drops the
+        tool for a question it answers exactly. (`usb_devices` used to be the
+        example; it moved to shani-sysadmin with the other deep reads.)
         """
-        assert "usb_devices" in self._sent("What is plugged in, and Thunderbolt docks.")
+        assert "login_history" in self._sent("Explain who logged in recently.")
 
     def test_the_threshold_is_not_what_did_the_work(self):
         """Pin the numbers, so a retune of `CONVERSATION_YIELD` is deliberate.
 
-        This is a **measurement pin, not a guard**: it says the one-word miss
-        scores *above* the cases that must outrank, so nobody "fixes" this by
-        lowering the threshold and silently losing two correct answers.
+        This is a **measurement pin, not a guard**: it says the correct body
+        match scores *above* the conversational false positive, so nobody
+        "fixes" this by lowering the threshold and silently losing the answer.
         """
-        assert _SCORES["explain what a black hole is in two sentences"] > _SCORES[
-            "What is plugged in, and Thunderbolt docks."]
+        assert _SCORES["Explain who logged in recently."] > _SCORES[
+            "explain what a black hole is in two sentences"]
 
 
 _SCORES = {case: ranked(case, TOOLS)[0][0] for case in (
     "explain what a black hole is in two sentences",
-    "What is plugged in, and Thunderbolt docks.",
+    "Explain who logged in recently.",
 )}

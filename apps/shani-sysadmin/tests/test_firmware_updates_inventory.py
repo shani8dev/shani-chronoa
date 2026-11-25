@@ -28,9 +28,10 @@ import os
 import pathlib
 import sys
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "usr/lib/shani-chronoa"))
+_REPO = pathlib.Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(_REPO / "usr/lib/shani-chronoa"))
 
-from shani_chronoa.skills import firmware_updates as fw  # noqa: E402
+from shani_sysadmin.skills import firmware_updates as fw  # noqa: E402
 
 #: A get-devices payload in the real shape: `Flags` is a list of fwupd's own
 #: tokens, several devices have no `Version`, and the internal devices are the

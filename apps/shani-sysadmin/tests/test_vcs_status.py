@@ -38,10 +38,10 @@ import sys
 
 import pytest
 
-_REPO = pathlib.Path(__file__).resolve().parents[1]
+_REPO = pathlib.Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
-from shani_chronoa.skills import vcs_status as VS  # noqa: E402
+from shani_sysadmin.skills import vcs_status as VS  # noqa: E402
 
 #: Real `svn info` from a working copy on `@blue`, captured verbatim.
 SVN_INFO = """Path: var/tmp/chronoa-cli-formats/svnwc

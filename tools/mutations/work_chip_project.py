@@ -20,7 +20,7 @@ The set is the four ways each of those can be lost.
 TEST_FILE = "tests/test_the_work_chip_says_which_project_it_is_on.py"
 
 _WINDOW = "usr/lib/shani-chronoa/shani_chronoa/gui/window.py"
-_VCS = "usr/lib/shani-chronoa/shani_chronoa/skills/vcs_status.py"
+_VCS = "apps/shani-sysadmin/shani_sysadmin/skills/vcs_status.py"
 
 MUTATIONS = [
     {

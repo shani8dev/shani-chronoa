@@ -24,7 +24,7 @@ import subprocess
 
 import pytest
 
-from shani_chronoa.skills import autostart_entries as ae
+from shani_sysadmin.skills import autostart_entries as ae
 
 # --- captured verbatim from /etc/xdg/autostart on @blue ---------------------
 ATSPI = """\
@@ -405,9 +405,9 @@ class TestItIsReachable:
         assert ae._autostart_dirs()[0] == str(
             pathlib.Path(files.config_home()) / "autostart")
 
-        app = pathlib.Path(ae.__file__).parents[1] / "app" / "desktop_integration.py"
+        app = (pathlib.Path(__file__).resolve().parents[3]
+               / "usr/lib/shani-chronoa/shani_chronoa/app/desktop_integration.py")
         src = app.read_text(encoding="utf-8")
         assert '_AUTOSTART_DIR = str(files.config_home() / "autostart")' in src, (
             "the app's own autostart directory moved; this skill must follow "
             "it rather than keep a second spelling")
-        # `skills/autostart_entries.py` -> parents[0]=skills, [1]=shani_chronoa

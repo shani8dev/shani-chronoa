@@ -28,6 +28,18 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "usr" / "lib" / "shani-chronoa"))
+sys.path.insert(0, str(REPO / "apps" / "shani-sysadmin"))
+
+#: Moved tools are no longer in Chronoa's whitelist; probe them through the
+#: app's dispatcher instead of reporting "Unknown tool" for a working skill.
+_APP_SKILLS = {
+    "disk_activity", "cpu_frequency", "cpu_per_core", "inspect_binary",
+    "dns_lookup", "check_port", "vcs_status", "backup_status",
+    "bandwidth_to_host", "port_owner", "interface_counters",
+    "neighbour_table", "routing_table", "usb_devices", "driver_info",
+    "temperatures", "list_services", "read_logs", "log_files",
+    "scheduled_tasks", "tls_certificate", "ping_host", "trace_route",
+}
 
 PROBES = [
     ("disk_activity", {}, "iostat, read only"),
@@ -132,7 +144,11 @@ def main():
                 args[key] = value
         print("\n### %s   (%s)" % (name, why))
         try:
-            result = tools.execute_tool(name, args)
+            if name in _APP_SKILLS:
+                from shani_sysadmin import run_skill
+                result = run_skill(name, args).text
+            else:
+                result = tools.execute_tool(name, args)
         except Exception as exc:
             problems.append((name, "RAISED %s: %s" % (type(exc).__name__, exc)))
             print("  !! RAISED %s: %s" % (type(exc).__name__, exc))

@@ -17,9 +17,9 @@ import pathlib
 import subprocess
 import sys
 
-sys.path.insert(0, str(pathlib.Path("usr/lib/shani-chronoa")))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[3] / "usr/lib/shani-chronoa"))
 
-from shani_chronoa.skills import usb_devices as U  # noqa: E402
+from shani_sysadmin.skills import usb_devices as U  # noqa: E402
 
 #: Recorded verbatim from `usb-devices` on a machine with a hub and a
 #: keyboard. Two different classes, because a parser that only ever sees one

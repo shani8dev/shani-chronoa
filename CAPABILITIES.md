@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**222 skills in 24 groups.** Each is a named, schema-typed module; the model
+**204 skills in 23 groups.** Each is a named, schema-typed module; the model
 calls them by name. The whitelist *is* the design, so a new capability is a
 new named skill. The one exception is `run_command`, for running a project's
 tests and builds: off by default, sandboxed (no network, nothing outside the
@@ -37,7 +37,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**86 of 222 are consent-gated and 16 are destructive.**
+**78 of 204 are consent-gated and 15 are destructive.**
 
 ## Files
 
@@ -111,7 +111,6 @@ Hardware, peripherals, sensors and their state.
 | `bluetooth_call` | Call through a paired phone, on this computer's speakers | needs `bluetooth-call-enabled` |
 | `bluetooth_devices` | Bluetooth devices | — |
 | `bluetooth_gatt` | Read a watch or band's battery, sensors and firmware | needs `bluetooth-gatt-enabled` |
-| `disk_health` | Drive health and disk encryption | needs `storage-sense-enabled` |
 | `find_device` | Make a lost watch or band buzz so you can find it | needs `bluetooth-gatt-enabled` |
 | `fm_radio` | Listen to FM radio through a USB receiver | needs `fm-radio-enabled` |
 | `ir_remote` | Send or receive infrared remote-control codes | needs `ir-remote-enabled` |
@@ -122,40 +121,9 @@ Hardware, peripherals, sensors and their state.
 | `phone_remote` | Press the phone camera shutter, media keys, or type on the phone | needs `phone-remote-enabled` |
 | `print_queue` | The print queue, and cancelling a job | needs `print-control-enabled` |
 | `screen_to_phone` | Show this screen on a phone | needs `screen-share-enabled` |
-| `temperatures` | Temperatures and fan speeds | needs `hwmon-sense-enabled` |
 | `toggle_bluetooth` | Turn the Bluetooth adapter on or off | needs `bluetooth-control-enabled` |
 | `toggle_wifi` | Turn the Wi-Fi radio on or off | needs `radio-control-enabled` |
-| `usb_devices` | What is plugged in, and Thunderbolt docks | needs `usb-sense-enabled` |
 | `watch` | Steps, sleep, stress, heart rate, SpO2 and settings on your watch | needs `bluetooth-gatt-enabled` |
-
-## System
-
-Processes, packages, updates, containers, vms, disks, network.
-
-| Skill | What it does | Before it runs |
-|---|---|---|
-| `autostart_entries` | What starts on this machine automatically, at login and on a schedule | — |
-| `backup_adapters` | Check a backup repository or print a backup command without running it | — |
-| `backup_status` | Whether this machine has an off-machine backup, and when | — |
-| `check_internet` | Is the internet working? | — |
-| `check_updates` | Check for waiting package updates | — |
-| `cloud_files` | What is in this machine's cloud storage remotes | — |
-| `connect_wifi` | Join a WiFi network | needs `wifi-connect-enabled` |
-| `content_discovery` | Which paths a local web server answers on | — |
-| `data_usage` | Data used | — |
-| `disk_usage` | Report filesystem and directory space use | — |
-| `firmware_updates` | List firmware updates for this machine's devices | — |
-| `list_wifi_networks` | WiFi networks | — |
-| `login_history` | Who logged in recently | needs `sessions-sense-enabled` |
-| `machine_capabilities` | What this machine can actually do | — |
-| `my_ip_address` | IP address | — |
-| `open_settings` | Open the system Settings at a page | — |
-| `print_file` | Print a file | — |
-| `security_status` | Secure Boot, TPM and firewall status | needs `security-sense-enabled` |
-| `set_hostname` | This computer's name | needs `hostname-control-enabled` |
-| `snapshot_status` | Can this machine roll back, and which slot is it on | needs `snapshots-sense-enabled` |
-| `system_info` | Describe this machine | — |
-| `vpn_control` | VPN connections | needs `wifi-connect-enabled` |
 
 ## Everyday tools
 
@@ -180,6 +148,25 @@ The small things a person asks for most.
 | `scan_document` | Scan and read a page | — |
 | `solve_math` | Algebra and calculus | — |
 | `spell_word` | Spell a word | — |
+
+## System
+
+Processes, packages, updates, containers, vms, disks, network.
+
+| Skill | What it does | Before it runs |
+|---|---|---|
+| `backup_adapters` | Check a backup repository or print a backup command without running it | — |
+| `check_internet` | Is the internet working? | — |
+| `cloud_files` | What is in this machine's cloud storage remotes | — |
+| `connect_wifi` | Join a WiFi network | needs `wifi-connect-enabled` |
+| `data_usage` | Data used | — |
+| `disk_usage` | Report filesystem and directory space use | — |
+| `list_wifi_networks` | WiFi networks | — |
+| `login_history` | Who logged in recently | needs `sessions-sense-enabled` |
+| `my_ip_address` | IP address | — |
+| `open_settings` | Open the system Settings at a page | — |
+| `print_file` | Print a file | — |
+| `system_info` | Describe this machine | — |
 
 ## Time and reminders
 
@@ -212,11 +199,9 @@ Inspect repositories and work through files.
 | `git_push` | Push a branch to a named remote | **asks first, always** · needs `git-push-enabled` |
 | `manage_goals` | Save a multi-step goal to run later | needs `goals-enabled` |
 | `manage_triggers` | Arm an automatic rule | **asks first, always** · needs `trigger-control-enabled` |
-| `project_outline` | Outline a code project: files, classes and functions | — |
 | `resolve_conflict` | What is conflicting in a git repository, and resolve it | needs `git-sense-enabled` |
 | `run_command` | Run a project's tests, build or linter | **asks first, always** · needs `run-command-enabled` |
 | `todo_list` | Keep a list of tasks to do | needs `todo-list-enabled` |
-| `vcs_status` | State of a git, subversion or mercurial checkout | — |
 
 ## Power and screen
 
@@ -355,16 +340,6 @@ Read, edit and extract from media.
 | `photo_metadata` | When, where and with what camera a photo was taken | — |
 | `photos` | Find your photos by what is in them, what is written on them, or when they were taken | — |
 | `take_photo` | Take a photo or selfie with the webcam | needs `vision-sense-enabled` |
-
-## Services and logs
-
-Systemd units and the journal.
-
-| Skill | What it does | Before it runs |
-|---|---|---|
-| `control_service` | Start or stop a service | **asks first, always** · needs `service-control-enabled` |
-| `list_services` | System services | — |
-| `read_logs` | Read the system log | — |
 
 ## Clipboard
 

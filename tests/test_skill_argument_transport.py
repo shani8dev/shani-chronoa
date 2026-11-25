@@ -90,9 +90,11 @@ class TestThroughTheRealSubprocess:
         assert not out.startswith("ERROR(exit="), out[:160]
 
     def test_a_skill_with_only_a_boolean_argument_works(self, gsettings_env):
-        out = execute_tool("list_services", {"failed_only": True})
+        # `list_services` used to be this example; it moved to shani-sysadmin.
+        # `do_not_disturb` has the same one-boolean shape and stays here.
+        out = execute_tool("do_not_disturb", {"enabled": True})
         assert "NameError" not in out, out[:160]
-        assert "service unit" in out
+        assert "Do Not Disturb" in out
 
     def test_the_boolean_actually_took_effect(self, gsettings_env):
         """Not just "no crash" - the value must have arrived as a bool.
@@ -108,18 +110,13 @@ class TestThroughTheRealSubprocess:
         one. If the boolean were dropped the two replies would be identical,
         so the comparison below is the property this was after.
         """
-        everything = execute_tool("list_services", {"failed_only": False})
-        failed_only = execute_tool("list_services", {"failed_only": True})
-        assert "service unit(s)" in everything
-        assert everything != failed_only, (
+        turned_on = execute_tool("do_not_disturb", {"enabled": True})
+        turned_off = execute_tool("do_not_disturb", {"enabled": False})
+        assert "now on" in turned_on
+        assert turned_on != turned_off, (
             "True and False produced identical output, so the argument did not "
             "reach the handler as a boolean at all")
-        # And the filtered answer is about the filter, not about the machine
-        # being broken: an empty failed-state list is the good case, and the
-        # skill must not present it as an anomaly.
-        assert "not expected on a running system" not in failed_only, (
-            f"an empty failed-state list was reported as a broken machine: "
-            f"{failed_only[:160]!r}")
+        assert "now off" in turned_off
 
     def test_a_quote_in_an_argument_does_not_break_the_program(self, gsettings_env):
         out = execute_tool("calculate", {"expression": "2+2"})

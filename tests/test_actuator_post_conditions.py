@@ -26,7 +26,10 @@ from shani_chronoa.verification import Verdict
 
 
 def _verify(module, arguments, tool=None):
-    return verification.verify(f"shani_chronoa.skills.{module}", arguments, tool=tool)
+    # `control_service` moved to shani-sysadmin; its post-condition is read
+    # from the app module, which keeps the same verification contract.
+    package = "shani_sysadmin.skills" if module == "control_service" else "shani_chronoa.skills"
+    return verification.verify(f"{package}.{module}", arguments, tool=tool)
 
 
 def _stub(bindir, name, script):
@@ -282,7 +285,8 @@ def test_every_post_condition_is_read_only_by_name():
     for mod in ("volume", "set_mic_mute", "power_profile", "set_timezone", "control_service", "kill_process",
                 "create_directory", "delete_file", "write_text_file", "move_or_copy_file",
                 "do_not_disturb", "clipboard"):
-        src = inspect.getsource(importlib.import_module(f"shani_chronoa.skills.{mod}").POST_CONDITION)
+        package = "shani_sysadmin.skills" if mod == "control_service" else "shani_chronoa.skills"
+        src = inspect.getsource(importlib.import_module(f"{package}.{mod}").POST_CONDITION)
         for verb in ('"set-volume"', '"set-mute"', '"set-timezone"', '"set", SCHEMA_ID', "_run_ppd(\"set",
                      "write_text(", "unlink(", "os.kill(", "rmtree(", "send2trash", '"trash"'):
             assert verb not in src, f"{mod}'s post-condition contains {verb}"

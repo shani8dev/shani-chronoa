@@ -38,10 +38,10 @@ import sys
 
 import pytest
 
-_REPO = pathlib.Path(__file__).resolve().parents[1]
+_REPO = pathlib.Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
-from shani_chronoa.skills import backup_status as BS  # noqa: E402
+from shani_sysadmin.skills import backup_status as BS  # noqa: E402
 
 #: The captured table, verbatim, including the rule and the trailing note.
 #: **Ordered by id, which is what restic does** - and `4f2a1b90` sorts before
@@ -206,7 +206,7 @@ def test_it_never_writes_to_the_repository(tmp_path, monkeypatch):
     verb list; a status reader that can reach one is a writer. Asserted on the
     source because the run-time list is not obviously the same thing.
     """
-    source = (_REPO / "usr/lib/shani-chronoa/shani_chronoa/skills"
+    source = (_REPO / "apps/shani-sysadmin/shani_sysadmin/skills"
               / "backup_status.py").read_text()
     code = "\n".join(line for line in source.splitlines()
                      if not line.lstrip().startswith("#"))

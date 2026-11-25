@@ -89,7 +89,8 @@ GATED: dict[str, str] = {
     "close_window": "window-close-enabled",
     "power_action": "power-control-enabled",
     "install_app": "app-install-enabled",
-    "vpn_control": "wifi-connect-enabled",
+    # VPN control moved to shani-sysadmin; `wifi-connect-enabled` stays in the
+    # schema so a grant already made still applies when the app runs it.
     "connect_wifi": "wifi-connect-enabled",
     # The lab-network builder. One key for all four, and deliberately not the
     # `network-sense-enabled` or `wifi-connect-enabled` keys: those are about
@@ -97,11 +98,9 @@ GATED: dict[str, str] = {
     # network that already exists), while this one *creates* network interfaces
     # and needs the machine administrator's password to do it. Reading about a
     # network and being allowed to invent one are different agreements.
-    # Packet capture is the only thing in the package that reads what is IN a
-    # packet. Its own key, not `network-sense-enabled`: that one reads interface
-    # counters, this one sees payloads, and on a machine with a browser open
-    # that is a very different permission.
-    "control_service": "service-control-enabled",
+    # `service-control-enabled` stays in the schema even though the tool moved
+    # to shani-sysadmin, so an old grant still applies there. Packet capture,
+    # also in the app, keeps `packet-capture-enabled` for the same reason.
     # `systemd-analyze verify` - the command that answers "why won't it start"
     # - is deliberately **not** here. It reads a configuration file, starts
     # nothing and reports only what `verify` prints, so gating it would make
@@ -152,27 +151,16 @@ GATED: dict[str, str] = {
     # path only, as set_timezone does).
     "default_apps": "default-apps-enabled",
     "print_queue": "print-control-enabled",
-    "set_hostname": "hostname-control-enabled",
+    # `hostname-control-enabled` moved with set_hostname to shani-sysadmin; the
+    # key stays declared here so existing grants still apply.
     "set_locale": "locale-control-enabled",
     # The `sessions` sense's own key, not a new one: login history is other
     # people's presence, the same agreement whether volunteered or asked for.
     "login_history": "sessions-sense-enabled",
     # The sense-backed matrix skills share their sense's key, as git_inspect
-    # does (see sense_reading.py). Where a skill also reads something no sense
-    # covers (shani-deploy, systemd-analyze, lsblk, boltctl, distrobox), only
-    # the sense half follows the switch. security_status's firewall half
-    # follows `firewall-sense-enabled`; one key per tool here, so the primary
-    # one is named.
-    "snapshot_status": "snapshots-sense-enabled",
-    # btrfs compression saving: the same subject the filesystems sense reports
-    # (mounts and real room), so it follows that sense's switch - measured on a
-    # slot, compsize walks extents and reports the ratio.
-    # Disk activity follows the storage sense: the same subject that sense
-    # reports, so it wears the same consent rather than opening a new switch.
-    "security_status": "security-sense-enabled",
-    "disk_health": "storage-sense-enabled",
-    "temperatures": "hwmon-sense-enabled",
-    "usb_devices": "usb-sense-enabled",
+    # does (see sense_reading.py). snapshot_status, security_status,
+    # disk_health, temperatures and usb_devices moved to shani-sysadmin; their
+    # sense keys stay declared here so a grant already made still applies.
     # The `web` sense's own key, not a new one: driving a browser is
     # the same agreement web_search asks for when it reads a page -
     # reaching the web - so one switch covers both.
@@ -301,9 +289,8 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "email_read": ("Files", "Read your mailbox: list recent messages or open one"),
     "email_send": ("Files", "Send an email from the configured account"),
     "email_draft": ("Files", "Save an email draft as a local file, without sending"),
-    "list_services": ("Services and logs", "System services"),
-    "control_service": ("Services and logs", "Start or stop a service"),
-    "read_logs": ("Services and logs", "Read the system log"),
+    # Service listing, service control and journal reading moved to the
+    # shani-sysadmin app with the other deep system diagnostics.
     "create_archive": ("Files", "Make or extract an archive"),
     "find_and_replace": ("Files", "Find and replace"),
     "list_percepts": ("What Chronoa knows", "What it perceives"),
@@ -428,16 +415,17 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # names that are junk whatever they contain.
     "temp_files": ("Files", "Find junk, temporary and leftover files by name"),
     "bluetooth_devices": ("Devices", "Bluetooth devices"),
-    "vpn_control": ("System", "VPN connections"),
     "install_app": ("Apps", "Install and remove apps"),
     "power_action": ("Power and screen", "Suspend, restart or shut down"),
     "ask_user": ("Everyday tools", "Ask a clarifying question"),
     "delegate": ("Everyday tools", "Hand a long task to a helper and get back its summary"),
     "list_apps": ("Apps", "List installed applications"),
-    "check_updates": ("System", "Check for waiting package updates"),
+    # Package updates, web-path discovery and the other deep system reads
+    # moved to shani-sysadmin. The plain questions the assistant keeps are
+    # listed here and above: disk_usage, system_info, check_internet,
+    # data_usage, my_ip_address, list_processes, process_cost, login_history.
     "disk_usage": ("System", "Report filesystem and directory space use"),
     "system_info": ("System", "Describe this machine"),
-    "content_discovery": ("System", "Which paths a local web server answers on"),
     "toggle_bluetooth": ("Devices", "Turn the Bluetooth adapter on or off"),
     # Reading what a device says about itself, one layer under `bluetooth_devices`
     # which lists and connects them. Its own switch: on a wearable the values are
@@ -489,7 +477,6 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "phone": ("Devices", "Find, ping or send a file to your paired phone"),
     "airplane_mode": ("Devices", "Report the radios, or turn airplane mode on or off"),
     "charger_info": ("Power and screen", "Say what is charging this machine, and how fast"),
-    "firmware_updates": ("System", "List firmware updates for this machine's devices"),
     "extract_archive": ("Files", "Unpack a tar, zip, 7z, rar or cab archive"),
     # Read-only: it opens the archive and writes nothing.
     "list_archive": ("Files", "List what is inside an archive, without extracting it"),
@@ -513,11 +500,11 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # container / nspawn machine; asks before each command.
     "run_command": ("Code and git", "Run a project's tests, build or linter"),
     "git_branch": ("Code and git", "Create or switch branch"),
-    # Read-only: reads the marker and asks the tool, and never modifies a
-    # repository - which is what makes it safe to point at any path.
-    "vcs_status": ("Code and git", "State of a git, subversion or mercurial checkout"),
     "git_push": ("Code and git", "Push a branch to a named remote"),
-    "project_outline": ("Code and git", "Outline a code project: files, classes and functions"),
+    # `vcs_status` and `project_outline` moved to shani-sysadmin with the rest
+    # of the developer tooling. The git skills here stay: Chronoa's Work chip,
+    # Git panel and build mode read them directly, and run_command remains the
+    # documented edit/test exception.
     "todo_list": ("Code and git", "Keep a list of tasks to do"),
     "manage_goals": ("Code and git", "Save a multi-step goal to run later"),
     "compare_files": ("Files", "Compare two files"),
@@ -541,9 +528,7 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "json_query": ("Files", "Ask what a JSON document contains"),
     # `check_internet` walks a fixed ladder and takes no arguments; the
     # address-, route- and neighbour-level questions it cannot answer moved to
-    # shani-sysadmin. `machine_capabilities` answers what this machine offers,
-    # which is the path to a goal that is actually open here.
-    "machine_capabilities": ("System", "What this machine can actually do"),
+    # shani-sysadmin, as did the live `machine_capabilities` probe.
     "ui_elements": ("Pointer and keyboard",
                    "Press buttons, fill fields and open menus in other apps, and drive them visible"),
     "adb_workflow": ("Devices", "Pair an Android phone and copy one file over adb"),
@@ -552,10 +537,8 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # The linear half: a Code 128 tag, beside the QR code that reads it.
     "barcode": ("Everyday tools", "Make a Code 128 barcode or read codes in an image"),
     # The 2026-10-07 matrix skills.
-    "snapshot_status": ("System", "Can this machine roll back, and which slot is it on"),
-    # Read-only: restic snapshots + `restic check`. Never init/backup/prune/forget.
-    "backup_status": ("System", "Whether this machine has an off-machine backup, and when"),
-    # The optional adapters around that one honest reader. `plan` asks first
+    # Rollback slots and the restic reader moved to shani-sysadmin. The
+    # optional adapters around that one honest reader stay: `plan` asks first
     # and never runs the command it prints.
     "backup_adapters": (
         "System",
@@ -597,13 +580,9 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "empty_directories": ("Files", "Which directories hold nothing at all"),
     # Read-only: lists matches with sizes and dates, deletes none.
     "files_by_name": ("Files", "Where every file with this name lives"),
-    # The by-suffix space breakdown, the permission audit and the per-program
-    # network reading now live in shani-sysadmin. Autostart .desktop
-    # files, systemd *user* units and timers, and the crontab are the other
-    # three ways a machine arranges to run something unasked - and Chronoa
-    # writes one of them itself (`_sync_autostart`), so nothing could read back
-    # what its own auto-start setting produced.
-    "autostart_entries": ("System", "What starts on this machine automatically, at login and on a schedule"),
+    # The by-suffix space breakdown, the permission audit, the per-program
+    # network reading and the autostart/systemd-user/crontab inventory now
+    # live in shani-sysadmin.
     # Thread-level, `wchan` and CPU-frequency diagnostics moved to
     # shani-sysadmin; `list_processes` and `process_cost` stay as the plain
     # "what is running / why is it slow" answers.
@@ -617,12 +596,8 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # dangerous half (deleting at the destination) is refused outright
     # rather than gated, so there is no switch that turns it on.
     "sync_folder": ("Files", "Sync two folders, showing what would change first"),
-    "security_status": ("System", "Secure Boot, TPM and firewall status"),
-    # The actuator half of both siblings: the read skills list what exists,
-    # these two start and drive it.
-    "disk_health": ("Devices", "Drive health and disk encryption"),
-    "temperatures": ("Devices", "Temperatures and fan speeds"),
-    "usb_devices": ("Devices", "What is plugged in, and Thunderbolt docks"),
+    # Security posture, drive health/encryption, hwmon readings and the USB /
+    # Thunderbolt inventory moved to shani-sysadmin with the other deep reads.
     # Driver work (2026-10-10). Beside driver_info because that answers "which
     # driver is bound right now" and these answer "can I write one, and how do I
     # talk to hardware without one".
@@ -633,7 +608,6 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "default_apps": ("Apps", "Which app opens a kind of file, and the default browser"),
     "pdf_pages": ("Files", "Merge, split or take pages out of PDFs"),
     "print_queue": ("Devices", "The print queue, and cancelling a job"),
-    "set_hostname": ("System", "This computer's name"),
     "set_locale": ("Appearance", "System language and date, number and money formats"),
     # `browse` is deliberately NOT repeated here. It appeared twice in this
     # table - once as "Use a web page: click, type and read it" and once as
@@ -1286,9 +1260,10 @@ EVERYDAY_TASKS: tuple = (
         ("check_internet", "list_wifi_networks")),
     EverydayTask(
         "Keep the computer healthy",
-        "Disk space, updates, battery, temperature and what is filling the disk.",
-        "Is my laptop healthy? Check disk space, updates, battery and temperature.",
-        ("disk_usage", "cleanup_report", "check_updates", "get_battery_status", "temperatures")),
+        "Disk space, what is filling the disk and the battery. Package and "
+        "temperature checks moved to the shani-sysadmin app.",
+        "Is my laptop healthy? Check disk space and battery.",
+        ("disk_usage", "cleanup_report", "get_battery_status")),
     EverydayTask(
         "Arrange your screen",
         "Puts windows side by side, maximises, minimises or moves them to another "
@@ -1316,8 +1291,8 @@ EVERYDAY_TASKS: tuple = (
     EverydayTask(
         "Help with code",
         "Explains a project, what changed in git and what is left to do.",
-        "Explain this project's layout and what changed in git this week.",
-        ("project_outline", "git_inspect", "todo_list")),
+        "Explain what changed in git this week and what is left to do.",
+        ("git_inspect", "todo_list")),
 )
 
 
@@ -1391,12 +1366,13 @@ DESTRUCTIVE_CONSENT_KEYS = frozenset({
 #: because not needing consent does not mean changing nothing: `open_application`
 #: and `speak` are ungated and both act.
 READ_ONLY_TOOLS = frozenset({
-    "charger_info", "firmware_updates",
+    # The firmware, package, service and journal diagnostics moved to
+    # shani-sysadmin; only the plain-answer reads stay here.
+    "charger_info",
     # `device_i2c` reads by default; its write half is the gated direction, and
     # being in this set is what stops `EXPLORE` mode from reaching it.
     # device_serial is the serial half of the same shape: reads by default,
     # writes gated by the same key.
-    "project_outline",
     "calendar_events",
     # Gated like calendar_events, and only reads: the one write a wearable can be
     # sent (the buzz) is its own tool, `find_device`, so it is not in this set.
@@ -1417,7 +1393,7 @@ READ_ONLY_TOOLS = frozenset({
     # Reads the enrolled-fingerprint list; enrolls and deletes nothing, so it
     # has no post-condition to verify and no reason to withhold the answer.
     "fingerprint_status",
-    "list_services", "read_logs", "check_updates", "compute_hash",
+    "compute_hash",
     # Runs systemd-analyze verify and changes nothing.
     "list_percepts", "recommend_model", "calculate", "system_info",
     "get_weather", "get_location", "get_world_time", "convert_units",
@@ -1442,14 +1418,11 @@ READ_ONLY_TOOLS = frozenset({
     # permission to act on it.
     # `json_query` reads a file or a kernel table and changes nothing. The
     # counter, neighbour, route, DNS/whois and trace diagnostics moved to
-    # shani-sysadmin; `check_internet` stays as the plain answer.
+    # shani-sysadmin; `check_internet` stays as the plain answer, as do
+    # data_usage and my_ip_address.
     "json_query",
-    # The 2026-10-07 matrix skills that only read. Eight are backed by a sense
-    # and share its switch (they are in GATED too, like `calendar_events`, so
-    # `tool_annotations` takes the gated branch and never claims read-only for
-    # them); the rest read the kernel, a config file or a read-only command.
-    "snapshot_status", "security_status",
-    "disk_health", "temperatures", "usb_devices",
+    # The remaining matrix reads that stay are `list_fonts` and
+    # `photo_metadata`; the sense-backed system reads moved with the app.
     "list_fonts", "photo_metadata",
 })
 

@@ -70,6 +70,34 @@ exception to the fixed-whitelist design and closes the edit-test loop for the
 assistant itself. Asking Chronoa for any moved tool now gets a clear unknown-tool
 refusal; use `python3 -m shani_sysadmin list` to see what the app provides.
 
+**Remaining deep system and developer skills (third move)** — the last of the
+specialist reads that do not belong in an everyday whitelist:
+
+- Services and logs: `list_services`, `control_service`, `read_logs`.
+- Packages, firmware and updates: `check_updates`, `firmware_updates`.
+- Network and web posture: `vpn_control`, `content_discovery` (the bounded
+  gobuster path finder, previously gated like the moved `scan_network`).
+- Machine reports: `machine_capabilities`, `autostart_entries`,
+  `security_status`, `snapshot_status`, `backup_status`, `disk_health`,
+  `temperatures`, `usb_devices`, `set_hostname`.
+- Developer questions: `vcs_status`, `project_outline`.
+
+`vcs_status` and `backup_status` keep library-only shims in Chronoa: its Work
+chip, Git panel and restic adapter still import `git_state()` and `_run()` from
+those names, but the shims declare `_CHRONOA_NOT_A_SKILL`, so the assistant no
+longer offers either tool. The git write skills (`git_inspect`, `git_commit`,
+`git_branch`, `git_push`, `resolve_conflict`), `apply_patch` and `edit_file`
+stay in Chronoa with `run_command`: Build mode and the Work chip call them
+directly, and they are the assistant's own edit loop rather than questions a
+person asks about the machine.
+
+All their consent keys remain declared in Chronoa's GSettings schema and
+`capabilities.GATE_NAMES` (`service-control-enabled`, `hostname-control-enabled`,
+`wifi-connect-enabled`, `snapshots-sense-enabled`, `security-sense-enabled`,
+`storage-sense-enabled`, `hwmon-sense-enabled`, `usb-sense-enabled`, ...), so a
+grant already made still applies when the app runs the tool; only the
+tool-to-key rows in `capabilities.GATED` were removed.
+
 **ML harnesses with no assistant-facing caller** — `rerank.py`, `distill.py`,
 `merge.py`, `adapter.py`, `cultivation.py`, `gguf_write.py`,
 `model_registry.py`, now grouped under `shani_sysadmin/ml_harness/`. Nothing was

@@ -14,7 +14,7 @@ from shani_chronoa.skills import encode_text as et
 from shani_chronoa.skills import find_emoji as fe
 from shani_chronoa.skills import install_app as ia
 from shani_chronoa.skills import stopwatch as sw
-from shani_chronoa.skills import vpn_control as vpn
+from shani_sysadmin.skills import vpn_control as vpn
 
 
 def _cp(out="", rc=0, err=""):

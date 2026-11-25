@@ -322,7 +322,7 @@ def test_the_live_machine_is_asked_not_the_shipped_matrix():
     was built from, and a machine can disagree with it. The skill must ask
     `which` and the module system rather than reading a static table.
     """
-    from shani_chronoa.skills import machine_capabilities as MC
+    from shani_sysadmin.skills import machine_capabilities as MC
     out = MC._run({})
     assert out.strip(), "machine_capabilities answered nothing"
     # A command that is genuinely present here must be reported present.
@@ -333,7 +333,7 @@ def test_a_refresh_asks_again_rather_than_reusing_the_cache():
     """`refresh` exists because a cache is a claim about a moment; the flag has
     to reach the probe or it is a switch that does nothing.
     """
-    from shani_chronoa.skills import machine_capabilities as MC
+    from shani_sysadmin.skills import machine_capabilities as MC
     seen = []
 
     from shani_chronoa.capability import Capabilities
