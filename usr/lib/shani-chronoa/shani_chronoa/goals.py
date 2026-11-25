@@ -160,6 +160,8 @@ class PlannedStep(NamedTuple):
     tool_arguments: dict
     variable_name: str
     depends_on: tuple = ()
+    priority: int = 0
+
 class GoalRun(NamedTuple):
     """The persisted state of one run. Plain data: json round-trips it."""
 
@@ -233,6 +235,7 @@ class GoalRun(NamedTuple):
                 tool_arguments=s.get("tool_arguments", {}),
                 variable_name=s["variable_name"],
                 depends_on=tuple(s.get("depends_on", ())),
+                priority=int(s.get("priority", 0)),
             ) for s in data.get("steps", []))
         return cls(
             id=data["id"], goal=data["goal"], phase=Phase(data["phase"]),
@@ -249,6 +252,7 @@ class GoalRun(NamedTuple):
                     tool_arguments=r.get("tool_arguments", {}),
                     variable_name=r["variable_name"],
                     depends_on=tuple(r.get("depends_on", ())),
+                    priority=int(r.get("priority", 0)),
                 ) for r in data.get("removed", [])),
         )
 
