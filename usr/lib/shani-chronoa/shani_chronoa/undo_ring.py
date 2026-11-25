@@ -126,6 +126,23 @@ def _append(entry: dict) -> str:
     return note
 
 
+def note_undo() -> None:
+    """Mark the newest call record "done, then undone" - best effort.
+
+    A restore is itself a tool call, recorded *after* the skill returns, so at
+    the moment an entry is consumed the newest record in the log is the action
+    being put back, not the undo. Marking it there is what lets the audit trail
+    and the learning layer see an actuation that did not stand. A missing or
+    unwritable log never stops a restore: this is an annotation, not a gate.
+    """
+    try:
+        from shani_chronoa import tool_tracking
+
+        tool_tracking.annotate_last_undo()
+    except Exception:  # noqa: BLE001 - the journal is the durable record
+        pass
+
+
 def consume(entry: dict) -> bool:
     """Drop one journal entry (a restore consumed it). True if it was found."""
     entries = load()
@@ -137,6 +154,7 @@ def consume(entry: dict) -> bool:
                 and existing.get("at") == entry.get("at")):
             del entries[i]
             _save(entries)
+            note_undo()
             return True
     return False
 

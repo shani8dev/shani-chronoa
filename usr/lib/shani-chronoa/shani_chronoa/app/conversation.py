@@ -207,6 +207,39 @@ class ConversationMixin:
         self.window.show_conversation(self.assistant.visible_turns())
         self.window.set_status("Kept in the conversation")
 
+    def attach_feedback(self) -> None:
+        """Give the transcript a place to record "That was wrong".
+
+        A judgement is a record, never an instruction to the model. The handler
+        below writes it with `mark_last_answer` and puts the correction in the
+        composer, so it reaches the model only as the next turn the person
+        actually sends. With no assistant the control is not attached at all.
+        """
+        if self.window:
+            self.window.set_verdict_handler(
+                self._mark_answer if self.assistant else None)
+
+    def _mark_answer(self, verdict: str, correction: str = "") -> None:
+        """Record a verdict and leave its correction ready as the next turn.
+
+        Nothing is injected into the conversation and no tool gate moves: the
+        correction is a sentence in the composer that the person can edit and
+        send, which is the only way feedback reaches a model honestly.
+        """
+        if not (self.assistant and self.window):
+            return
+        from shani_chronoa import feedback
+
+        written = self.assistant.mark_last_answer(verdict, correction)
+        if written.verdict == feedback.CORRECTION and written.correction:
+            text = written.correction
+            note = "Correction ready to send"
+        else:
+            text = "That answer was wrong. Please reconsider it and answer again."
+            note = "Marked as wrong - the note is ready to send"
+        self.window.set_input_text(text)
+        self.window.set_status(note)
+
     def attach_regenerate(self) -> None:
         """Give the window a way to re-ask the last question.
 

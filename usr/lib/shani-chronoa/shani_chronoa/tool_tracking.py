@@ -152,30 +152,21 @@ def __getattr__(name: str) -> Path:
     raise AttributeError(name)
 
 
-def annotate_last_feedback(
-    text: str,
-    verdict: str = "wrong",
-    tracker: Optional["ToolTracker"] = None,
-    log_dir: Optional[Path] = None,
-) -> bool:
-    """Write a person's judgement back onto the newest call record.
+def _annotate_last(fields: dict, tracker: Optional["ToolTracker"] = None,
+                   log_dir: Optional[Path] = None) -> bool:
+    """Write `fields` back onto the newest call record, on disk and in the ring.
 
-    Feedback arrives *after* the answer, so the record it describes was written
-    earlier and cannot be changed by `record_call`. This rewrites that one line
-    in place - the whole file is small (it is capped and rotated) and feedback
-    is rare, so a search from the end plus an atomic replace is cheaper and
-    safer than a second log that a reader would have to join by hand.
+    A person's verdict and a restore both arrive *after* the call they describe,
+    so that record was written earlier and cannot be changed by `record_call`.
+    This rewrites that one line in place - the file is capped and rotated, and
+    both events are rare, so a search from the end plus an atomic replace is
+    cheaper and safer than a second log a reader would have to join by hand.
 
     Returns whether a record was found and annotated. An absent log is `False`,
     not a newly created file: asking to annotate is not a request to record a
-    call that never happened. The in-memory ring is updated too when a tracker
-    is passed, so a panel reading `get_calls()` sees the same answer as the log.
-
-    Only the active chunk is touched. Feedback is written moments after an
-    answer, so the call was almost certainly made in that chunk; if rotation
-    already moved it, the durable feedback file still holds the judgement.
-    Rewriting archives for a rare late annotation would cost more than it
-    returns.
+    call that never happened. Only the active chunk is touched; if rotation
+    already moved the record, the durable feedback/journal store still holds
+    the event.
     """
     active = Path(log_dir) / "tool_calls.log" if log_dir is not None else log_dir() / "tool_calls.log"
     done = False
@@ -190,8 +181,7 @@ def annotate_last_feedback(
             continue
         if not isinstance(record, dict) or "tool_name" not in record:
             continue
-        record["feedback"] = text
-        record["feedback_verdict"] = verdict
+        record.update(fields)
         lines[at] = json.dumps(record, ensure_ascii=False, default=repr) + "\n"
         done = True
         break
@@ -212,10 +202,39 @@ def annotate_last_feedback(
             done = False
     if done and tracker is not None:
         for record in reversed(getattr(tracker, "_calls", ())):
-            record.feedback = text
-            record.feedback_verdict = verdict
+            for key, value in fields.items():
+                setattr(record, key, value)
             break
     return done
+
+
+def annotate_last_feedback(
+    text: str,
+    verdict: str = "wrong",
+    tracker: Optional["ToolTracker"] = None,
+    log_dir: Optional[Path] = None,
+) -> bool:
+    """Write a person's judgement back onto the newest call record.
+
+    See `_annotate_last` for the shared write-back. The in-memory ring is
+    updated too when a tracker is passed, so a panel reading `get_calls()` sees
+    the same answer as the log. Neither path grants or refuses a tool.
+    """
+    return _annotate_last({"feedback": text, "feedback_verdict": verdict},
+                          tracker=tracker, log_dir=log_dir)
+
+
+def annotate_last_undo(tracker: Optional["ToolTracker"] = None,
+                       log_dir: Optional[Path] = None) -> bool:
+    """Mark the newest call record as "done, then undone".
+
+    A restore consumes a pre-image in `undo_ring`, after the call that made the
+    change was logged. Marking that record is what lets an audit trail and the
+    learning layer tell an actuation that still holds from one a person put
+    back. Best effort, like feedback: an absent or unwritable log must not stop
+    the restore itself.
+    """
+    return _annotate_last({"undone": True}, tracker=tracker, log_dir=log_dir)
 
 
 # Who asked for this call. The audit trail's whole point for the trigger
@@ -275,6 +294,7 @@ class ToolCallRecord:
         evidence: str = "",
         feedback: str = "",
         feedback_verdict: str = "",
+        undone: bool = False,
     ):
         self.tool_name = tool_name
         self.args = args
@@ -298,6 +318,10 @@ class ToolCallRecord:
         # because the person has not answered yet when the call is recorded.
         self.feedback = feedback
         self.feedback_verdict = feedback_verdict
+        # Set by `annotate_last_undo` when a person puts the effect back. The
+        # call ran and was recorded; "done, then undone" is a third fact about
+        # it that neither `verdict` nor the result string can carry.
+        self.undone = undone
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -311,6 +335,7 @@ class ToolCallRecord:
             "evidence": self.evidence,
             "feedback": self.feedback,
             "feedback_verdict": self.feedback_verdict,
+            "undone": self.undone,
         }
 
     def to_log_dict(self) -> dict[str, Any]:
@@ -359,6 +384,7 @@ class ToolTracker:
         evidence: str = "",
         feedback: str = "",
         feedback_verdict: str = "",
+        undone: bool = False,
     ) -> ToolCallRecord:
         """Record a tool call.
 
@@ -374,6 +400,7 @@ class ToolTracker:
             tool_name, args, result, duration_ms, origin=origin,
             verdict=verdict, evidence=evidence,
             feedback=feedback, feedback_verdict=feedback_verdict,
+            undone=undone,
         )
         self._calls.append(record)
         self._write_to_log(record)
@@ -395,7 +422,8 @@ class ToolTracker:
             writer = csv.writer(f)
             writer.writerow(
                 ["timestamp", "tool_name", "args", "result", "duration_ms",
-                 "origin", "verdict", "evidence", "feedback", "feedback_verdict"]
+                 "origin", "verdict", "evidence", "feedback", "feedback_verdict",
+                 "undone"]
             )
             for record in self._calls:
                 writer.writerow([
@@ -409,6 +437,7 @@ class ToolTracker:
                     record.evidence,
                     record.feedback,
                     record.feedback_verdict,
+                    record.undone,
                 ])
         logger.info("Exported %d calls to %s", len(self._calls), output_path)
 

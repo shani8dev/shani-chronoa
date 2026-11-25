@@ -746,7 +746,7 @@ class TranscriptView(Gtk.ScrolledWindow):
 
     def __init__(self, config=None, caps=None, on_suggestion=None,
                  reduce_motion: bool = False, on_regenerate=None,
-                 on_show_diff=None, home_factory=None) -> None:
+                 on_verdict=None, on_show_diff=None, home_factory=None) -> None:
         super().__init__()
         #: Builds the home board under the suggestions (today, recent
         #: conversations, quick actions) - the window's, since it knows the app.
@@ -763,6 +763,10 @@ class TranscriptView(Gtk.ScrolledWindow):
         #: None means the window offers no such control, rather than offering one
         #: that goes nowhere.
         self._on_regenerate = on_regenerate
+        #: Called as `(verdict, correction)` when a person rejects a reply.
+        #: None means no assistant to record it with, so the control is not
+        #: built - the same rule as "Ask that again".
+        self._on_verdict = on_verdict
         #: Set by `set_rewind_handler`; None means no assistant to rewind to.
         self._on_rewind = None
         self._rewind_rows: "list[tuple[Gtk.Widget, int]]" = []
@@ -1112,6 +1116,16 @@ class TranscriptView(Gtk.ScrolledWindow):
         suggestion chips follow (a redraw is needed to change the empty state).
         """
         self._on_regenerate = handler
+
+    def set_verdict_handler(self, handler) -> None:
+        """Attach (or detach) "That was wrong" on assistant replies.
+
+        The handler is called with `(verdict, correction)`; the transcript has
+        no assistant, so the window forwards the app's recorder here the same
+        way it forwards "Ask that again". None leaves the control unbuilt -
+        a button that cannot record a judgement is a dead control.
+        """
+        self._on_verdict = handler
 
     def show_placeholder(self) -> None:
         """The empty state: a prompt *and* something to press.
@@ -1483,6 +1497,15 @@ class TranscriptView(Gtk.ScrolledWindow):
             again.update_property([Gtk.AccessibleProperty.LABEL], ["Ask that again"])
             again.connect("clicked", self._on_regenerate_clicked)
             buttons.append(again)
+        if self._on_verdict is not None:
+            wrong = Gtk.Button()
+            wrong.set_icon_name("dialog-warning-symbolic")
+            wrong.add_css_class("flat")
+            wrong.add_css_class("circular")
+            wrong.set_tooltip_text("That was wrong")
+            wrong.update_property([Gtk.AccessibleProperty.LABEL], ["That was wrong"])
+            wrong.connect("clicked", self._on_verdict_clicked)
+            buttons.append(wrong)
         # No code button here any more: each `CodeBlock` carries its own, next to
         # the code it copies. A turn-level one had to guess which block was meant
         # and could only offer to copy all of them, which is the wrong answer for
@@ -1500,6 +1523,56 @@ class TranscriptView(Gtk.ScrolledWindow):
         """
         if self._on_regenerate is not None:
             self._on_regenerate()
+
+    def _build_verdict_popover(self, button: Gtk.Button) -> Gtk.Popover:
+        """Build the two choices without showing them.
+
+        Separated from the click so the choices are checkable without mapping a
+        popover on a display-less test runner. A widget that can be inspected is
+        still the widget a person presses.
+        """
+        from shani_chronoa import feedback
+
+        popover = Gtk.Popover()
+        popover.set_parent(button)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.set_margin_top(8)
+        box.set_margin_bottom(8)
+        box.set_margin_start(10)
+        box.set_margin_end(10)
+        prompt = Gtk.Label(label="What was wrong with this answer?")
+        prompt.set_xalign(0.0)
+        prompt.set_wrap(True)
+        prompt.set_max_width_chars(32)
+        entry = Gtk.Entry()
+        entry.set_placeholder_text("The right answer (optional)")
+
+        def send(verdict: str) -> None:
+            text = entry.get_text().strip() if verdict == feedback.CORRECTION else ""
+            handler = self._on_verdict
+            popover.popdown()
+            if handler is not None:
+                handler(verdict, text)
+
+        wrong = Gtk.Button(label="That was wrong")
+        wrong.connect("clicked", lambda *_: send(feedback.WRONG))
+        correct = Gtk.Button(label="Send correction")
+        correct.add_css_class("suggested-action")
+        correct.connect("clicked", lambda *_: send(feedback.CORRECTION))
+        for widget in (prompt, entry, wrong, correct):
+            box.append(widget)
+        popover.set_child(box)
+        self._verdict_popover = popover
+        popover.connect("closed", self._on_verdict_closed)
+        return popover
+
+    def _on_verdict_clicked(self, button: Gtk.Button) -> None:
+        """Show the choices a person presses on the reply."""
+        self._build_verdict_popover(button).popup()
+
+    def _on_verdict_closed(self, _popover) -> None:
+        """Forget the open popover so it cannot be popped down twice."""
+        self._verdict_popover = None
 
     @staticmethod
     def _copy_button(tooltip: str, accessible: str, payload: str) -> Gtk.Button:

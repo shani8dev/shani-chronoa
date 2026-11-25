@@ -1343,6 +1343,7 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
                         Path(self.assistant.session_path).stem
                         if self.assistant.session_path else "")
             self.attach_regenerate()
+            self.attach_feedback()
             # **The rail now reads fired rules.** `event_results()` had no
             # caller anywhere in `usr/`, so an event rule could run a skill or
             # change a setting with nothing on screen to say so.

@@ -2413,6 +2413,10 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             # No regenerate control until the application attaches one: a button
             # that cannot re-ask anything is a dead control in every transcript.
             on_regenerate=None,
+            # No verdict control until the application attaches a recorder: a
+            # "That was wrong" button with no place to put the judgement is a
+            # dead control in every transcript.
+            on_verdict=None,
             # A file write's card links straight to the Diff panel, which was
             # otherwise reachable only from the rail or by typing /diff.
             on_show_diff=lambda: self._show_surface("diff"),
@@ -4452,6 +4456,17 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         by nothing. The forward below is the whole of what this method does.
         """
         self._transcript.set_regenerate_handler(handler)
+
+    def set_verdict_handler(self, handler) -> None:
+        """Attach (or detach) what the transcript's "That was wrong" does.
+
+        Same late binding as `set_regenerate_handler`: the window exists before
+        the application knows whether there is an assistant to record a
+        judgement with. Passing None removes the control rather than leaving a
+        button that reports nothing. The transcript owns the handler; this
+        window keeps no second copy.
+        """
+        self._transcript.set_verdict_handler(handler)
 
     def _build_palette(self) -> None:
         """Ctrl+K, and the one list of everywhere you can go.
