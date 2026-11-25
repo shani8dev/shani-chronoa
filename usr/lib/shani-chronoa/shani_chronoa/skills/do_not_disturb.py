@@ -19,14 +19,25 @@ _SCHEMA = {
 }
 
 
-def _run(arguments: dict) -> str:
+def is_on():
+    """The one read of the switch: True, False, or None when there is none.
+
+    Unattended announcement policy asks this rather than running gsettings
+    itself, so the reflex layer keeps its single subprocess call (notify-send).
+    """
     try:
         cur = subprocess.run(["gsettings", "get", SCHEMA_ID, KEY], capture_output=True, text=True, timeout=5)
-    except OSError:
-        return "Do Not Disturb is set in this desktop's own settings; I can only switch GNOME's."
+    except (OSError, subprocess.SubprocessError):
+        return None
     if cur.returncode != 0:
+        return None
+    return cur.stdout.strip() == "false"
+
+
+def _run(arguments: dict) -> str:
+    on = is_on()
+    if on is None:
         return "This desktop does not keep GNOME's notification settings; use its own Do Not Disturb switch."
-    on = cur.stdout.strip() == "false"
     want = arguments.get("enabled")
     if want is None:
         return f"Do Not Disturb is {'on' if on else 'off'}."
@@ -43,10 +54,9 @@ def _post_condition(arguments: dict):
     want = arguments.get("enabled")
     if not isinstance(want, bool):
         return None
-    cur = subprocess.run(["gsettings", "get", SCHEMA_ID, KEY], capture_output=True, text=True, timeout=5)
-    if cur.returncode != 0:
+    on = is_on()
+    if on is None:
         return None
-    on = cur.stdout.strip() == "false"
     return on == want, f"Do Not Disturb reads back {'on' if on else 'off'}"
 
 

@@ -47,6 +47,7 @@ def _dream_tick() -> None:
     failure has to be observable.
     """
     from shani_chronoa import dream as dream_module
+
     try:
         written = dream_module.write_dream()
     except Exception:
@@ -61,7 +62,9 @@ def _dream_tick() -> None:
 
 
 def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
+    )
     from shani_chronoa.senses.scheduler import AmbientScheduler
     from shani_chronoa.senses.store import PerceptStore
     from shani_chronoa.triggers import EventEngine
@@ -71,12 +74,15 @@ def main() -> int:
         signal.signal(sig, lambda *_: stop.set())
     from shani_chronoa import rhythm
     from shani_chronoa.senses import idle as idle_sense
+
     store = PerceptStore()
     # Rhythm is a percept, not a gate: rules and senses run in every state.
     monitor = rhythm.RhythmMonitor(store=store, read_idle=idle_sense.read_idle_seconds)
     scheduler = AmbientScheduler(store=store, event_engine=EventEngine())
     scheduler.start()
-    logger.info("Chronoa background mode running (rules and ambient senses; no microphone)")
+    logger.info(
+        "Chronoa background mode running (rules and ambient senses; no microphone)"
+    )
     # Sleep. Runs on a timer rather than on every tick, because consolidation
     # reads whole conversations and a per-second poll would be absurd. The first
     # pass is delayed so starting the daemon is not also a burst of work; the
@@ -92,10 +98,16 @@ def main() -> int:
     # stop, start and misfire independently. `_dream_tick` holds the pass and
     # every log line its outcomes can produce.
     from shani_chronoa import consolidation
+
     next_sleep = time.monotonic() + SLEEP_FIRST_DELAY_SECONDS
     try:
         while not stop.wait(1.0):
-            monitor.tick()
+            # Consult the rule gate with the state just observed instead of
+            # discarding it. Today it is always True; interrupt policy reads
+            # the same state through rhythm.current_state().
+            state = monitor.tick().state
+            if not rhythm.should_run_rules(state):
+                logger.debug("rhythm %s holds rules this tick", state.value)
             now = time.monotonic()
             if now >= next_sleep:
                 next_sleep = now + SLEEP_EVERY_SECONDS
@@ -105,8 +117,10 @@ def main() -> int:
                     # machine with no model still sleeps. The index refresh
                     # happens in the sleep pass itself.
                     from shani_chronoa import conversation_learning
+
                     slept = consolidation.sleep_now(
-                        enrich=conversation_learning.local_enricher())
+                        enrich=conversation_learning.local_enricher()
+                    )
                     if slept:
                         logger.info("slept on %d conversation(s)", len(slept))
                 except Exception:
@@ -118,6 +132,7 @@ def main() -> int:
     finally:
         scheduler.stop()
         from shani_chronoa import runner_lock
+
         runner_lock.release()
         logger.info("Chronoa background mode stopped")
     return 0

@@ -35,7 +35,7 @@ PRESETS = (
         "match_mode": "keywords",
         "keywords": ["full", "low space", "almost full"],
         "actuator": "notify",
-        "arguments": {"title": "Disk space is low"},
+        "arguments": {"summary": "Disk space is low"},
         "consent_key": "storage-sense-enabled",
     },
     {
@@ -46,7 +46,7 @@ PRESETS = (
         "match_mode": "keywords",
         "keywords": ["hot", "overheat", "critical temperature"],
         "actuator": "notify",
-        "arguments": {"title": "This machine is running hot"},
+        "arguments": {"summary": "This machine is running hot"},
         "consent_key": "hwmon-sense-enabled",
     },
     {
@@ -58,7 +58,7 @@ PRESETS = (
         "match_mode": "substring",
         "substring": "failed",
         "actuator": "notify",
-        "arguments": {"title": "A service has failed"},
+        "arguments": {"summary": "A service has failed"},
         "consent_key": "unithealth-sense-enabled",
     },
     {
@@ -69,7 +69,7 @@ PRESETS = (
         "match_mode": "keywords",
         "keywords": ["wear", "health", "degraded"],
         "actuator": "notify",
-        "arguments": {"title": "Battery health has changed"},
+        "arguments": {"summary": "Battery health has changed"},
         "consent_key": "power-sense-enabled",
     },
 )

@@ -377,7 +377,7 @@ Paths are relative to `usr/lib/shani-chronoa/shani_chronoa/`.
 | Perception: Touch | 🟡 | idle time, USB/Bluetooth/devices inventory; no raw input events (on purpose) |
 | Eat / Ingest | 🟡 | file-watch (polling), journald, D-Bus, udev, web, office/PDF; no feeds, no MCP client |
 | Perception fusion | 🟡 | per-turn percept assembly and trigger engine; no general event bus, no entity extraction |
-| Attention | 🟡 | tool selection, context fitting, compression; no salience or priority queue |
+| Attention | 🟡 | tool selection, context fitting, compression; `salience.py` scores unattended urgences in a bounded queue with a DND/rhythm interrupt policy |
 | Memory | ✅ | durable facts with links and history; conversations and photos searched by words (FTS5) and by meaning (embeddings, setup's Memory) |
 | Self-model | ✅ | capabilities, hardware tier, model choice, model fit, child supervisor |
 | Brain | ✅ | llama.cpp (default), Ollama, cloud fallback chain, tool loop, MCP server |
@@ -462,8 +462,8 @@ Paths are relative to `usr/lib/shani-chronoa/shani_chronoa/`.
 
 | Box | Status | Where |
 |---|---|---|
-| Filesystem watcher | 🟡 | `triggers/sources.py` `PollingDirWatcher`, a stdlib snapshot diff. Designed so an inotify backend is a subclass |
-| inotify / fanotify | ❌ | see above; fanotify needs root |
+| Filesystem watcher | 🟡 | `triggers/sources.py` keeps one watcher per resolved directory, built by `inotify_watch.build_watcher` |
+| inotify / fanotify | 🟡 | `inotify_watch.py` is the inotify backend for `PollingDirWatcher`, with a polling fallback; fanotify still needs root and is absent |
 | journald, D-Bus, udev | ✅ | trigger event sources (`triggers/sources.py`, `triggers/desktop_sources.py`) |
 | PipeWire | ✅ | audio-device event |
 | Network APIs / REST | 🟡 | `netjson.py` (one JSON GET, used by weather, currency and similar); no GraphQL |
@@ -488,7 +488,7 @@ Paths are relative to `usr/lib/shani-chronoa/shani_chronoa/`.
 
 | Box | Status | Where |
 |---|---|---|
-| Salience engine / event priority | ❌ | percepts are not scored |
+| Salience engine / event priority | 🟡 | `salience.py` scores unattended urgences, bounds them in a priority queue and applies speak/notify/hold with DND and rhythm; percept selection is still by relevance |
 | Priority queue | ❌ | — |
 | Interrupt manager | 🟡 | barge-in (`audio.py` `BargeInMonitor`) is the only interrupt |
 | Context window | ✅ | `local_llm.fit_to_context` (n_ctx from `/props`), `compression.py`, `history_repair.py`, `tool_select.py` (sends only the schemas a request could use) |
@@ -514,7 +514,7 @@ Paths are relative to `usr/lib/shani-chronoa/shani_chronoa/`.
 | Model router | 🟡 | `model_choice.py` (one model per job), cloud fallback chain in `cloud_llm.py`, and every backend reachable behind one `chat_message()` interface (llama.cpp, Ollama, Anthropic's native adapter, OpenAI, Gemini, Groq, OpenRouter, opencode-zen, keyless gateways) - but no routing per request by difficulty |
 | Context manager | ✅ | see Attention |
 | Prompt manager | ✅ | `user_prompts.py`; rules go in the head system message, changing percepts in the last user message |
-| Task planner | 🟡 | `goals.py` **is** a planner now (2026-10-11): a model saves a plan through `manage_goals`, the Goals panel steps it, a person can remove and reorder steps and is told nothing was lost, and a parked run resumes. Still 🟡 because priorities and a self-replanning loop are absent, and the *planning* itself is the model's `manage_goals` call rather than a decomposition inside the loop |
+| Task planner | 🟡 | `goals.py` **is** a planner (2026-10-11): `manage_goals` saves it, the Goals panel steps it and a person can remove or reorder a step. `planner.py` now orders ready steps by priority without breaking dependencies and re-plans a failed step through a bounded caller-supplied repair; decomposition *inside* the turn is still absent |
 | Agent runtime | ✅ | `assistant.py` tool loop with streaming, `loops.py` |
 | Tool router | ✅ | `tool_select.py`, `tools.py`, plus a distilled student (`distill.py`) that may only re-rank and narrow names already on offer - it cannot add a skill, and `distill.fallback()` will not run one without arguments or one that deletes something |
 | MCP | ✅ (server) | `mcp.py`, `shani-chronoa-mcp` |
@@ -535,7 +535,7 @@ Paths are relative to `usr/lib/shani-chronoa/shani_chronoa/`.
 
 | Box | Status | Where |
 |---|---|---|
-| Goal manager / priorities / reward model | ❌ | — |
+| Goal manager / priorities / reward model | 🟡 | `goals.py` + `planner.py` give priorities and a failed-step re-plan; `reward.py` records a per-outcome number in `tool_tracking.py` as advice only |
 | Task queue / persistence | 🟡 | `skills/todo_list.py` (statuses, across sessions), `add_reminder`, `timer` |
 | Scheduler | ✅ | schedule event, `senses/scheduler.py` ambient polling, `daemon.py` |
 | LLM / STT / TTS | ✅ | see Brain, Ears, Voice output |
@@ -643,7 +643,7 @@ two desktops are detected in `desktop_session.py`. ✅
 | Box | Status | Where |
 |---|---|---|
 | Vitals (CPU/GPU, RAM, storage, thermals, battery, network, services, security) | ✅ sensed | one sense per vital (see Environment) |
-| Keeping them in range | 🟡 | only if the user arms a trigger rule; there is no built-in setpoint |
+| Keeping them in range | 🟡 | `setpoints.py` offers built-in off-by-default presets through `manage_triggers`; the user still arms each one and no preset enables a consent key |
 | systemd / lm-sensors / smartmontools / NM / journald / firewalld | as in Smell | |
 | Awake / active / idle / sleep / dream / maintenance states | ❌ | no state machine; window-or-daemon is the only mode switch |
 | systemd timers / cron / scheduler | 🟡 | schedule event inside the trigger engine; no systemd timers of Chronoa's own |
@@ -726,10 +726,16 @@ real version of it.
 5. **Salience and an interrupt policy** (Attention). Score percepts and events
    by change, severity and the user's own rules; decide speak now, notify, or
    hold for the next turn. Do-not-disturb and the rhythm state gate it.
+   **Wired:** `salience.py` scores unattended reflex urgences into a bounded
+   priority queue in `reflex.announce`, used by `reflex.notify`; DND and
+   `rhythm.current_state()` can hold an announcement, never stop a rule.
 6. **Homeostasis setpoints** (Homeostasis). Ship built-in, off-by-default rule
    presets (disk nearly full, overheating, a failed unit, battery wear) that
    use the existing trigger engine and the approval flow. They are proposals
    for the user to arm, not autonomous fixes.
+   **Wired:** `setpoints.py` is exposed through `manage_triggers`'s `setpoints`,
+   `describe-setpoint` and `arm-setpoint` actions; arming needs the preset's
+   own consent switch and uses the ordinary rule builders.
 
 **Then: medium cost**
 
@@ -738,9 +744,11 @@ real version of it.
    resume after a restart. A goal manager is this plus priorities.
    **Mostly built (2026-10-11):** `goals.py` holds the plan, `manage_goals`
    saves it, the Goals panel steps it and lets a person remove or reorder a step
-   with the model told what changed. What is left is priorities, a
-   re-planning path when a step fails, and decomposition *inside* the turn
-   rather than through a separate skill call — see `../harness-study/HARVEST-OIU.md`.
+   with the model told what changed. `planner.priority_order` now orders ready
+   steps by priority without breaking dependencies and `planner.replan_failed`
+   replaces a failed step through a bounded caller-supplied repair; both run
+   from `goals.advance`. Decomposition *inside* the turn is still absent — see
+   `../harness-study/HARVEST-OIU.md`.
 8. **Confidence and a judge** (Taste). A cheap self-check pass on the local
    model for actions above a risk level, and "I'm not sure" when it fails.
    Measure the latency cost first on CPU; it may need to be opt-in.
@@ -753,6 +761,9 @@ real version of it.
 9. **An inotify backend** for `PollingDirWatcher` (Ingest), as the subclass
    its docstring already plans for. Do it only if polling measurably costs
    something.
+   **Wired:** `triggers.sources` builds one persistent watcher per resolved
+   directory through `inotify_watch.build_watcher`; machines without inotify
+   keep `PollingDirWatcher`.
 10. **Vision on llama.cpp** (Eyes). Qwen-VL GGUF with its mmproj through
     `llama-server`, so vision needs no Ollama, the same way text does not.
     **Built (2026-10-12).** `local_vision.py` serves it on 127.0.0.1:8767 with
@@ -837,7 +848,7 @@ there is no left pinky, because nothing in here has one.
 | Senses | Fingertips | reaching outward: looking something up beyond this machine. | part | - | `websearch.py`, `webtext.py`, `senses/web.py` | the only sense that leaves the machine by default - it is gated on the Web search switch and the egress layer records it, but no organ owned it until now, and it is the one sense a person would assume is covered by eyes or skin
 | Senses | Touch | contact: idle time, and what is plugged into it. | part | `nose` | `senses/idle.py`, `senses/devices.py`, `senses/usb.py`, `senses/bluetooth.py` | no raw input events, on purpose - it watches devices, not you
 | Senses | Tongue | taste: judging whether an action actually worked. | built | - | `verification.py`, `history_repair.py`, `guardrail.py` |
-| Senses | Vestibular sense | balance: what deserves attention now, out of everything that happened. | part | - | `tool_select.py`, `compression.py`, `triggers/events.py` | no salience or priority queue; selection is by tool relevance only
+| Senses | Vestibular sense | balance: what deserves attention now, out of everything that happened. | part | - | `tool_select.py`, `compression.py`, `triggers/events.py` | salience scores unattended urgences in a bounded queue with a DND/rhythm interrupt policy; tool selection is still by relevance, not by that score
 | Action | Mouth | speech: saying things, in the voice that was chosen. | built | `mouth` | `tts.py`, `voices.py`, `sherpa.py`, `audio.py` |
 | Action | Hands | acting: changing the world - files, windows, services, settings, devices. | built | `hands` | `tools.py`, `skills/`, `office/`, `portal.py`, `desktop_session.py`, `phone.py`, `landline/` |
 | Action | Legs | getting about without being asked: rules that fire on their own. | built | - | `triggers/rules.py`, `triggers/event_rules.py`, `skills/timer.py`, `approvals.py` |
@@ -850,15 +861,15 @@ there is no left pinky, because nothing in here has one.
 | Core | Brainstem | the involuntary: what keeps running when nobody is deciding. | part | - | `model_service.py`, `daemon.py`, `senses/idle.py` | the Heart below says 'a liveness signal exists per subsystem; nothing consumes it yet' - this is what would consume it. The daemon's rules and senses survive every state, and the model's own cycle does not govern them
 | Regulation | Heart | pulse: is it alive, is the model up, is the clock sane. | part | - | `model_service.py`, `local_llm.py`, `senses/timebase.py` | a liveness signal exists per subsystem; nothing consumes it yet
 | Regulation | Thermoregulation | keeping itself at a working temperature, and noticing when it cannot. | part | `nose` | `senses/thermalgrid.py`, `senses/hwmon.py`, `skills/power_profile.py` | it reads its temperature; it does not act on it unasked
-| Regulation | Hypothalamus | setpoints: the conditions it should notice on its own. | part | - | `triggers/rules.py`, `approvals.py` | no built-in presets; a rule has to be armed by the user
-| Regulation | Pituitary gland | the master gland: the setpoints the hypothalamus has none of. | part | - | `triggers/rules.py`, `approvals.py` | nothing supplies a setpoint. The Hypothalamus below records the gap - 'a rule has to be armed by the user' - and this is the organ that would fill it: a default posture per context so a person sets a policy once rather than arming every rule
+| Regulation | Hypothalamus | setpoints: the conditions it should notice on its own. | part | - | `triggers/rules.py`, `approvals.py` | built-in off-by-default presets are proposed through manage_triggers; a preset still has to be armed by the user and never switches a consent key on
+| Regulation | Pituitary gland | the master gland: the setpoints the hypothalamus has none of. | part | - | `triggers/rules.py`, `approvals.py` | setpoints.py supplies proposals only; the per-context default posture that would set a policy once is still absent
 | Regulation | Circadian rhythm | rhythm: knowing what time it is and whether that matters now. | part | - | `senses/timebase.py`, `senses/idle.py`, `triggers/` | the clock is read; nothing is scheduled *because* of the hour
 | Regulation | Kidney | filtration: what gets thrown away rather than kept. | part | - | `skills/cleanup_apply.py`, `skills/empty_trash.py`, `skills/power_profile.py`, `cues.py` | cleanup and empty-trash are consented skills with no organ at all - they are the only actuators that discard rather than change, and a body filters continuously rather than when asked
 | Memory and learning | Hippocampus | what it was told, and what it perceived. | built | `memory` | `senses/store.py`, `conversation_store.py`, `local_embed.py` |
 | Memory and learning | Sleep | consolidation: turning a long conversation into something usable. | built | - | `consolidation.py`, `compression.py` |
 | Memory and learning | Synaptic plasticity | learning from how a call went - the outcome, whether it was approved, undone. | built | `brain` | `learning.py`, `tool_tracking.py`, `tool_select.py` |
 | Memory and learning | Thymus | the foundry: producing the cells that do the defending. | part | - | `learning.py`, `tool_tracking.py` | Immune system guards the boundary and that organ is built, but nothing *produces* anything. Learning reorders the tools already allowed by their verdicts, which is immune memory with nowhere to be made; there is no factory, only the record
-| Memory and learning | Endocrine system | slow signals about how things are going: pain and reward. | part | - | `tool_tracking.py`, `cues.py`, `verification.py` | faults and pressures are reported; there is no reward signal at all
+| Memory and learning | Endocrine system | slow signals about how things are going: pain and reward. | part | - | `tool_tracking.py`, `cues.py`, `verification.py` | tool_tracking records a reward with every outcome; it is advisory only and changes no consent decision
 
 ### The gaps, in one place
 
@@ -870,18 +881,18 @@ works and stops short of something specific.
 
 - **Fingertips** - the only sense that leaves the machine by default - it is gated on the Web search switch and the egress layer records it, but no organ owned it until now, and it is the one sense a person would assume is covered by eyes or skin.
 - **Touch** - no raw input events, on purpose - it watches devices, not you.
-- **Vestibular sense** - no salience or priority queue; selection is by tool relevance only.
+- **Vestibular sense** - salience scores unattended urgences in a bounded queue with a DND/rhythm interrupt policy; tool selection is still by relevance, not by that score.
 - **Diaphragm** - the awake/active/asleep cycle now exists for the *model* (on the mode strip, and it reaches SLEEPING), but nothing sleeps the rest of it: the daemon keeps its rules and senses running through every state.
 - **Reticular formation** - no interrupt policy; everything notable is announced equally.
 - **Heart** - a liveness signal exists per subsystem; nothing consumes it yet.
 - **Thermoregulation** - it reads its temperature; it does not act on it unasked.
-- **Hypothalamus** - no built-in presets; a rule has to be armed by the user.
-- **Pituitary gland** - nothing supplies a setpoint. The Hypothalamus below records the gap - 'a rule has to be armed by the user' - and this is the organ that would fill it: a default posture per context so a person sets a policy once rather than arming every rule.
+- **Hypothalamus** - built-in off-by-default presets are proposed through manage_triggers; a preset still has to be armed by the user and never switches a consent key on.
+- **Pituitary gland** - setpoints.py supplies proposals only; the per-context default posture that would set a policy once is still absent.
 - **Brainstem** - the Heart below says 'a liveness signal exists per subsystem; nothing consumes it yet' - this is what would consume it. The daemon's rules and senses survive every state, and the model's own cycle does not govern them.
 - **Circadian rhythm** - the clock is read; nothing is scheduled *because* of the hour.
 - **Thymus** - Immune system guards the boundary and that organ is built, but nothing *produces* anything. Learning reorders the tools already allowed by their verdicts, which is immune memory with nowhere to be made; there is no factory, only the record.
 - **Kidney** - cleanup and empty-trash are consented skills with no organ at all - they are the only actuators that discard rather than change, and a body filters continuously rather than when asked.
-- **Endocrine system** - faults and pressures are reported; there is no reward signal at all.
+- **Endocrine system** - tool_tracking records a reward with every outcome; it is advisory only and changes no consent decision.
 
 ### How to keep this true
 

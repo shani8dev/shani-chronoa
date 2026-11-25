@@ -26,11 +26,10 @@ is not one the consent gates can reason about. `build_rule` refuses an
 actuator that is not in the shipped registry, so a rule cannot name a skill
 that does not exist and cannot later be silently redirected to one that does.
 
-**`list` is not gated; `add`, `remove` and `clear` are.** A user must be able
-to find out what is armed without first being granted permission to arm
-anything, or the gate hides the very state it exists to protect - and a rule
-the user cannot see is a rule they cannot revoke. This is the same split
-`find_and_replace` makes between its dry run and its write.
+**`list`, `setpoints` and `describe-setpoint` are not gated; `add`,
+`remove`, `clear` and `arm-setpoint` are.** `arm-setpoint` passes a preset to
+the ordinary arming path only when its own consent key is already on, and
+enables nothing itself.
 
 **A rule is not a promise that anything will happen.** A rule whose sense is
 switched off, or whose actuator is gated, is denied at fire time by the engine
@@ -49,7 +48,8 @@ from shani_chronoa.skills import Skill
 from shani_chronoa.triggers import EVENT_TYPES, DEFAULT_COOLDOWN_SECONDS, DEFAULT_DEBOUNCE_SECONDS, MATCH_ANY, MATCH_KEYWORDS, MATCH_SUBSTRING, RETRY_POLICIES, RETRY_RETRYABLE, TRIGGER_CONTROL_KEY, EventEngine, EventRuleStore, RuleStoreError, TriggerEngine, build_event_rule, build_rule
 
 _CONSENT_KEY = TRIGGER_CONTROL_KEY
-_ACTIONS = ("list", "add", "remove", "clear")
+_ACTIONS = ("list", "add", "remove", "clear",
+            "setpoints", "describe-setpoint", "arm-setpoint")
 _MATCH_MODES = (MATCH_SUBSTRING, MATCH_KEYWORDS)
 _EVENT_MATCH_MODES = (MATCH_ANY, MATCH_SUBSTRING, MATCH_KEYWORDS)
 
@@ -61,9 +61,12 @@ SCHEMA = {
             "Arm, list, or remove automatic rules that run a Chronoa action "
             "when a perception matches - for example, notify when the battery "
             "sense reports low. A rule names one already-whitelisted skill; it "
-            "cannot run an arbitrary command or an LLM-authored prompt. Listing "
-            "needs no permission; arming or disarming requires the "
-            "'trigger-control-enabled' consent key."
+            "cannot run an arbitrary command or an LLM-authored prompt. Use "
+            "'setpoints' to list built-in off-by-default proposals, "
+            "'describe-setpoint' to explain one, and 'arm-setpoint' to arm one "
+            "whose own switch is already on; arming never switches one on. "
+            "Listing and describing need no permission; arming or disarming "
+            "requires the 'trigger-control-enabled' consent key."
         ),
         "parameters": {
             "type": "object",
@@ -167,6 +170,15 @@ SCHEMA = {
                     "description": (
                         "Collapse a burst of changes into one delayed run, so one "
                         "commit touching 400 files notifies once."
+                    ),
+                },
+                "setpoint": {
+                    "type": "string",
+                    "description": (
+                        "A built-in proposed preset (see action 'setpoints'). "
+                        "Only used by 'describe-setpoint' and 'arm-setpoint'. A "
+                        "preset is never armed unless its own consent switch is "
+                        "already on; nothing here switches one on."
                     ),
                 },
             },
@@ -352,9 +364,17 @@ def _run(arguments: dict) -> str:
     if action == "list":
         return _list_both()
 
+    # Reading proposals is ungated, like `list`: a person must be able to see
+    # what could be armed before being granted permission to arm anything.
+    if action in ("setpoints", "describe-setpoint"):
+        return _setpoint_text(action, arguments)
+
     allowed, reason = _consent(ChronoaConfig())
     if not allowed:
         return f"Refusing to change armed rules: {reason}"
+
+    if action == "arm-setpoint":
+        return _arm_setpoint(arguments)
 
     if action in ("remove", "clear"):
         return _remove_or_clear(action, arguments)
@@ -364,6 +384,53 @@ def _run(arguments: dict) -> str:
         return _add_event_rule(arguments, event_type)
 
     return _add_percept_rule(arguments)
+
+
+def _setpoint_text(action: str, arguments: dict) -> str:
+    """List built-in setpoint proposals, or describe one. Never arms anything."""
+    from shani_chronoa import setpoints
+
+    config = ChronoaConfig()
+    if action == "setpoints":
+        lines = [
+            f"{p['name']}: {p['description']} (off unless you arm it; "
+            f"switch: {p['consent_key']})"
+            for p in setpoints.proposals(config)
+        ]
+        return (
+            "Built-in proposals, all off until you arm one:\n" + "\n".join(lines)
+            + "\nUse arm-setpoint with a name. Arming still needs the "
+            f"'{_CONSENT_KEY}' switch and the preset's own switch."
+        )
+    name = (arguments.get("setpoint") or arguments.get("name") or "").strip()
+    if not name:
+        return "Give a setpoint name (see action 'setpoints'). Nothing was armed."
+    return setpoints.describe(name, config)
+
+
+def _arm_setpoint(arguments: dict) -> str:
+    """Arm a built-in preset through the ordinary arming path.
+
+    `setpoints.armable` returns a rule-shaped dict only when the preset's own
+    consent switch is already on. It never enables a switch and never calls an
+    actuator, so a preset cannot fire a sense the person turned off. The rule
+    then goes through the same percept/event builders a hand-written call uses,
+    so argument checks, the whitelist and the approval flow still apply.
+    """
+    from shani_chronoa import setpoints
+
+    name = (arguments.get("setpoint") or arguments.get("name") or "").strip()
+    if not name:
+        return "Give a setpoint name (see action 'setpoints'). Nothing was armed."
+    config = ChronoaConfig()
+    rule = setpoints.armable(name, config)
+    if rule is None:
+        return f"{setpoints.describe(name, config)} Nothing was armed."
+    armed_arguments = dict(rule)
+    event_type = armed_arguments.pop("event_type", None)
+    if event_type:
+        return _add_event_rule(armed_arguments, event_type)
+    return _add_percept_rule(armed_arguments)
 
 
 def _post_condition(arguments: dict) -> tuple[bool, str]:
@@ -381,10 +448,17 @@ def _post_condition(arguments: dict) -> tuple[bool, str]:
     reports failure rather than passing: an unverifiable arm must not be
     recorded as a completed one.
     """
-    name = (arguments.get("name") or "").strip()
+    name = (arguments.get("name") or arguments.get("setpoint") or "").strip()
     if not name:
         return False, "no rule name was given, so there is nothing that could have been armed"
     event_type = (arguments.get("event_type") or "").strip().lower()
+    if not event_type and arguments.get("setpoint"):
+        # A preset names its own kind; do not look in the wrong store and
+        # report a correctly armed rule as absent.
+        from shani_chronoa import setpoints
+        preset = next((p for p in setpoints.PRESETS if p["name"] == name), None)
+        if preset is not None and preset.get("kind") == "event":
+            event_type = preset["event_type"]
     kind = "event" if event_type else "percept"
     store, problem = _open(kind)
     if store is None:
