@@ -56,6 +56,15 @@ Adw.init()
 
 from shani_chronoa.app import ChronoaApplication  # noqa: E402
 
+# Every test here maps a real `ChronoaApplication` inside `app.run()`. Several
+# in one process crash in GTK/Pango's symbolic-paintable snapshot (SIGSEGV or
+# SIGABRT in `pango_glyph_string_extents_range`), which takes the whole batch
+# down and reports every later test as an error. The default batch therefore
+# deselects these; `tools/run_render_tests.sh` runs each one in its own process
+# so the real window, button and press are still covered. None of this is a
+# skip of the product assertion - it is a change of process boundary.
+pytestmark = pytest.mark.render
+
 
 #: The action the button must reach. Named here as well as in `application.py`
 #: so a rename on either side fails a test instead of producing a dead button.

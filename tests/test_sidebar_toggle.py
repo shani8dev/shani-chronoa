@@ -72,6 +72,12 @@ Adw.init()
 
 from shani_chronoa.app import ChronoaApplication  # noqa: E402
 
+# Like `test_setup_button_is_reachable.py`, every test here maps a real
+# ChronoaApplication under `app.run()`. Two or more in one process can die in
+# GTK/Pango while snapshotting an icon; run them one process at a time through
+# tools/run_render_tests.sh. The toggle assertions themselves are unchanged.
+pytestmark = pytest.mark.render
+
 #: Long enough for the window to map and for the next main-loop turn, short
 #: enough that twenty-odd tests do not add up to minutes. The same numbers
 #: `test_setup_button_is_reachable.py` uses, for the same measured reasons.
