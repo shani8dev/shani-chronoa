@@ -305,10 +305,10 @@ _READ_ONLY_TOOLS = (
     "list_directory",
     "list_percepts",
     "list_processes",
-    "list_services",
+    # `list_services` and `read_logs` moved to shani-sysadmin; the
+    # unattended profile cannot allow a tool the assistant no longer has.
     "list_windows",
     "list_wifi_networks",
-    "read_logs",
     "read_text_file",
     "search_file_contents",
     "system_info",

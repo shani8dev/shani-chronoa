@@ -48,6 +48,12 @@ MOVED_SKILLS = {
     "check_units", "scheduled_tasks", "graphics_stack", "permission_audit",
     "process_detail", "thread_activity", "cpu_frequency", "cpu_per_core",
     "oom_score",
+    # Third move: remaining deep system and developer skills.
+    "content_discovery", "control_service", "list_services", "read_logs",
+    "check_updates", "firmware_updates", "vpn_control",
+    "machine_capabilities", "autostart_entries", "security_status",
+    "snapshot_status", "backup_status", "disk_health", "temperatures",
+    "usb_devices", "set_hostname", "vcs_status", "project_outline",
 }
 
 

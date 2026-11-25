@@ -26,7 +26,7 @@ _REPO = pathlib.Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
 from shani_sysadmin.skills import capture_packets as CP  # noqa: E402
-from shani_chronoa.skills import content_discovery as CD  # noqa: E402
+from shani_sysadmin.skills import content_discovery as CD  # noqa: E402
 from shani_sysadmin.skills import network_watch as NW  # noqa: E402
 
 

@@ -1,16 +1,17 @@
-"""airplane_mode, charger_info, firmware_updates against fake sysfs trees and a stub fwupdmgr.
+"""airplane_mode and charger_info against fake sysfs trees.
 
 The hardware is faked at its kernel interface, never touched: tests must not
-switch a real radio (the brightness incident is why that rule exists).
+switch a real radio (the brightness incident is why that rule exists). The
+fwupdmgr half moved with `firmware_updates` into shani-sysadmin.
 """
 
-import json
-import stat
 from pathlib import Path
+
+import stat
 
 import pytest
 
-from shani_chronoa.skills import airplane_mode as air, charger_info as chg, firmware_updates as fw
+from shani_chronoa.skills import airplane_mode as air, charger_info as chg
 
 
 def _w(p: Path, **files):
@@ -136,20 +137,3 @@ def test_charger_reports_pd_wattage_only_when_offered(tmp_path, monkeypatch):
             f.unlink()
         d.rmdir()
     assert "does not report its wattage" in chg._run({}), "no offers is not 0 W"
-
-
-def test_firmware_updates_parse_and_say_when_none(tmp_path, monkeypatch):
-    bindir = tmp_path / "bin"
-    bindir.mkdir()
-    stub = bindir / "fwupdmgr"
-    out = tmp_path / "out.json"
-    out.write_text(json.dumps({"Devices": [{"Name": "SSD", "Version": "1.0",
-                                            "Releases": [{"Version": "1.2", "Urgency": "high", "Summary": "Fixes TRIM"}]}]}))
-    stub.write_text(f"#!/bin/sh\ncat {out}\n")
-    stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
-    monkeypatch.setenv("PATH", f"{bindir}:/usr/bin:/bin")
-    assert "SSD: 1.0 -> 1.2 (high urgency) - Fixes TRIM" in fw._run({})
-    out.write_text(json.dumps({"Devices": []}))
-    assert "No firmware updates" in fw._run({})
-    out.write_text("No updatable devices")
-    assert "could not list updates" in fw._run({})

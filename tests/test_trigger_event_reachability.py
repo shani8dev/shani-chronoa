@@ -364,8 +364,8 @@ class TestAnEventRuleCanBeArmedFromATurn:
         )
 
     def test_an_expiry_rule_may_only_notify(self, consent, tmp_path):
-        out = _arm(tmp_path, event_type="expiry", actuator="control_service",
-                   arguments={"action": "restart"})
+        out = _arm(tmp_path, event_type="expiry", actuator="kill_process",
+                   arguments={"pid": "1"})
         assert "may only notify" in out
         assert EventRuleStore().all() == []
 

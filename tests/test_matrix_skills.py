@@ -123,6 +123,10 @@ _SYSADMIN_SKILLS = {
     "capture_packets", "dissect_traffic", "binary_hardening", "inspect_binary",
     "container", "vm", "bridge_topology", "compression_savings",
     "crash_report", "speed_test",
+    # Third move: the remaining deep system/developer skills are exercised
+    # here through the app's dispatcher, not Chronoa's whitelist.
+    "snapshot_status", "security_status", "disk_health", "temperatures",
+    "usb_devices", "set_hostname",
 }
 
 
@@ -139,10 +143,8 @@ def call(name: str, arguments: dict):
 
 def test_every_new_skill_is_registered():
     names = {t["function"]["name"] for t in tools.TOOLS}
-    new = {"snapshot_status", "security_status",
-           "disk_health", "temperatures", "usb_devices", "list_fonts",
-           "photo_metadata", "login_history", "audio_output", "default_apps",
-           "pdf_pages", "print_queue", "set_hostname", "set_locale"}
+    new = {"list_fonts", "photo_metadata", "login_history", "audio_output",
+           "default_apps", "pdf_pages", "print_queue", "set_locale"}
     assert new <= names, f"not registered: {sorted(new - names)}"
 
 
@@ -167,7 +169,7 @@ def test_snapshot_status_reads_the_deploy_contract(bindir):
 
 
 def test_snapshot_status_does_not_call_a_fallback_an_update():
-    from shani_chronoa.skills import snapshot_status as s
+    from shani_sysadmin.skills import snapshot_status as s
     lines = "\n".join(s.describe_deploy({**_STATUS, "candidate_boot": False, "reboot_needed": "",
                                          "boot_failure": "green"}))
     assert "update is installed" not in lines
@@ -284,7 +286,7 @@ _SHANIOS_TREE = [{"name": "nvme0n1", "type": "disk", "fstype": None, "mountpoint
 
 
 def test_disk_health_walks_ancestors_for_luks():
-    from shani_chronoa.skills import disk_health as d
+    from shani_sysadmin.skills import disk_health as d
     found = d.encryption_by_mount(_SHANIOS_TREE)
     assert found["/"] == "nvme0n1p2" and found["/home"] == "nvme0n1p2"
     assert found["/boot/efi"] is None
@@ -317,7 +319,7 @@ _BOLT = """\
 
 
 def test_usb_devices_flags_an_unauthorised_dock(bindir):
-    from shani_chronoa.skills import usb_devices as u
+    from shani_sysadmin.skills import usb_devices as u
     devices = u.parse_boltctl(_BOLT)
     assert [d["title"] for d in devices] == ["Dell Thunderbolt Dock", "OWC Envoy Express"]
     assert devices[0]["status"] == "connected"
@@ -748,7 +750,7 @@ esac
 
 
 def test_set_hostname_validates_before_anything_runs():
-    from shani_chronoa.skills.set_hostname import validate
+    from shani_sysadmin.skills.set_hostname import validate
     assert validate("kitchen-laptop") is None
     for bad in ("My Laptop!", "-x", "x-", "a.b", "a_b", "x" * 64, ""):
         assert validate(bad), bad
@@ -775,11 +777,13 @@ def test_set_hostname_consent_rename_and_control(bindir):
     _, text = call("set_hostname", {"action": "set", "name": "kitchen-laptop"})
     assert "Refusing" in text and "hostname-control-enabled" in text
     grant("hostname-control-enabled")
-    outcome, text = call("set_hostname", {"action": "set", "name": "kitchen-laptop"})
-    assert "now named kitchen-laptop (verified" in text and outcome.verdict is Verdict.VERIFIED
+    _, text = call("set_hostname", {"action": "set", "name": "kitchen-laptop"})
+    # The app's Outcome has no post-condition verdict; the skill's own
+    # read-back sentence is the claim being tested here.
+    assert "now named kitchen-laptop (verified" in text
     (bindir / "sticky").write_text("")
-    outcome, text = call("set_hostname", {"action": "set", "name": "study-pc"})
-    assert "not verified" in text and outcome.verdict is Verdict.FAILED
+    _, text = call("set_hostname", {"action": "set", "name": "study-pc"})
+    assert "not verified" in text
 
 
 # ── 19. set_locale ───────────────────────────────────────────────────────────

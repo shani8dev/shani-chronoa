@@ -73,6 +73,12 @@ MOVED_SKILLS = {
     "cpu_frequency",
     "cpu_per_core",
     "oom_score",
+    # Third move: remaining deep system and developer skills.
+    "content_discovery", "control_service", "list_services", "read_logs",
+    "check_updates", "firmware_updates", "vpn_control",
+    "machine_capabilities", "autostart_entries", "security_status",
+    "snapshot_status", "backup_status", "disk_health", "temperatures",
+    "usb_devices", "set_hostname", "vcs_status", "project_outline",
 }
 
 #: The plain-answer diagnostics that deliberately stayed in Chronoa.
@@ -129,9 +135,18 @@ def test_moved_skill_and_sense_files_left_the_canonical_package():
         "lab_network_create", "lab_network_destroy", "lab_network_list",
         "lab_network_status", "device_probe", "device_serial", "device_i2c",
         "driver_status", "driver_scaffold", "driver_build",
+        # These two keep a library-only shim: Chronoa's restic adapter and
+        # Work chip / Git panel still call the helpers, but no SKILLS are
+        # registered from the shim.
+        "backup_status", "vcs_status",
     }}
     for module in modules:
         assert not (package / "skills" / f"{module}.py").exists(), module
+        assert (APP / "shani_sysadmin" / "skills" / f"{module}.py").is_file(), module
+    for module in ("backup_status", "vcs_status"):
+        shim = (package / "skills" / f"{module}.py").read_text()
+        assert "_CHRONOA_NOT_A_SKILL = True" in shim, module
+        assert "shani_sysadmin.skills." in shim, module
         assert (APP / "shani_sysadmin" / "skills" / f"{module}.py").is_file(), module
     assert not (package / "senses" / "kernel_log.py").exists()
 

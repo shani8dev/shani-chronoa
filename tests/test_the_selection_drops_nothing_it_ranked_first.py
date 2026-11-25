@@ -68,7 +68,7 @@ class TestTheConversationPathNoLongerSwallowsATask:
 
     @pytest.mark.parametrize("turn,want", [
         ("Explain a command.", "explain_command"),
-        ("What is plugged in, and Thunderbolt docks.", "usb_devices"),
+        ("Explain who logged in recently.", "login_history"),
         ("What is conflicting in a git repository, and how do I resolve it?",
          "resolve_conflict"),
     ])
