@@ -32,16 +32,15 @@ redact nothing at all.
 
 What `recall` is, and is not
 ----------------------------
-There is no embedding model, vector index, or similarity code anywhere in
-this codebase and adding one is out of scope. `recall` is **weighted
-keyword overlap**: it scores a fact by how much of the query's
-*information* it shares, breaks ties by confidence then newest-first, and
-returns nothing for a query with no shared word. It is still a literal
-filter, not semantic ranking - "what do I drink?" will not find "The user's
-order: a flat white", because they share no tokens. The cost of that
-honesty is that a good paraphrase is invisible; the alternative was to call
-substring matching "semantic search", which reads as a feature and behaves as
-a no-op.
+`recall` is **weighted keyword overlap** first: it scores a fact by how much
+of the query's *information* it shares, breaks ties by confidence then
+newest-first, and returns nothing for a query with no shared word. When
+Chronoa's local embedding model is set up, a fact also carries a vector
+written once with it into the same JSON line, and cosine similarity is fused
+into that ranking. There is no second index to keep in step with `forget()`
+or eviction: the vector rides in the percept's metadata. Without the model,
+none of that runs and the ranking is exactly the keyword one - no download,
+no cloud call, no new dependency.
 
 What stemming does, and what it cannot
 --------------------------------------
@@ -223,6 +222,15 @@ RECALL_MIN_RELEVANCE = 0.0
 #: starve every other subject. Chronoa's keys are name/preference/place/
 #: attribute/imperative/rel:*, and the reserve is the top of the ranking.
 RESERVE_DISTINCT_KEYS = 3
+
+#: How much of a fact's rank comes from meaning when the local model is up.
+#: 0 is the shipped keyword ranking, 1 would ignore it entirely.
+VECTOR_WEIGHT = 0.5
+
+#: Below this cosine similarity a fact is not "about" the query. Same model
+#: and the same measured floor as conversation search uses; a fact with no
+#: shared word still has to be genuinely on topic to be recalled by meaning.
+VECTOR_MIN_SIMILARITY = 0.55
 
 _last_auto_capture = 0.0
 
@@ -589,6 +597,23 @@ def _relevance(shared: float, query_mass: float, document_mass: float) -> float:
     return min(1.0, 2.0 * shared / total)
 
 
+def _embedder():
+    """Chronoa's one local embedding path, imported only when it is used.
+
+    The same model serves conversation search and file indexing. `embed`
+    answers None when the local server is not set up; that is the fallback
+    shared by every caller, and nothing here downloads a model or calls a
+    cloud service.
+    """
+    from shani_chronoa import local_embed
+    return local_embed
+
+
+def _fuse(relevance: float, similarity: float) -> float:
+    """Blend two ranks already in [0, 1] without leaving that range."""
+    return (1.0 - VECTOR_WEIGHT) * relevance + VECTOR_WEIGHT * similarity
+
+
 def _consent_error() -> str:
     """Why the memory sense is refusing to operate, or "" if it may.
 
@@ -676,6 +701,20 @@ def _memory_percept(fact: Fact) -> Percept:
     because this one argument is what routes the fact to the durable tier
     in `PerceptStore.add()`. See the module docstring.
     """
+    metadata = {
+        "key": fact.key,
+        "keywords": sorted(_tokens(fact.span)),
+        **({"relation": list(fact.relation)} if fact.relation else {}),
+        **({"channel": fact.channel} if fact.channel else {}),
+        **({"private": True} if fact.private else {}),
+    }
+    # One embedding per fact, here at the write: the vector rides in this
+    # percept's metadata, so `forget()` and capacity eviction need no second
+    # index to clean up. A machine without the local model stores no vector.
+    embedder = _embedder()
+    vectors = embedder.embed([fact.text], kind=embedder.DOCUMENT)
+    if vectors:
+        metadata["vector"] = list(vectors[0])
     return Percept(
         sense=CONSENT_SENSE,
         kind=MEMORY_KIND_FACT,
@@ -684,10 +723,7 @@ def _memory_percept(fact: Fact) -> Percept:
         ttl_seconds=None,
         source=fact.source,
         sensitivity=SENSITIVITY_PRIVATE,
-        metadata={"key": fact.key, "keywords": sorted(_tokens(fact.span)),
-                  **({"relation": list(fact.relation)} if fact.relation else {}),
-                    **({"channel": fact.channel} if fact.channel else {}),
-                    **({"private": True} if fact.private else {})},
+        metadata=metadata,
         valid_until=fact.valid_until,
         confidence=fact.confidence,
     )
@@ -1371,24 +1407,39 @@ def recall_report(
 
     now = time.time()
     query_mass = sum(weight(token) for token in wanted)
+    embedder = _embedder()
+    asked = embedder.embed([query], kind=embedder.QUERY)
+    query_vector = asked[0] if asked else None
     scored, expired, gated = [], [], []
     for percept, vocabulary in zip(candidates, vocabularies):
         shared = sum(weight(token) for token in wanted if token in vocabulary)
-        if not shared:
+        similarity = 0.0
+        vector = (percept.metadata or {}).get("vector")
+        if query_vector is not None and isinstance(vector, (list, tuple)):
+            cosine = embedder.similarity(query_vector, vector)
+            if cosine >= VECTOR_MIN_SIMILARITY:
+                similarity = cosine
+        if not shared and similarity <= 0.0:
             continue
         if percept.is_expired(now):
             expired.append(percept)
             continue
-        document_mass = sum(weight(token) for token in vocabulary)
-        relevance = _relevance(shared, query_mass, document_mass)
+        if shared:
+            document_mass = sum(weight(token) for token in vocabulary)
+            relevance = _relevance(shared, query_mass, document_mass)
+        else:
+            relevance = 0.0
+        # Without the local model the rank is the shipped keyword score,
+        # byte for byte. With it, meaning and words share the rank.
+        rank = _fuse(relevance, similarity) if query_vector is not None else relevance
         # The gate is here, above the reserve, rather than at the `limit` cut
         # below: gating last would let a weak fact claim a reserved distinct-key
         # slot and push out a strong one, which is the failure the reserve
         # exists to prevent. See `RECALL_MIN_RELEVANCE`.
-        if relevance < RECALL_MIN_RELEVANCE:
+        if rank < RECALL_MIN_RELEVANCE:
             gated.append(percept)
             continue
-        scored.append((relevance, percept))
+        scored.append((rank, percept))
     if gated:
         logger.debug("Gated %d fact(s) below relevance %.3f",
                      len(gated), RECALL_MIN_RELEVANCE)
@@ -1448,16 +1499,15 @@ def recall(
     "editors" finds "my editor is neovim". That is word-shape matching and
     nothing more - see the module docstring for the limit it does not cross.
 
-    NOT semantic search. Nothing here can see that "what do I drink?" and
-    "The user's order: a flat white" are about the same thing, and no
-    embedding model is being added to fix that. What a query word found in
-    no stored fact does is worth stating precisely, because it looks like a
-    bug and is not: it raises the query's mass and therefore lowers every
-    candidate's score equally. The *order* is unaffected; only the number
-    moves, which is the honest reading of "most of this question is not
-    something I have stored".
+    Without the local embedding model this is still keyword overlap: "what
+    do I drink?" will not find "The user's order: a flat white". With the
+    model present, facts carry a vector from the write path and cosine
+    similarity is fused into the rank, so it can. A query word found in no
+    stored fact raises the query's mass and lowers every keyword score
+    equally; the keyword *order* is unaffected.
 
-    A query sharing no content word returns nothing rather than everything,
+    With no embedding model, a query sharing no content word returns nothing
+    rather than everything,
     because an assistant that answers every question with its whole
     database is worse than one that admits it does not know. Callers that can
     report *why* they got nothing should use `recall_report()`.
