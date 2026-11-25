@@ -5,22 +5,27 @@ by hand. This is that surface: fields for IMAP/SMTP hosts, ports and the user,
 a connection-security choice the skill actually implements, an explicit Save,
 and an honest status read from the same file the skill reads.
 
-Setup never talks to a mail server and never sends a message. It writes only
-the 0600 JSON the reader parses, and it says so on the page. The password is
-not a field here: it stays in the session keyring, and the note says where.
+Building the page never talks to a mail server and never sends a message. It
+writes only the 0600 JSON the reader parses, and it says so on the page. The
+password is not a field here: it stays in the session keyring, and the note
+says where. The one network action, "Check account", is a button a person has
+to press; it logs in through the keyring and sends nothing.
 """
 
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gtk
+from gi.repository import Adw, GLib, Gtk
+
+import threading
 
 from shani_chronoa import email_setup
 
 GROUP_TITLE = "Email account"
 STATUS_TITLE = "Account status"
 SAVE_LABEL = "Save account"
+CHECK_LABEL = "Check account"
 
 
 class EmailPage:
@@ -100,24 +105,58 @@ class EmailPage:
         group._needle_extra.append((status_row, STATUS_TITLE.lower()))
         self._email_status_row = status_row
 
+        check_row = Adw.ActionRow(
+            title="Check account",
+            subtitle=(
+                "Log in once to both servers with the keyring password. "
+                "Nothing is sent; the check has a time limit."
+            ),
+        )
+        check_button = Gtk.Button(label=CHECK_LABEL)
+        check_row.add_suffix(check_button)
+        group.add(check_row)
+        group._needle_extra.append((check_row, "check account login".lower()))
+
         note = Adw.ActionRow(title="Password", subtitle=email_setup.PASSWORD_NOTE)
         note.set_tooltip_text(email_setup.PASSWORD_NOTE)
         group.add(note)
         group._needle_extra.append((note, "password keyring".lower()))
 
-        def refresh() -> None:
-            word, message = email_setup.status()
+        def paint_status(word: str, message: str) -> None:
             status_row.set_subtitle(f"{word}: {message}")
             status_row.remove_css_class("status-ok")
             status_row.remove_css_class("status-attention")
             status_row.remove_css_class("status-unknown")
             status_row.add_css_class(
                 "status-ok"
-                if word == email_setup.CONFIGURED
+                if word in (email_setup.CONFIGURED, email_setup.REACHABLE)
                 else "status-unknown"
-                if word == email_setup.MISSING
+                if word == email_setup.NOT_CONFIGURED
                 else "status-attention"
             )
+
+        def refresh() -> None:
+            paint_status(*email_setup.status())
+
+        def on_check(*_args) -> None:
+            check_button.set_sensitive(False)
+            status_row.set_subtitle("checking: contacting the configured mail servers")
+
+            # A login can block for seconds. Keep it off the GTK thread and
+            # come back through the main loop to draw the answer.
+            def work() -> None:
+                try:
+                    result = email_setup.check_account()
+                except Exception as exc:  # noqa: BLE001 - never leave the button stuck
+                    result = (email_setup.FAILED, f"check failed: {exc}")
+                GLib.idle_add(done, result)
+
+            def done(result) -> bool:
+                paint_status(*result)
+                check_button.set_sensitive(True)
+                return False
+
+            threading.Thread(target=work, daemon=True).start()
 
         def on_save(*_args) -> None:
             values = {key: row.get_text() for key, row in entries.items()}
@@ -127,14 +166,13 @@ class EmailPage:
             try:
                 email_setup.save(values)
             except ValueError as exc:
-                status_row.set_subtitle(f"{email_setup.BAD_FILE}: {exc}")
-                status_row.remove_css_class("status-ok")
-                status_row.add_css_class("status-attention")
+                paint_status(email_setup.FAILED, str(exc))
                 return
             refresh()
 
         button.connect("clicked", on_save)
+        check_button.connect("clicked", on_check)
         refresh()
 
 
-__all__ = ["GROUP_TITLE", "STATUS_TITLE", "SAVE_LABEL", "EmailPage"]
+__all__ = ["CHECK_LABEL", "GROUP_TITLE", "STATUS_TITLE", "SAVE_LABEL", "EmailPage"]

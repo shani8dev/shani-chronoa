@@ -345,8 +345,10 @@ def test_the_form_is_reachable_from_settings(surface):
     assert surface["selected"] == "TLS (recommended)", surface["selected"]
 
 
-def test_the_form_reports_missing_then_configured_without_a_password(surface):
-    assert "missing" in surface["status_before"].lower(), surface["status_before"]
+def test_the_form_reports_not_configured_then_configured_without_a_password(surface):
+    assert "not configured" in surface["status_before"].lower(), surface[
+        "status_before"
+    ]
     assert "keyring" in surface["note"].lower(), surface["note"]
     assert "configured" in surface["status"].lower(), surface["status"]
     payload = surface["file"]
