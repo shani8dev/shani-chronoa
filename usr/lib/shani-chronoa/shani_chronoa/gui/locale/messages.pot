@@ -1,6 +1,6 @@
-# Shani Chronoa GTK UI - en.
-# 140 of 140 strings translated. Untranslated entries are
-# intentional: copy this file, fill the empty msgstrs and compile with msgfmt.
+# Shani Chronoa GTK UI - message template.
+# Extracted from _() calls under gui/ and gui/surfaces/.
+# msgstr values are empty by design: copy, fill in and compile with msgfmt.
 msgid ""
 msgstr ""
 "Project-Id-Version: shani-chronoa\n"

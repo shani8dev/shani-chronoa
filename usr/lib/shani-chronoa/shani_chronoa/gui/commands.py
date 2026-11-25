@@ -120,14 +120,17 @@ def _diagnostics(window, argument: str) -> Optional[str]:
 
 
 def _help(window, argument: str) -> Optional[str]:
-    """Open the capability list.
+    """Open the Skills page: the one live list of what Chronoa can do.
 
     `argument` is the text after the command, so `/help what can you do?` fills
     the composer with the capability prompt instead of discarding it. Typed on
-    its own it still opens the window, which is the answer to "what can you do"
-    and is not a turn the model has to answer. The prompt string itself lives in
-    `capabilities.help_prompt()` rather than here, so the command, the chip and
-    the empty-transcript suggestions cannot name three different things.
+    its own it opens the Skills surface, which is built from the same registry
+    the model is handed. HelpWindow is a separate, older capability list; it
+    stays reachable from its own header button and `?` shortcut, but a command
+    must not offer a second answer to the question Skills already answers.
+    The prompt string lives in `capabilities.help_prompt()` rather than here, so
+    the command, the chip and the empty-transcript suggestions cannot name three
+    different things.
     """
     text = (argument or "").strip()
     if text:
@@ -135,7 +138,7 @@ def _help(window, argument: str) -> Optional[str]:
 
         window.set_input_text(caps.help_prompt() if text.endswith("?") else text)
         return None
-    window.open_help()
+    window._show_surface("skills")
     return None
 
 
