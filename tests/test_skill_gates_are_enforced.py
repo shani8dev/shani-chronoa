@@ -194,6 +194,11 @@ _IMPL = {
     # filenames cannot disagree about whether that is permitted.
     "git_inspect": "shani_chronoa.skills.git_inspect",
     "todo_list": "shani_chronoa.skills.todo_list",
+    # Email reads and sends through one module, with two separate `_consent`
+    # calls. `email_draft` is deliberately absent: it writes a local file and
+    # has no gate to enforce.
+    "email_read": "shani_chronoa.skills.email",
+    "email_send": "shani_chronoa.skills.email",
     "manage_goals": "shani_chronoa.skills.manage_goals",
     "manage_triggers": "shani_chronoa.skills.manage_triggers",
     "conversations": "shani_chronoa.skills.conversations",

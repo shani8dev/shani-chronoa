@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**269 skills in 24 groups.** Each is a named, schema-typed module; the model
+**273 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. The whitelist *is* the design, so a new capability is a
 new named skill. The one exception is `run_command`, for running a project's
 tests and builds: off by default, sandboxed (no network, nothing outside the
@@ -37,7 +37,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**98 of 269 are consent-gated and 17 are destructive.**
+**100 of 273 are consent-gated and 17 are destructive.**
 
 ## System
 
@@ -130,6 +130,9 @@ Read, write, move, archive and undo files.
 | `disk_layout` | How this machine's disks are partitioned | — |
 | `duplicate_files` | Which files are stored twice, and how much that wastes | — |
 | `edit_file` | Change one exact piece of text | **asks first, always** · needs `file-edit-enabled` |
+| `email_draft` | Save an email draft as a local file, without sending | — |
+| `email_read` | Read your mailbox: list recent messages or open one | needs `email-read-enabled` |
+| `email_send` | Send an email from the configured account | needs `email-send-enabled` |
 | `empty_directories` | Which directories hold nothing at all | — |
 | `empty_trash` | Permanently empty the desktop trash | **asks first, always** · needs `trash-empty-enabled` |
 | `extract_archive` | Unpack a tar, zip, 7z, rar or cab archive | — |
@@ -157,6 +160,7 @@ Read, write, move, archive and undo files.
 | `search_documents` | Search inside your files with the desktop's own index | needs `document-search-enabled` |
 | `search_file_contents` | Search inside files | — |
 | `search_my_files` | Search your own files by meaning | needs `file-index-enabled` |
+| `shopping_list` | Keep a shopping list: add, list, tick off and remove | — |
 | `space_by_type` | Where the space goes, by kind of file | — |
 | `stale_files` | What is big AND untouched - the deletion candidates | — |
 | `sync_folder` | Sync two folders, showing what would change first | — |

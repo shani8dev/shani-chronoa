@@ -597,6 +597,16 @@ class PrivacyPage:
              "Off: Chronoa cannot save a plan to run later. Saving runs nothing; "
              "each step asks when it is run from the Goals panel.",
              "manage_goals refuses while this is off"),
+            ("Let Chronoa read your email", "email-read-enabled",
+             "Off: Chronoa cannot list or open messages in the mailbox configured "
+             "on this machine. Reading is a separate agreement from sending, and "
+             "neither grants the other. Saving a local draft needs no switch.",
+             "email_read refuses while this is off"),
+            ("Let Chronoa send email", "email-send-enabled",
+             "Off: Chronoa cannot send mail from the configured account. Sending "
+             "reaches somebody outside this machine and cannot be taken back, so "
+             "it stays a separate switch even when reading is allowed.",
+             "email_send refuses while this is off"),
             ("Let Chronoa arm automatic rules", "trigger-control-enabled",
              "Off: Chronoa cannot create rules that act on their own, such as "
              "running something when a file changes.",
