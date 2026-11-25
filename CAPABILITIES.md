@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**222 skills in 24 groups.** Each is a named, schema-typed module; the model
+**221 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. The whitelist *is* the design, so a new capability is a
 new named skill. The one exception is `run_command`, for running a project's
 tests and builds: off by default, sandboxed (no network, nothing outside the
@@ -37,7 +37,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**86 of 222 are consent-gated and 16 are destructive.**
+**86 of 221 are consent-gated and 16 are destructive.**
 
 ## Files
 
@@ -330,7 +330,6 @@ Memory, percepts and what it has decided.
 |---|---|---|
 | `conversations` | Search, reopen, copy or export earlier conversations | **asks first, always** · needs `file-delete-enabled` |
 | `device_sync` | Carry conversations, preferences and memory to another machine in a file | — |
-| `kundali` | Read the birth chart, panchang and planetary yogas of a person | — |
 | `list_capabilities` | What it can do right now | — |
 | `list_percepts` | What it perceives | — |
 | `review_proposals` | What it noticed but did not keep | needs `memory-sense-enabled` |
