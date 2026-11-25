@@ -26,6 +26,7 @@ what the chat path would have allowed.
 """
 
 from __future__ import annotations
+from shani_chronoa.gui.locale import _
 
 import logging
 from pathlib import Path
@@ -41,13 +42,12 @@ from shani_chronoa.gui.surfaces import common  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
-TITLE = "Git"
+TITLE = _('Git')
+
 ICON = "folder-symbolic"
 SECTION = "Making"
-SUBTITLE = (
-    "The repository Chronoa is working in, and the two git writes. "
-    "Committing and pushing both ask in chat, behind their own switches."
-)
+SUBTITLE = _('The repository Chronoa is working in, and the two git writes. Committing and pushing both ask in chat, behind their own switches.')
+
 
 WRITE_KEY = "git-write-enabled"
 PUSH_KEY = "git-push-enabled"

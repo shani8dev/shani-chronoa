@@ -236,3 +236,42 @@ msgstr ""
 msgid "Settings"
 msgstr ""
 
+
+msgid "Automation"
+msgstr ""
+
+msgid "Saved phrases, rules that fire on their own, plans, and the switch that lets any of them run with the window closed."
+msgstr ""
+
+msgid "Changes"
+msgstr ""
+
+msgid "What Chronoa wrote and made: the diff of each change, an editor to open it in, and the files it produced."
+msgstr ""
+
+msgid "Git"
+msgstr ""
+
+msgid "The repository Chronoa is working in, and the two git writes. Committing and pushing both ask in chat, behind their own switches."
+msgstr ""
+
+msgid "Health"
+msgstr ""
+
+msgid "Whether Chronoa can see and drive this desktop, what the machine is reporting, and what it left running."
+msgstr ""
+
+msgid "What answers now and what is installed: the live answer first, the catalogue underneath."
+msgstr ""
+
+msgid "Privacy & permissions"
+msgstr ""
+
+msgid "What Chronoa may read, do and send: the switches, the senses and the full consent table, in one place."
+msgstr ""
+
+msgid "Today"
+msgstr ""
+
+msgid "Reminders, alarms, timers, notes and to-dos on one page - what is due or waiting, read from the same stores the assistant uses. Only a timer can be changed here; the rest are started by asking."
+msgstr ""

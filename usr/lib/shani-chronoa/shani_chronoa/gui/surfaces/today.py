@@ -27,6 +27,7 @@ not where the JSON lives; the full path is the row's tooltip.
 """
 
 from __future__ import annotations
+from shani_chronoa.gui.locale import _
 
 import logging
 from typing import Any, Callable, List, Tuple
@@ -41,14 +42,12 @@ from shani_chronoa.gui import timers as timer_ui  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
-TITLE = "Today"
+TITLE = _('Today')
+
 ICON = "document-open-recent-symbolic"
 SECTION = "Remembering"
-SUBTITLE = (
-    "Reminders, alarms, timers, notes and to-dos on one page - what is "
-    "due or waiting, read from the same stores the assistant uses. "
-    "Only a timer can be changed here; the rest are started by asking."
-)
+SUBTITLE = _('Reminders, alarms, timers, notes and to-dos on one page - what is due or waiting, read from the same stores the assistant uses. Only a timer can be changed here; the rest are started by asking.')
+
 
 #: group title -> (one-line description, "ask" prompt to fill the composer)
 _GROUPS = (

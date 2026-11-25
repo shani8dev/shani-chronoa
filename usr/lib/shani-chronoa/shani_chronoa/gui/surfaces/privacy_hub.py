@@ -6,18 +6,18 @@ One hub holds the three without re-drawing any of them.
 """
 
 from __future__ import annotations
+from shani_chronoa.gui.locale import _
 
 from typing import Any
 
 from shani_chronoa.gui.surfaces import hub
 
-TITLE = "Privacy & permissions"
+TITLE = _('Privacy & permissions')
+
 ICON = "system-search-symbolic"
 SECTION = "Health and trust"
-SUBTITLE = (
-    "What Chronoa may read, do and send: the switches, the senses and "
-    "the full consent table, in one place."
-)
+SUBTITLE = _('What Chronoa may read, do and send: the switches, the senses and the full consent table, in one place.')
+
 
 
 def build(app: Any):

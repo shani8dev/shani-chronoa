@@ -7,18 +7,18 @@ expander stay in the member panels; the hub is one place to look.
 """
 
 from __future__ import annotations
+from shani_chronoa.gui.locale import _
 
 from typing import Any
 
 from shani_chronoa.gui.surfaces import hub
 
-TITLE = "Health"
+TITLE = _('Health')
+
 ICON = "battery-good-symbolic"
 SECTION = "Health and trust"
-SUBTITLE = (
-    "Whether Chronoa can see and drive this desktop, what the machine "
-    "is reporting, and what it left running."
-)
+SUBTITLE = _('Whether Chronoa can see and drive this desktop, what the machine is reporting, and what it left running.')
+
 
 
 def build(app: Any):

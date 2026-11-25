@@ -6,18 +6,18 @@ without it none of the three kinds of saved work can run unattended.
 """
 
 from __future__ import annotations
+from shani_chronoa.gui.locale import _
 
 from typing import Any
 
 from shani_chronoa.gui.surfaces import hub
 
-TITLE = "Automation"
+TITLE = _('Automation')
+
 ICON = "preferences-system-symbolic"
 SECTION = "Acting"
-SUBTITLE = (
-    "Saved phrases, rules that fire on their own, plans, and the "
-    "switch that lets any of them run with the window closed."
-)
+SUBTITLE = _('Saved phrases, rules that fire on their own, plans, and the switch that lets any of them run with the window closed.')
+
 
 
 def build(app: Any):

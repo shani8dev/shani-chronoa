@@ -6,18 +6,18 @@ first question a person has was two clicks away from the second.
 """
 
 from __future__ import annotations
+from shani_chronoa.gui.locale import _
 
 from typing import Any
 
 from shani_chronoa.gui.surfaces import hub
 
-TITLE = "Models"
+TITLE = _('Models')
+
 ICON = "document-properties-symbolic"
 SECTION = "Thinking"
-SUBTITLE = (
-    "What answers now and what is installed: the live answer first, "
-    "the catalogue underneath."
-)
+SUBTITLE = _('What answers now and what is installed: the live answer first, the catalogue underneath.')
+
 
 
 def build(app: Any):

@@ -6,18 +6,18 @@ views of the same question together without duplicating any of them.
 """
 
 from __future__ import annotations
+from shani_chronoa.gui.locale import _
 
 from typing import Any
 
 from shani_chronoa.gui.surfaces import hub
 
-TITLE = "Changes"
+TITLE = _('Changes')
+
 ICON = "document-revert-symbolic"
 SECTION = "Making"
-SUBTITLE = (
-    "What Chronoa wrote and made: the diff of each change, an editor "
-    "to open it in, and the files it produced."
-)
+SUBTITLE = _('What Chronoa wrote and made: the diff of each change, an editor to open it in, and the files it produced.')
+
 
 
 def build(app: Any):
