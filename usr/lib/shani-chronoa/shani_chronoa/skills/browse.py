@@ -1123,7 +1123,7 @@ def _act(arguments: dict) -> str:
             return f"Current URL: {url}"
 
         elif action == "get_text":
-            from shani_chronoa.gui.browser import page_from_text
+            from shani_chronoa.webtext import page_from_text
             url = _current_browser.evaluate("window.location.href") or ""
             title = _current_browser.evaluate("document.title") or ""
             text = _current_browser.evaluate(

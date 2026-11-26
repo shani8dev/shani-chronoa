@@ -438,3 +438,29 @@ def render(page: Page) -> str:
         body += (f"\n[truncated after {MAX_TEXT_CHARS} characters - continue with "
                  f"start_index={page.start + len(page.text)}]")
     return header + "\n" + "\n".join(notes) + "\n\n" + body
+
+
+def page_from_text(url: str, text: str, title: str = '') -> Page:
+    """Wrap text already read out of a document in the `Page` a fetch returns.
+
+    The line-per-block collapsing is `_TextExtractor.text()`'s, so text from
+    the view is shaped like text from a fetch, and the cap and the
+    `chars_dropped` count are this module's own: a page attached to a
+    conversation is bounded by the same ceiling as one handed to the model as a
+    tool result. Without that, `document.body.innerText` on a documentation
+    page is an unbounded paste into the context budget.
+
+    It lives here, not in `gui/browser.py`, because the headless Chromium path
+    in `skills/browse` needs it without importing GTK.
+    """
+    lines = (' '.join(line.split()) for line in str(text or '').splitlines())
+    body = '\n'.join(line for line in lines if line)
+    clipped = body[:MAX_TEXT_CHARS]
+    return Page(
+        url=url,
+        title=title or '',
+        text=clipped,
+        chars_dropped=len(body) - len(clipped),
+        bytes_truncated=False,
+        start=0,
+    )

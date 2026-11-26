@@ -17,17 +17,11 @@ import os
 _USR_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(_USR_DIR, "lib", "shani-chronoa"))
 
-# The desktop companion (`mascot.py`) asks for a layer-shell surface in **this**
-# process - `application.py` constructs `Mascot(self)` rather than launching it -
-# so the app is a layer-shell caller and needs the same link order the overlay
-# launcher has always had. Without it the mascot quietly renders as an ordinary
-# window: the library logs a warning and returns a working surface, so nothing
-# fails and nothing says so.
-from shani_chronoa.layer_shell_preload import preload_layer_shell
-
-preload_layer_shell()
-
-from shani_chronoa.app import main
+# All GTK process setup lives behind `shani_chronoa.ui_gtk`, the GTK client of
+# the engine. It preloads libgtk4-layer-shell before importing the app: the
+# desktop companion asks for a layer-shell surface in this process, and without
+# the link order it quietly renders as an ordinary window.
+from shani_chronoa.ui_gtk import main
 
 if __name__ == "__main__":
     main()
