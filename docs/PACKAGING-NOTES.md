@@ -160,3 +160,38 @@ No QML was written and no other repo was edited. The read-only
 skills, routines, triggers, privacy, senses, memory, capabilities and engine
 status; `docs/HEADLESS.md` lists which GTK panel maps to it and what still
 needs a shell-side bridge op.
+
+## 3. Chronoa settings: a JSON table, not a compiled GSettings schema
+
+`org.shani.chronoa.gschema.xml` and `glib-compile-schemas` are **gone for
+Chronoa's own settings**. Do not install the schema file and do not run
+`glib-compile-schemas` in `build()`; Chronoa reads no compiled schema of its
+own at runtime. `settings_file.py` is the store, `settings_table.py` is the
+one authoritative table of keys, kinds and defaults.
+
+Four layers, later wins:
+
+| layer | path | owner |
+|---|---|---|
+| built-in defaults | `usr/share/shani-chronoa/settings.json` | this package |
+| vendor defaults | `/usr/share/shani-chronoa/defaults.d/*.json` | distribution |
+| admin defaults | `/etc/shani-chronoa/settings.d/*.json` | machine admin |
+| person's settings | `$XDG_CONFIG_HOME/shani-chronoa/settings.json` | the user (writes only here, atomically) |
+
+A distribution ships defaults by dropping one flat JSON object into
+`/usr/share/shani-chronoa/defaults.d/`, e.g.
+`50-shani-os.json` with `{"enable-camera-sense": false}`. Files are read in
+sorted name order, so a later filename wins; admin and person layers then win
+over both. Only keys declared in `settings_table.KEYS` are accepted, values are
+coerced to that key's declared kind, and unknown keys are ignored. No schema
+compilation, no dconf write, no package-specific key list in the packaging
+repo beyond the defaults it wants to set.
+
+`org.gnome.*` schemas are different: they stay the desktop's business.
+`shani_chronoa/desktop_settings.py` is the single provider for them
+(`available`, `get`, `get_bool`, `keys`, `describe`); it looks the schema up
+first and returns a documented "not available" value on a desktop that does
+not install it, rather than aborting on `Gio.Settings.new()`. The allowlisted
+schemas are the ones this tree reads (`org.gnome.desktop.*` and
+`org.gnome.settings-daemon.plugins.*`). It never claims `org.shani.chronoa`.
+No desktop schema needs to be shipped, compiled or owned by this package.

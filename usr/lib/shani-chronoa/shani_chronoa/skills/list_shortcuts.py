@@ -41,20 +41,15 @@ import shutil
 import subprocess
 from typing import List, Optional
 
-import gi
-
-gi.require_version("Gio", "2.0")
-from gi.repository import Gio  # noqa: E402
-
-from shani_chronoa import files
+from shani_chronoa import desktop_settings, files
 from shani_chronoa.skills import Skill
 
 _TIMEOUT = 10
 
 #: GNOME's two keybinding schemas. The second is `settings-daemon`, not `wm`,
 #: and a list without it is missing every hardware key.
-#: `id(schema) -> {key name: description}`, built on first use. See
-#: `_summary_for` for why it is cached and why it is keyed the way it is.
+#: `schema id -> {key name: description}`, built on first use. See
+#: `_summary_for` for why the descriptions are cached here.
 _SUMMARY_CACHE: dict = {}
 
 _SCHEMAS = (
@@ -72,8 +67,13 @@ def _gsettings(*args: str) -> Optional[str]:
     if shutil.which("gsettings") is None:
         return None
     try:
-        proc = subprocess.run(["gsettings", *args], capture_output=True,
-                              text=True, timeout=_TIMEOUT, check=False)
+        proc = subprocess.run(
+            ["gsettings", *args],
+            capture_output=True,
+            text=True,
+            timeout=_TIMEOUT,
+            check=False,
+        )
     except (subprocess.SubprocessError, OSError):
         return None
     if proc.returncode != 0:
@@ -143,11 +143,16 @@ def _readable(binding: str) -> str:
     have. A key it cannot interpret is reported as it is.
     """
     out = binding
-    for tag, word in (("<Primary>", "Ctrl+"), ("<Control>", "Ctrl+"),
-                      ("<Ctrl>", "Ctrl+"),
-                      ("<Super>", "Super+"), ("<Shift>", "Shift+"),
-                      ("<Alt>", "Alt+"), ("<Meta>", "Meta+"),
-                      ("<Hyper>", "Hyper+")):
+    for tag, word in (
+        ("<Primary>", "Ctrl+"),
+        ("<Control>", "Ctrl+"),
+        ("<Ctrl>", "Ctrl+"),
+        ("<Super>", "Super+"),
+        ("<Shift>", "Shift+"),
+        ("<Alt>", "Alt+"),
+        ("<Meta>", "Meta+"),
+        ("<Hyper>", "Hyper+"),
+    ):
         out = out.replace(tag, word)
     # Anything left in angle brackets is a key name, not a modifier (XF86AudioPlay,
     # Page_Up): keep the word, drop the brackets.
@@ -191,38 +196,22 @@ def _bindings() -> Optional[List[dict]]:
 def _summary_for(row: dict) -> str:
     """The schema's own description of this key, or "" if it has none.
 
-    **Read from the GSettings schema through `Gio`, not from `gsettings range`** -
-    `range` prints the *type* (`type as` for an accelerator array), which is not
-    a description. A hand-kept table of ~150 GNOME descriptions would be a table
-    that goes stale on the next release, and this is the part that makes the
-    answer worth anything: `['<Super>Tab']` tells you a key and nothing else.
+    **Read from the GSettings schema through `desktop_settings`, not from
+    `gsettings range`** - `range` prints the *type* (`type as` for an accelerator
+    array), which is not a description. A hand-kept table of ~150 GNOME
+    descriptions would be a table that goes stale on the next release, and this
+    is the part that makes the answer worth anything: `['<Super>Tab']` tells you
+    a key and nothing else. The provider answers ``{}`` on a desktop without the
+    schema, which is an honest no-gloss rather than a crash.
 
     **Cached per schema, not per row.** This is called once per bound shortcut
-    and there are ~120 of those, and a schema lookup is not free; the cache is a
-    plain dict on the schema *object's identity* rather than the schema id, so
-    two rows sharing a schema do the work once.
+    and there are ~120 of those; walking a schema's keys for every row is not
+    free, so two rows sharing a schema do the work once.
     """
-    try:
-        source = Gio.SettingsSchemaSource.get_default()
-        schema = source.lookup(row["schema"], True) if source else None
-        if schema is None:
-            return ""
-        if id(schema) not in _SUMMARY_CACHE:
-            # `list_keys()` returns key *names* (strings), not key objects, so
-            # each still has to be fetched with `get_key`. My first version
-            # called `.get_name()` on the string instead, which raised
-            # `AttributeError` inside the `except` below and returned "" for
-            # all 120 rows - a bare `except` turning a type error into "no
-            # schema has a description", which is what made this file look
-            # like it had no glosses when the schema has them all along.
-            _SUMMARY_CACHE[id(schema)] = {
-                name: (key.get_description() or key.get_summary() or "")
-                for name in schema.list_keys()
-                for key in (schema.get_key(name),)
-            }
-        text = _SUMMARY_CACHE[id(schema)].get(row["key"], "")
-    except Exception:  # noqa: BLE001 - a schema that cannot be read is no text
-        return ""
+    schema_id = row["schema"]
+    if schema_id not in _SUMMARY_CACHE:
+        _SUMMARY_CACHE[schema_id] = desktop_settings.describe(schema_id)
+    text = _SUMMARY_CACHE[schema_id].get(row["key"], "")
     return " ".join(text.split()).split(". ")[0][:110]
 
 
@@ -235,18 +224,21 @@ def _run(arguments: dict) -> str:
     if rows is None:
         return (
             "Could not read this machine's keyboard shortcuts. "
-            + (files.tool_missing("gsettings", "read your keyboard shortcuts")
-               if shutil.which("gsettings") is None else
-               "GNOME's keybinding schemas were not readable, so these are "
-               "probably KDE's - Plasma keeps its own in kglobalshortcutsrc and "
-               "System Settings, and listing GNOME's defaults on this machine "
-               "would describe a desktop it is not running.")
-            + " Nothing was guessed.")
+            + (
+                files.tool_missing("gsettings", "read your keyboard shortcuts")
+                if shutil.which("gsettings") is None
+                else "GNOME's keybinding schemas were not readable, so these are "
+                "probably KDE's - Plasma keeps its own in kglobalshortcutsrc and "
+                "System Settings, and listing GNOME's defaults on this machine "
+                "would describe a desktop it is not running."
+            )
+            + " Nothing was guessed."
+        )
 
     if action == "find":
         wanted = (arguments.get("keys") or "").strip()
         if not wanted:
-            return ("Name the key to look up, e.g. 'Super Tab' or F4.")
+            return "Name the key to look up, e.g. 'Super Tab' or F4."
         flat = wanted.replace("-", "").replace("+", "").replace(" ", "").lower()
         hits = []
         for row in rows:
@@ -254,18 +246,24 @@ def _run(arguments: dict) -> str:
             if flat and flat in accel or flat in row["accel"].replace(">", "").lower():
                 hits.append(row)
         if not hits:
-            return (f"Nothing is bound to {wanted!r} in GNOME's keybinding "
-                    f"schemas. {len(rows)} other shortcut(s) are bound on this "
-                    f"machine - ask for the list to see them.")
+            return (
+                f"Nothing is bound to {wanted!r} in GNOME's keybinding "
+                f"schemas. {len(rows)} other shortcut(s) are bound on this "
+                f"machine - ask for the list to see them."
+            )
         return "\n".join(
             f"{_readable(h['accel'])} — {_summary_for(h) or h['key']}  "
-            f"({h['schema'].rsplit('.', 1)[-1]}: {h['key']})" for h in hits[:8])
+            f"({h['schema'].rsplit('.', 1)[-1]}: {h['key']})"
+            for h in hits[:8]
+        )
 
     if not rows:
         return "No keyboard shortcuts are bound in GNOME's keybinding schemas."
     lines = [f"{len(rows)} keyboard shortcut(s) are bound on this machine:"]
     for row in sorted(rows, key=lambda r: _readable(r["accel"]).lower()):
-        lines.append(f"  {_readable(row['accel']):22} {_summary_for(row) or row['key']}")
+        lines.append(
+            f"  {_readable(row['accel']):22} {_summary_for(row) or row['key']}"
+        )
     lines.append("Ask with action=find and the key, to answer 'what does this do'.")
     return "\n".join(lines)
 

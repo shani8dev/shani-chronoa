@@ -110,18 +110,16 @@ def reduced_motion() -> bool:
     `sandbox/limits.py` reads the seccomp switch per call.
     """
     try:
-        import gi
+        from shani_chronoa import desktop_settings
 
-        gi.require_version("Gio", "2.0")
-        from gi.repository import Gio
-
-        source = Gio.SettingsSchemaSource.get_default()
-        if source is None or source.lookup("org.gnome.desktop.interface", True) is None:
-            return False
-        return not Gio.Settings.new("org.gnome.desktop.interface").get_boolean(
-            "enable-animations")
+        # No schema used to mean "no reduced motion" (this returned False
+        # before any Gio.Settings was built), so the absent-schema default for
+        # enable-animations is True, not Python's False.
+        return not desktop_settings.get_bool(
+            "org.gnome.desktop.interface", "enable-animations", True
+        )
     except Exception:  # noqa: BLE001 - a desktop that cannot be asked still
-        return False     # gets a cue; it just does not animate.
+        return False  # gets a cue; it just does not animate.
 
 
 # --- the drawing. Only the snapshot calls that are measured to work on this
@@ -151,7 +149,9 @@ def _rounded(x: float, y: float, w: float, h: float, radius: float):
     return box
 
 
-def _fill(snapshot, x: float, y: float, w: float, h: float, radius: float, color) -> None:
+def _fill(
+    snapshot, x: float, y: float, w: float, h: float, radius: float, color
+) -> None:
     """A filled rounded rectangle - the plate a name sits on.
 
     Without it a tag is a border with nothing behind the letters, and white text
@@ -164,17 +164,28 @@ def _fill(snapshot, x: float, y: float, w: float, h: float, radius: float, color
     # segfaulting family as FillNode and BorderNode here (measured - the process
     # dies inside g_atomic_ref_count_dec), while `append_color` works.
     snapshot.append_color(
-        _color(color.red, color.green, color.blue, color.alpha),
-        _rect(x, y, w, h))
+        _color(color.red, color.green, color.blue, color.alpha), _rect(x, y, w, h)
+    )
 
 
-def _outline(snapshot, x: float, y: float, w: float, h: float, radius: float,
-             width: float, color, alpha: float = 1.0) -> None:
+def _outline(
+    snapshot,
+    x: float,
+    y: float,
+    w: float,
+    h: float,
+    radius: float,
+    width: float,
+    color,
+    alpha: float = 1.0,
+) -> None:
     """One outlined rounded rectangle, drawn as a four-edge border."""
     tinted = _color(color.red, color.green, color.blue, color.alpha * alpha)
-    snapshot.append_border(_rounded(x, y, w, h, radius),
-                           (width, width, width, width),
-                           (tinted, tinted, tinted, tinted))
+    snapshot.append_border(
+        _rounded(x, y, w, h, radius),
+        (width, width, width, width),
+        (tinted, tinted, tinted, tinted),
+    )
 
 
 #: One offscreen label, reused, because a font map in this PyGObject can only be
@@ -312,7 +323,7 @@ def _pointer_pixels() -> bytes:
             red = int(round(255 * weight + _EDGE_RGB[0] * (1 - weight)))
             green = int(round(255 * weight + _EDGE_RGB[1] * (1 - weight)))
             blue = int(round(255 * weight + _EDGE_RGB[2] * (1 - weight)))
-            buffer[index:index + 4] = bytes((red, green, blue, alpha))
+            buffer[index : index + 4] = bytes((red, green, blue, alpha))
     return bytes(buffer)
 
 
@@ -323,8 +334,12 @@ def _pointer_texture():
     global _POINTER_TEXTURE
     if _POINTER_TEXTURE is None:
         _POINTER_TEXTURE = Gdk.MemoryTexture.new(
-            POINTER_SIZE, POINTER_SIZE, Gdk.MemoryFormat.R8G8B8A8,
-            GLib.Bytes.new(_pointer_pixels()), POINTER_SIZE * 4)
+            POINTER_SIZE,
+            POINTER_SIZE,
+            Gdk.MemoryFormat.R8G8B8A8,
+            GLib.Bytes.new(_pointer_pixels()),
+            POINTER_SIZE * 4,
+        )
     return _POINTER_TEXTURE
 
 
@@ -337,13 +352,13 @@ def draw_pointer(snapshot, x: float, y: float) -> None:
     """
     snapshot.save()
     snapshot.translate(_point(x, y))
-    snapshot.append_texture(_pointer_texture(),
-                            _rect(0, 0, POINTER_SIZE, POINTER_SIZE))
+    snapshot.append_texture(_pointer_texture(), _rect(0, 0, POINTER_SIZE, POINTER_SIZE))
     snapshot.restore()
 
 
-def draw_highlight(snapshot, x: float, y: float, w: float, h: float,
-                   label: str = "Chronoa") -> None:
+def draw_highlight(
+    snapshot, x: float, y: float, w: float, h: float, label: str = "Chronoa"
+) -> None:
     """A standing border around the window being driven, with a name tab.
 
     The difference from `draw_ring` is persistence: a ring fades over its life
@@ -355,8 +370,16 @@ def draw_highlight(snapshot, x: float, y: float, w: float, h: float,
         return
     # Two borders: a soft wide one outside the window's edge and a bright one on
     # it, so it reads against both a light and a dark app.
-    _outline(snapshot, x - 3, y - 3, w + 6, h + 6, 10, 4.0,
-             _color(CUE_RED, CUE_GREEN, CUE_BLUE, 0.35))
+    _outline(
+        snapshot,
+        x - 3,
+        y - 3,
+        w + 6,
+        h + 6,
+        10,
+        4.0,
+        _color(CUE_RED, CUE_GREEN, CUE_BLUE, 0.35),
+    )
     _outline(snapshot, x, y, w, h, 8, 3.0, _color(CUE_RED, CUE_GREEN, CUE_BLUE))
     # The name tab sits above the window, so it never covers the app's toolbar.
     #
@@ -370,27 +393,54 @@ def draw_highlight(snapshot, x: float, y: float, w: float, h: float,
         width, height = layout_size(label)
         box_x, box_y = x, y - height - 8
         box_w, box_h = width + 12, height + 7
-        _fill(snapshot, box_x, box_y, box_w, box_h, 9,
-              _color(CUE_RED, CUE_GREEN, CUE_BLUE))
-        _outline(snapshot, box_x, box_y, box_w, box_h, 9, 3.0,
-                 _color(CUE_RED, CUE_GREEN, CUE_BLUE))
+        _fill(
+            snapshot,
+            box_x,
+            box_y,
+            box_w,
+            box_h,
+            9,
+            _color(CUE_RED, CUE_GREEN, CUE_BLUE),
+        )
+        _outline(
+            snapshot,
+            box_x,
+            box_y,
+            box_w,
+            box_h,
+            9,
+            3.0,
+            _color(CUE_RED, CUE_GREEN, CUE_BLUE),
+        )
         if layout is not None:
             snapshot.save()
             # centred, computed from what was measured rather than hard-coded:
             # 6px of the 12px horizontal padding, 3px of the 7px vertical.
-            snapshot.translate(_point(box_x + (box_w - width) / 2,
-                                      box_y + (box_h - height) / 2))
+            snapshot.translate(
+                _point(box_x + (box_w - width) / 2, box_y + (box_h - height) / 2)
+            )
             snapshot.append_layout(layout, _color(1, 1, 1))
             snapshot.restore()
 
 
-def draw_ring(snapshot, x: float, y: float, w: float, h: float, alpha: float = 1.0) -> None:
+def draw_ring(
+    snapshot, x: float, y: float, w: float, h: float, alpha: float = 1.0
+) -> None:
     """The outline around whatever is about to be acted on."""
     if w <= 0 or h <= 0:
         return
     _outline(snapshot, x, y, w, h, 8, 3.0, _color(CUE_RED, CUE_GREEN, CUE_BLUE), alpha)
-    _outline(snapshot, x - 5, y - 5, w + 10, h + 10, 12, 7.0,
-             _color(CUE_RED, CUE_GREEN, CUE_BLUE, 0.25), alpha)
+    _outline(
+        snapshot,
+        x - 5,
+        y - 5,
+        w + 10,
+        h + 10,
+        12,
+        7.0,
+        _color(CUE_RED, CUE_GREEN, CUE_BLUE, 0.25),
+        alpha,
+    )
 
 
 def draw_ripple(snapshot, x: float, y: float, progress: float) -> None:
@@ -402,8 +452,17 @@ def draw_ripple(snapshot, x: float, y: float, progress: float) -> None:
     if not 0.0 <= progress <= 1.0:
         return
     radius = 8 + progress * 40
-    _outline(snapshot, x - radius, y - radius, radius * 2, radius * 2, radius,
-             3.0, _color(CUE_RED, CUE_GREEN, CUE_BLUE), (1 - progress) ** 0.5)
+    _outline(
+        snapshot,
+        x - radius,
+        y - radius,
+        radius * 2,
+        radius * 2,
+        radius,
+        3.0,
+        _color(CUE_RED, CUE_GREEN, CUE_BLUE),
+        (1 - progress) ** 0.5,
+    )
 
 
 #: Where the name tab sits relative to the cursor's tip, in pixels: clear of
@@ -448,8 +507,9 @@ def draw_tag(snapshot, x: float, y: float, layout) -> None:
     snapshot.save()
     snapshot.translate(_point(x + POINTER_SIZE + TAG_GAP, y + TAG_DROP))
     _fill(snapshot, 0, 0, width, height, 9, _color(CUE_RED, CUE_GREEN, CUE_BLUE))
-    _outline(snapshot, 0, 0, width, height, 9, 3.0,
-             _color(CUE_RED, CUE_GREEN, CUE_BLUE))
+    _outline(
+        snapshot, 0, 0, width, height, 9, 3.0, _color(CUE_RED, CUE_GREEN, CUE_BLUE)
+    )
     snapshot.save()
     # centred in the box: half the horizontal padding either side, and the same
     # vertically - computed rather than assumed, so a fallback box and a
@@ -553,8 +613,9 @@ class CueOverlay:
     def ring(self, x: float, y: float, w: float, h: float) -> None:
         self.cues["ring"] = (float(x), float(y), float(w), float(h), time.monotonic())
 
-    def highlight(self, x: float, y: float, w: float, h: float,
-                  label: str = "Chronoa") -> None:
+    def highlight(
+        self, x: float, y: float, w: float, h: float, label: str = "Chronoa"
+    ) -> None:
         """The standing border around the window being driven.
 
         No timestamp on purpose: a highlight that fades is a highlight that stops
@@ -567,8 +628,9 @@ class CueOverlay:
             return
         now = time.monotonic()
         self.cues.setdefault("ripples", []).append((float(x), float(y), now))
-        self.cues["ripples"] = [r for r in self.cues["ripples"]
-                                if now - r[2] < RIPPLE_SECONDS]
+        self.cues["ripples"] = [
+            r for r in self.cues["ripples"] if now - r[2] < RIPPLE_SECONDS
+        ]
 
     def hide(self) -> None:
         """Stop drawing the pointer, because the **real** one has arrived.
@@ -615,8 +677,10 @@ class CueOverlay:
         t = max(0.0, min(1.0, elapsed / GLIDE_SECONDS))
         # The same cubic ease-out `browser_driver.py` uses, so the two feel alike.
         eased = 1 - (1 - t) ** 3
-        return (origin[0] + (pointer[0] - origin[0]) * eased,
-                origin[1] + (pointer[1] - origin[1]) * eased)
+        return (
+            origin[0] + (pointer[0] - origin[0]) * eased,
+            origin[1] + (pointer[1] - origin[1]) * eased,
+        )
 
     def apply(self, message: dict) -> "dict | None":
         """One JSON message. Answers a `ping`; anything else is fire-and-forget."""
@@ -638,8 +702,7 @@ class CueOverlay:
             self.clear()
         # **Anything that draws wants the window on top again.** Not `hide`: a
         # message that draws nothing has no business raising anything.
-        if any(key in message for key in
-               ("glide", "ring", "highlight", "ripple")):
+        if any(key in message for key in ("glide", "ring", "highlight", "ripple")):
             self._raise_pending = True
         if message.get("ping"):
             # **`drawn` as well as `pointer`.** The position alone cannot answer
@@ -648,8 +711,11 @@ class CueOverlay:
             # so a ping reports (187,806) whether the arrow is there or not. A
             # probe that cannot tell those apart is how "the second cursor is
             # gone" gets reported on a machine that still has two.
-            return {"ok": True, "pointer": list(self.pointer_now()),
-                    "drawn": "pointer" in self.cues}
+            return {
+                "ok": True,
+                "pointer": list(self.pointer_now()),
+                "drawn": "pointer" in self.cues,
+            }
         return None
 
 
@@ -720,7 +786,8 @@ def wait_until_pointing_at(path: str, x: float, y: float, budget: float = 1.5) -
 def socket_path(name: str) -> str:
     """Where a named machine's or app's cue layer listens."""
     runtime = os.environ.get("XDG_RUNTIME_DIR") or os.path.join(
-        os.path.expanduser("~"), ".cache", "shani-chronoa")
+        os.path.expanduser("~"), ".cache", "shani-chronoa"
+    )
     return os.path.join(runtime, f"chronoa-cue-{name}.sock")
 
 
@@ -771,13 +838,15 @@ def main(argv: "list[str] | None" = None) -> int:
     provider = Gtk.CssProvider()
     provider.load_from_data(b"window.chronoa-cue { background-color: transparent; }")
     Gtk.StyleContext.add_provider_for_display(
-        display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+    )
 
     _GLib.timeout_add(16, lambda: _frame(overlay, area))
 
     server = _listen(arguments.socket)
-    threading.Thread(target=_accept_loop, args=(server, overlay, _GLib),
-                     daemon=True).start()
+    threading.Thread(
+        target=_accept_loop, args=(server, overlay, _GLib), daemon=True
+    ).start()
 
     if not layered:
         _show_unlayered(window)
@@ -824,10 +893,14 @@ def _show_unlayered(window) -> None:
     rule that is never checked.
     """
     window.present()
-    print("chronoa-cue: no layer-shell surface (this compositor does not "
-          "implement wlr-layer-shell), so this layer is an ordinary window "
-          "raised with present() - it is visible, and it takes keyboard focus "
-          "as the price", file=sys.stderr, flush=True)
+    print(
+        "chronoa-cue: no layer-shell surface (this compositor does not "
+        "implement wlr-layer-shell), so this layer is an ordinary window "
+        "raised with present() - it is visible, and it takes keyboard focus "
+        "as the price",
+        file=sys.stderr,
+        flush=True,
+    )
 
 
 def _make_it_a_layer(window) -> bool:
@@ -870,12 +943,13 @@ def _make_it_a_layer(window) -> bool:
        degraded mode; it is a broken one.**
     """
     _Shell = None
-    for namespace, version in (("Gtk4LayerShell", "1.0"),
-                               ("GtkLayerShell", "0.1")):
+    for namespace, version in (("Gtk4LayerShell", "1.0"), ("GtkLayerShell", "0.1")):
         try:
             import gi as _gi
+
             _gi.require_version(namespace, version)
             from gi.repository import Gtk4LayerShell as _Shell
+
             break
         except Exception as error:  # noqa: BLE001 - try the other spelling
             logging.info("cue layer: no %s %s (%s)", namespace, version, error)
@@ -885,7 +959,8 @@ def _make_it_a_layer(window) -> bool:
             "cue layer: no layer-shell surface. A GTK 4 app needs "
             "gir1.2-gtk4layershell-1.0 and libgtk4-layer-shell0 - the "
             "GtkLayerShell-0.1 typelib many systems ship is the GTK 3 build "
-            "and cannot load in a GTK 4 process.")
+            "and cannot load in a GTK 4 process."
+        )
         return False
     try:
         _Shell.init_for_window(window)
@@ -930,7 +1005,8 @@ def _make_it_a_layer(window) -> bool:
             "cue layer: layer-shell loaded but the compositor created no layer "
             "surface. wlr-layer-shell is a wlroots/KDE protocol and Mutter does "
             "not implement it, so on GNOME this cannot work - falling back to an "
-            "ordinary window, which is raised again on every cue instead.")
+            "ordinary window, which is raised again on every cue instead."
+        )
         return False
     return True
 
@@ -965,6 +1041,7 @@ class _CueArea(Gtk.Widget):
         # applied. Build the description instead of asking for one.
         try:
             from gi.repository import Pango as _Pango
+
             description = _Pango.FontDescription.new()
             description.set_weight(_Pango.Weight.BOLD)
             description.set_absolute_size(11 * _Pango.SCALE)
@@ -992,8 +1069,9 @@ def _accept_loop(server, overlay: CueOverlay, GLib) -> None:
             connection, _ = server.accept()
         except OSError:
             return
-        threading.Thread(target=_client, args=(connection, overlay),
-                         daemon=True).start()
+        threading.Thread(
+            target=_client, args=(connection, overlay), daemon=True
+        ).start()
 
 
 def _client(connection, overlay: CueOverlay) -> None:
