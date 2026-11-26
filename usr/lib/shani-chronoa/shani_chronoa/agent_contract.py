@@ -16,6 +16,14 @@ Methods:
   FindFiles(query, limit) -> json
   Inventory(section) -> json   # read-only facts for a shell's panels
 
+  Additive capability methods (all return one JSON string; see
+  `agent_capabilities.py` for the single table both clients also read):
+  SettingsList, SettingsGet, SettingsSet, ModelsList, ModelsUse,
+  SetupState, SetupStep, Conversations, ConversationsResume,
+  ConversationsRename, ConversationsDelete, MemoryList, MemoryDecide,
+  Routines, RoutinesRun, Triggers, Notices, NoticesDismiss, VoiceEngines,
+  Activity, DiagnosticsProbe.
+
 Signal:
   Event(json)                   # the stream of events for a turn
 
@@ -54,6 +62,31 @@ BUS_NAME = "dev.shani.chronoa.Agent"
 PATH = "/dev/shani/chronoa/Agent"
 IFACE = "dev.shani.chronoa.Agent"
 
+
+def _capability_xml() -> str:
+    """One XML block per additive method, read from the clients' table.
+
+    Generating this from `agent_capabilities` rather than naming the methods
+    twice is what lets the parity test prove that a method exposed on the bus
+    also has a slash command and a CLI subcommand. The shell's copy of this
+    module must gain the same blocks; its contract test compares the strings.
+    """
+    from shani_chronoa.agent_capabilities import METHODS
+
+    blocks = []
+    for method in METHODS.values():
+        args = "".join(
+            f'\n      <arg name="{name}" type="{kind}" direction="in"/>'
+            for name, kind in method.args
+        )
+        blocks.append(
+            f'    <method name="{method.name}">{args}\n'
+            '      <arg name="json" type="s" direction="out"/>\n'
+            "    </method>"
+        )
+    return "\n".join(blocks)
+
+
 #: The introspection XML. Interpolated so the name cannot drift from `IFACE`.
 XML = f"""<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
  "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
@@ -91,6 +124,7 @@ XML = f"""<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 
       <arg name="section" type="s" direction="in"/>
       <arg name="json" type="s" direction="out"/>
     </method>
+{_capability_xml()}
     <signal name="Event">
       <arg name="json" type="s"/>
     </signal>

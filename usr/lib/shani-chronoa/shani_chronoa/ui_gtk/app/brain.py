@@ -4,32 +4,56 @@ import logging
 import threading
 
 import gi
-gi.require_version('Gtk', '4.0')
-gi.require_version('Gdk', '4.0')
-gi.require_version('Gio', '2.0')
-gi.require_version('Adw', '1')
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
+gi.require_version("Gio", "2.0")
+gi.require_version("Adw", "1")
 from gi.repository import Gio, GLib  # type: ignore
 
 
-
-from shani_chronoa.cloud_llm import (
-    BYOK_PROVIDER_ORDER,
-    CUSTOM_ID,
-    DEFAULT_PROVIDER_ORDER,
-    CloudLLMChain,
-    custom_provider,
-)
-from shani_chronoa.redaction import redactor
+from shani_chronoa import llm_choice
+from shani_chronoa.cloud_llm import CloudLLMChain
 
 
 logger = logging.getLogger("shani_chronoa.app.brain")
 
 
+class _ChoiceConfig:
+    """The settings the GTK-free chooser reads, including live privacy state.
+
+    `PrivacyManager` and `ChronoaConfig` are two objects on the app; the engine
+    sees one config-shaped object, so privacy and the gates cannot be read from
+    different moments.
+    """
+
+    def __init__(self, app):
+        self._app = app
+
+    @property
+    def privacy_mode(self):
+        return self._app.privacy.is_local_only
+
+    @property
+    def cloud_fallback_enabled(self):
+        return self._app.config.cloud_fallback_enabled
+
+    @property
+    def answer_mode(self):
+        return getattr(self._app.config, "answer_mode", "local")
+
+    def cloud_llm_api_keys(self):
+        return self._app.config.cloud_llm_api_keys()
+
+    def cloud_llm_models(self):
+        return self._app.config.cloud_llm_models()
+
+    def get(self, key, default=""):
+        return self._app.config.get(key, default)
 
 
 class BrainMixin:
     """Which language model answers: Ollama, the local llama.cpp server, or - only when opted in - the cloud; setup when there is none. - a part of ChronoaApplication, which mixes it in."""
-
 
     def _llm_status_text(self) -> str:
         """Describe which LLM backend is active - nothing else surfaced this before.
@@ -90,6 +114,7 @@ class BrainMixin:
 
     def _setup_needed(self) -> bool:
         from shani_chronoa import setup_wizard
+
         try:
             return setup_wizard.needs_setup(self.config)
         except Exception:  # noqa: BLE001 - a probe failing must not stop the app opening
@@ -115,6 +140,7 @@ class BrainMixin:
             logger.info("not opening setup while the application shuts down")
             return
         from shani_chronoa import setup_wizard
+
         existing = getattr(self, "_setup_window", None)
         if existing is not None and existing.get_visible():
             if page and hasattr(existing, "show_page"):
@@ -126,13 +152,18 @@ class BrainMixin:
             if not self._ollama_available:
                 self._use_local_server()
             from shani_chronoa.tts import PiperTTS
+
             self.tts = PiperTTS(voice=self.config.piper_voice)
             self.tts.rate = self.config.get_double("speech-rate", 1.0) or 1.0
             self.stt = self._build_stt()
             if self.window:
                 self.window.set_status(self._llm_status_text())
-        self._setup_window = setup_wizard.build_window(self, self.config, on_finished=finished)
+
+        self._setup_window = setup_wizard.build_window(
+            self, self.config, on_finished=finished
+        )
         from shani_chronoa import pages
+
         pages.note_window("setup", self._setup_window)
         if page and hasattr(self._setup_window, "show_page"):
             self._setup_window.show_page(page)
@@ -157,13 +188,17 @@ class BrainMixin:
         """
         from shani_chronoa import local_llm
         from shani_chronoa.presence import Presence
+
         if not local_llm.is_up():
             # Only Drowsy means "load it again". Sleeping means do not, and
             # reading a *presence* rather than the `_can_answer` bool is the
             # difference: a bool cannot tell "no model installed" from "asleep
             # on purpose", and a first version compared the bool to an enum,
             # which is never true and so quietly disabled the whole guard.
-            if not wake or getattr(self, "_presence", Presence.ACTIVE) is Presence.SLEEPING:
+            if (
+                not wake
+                or getattr(self, "_presence", Presence.ACTIVE) is Presence.SLEEPING
+            ):
                 return False
             logger.info("llama-server is not answering; starting it for this question")
             problem = local_llm.start_service()
@@ -182,7 +217,11 @@ class BrainMixin:
                 self._local_server_loading = True
                 return False
         self._local_server_loading = False
-        self.llm = local_llm.LocalLLM()
+        chosen, how = llm_choice.select_llm("local", config=_ChoiceConfig(self))
+        if chosen is None:
+            logger.warning("could not pick the local model: %s", how)
+            return False
+        self.llm = chosen
         self._ollama_available = True
         if getattr(self, "assistant", None):
             self.assistant.llm = self.llm
@@ -199,15 +238,20 @@ class BrainMixin:
         """
         import time as _time
         from shani_chronoa import local_llm
+
         if getattr(self, "window", None):
-            self.window.set_status("Starting the local model - the first answer takes a moment")
+            self.window.set_status(
+                "Starting the local model - the first answer takes a moment"
+            )
 
         def done(ok: bool) -> bool:
             self._local_server_loading = False
             if ok and self._use_local_server(wake=False):
                 then()
             else:
-                logger.warning("the local model did not answer within %.0f s of starting", timeout)
+                logger.warning(
+                    "the local model did not answer within %.0f s of starting", timeout
+                )
                 otherwise()
             return False
 
@@ -243,6 +287,7 @@ class BrainMixin:
             # wrong program.
             try:
                 from shani_chronoa import local_llm
+
                 binary = local_llm.server_binary()
                 if not binary:
                     local = "llama.cpp is not installed"
@@ -259,47 +304,21 @@ class BrainMixin:
                 gates.append("cloud fallback is off")
             logger.info(
                 "LLM unavailable - %s; Ollama is not running; no cloud model (%s)",
-                local, " and ".join(gates),
+                local,
+                " and ".join(gates),
             )
             return
-        # BYOK providers (Anthropic/OpenAI/Google/Groq) go first when a key
-        # is configured for them - presumably far more capable/reliable
-        # than the anonymous free chain, which stays as the fallback of
-        # last resort. CloudLLMChain itself skips any BYOK provider left
-        # without a key, so listing all of them here is harmless.
-        api_keys = self.config.cloud_llm_api_keys()
-        # Make the sanitizer/sandbox-env-injection aware of the actual live
-        # keys (stored in GSettings by design, not the vault - see
-        # ChronoaConfig.cloud_llm_api_keys()'s threat-model note) so
-        # redactor.sanitize() can actually redact them.
-        # Without this the vault's cache stays empty and sanitization is a
-        # silent no-op against every real key in use.
-        for provider_id, key_value in api_keys.items():
-            redactor.register(f"cloud_llm_{provider_id}", key_value)
-        cloud_models = self.config.cloud_llm_models()
-        provider_order = BYOK_PROVIDER_ORDER + DEFAULT_PROVIDER_ORDER
-        # A hand-typed endpoint joins the chain ahead of the anonymous free
-        # providers: the person who wrote an address down has usually written it
-        # down because it is the one they trust to answer (their own router, a
-        # gateway they pay for). It is still gated by the same two switches as
-        # everything else here - reaching it is not a way around privacy mode.
-        custom_url = self.config.get("custom-llm-base-url", "")
-        custom_model = self.config.get("custom-llm-model", "")
-        if custom_provider(custom_url, custom_model) is not None:
-            provider_order = (CUSTOM_ID,) + provider_order
-        # **The chosen model travels with the key.** `cloud_llm_models()` returns
-        # only what a person has actually picked, so the key names in the dict the
-        # chain reads ("<pid>_model") line up and an untouched install is
-        # unchanged. Without this, a model picked in the setup wizard was stored
-        # and then read by nothing.
-        api_keys = dict(api_keys)
-        api_keys.update(cloud_models)
-        cloud_llm = CloudLLMChain(provider_ids=provider_order, api_keys=api_keys,
-                                  custom_base_url=custom_url, custom_model=custom_model)
-        if not cloud_llm.is_available():
+        # The engine builds the chain with the same gates, BYOK order and key
+        # registration as an explicit choice; this file only names what answered.
+        view = _ChoiceConfig(self)
+        active = [
+            row["name"]
+            for row in llm_choice.providers(view)
+            if row["kind"] in ("free", "custom") or row["key_set"]
+        ]
+        cloud_llm, _how = llm_choice.cloud_fallback(view)
+        if cloud_llm is None:
             return
-        active = [p for p in provider_order
-                  if api_keys.get(p) or p in DEFAULT_PROVIDER_ORDER or p == CUSTOM_ID]
         logger.warning(
             f"Falling back to cloud LLM providers ({', '.join(active)}) - privacy mode is "
             "off and cloud-fallback-enabled is set. Prompts will leave this machine."
@@ -323,17 +342,10 @@ class BrainMixin:
         re-derive it. Re-deriving is how the two came to disagree, which is the
         lesson `model.py`'s `_selected_engine` records from the other side.
         """
-        if self.privacy.is_local_only and not self.config.cloud_fallback_enabled:
-            return "privacy mode is on and cloud fallback is off"
-        if self.privacy.is_local_only:
-            return "privacy mode is on - nothing leaves this machine"
-        if not self.config.cloud_fallback_enabled:
-            return ("cloud fallback is off; turn on 'Use the free cloud gateways "
-                    "when no local model answers' in Settings")
-        return ""
+        return llm_choice.cloud_gate_reason(_ChoiceConfig(self))
 
     def select_llm(self, what: str) -> str:
-        """Switch the answering engine now: ``"local"`` or ``"cloud"``.
+        """Switch the answering engine now: ``"local"``, ``"cloud"`` or ``"auto"``.
 
         "" on success, or the sentence naming which gate shut.
 
@@ -350,46 +362,11 @@ class BrainMixin:
         same pair `_toggle_cloud_fallback` already has to keep in step.
         """
         want = (what or "").strip().lower()
-        if want not in ("local", "cloud"):
+        if want not in ("local", "cloud", "auto"):
             return "%r is not a choice; use 'local' or 'cloud'" % (what,)
-        reason = self._cloud_gate_reason()
-        if want == "cloud" and reason:
-            return reason
-        try:
-            if want == "local":
-                from shani_chronoa import local_llm
-
-                chosen = local_llm.LocalLLM()
-            else:
-                api_keys = self.config.cloud_llm_api_keys()
-                # Registered with redactor here for the same reason the startup
-                # path does it: a key that reaches the sanitiser's cache is a key
-                # that cannot leak into a prompt, and skipping it makes that
-                # redaction a silent no-op.
-                for provider_id, key_value in api_keys.items():
-                    redactor.register(f"cloud_llm_{provider_id}", key_value)
-                from shani_chronoa.cloud_llm import (
-                    BYOK_PROVIDER_ORDER, CUSTOM_ID, DEFAULT_PROVIDER_ORDER,
-                    CloudLLMChain)
-                from shani_chronoa.cloud_llm import custom_provider
-
-                custom_url = self.config.get("custom-llm-base-url", "")
-                custom_model = self.config.get("custom-llm-model", "")
-                order = BYOK_PROVIDER_ORDER + DEFAULT_PROVIDER_ORDER
-                if custom_provider(custom_url, custom_model) is not None:
-                    order = (CUSTOM_ID,) + order
-                chosen = CloudLLMChain(
-                    provider_ids=order,
-                    api_keys={**api_keys, **self.config.cloud_llm_models()},
-                    custom_base_url=custom_url,
-                    custom_model=custom_model)
-                if not chosen.is_available():
-                    return ("no cloud provider is reachable: the free gateways are "
-                            "rate-limited or down, and no API key is configured for "
-                            "any of the ones that need one")
-        except Exception as exc:  # noqa: BLE001 - reported, never raised
-            return f"could not switch to {want}: {type(exc).__name__}: {exc}"
-
+        chosen, how = llm_choice.select_llm(want, config=_ChoiceConfig(self))
+        if chosen is None:
+            return how
         self.llm = chosen
         if self.assistant:
             self.assistant.llm = chosen
@@ -399,8 +376,9 @@ class BrainMixin:
         refresh = getattr(self, "_refresh_strip", None)
         if callable(refresh) and getattr(self, "window", None) is not None:
             GLib.idle_add(lambda: (refresh(), False)[1])
-        logger.warning("answering engine switched to %s (%s)", want,
-                       type(chosen).__name__)
+        logger.warning(
+            "answering engine switched to %s (%s)", want, type(chosen).__name__
+        )
         return ""
 
     def current_llm_kind(self) -> str:
@@ -447,6 +425,7 @@ class BrainMixin:
         """
         from shani_chronoa import distill, tools
         from shani_chronoa.tool_tracking import ORIGIN_USER
+
         proposal = distill.fallback(text)
         if not proposal:
             return False
@@ -459,7 +438,8 @@ class BrainMixin:
             self.window.set_response(
                 f"{outcome.text}\n\n(No language model is installed, so a "
                 f"distilled router picked `{name}` - {proposal['reason']}. "
-                f"Runner-up was `{proposal['runner_up']}`.)")
+                f"Runner-up was `{proposal['runner_up']}`.)"
+            )
             self.window.set_status(f"Routed by the distilled student: {name}")
             self.window.set_orb_state("idle")
         logger.info("no model answering; distilled router picked %s", name)
@@ -469,6 +449,7 @@ class BrainMixin:
         """No model answers: the router if it can be sure, the installed model, or setup - never just "not available"."""
         from shani_chronoa import local_llm
         from shani_chronoa.presence import Presence
+
         if not self.window:
             return
         if self._router_fallback(text):
@@ -487,31 +468,50 @@ class BrainMixin:
                 self.window.set_orb_state("error")
                 self.window.set_response(
                     "The model is asleep, so nothing was started. Press "
-                    "\"Wake up\" in Settings > Models > Right now to load it, "
-                    "then send your question again.")
+                    '"Wake up" in Settings > Models > Right now to load it, '
+                    "then send your question again."
+                )
                 self.window.set_status("The model is asleep")
                 # **What you typed is not consumed by a refusal.**
                 self.window.restore_last_sent(text)
                 return
-            self.window.set_response("Starting the local model - this takes a few seconds the first time. "
-                                     "Your question will be answered when it is ready.")
+            self.window.set_response(
+                "Starting the local model - this takes a few seconds the first time. "
+                "Your question will be answered when it is ready."
+            )
             self.window.set_status("Starting the local model...")
 
             def start_and_retry() -> None:
                 import time
+
                 problem = local_llm.start_service()
                 deadline = time.monotonic() + 120
-                while not problem and time.monotonic() < deadline and not local_llm.is_up():
+                while (
+                    not problem
+                    and time.monotonic() < deadline
+                    and not local_llm.is_up()
+                ):
                     time.sleep(1.0)
-                GLib.idle_add(lambda: (self._submit(text) if local_llm.is_up() else
-                                       self.window.set_response(f"The local model did not start: "
-                                                                f"{problem or 'it is still loading'}. Open Settings > "
-                                                                f"Set up Chronoa again to check it."), False)[1])
+                GLib.idle_add(
+                    lambda: (
+                        self._submit(text)
+                        if local_llm.is_up()
+                        else self.window.set_response(
+                            f"The local model did not start: "
+                            f"{problem or 'it is still loading'}. Open Settings > "
+                            f"Set up Chronoa again to check it."
+                        ),
+                        False,
+                    )[1]
+                )
+
             threading.Thread(target=start_and_retry, daemon=True).start()
             return
-        self.window.set_response("Chronoa has no language model yet. Setup downloads one (about 1 GB) "
-                                 "and runs it on this computer. Your question is back in the box - "
-                                 "send it again once the model is ready.")
+        self.window.set_response(
+            "Chronoa has no language model yet. Setup downloads one (about 1 GB) "
+            "and runs it on this computer. Your question is back in the box - "
+            "send it again once the model is ready."
+        )
         self.window.set_status("No model - opening setup")
         # **The first message anyone ever types was being eaten here.**
         #

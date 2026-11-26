@@ -777,3 +777,179 @@ class AgentService:
         # Nothing after this point should try to emit on a connection whose
         # object is gone; a shutdown turn finishing late is not a signal.
         self._connection = None
+
+
+# -- the additive capability surface ----------------------------------
+#
+# Every capability's logic lives in a GTK-free `engine_ops` module; this is
+# only the wire adapter: unpack the D-Bus args, call one function, return one
+# JSON string. The method names and signatures come from the same table the
+# two clients read (`agent_capabilities.py`), so a new method cannot be added
+# to the bus without appearing in the parity test.
+
+
+def _ops():
+    from shani_chronoa import engine_ops
+
+    return engine_ops
+
+
+def _settings_list(app, args):
+    return {"items": _ops().settings.rows()}
+
+
+def _settings_get(app, args):
+    return _ops().settings.get(args[0])
+
+
+def _settings_set(app, args):
+    name, value, confirm = args
+    data = _ops().settings.set(name, value, confirm=bool(confirm))
+    # A secret is a presence, never a value on the wire or in a log line.
+    if data.get("secret") or str(name).endswith("-api-key"):
+        data["value"] = "<set>"
+    return data
+
+
+def _settings_preset(app, args):
+    name, confirm = args
+    return _ops().settings.preset(name, confirm=bool(confirm))
+
+
+def _settings_email(app, args):
+    values_json, confirm = args
+    try:
+        values = json.loads(values_json or "{}")
+    except (TypeError, ValueError) as exc:
+        return {"error": f"email details are not JSON: {exc}"}
+    if not isinstance(values, dict):
+        return {"error": "email details must be a JSON object"}
+    data = _ops().settings.email(values, confirm=bool(confirm))
+    # Never echo a password back, even in a success message.
+    return {k: v for k, v in data.items() if "password" not in k and k != "value"}
+
+
+def _models_list(app, args):
+    return _ops().models.list_models()
+
+
+def _models_use(app, args):
+    name, confirm = args
+    return _ops().models.use(name, confirm=bool(confirm))
+
+
+def _setup_state(app, args):
+    return _ops().setup.state()
+
+
+def _setup_step(app, args):
+    step, value, confirm = args
+    return _ops().setup.step(step, value, confirm=bool(confirm))
+
+
+def _conversations_list(app, args):
+    return {"items": _ops().conversations.list_sessions()}
+
+
+def _conversations_resume(app, args):
+    return _ops().conversations.resume(args[0], app=app)
+
+
+def _conversations_rename(app, args):
+    return _ops().conversations.rename(args[0], args[1])
+
+
+def _conversations_delete(app, args):
+    return _ops().conversations.delete(args[0], confirm=bool(args[1]))
+
+
+def _memory_list(app, args):
+    return _ops().memory.list_memory()
+
+
+def _memory_decide(app, args):
+    return _ops().memory.decide(args[0], args[1], confirm=bool(args[2]))
+
+
+def _routines_list(app, args):
+    return {"items": _ops().automation.routines()}
+
+
+def _routines_run(app, args):
+    return _ops().automation.run_routine(args[0])
+
+
+def _triggers_list(app, args):
+    return {"items": _ops().automation.triggers()}
+
+
+def _notices_list(app, args):
+    return {"items": _ops().automation.notices()}
+
+
+def _notices_dismiss(app, args):
+    return _ops().automation.dismiss_notice(args[0])
+
+
+def _voice_engines(app, args):
+    return _ops().voice.engines()
+
+
+def _activity_list(app, args):
+    return _ops().health.activity()
+
+
+def _diagnostics_probe(app, args):
+    return _ops().health.probe()
+
+
+#: Method name -> the one engine call behind it. `SettingsSet preset` and
+#: `SettingsSet email` are settings writes with a named group, not separate
+#: methods: the person still sees one `/settings set` path.
+_CAPABILITY_HANDLERS = {
+    "SettingsList": _settings_list,
+    "SettingsGet": _settings_get,
+    "SettingsSet": _settings_set,
+    "SettingsPreset": _settings_preset,
+    "SettingsEmail": _settings_email,
+    "ModelsList": _models_list,
+    "ModelsUse": _models_use,
+    "SetupState": _setup_state,
+    "SetupStep": _setup_step,
+    "Conversations": _conversations_list,
+    "ConversationsResume": _conversations_resume,
+    "ConversationsRename": _conversations_rename,
+    "ConversationsDelete": _conversations_delete,
+    "MemoryList": _memory_list,
+    "MemoryDecide": _memory_decide,
+    "Routines": _routines_list,
+    "RoutinesRun": _routines_run,
+    "Triggers": _triggers_list,
+    "Notices": _notices_list,
+    "NoticesDismiss": _notices_dismiss,
+    "VoiceEngines": _voice_engines,
+    "Activity": _activity_list,
+    "DiagnosticsProbe": _diagnostics_probe,
+}
+
+
+def _capability_handler(name: str, fn):
+    def handler(self, connection, sender, path, interface, method, params, invocation):
+        try:
+            data = fn(self._app, params.unpack())
+        except Exception as exc:  # noqa: BLE001 - the caller is told, in words
+            logger.exception("Agent.%s failed", name)
+            invocation.return_dbus_error(
+                "dev.shani.chronoa.Error.CapabilityFailed",
+                f"{type(exc).__name__}: {exc}",
+            )
+            return
+        payload = json.dumps(data, ensure_ascii=False, default=str)
+        invocation.return_value(GLib.Variant("(s)", (payload,)))
+
+    handler.__name__ = name
+    return handler
+
+
+for _method_name, _method_fn in _CAPABILITY_HANDLERS.items():
+    setattr(AgentService, _method_name, _capability_handler(_method_name, _method_fn))
