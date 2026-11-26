@@ -33,19 +33,20 @@ import pytest
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 PACKAGE = REPO / "usr" / "lib" / "shani-chronoa" / "shani_chronoa"
-SCHEMA = REPO / "usr" / "share" / "glib-2.0" / "schemas" / "org.shani.chronoa.gschema.xml"
+SCHEMA = (
+    REPO / "usr" / "share" / "glib-2.0" / "schemas" / "org.shani.chronoa.gschema.xml"
+)
 
 
 def _schema_defaults() -> dict:
-    """Every boolean key the schema declares, and its default."""
-    tree = ET.parse(SCHEMA)
-    defaults = {}
-    for key in tree.getroot().iter("key"):
-        if key.get("type") != "b":
-            continue
-        default = key.find("default")
-        defaults[key.get("name")] = (default.text or "false").strip() == "true"
-    return defaults
+    """Every boolean key the shipped settings table declares, and its default."""
+    from shani_chronoa import settings_table
+
+    return {
+        key: bool(value)
+        for key, value in settings_table.DEFAULTS.items()
+        if str(settings_table.kind(key)).lower() in ("b", "bool")
+    }
 
 
 def _code_fallbacks() -> list:
@@ -71,28 +72,41 @@ def _code_fallbacks() -> list:
             if not isinstance(node, ast.Call):
                 continue
             func = node.func
-            name = (func.attr if isinstance(func, ast.Attribute)
-                    else func.id if isinstance(func, ast.Name) else None)
+            name = (
+                func.attr
+                if isinstance(func, ast.Attribute)
+                else func.id
+                if isinstance(func, ast.Name)
+                else None
+            )
             if name != "get_bool" or not node.args:
                 continue
             key = node.args[0]
             if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
                 continue
             default = None
-            if len(node.args) > 1 and isinstance(node.args[1], ast.Constant) \
-                    and isinstance(node.args[1].value, bool):
+            if (
+                len(node.args) > 1
+                and isinstance(node.args[1], ast.Constant)
+                and isinstance(node.args[1].value, bool)
+            ):
                 default = node.args[1].value
             for keyword in node.keywords:
-                if keyword.arg == "default" and isinstance(keyword.value, ast.Constant) \
-                        and isinstance(keyword.value.value, bool):
+                if (
+                    keyword.arg == "default"
+                    and isinstance(keyword.value, ast.Constant)
+                    and isinstance(keyword.value.value, bool)
+                ):
                     default = keyword.value.value
             if default is None:
                 continue
-            found.append({
-                "key": key.value,
-                "default": default,
-                "where": f"{path.relative_to(REPO)}:{node.lineno}",
-            })
+            found.append(
+                {
+                    "key": key.value,
+                    "default": default,
+                    "where": f"{path.relative_to(REPO)}:{node.lineno}",
+                }
+            )
     return found
 
 
@@ -111,8 +125,7 @@ class TestTheResolverFindsThings:
 
     def test_the_schema_has_boolean_keys(self, schema_defaults):
         assert len(schema_defaults) > 100, (
-            f"only {len(schema_defaults)} boolean keys found - the schema was "
-            f"not read"
+            f"only {len(schema_defaults)} boolean keys found - the schema was not read"
         )
 
     def test_the_code_has_explicit_fallbacks(self, code_fallbacks):
@@ -123,7 +136,9 @@ class TestTheResolverFindsThings:
 
 
 class TestTheTwoPlacesAgree:
-    def test_no_fallback_disagrees_with_the_schema(self, schema_defaults, code_fallbacks):
+    def test_no_fallback_disagrees_with_the_schema(
+        self, schema_defaults, code_fallbacks
+    ):
         """Every site, not every key.
 
         A key read in two places with two different fallbacks is the case that
@@ -138,9 +153,11 @@ class TestTheTwoPlacesAgree:
             if key not in schema_defaults:
                 continue
             if site["default"] is not schema_defaults[key]:
-                out.append(f"{key} at {site['where']}: the schema says "
-                           f"{schema_defaults[key]}, the code falls back to "
-                           f"{site['default']}")
+                out.append(
+                    f"{key} at {site['where']}: the schema says "
+                    f"{schema_defaults[key]}, the code falls back to "
+                    f"{site['default']}"
+                )
         assert not out, (
             "a setting's two defaults disagree, so a machine with an older "
             "schema reads it the other way:\n  " + "\n  ".join(out)

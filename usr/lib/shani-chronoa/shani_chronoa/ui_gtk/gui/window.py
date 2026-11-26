@@ -7,10 +7,10 @@ import time
 
 import gi
 
-gi.require_version('Gtk', '4.0')
-gi.require_version('Gdk', '4.0')
-gi.require_version('GLib', '2.0')
-gi.require_version('Adw', '1')
+gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
+gi.require_version("GLib", "2.0")
+gi.require_version("Adw", "1")
 
 from gi.repository import Gtk, Gdk, Gio, GLib, GObject, Adw, Pango
 
@@ -355,7 +355,8 @@ class _ModeStrip(Gtk.Box):
         button.set_menu_model(menu)
         button.update_property(
             [Gtk.AccessibleProperty.LABEL],
-            ["What it works on, whether it plans first, and which project"])
+            ["What it works on, whether it plans first, and which project"],
+        )
         return button
 
     def _permissions_chip(self) -> Gtk.MenuButton:
@@ -378,8 +379,8 @@ class _ModeStrip(Gtk.Box):
         menu.append_section("On its own", alone)
         button.set_menu_model(menu)
         button.update_property(
-            [Gtk.AccessibleProperty.LABEL],
-            ["What it may do without asking you"])
+            [Gtk.AccessibleProperty.LABEL], ["What it may do without asking you"]
+        )
         return button
 
     def _menu_chip(self, icon: str):
@@ -406,18 +407,24 @@ class _ModeStrip(Gtk.Box):
         button.set_child(box)
         return button, label, image
 
-
     #: style -> (chip word, menu line). Words a person picks by, not the keys.
     _STYLES = (
         # Under 30 characters each: the layout contract fails any label longer
         # than that which can neither wrap nor ellipsise, and menu items do
         # neither.
-        ("ordinary", "Ordinary", "Ordinary: the usual answer",
-         "format-justify-left-symbolic"),
-        ("brief", "Brief", "Brief: just the answer",
-         "format-justify-right-symbolic"),
-        ("explanatory", "Explanatory", "Explanatory: adds the why",
-         "format-justify-fill-symbolic"),
+        (
+            "ordinary",
+            "Ordinary",
+            "Ordinary: the usual answer",
+            "format-justify-left-symbolic",
+        ),
+        ("brief", "Brief", "Brief: just the answer", "format-justify-right-symbolic"),
+        (
+            "explanatory",
+            "Explanatory",
+            "Explanatory: adds the why",
+            "format-justify-fill-symbolic",
+        ),
     )
 
     def _reply_style_chip(self) -> Gtk.MenuButton:
@@ -467,9 +474,12 @@ class _ModeStrip(Gtk.Box):
     #: where its stricter meaning is written down, and `buildmode.read_only_note`
     #: says so for anyone who remembers it on the strip.
     _AUTO = (
-        ("ask", "Ask first",
-         "It asks before anything that needs permission",
-         "dialog-question-symbolic"),
+        (
+            "ask",
+            "Ask first",
+            "It asks before anything that needs permission",
+            "dialog-question-symbolic",
+        ),
         # **"No questions", not "Auto".** The tooltip already said the mode
         # *refuses* rather than asks, and it already disclaimed acting freely -
         # and the word on the chip said the opposite of both. A mode strip is
@@ -484,11 +494,14 @@ class _ModeStrip(Gtk.Box):
         # that was failing when the change was made cannot catch the change**,
         # which is why `test_the_word_does_not_say_auto` is in the file that
         # goes with this change and not in the one that was red.
-        ("auto", "No questions",
-         "It does not interrupt you: anything needing permission is refused "
-         "rather than asked about. This is not permission to act freely, and it "
-         "lasts until Chronoa restarts",
-         "mail-unread-symbolic"),
+        (
+            "auto",
+            "No questions",
+            "It does not interrupt you: anything needing permission is refused "
+            "rather than asked about. This is not permission to act freely, and it "
+            "lasts until Chronoa restarts",
+            "mail-unread-symbolic",
+        ),
     )
 
     #: The **workflow** axis: work out what it would do, without doing it.
@@ -502,11 +515,13 @@ class _ModeStrip(Gtk.Box):
         # and renders as an empty box on plain GNOME. `dialog-question-symbolic`
         # is wrong for this row too, so this uses the one name in the theme that
         # means "nothing is happening here".
-        ("working", "Working", "It does what you ask",
-         "media-playback-start-symbolic"),
-        ("plan", "Plan",
-         "It works out what it would do and says so, changing nothing",
-         "document-edit-symbolic"),
+        ("working", "Working", "It does what you ask", "media-playback-start-symbolic"),
+        (
+            "plan",
+            "Plan",
+            "It works out what it would do and says so, changing nothing",
+            "document-edit-symbolic",
+        ),
     )
 
     #: **`explore` is deliberately not a row here**, and the first version of
@@ -533,9 +548,12 @@ class _ModeStrip(Gtk.Box):
     #: now says what the turn is *working on*, and read-only has gone back to
     #: being what it always was underneath: `permissions.EXPLORE`, in Settings.
     _CAPABILITY = (
-        ("general", "General",
-         "It answers anything, using whatever tools fit the question",
-         "security-medium-symbolic"),
+        (
+            "general",
+            "General",
+            "It answers anything, using whatever tools fit the question",
+            "security-medium-symbolic",
+        ),
         # **"Build", not "Code".** The files a person brings this app are often
         # not source - a .docx, a .csv, a systemd unit - and calling that "code"
         # promised a programmer's workflow it does not have. "Build" says what
@@ -547,10 +565,13 @@ class _ModeStrip(Gtk.Box):
         # `tools-check-spelling-symbolic`. `system-build-symbolic` and
         # `applications-development-symbolic` are Yaru names and render as an
         # empty box on plain GNOME.
-        ("build", "Build",
-         "It is working on your files: reads, searches, edits, and shows what "
-         "changed. It may still use anything else it needs",
-         "document-edit-symbolic"),
+        (
+            "build",
+            "Build",
+            "It is working on your files: reads, searches, edits, and shows what "
+            "changed. It may still use anything else it needs",
+            "document-edit-symbolic",
+        ),
     )
 
     #: What it does **when you are not asking**, as one choice.
@@ -563,12 +584,18 @@ class _ModeStrip(Gtk.Box):
     #: now", and "on-ask" versus "in the background" is the difference between a
     #: tool and an agent.
     _AMBIENT = (
-        ("on-ask", "Only when asked",
-         "It acts only in answer to something you asked for",
-         "dialog-question-symbolic"),
-        ("background", "In the background",
-         "Its automatic rules keep running when you are not talking to it",
-         "preferences-system-symbolic"),
+        (
+            "on-ask",
+            "Only when asked",
+            "It acts only in answer to something you asked for",
+            "dialog-question-symbolic",
+        ),
+        (
+            "background",
+            "In the background",
+            "Its automatic rules keep running when you are not talking to it",
+            "preferences-system-symbolic",
+        ),
     )
 
     #: How it listens, as one choice rather than two booleans.
@@ -586,8 +613,12 @@ class _ModeStrip(Gtk.Box):
         # Dictate button is a microphone - the convention for "speak into this
         # field" - and the two sat side by side at the narrow width as two
         # identical glyphs meaning different things.
-        ("off", "Mic button", "Mic button: press it to speak",
-         "audio-headset-symbolic"),
+        (
+            "off",
+            "Mic button",
+            "Mic button: press it to speak",
+            "audio-headset-symbolic",
+        ),
         # **`audio-volume-high-symbolic`, not `audio-input-microphone-high-symbolic`.**
         # The `-high` mic is a Yaru name - Adwaita ships only the plain
         # `audio-input-microphone-symbolic`, which the row above already uses for
@@ -598,15 +629,25 @@ class _ModeStrip(Gtk.Box):
         #
         # The blank was invisible here because GTK falls back to the system
         # theme; on plain GNOME the wake-word row showed nothing.
-        ("wake", "Wake word",
-         "Wake word: hands-free, but it will not talk over a reply",
-         "audio-volume-high-symbolic"),
-        ("wake-over", "Wake word, talk over",
-         "Wake word and talk over: hands-free, and talking interrupts a reply",
-         "audio-volume-high-symbolic"),
-        ("over", "Talk over",
-         "Talk over only: the mic is not always open, but talking interrupts a "
-         "reply", "media-playback-pause-symbolic"),
+        (
+            "wake",
+            "Wake word",
+            "Wake word: hands-free, but it will not talk over a reply",
+            "audio-volume-high-symbolic",
+        ),
+        (
+            "wake-over",
+            "Wake word, talk over",
+            "Wake word and talk over: hands-free, and talking interrupts a reply",
+            "audio-volume-high-symbolic",
+        ),
+        (
+            "over",
+            "Talk over",
+            "Talk over only: the mic is not always open, but talking interrupts a "
+            "reply",
+            "media-playback-pause-symbolic",
+        ),
     )
 
     #: Whether it is here at all, as one choice.
@@ -623,17 +664,23 @@ class _ModeStrip(Gtk.Box):
     #: disagrees with what is actually loaded, which is the two-widgets failure
     #: this strip keeps hitting.
     _PRESENCE = (
-        ("active", "Here",
-         "Awake and answering", "user-busy-symbolic"),
+        ("active", "Here", "Awake and answering", "user-busy-symbolic"),
         # **"Loaded", not "Drowsy".** A word a person has to look up is
         # not a word for a chip, and this one sat on the main window beside
         # "Here" and "Asleep" - the only chip whose word needed explaining.
         # The tooltip has said "Loaded, but idle" all along.
-        ("drowsy", "Loaded",
-         "Loaded, but idle - it will let go of the model", "user-idle-symbolic"),
-        ("sleeping", "Asleep",
-         "It has let go of the model and will not answer until woken",
-         "user-offline-symbolic"),
+        (
+            "drowsy",
+            "Loaded",
+            "Loaded, but idle - it will let go of the model",
+            "user-idle-symbolic",
+        ),
+        (
+            "sleeping",
+            "Asleep",
+            "It has let go of the model and will not answer until woken",
+            "user-offline-symbolic",
+        ),
     )
 
     #: Where it may **go**, as one choice: the answer engine and the egress lock
@@ -649,18 +696,30 @@ class _ModeStrip(Gtk.Box):
     #: real values, and this chip *writes* it alongside `privacy-mode` rather than
     #: replacing it.
     _EGRESS = (
-        ("this-machine", "Nothing leaves",
-         "Nothing leaves this machine, not even a question",
-         "security-high-symbolic"),
-        ("local-answers", "This machine answers",
-         "Questions are answered here; it may still look things up",
-         "computer-symbolic"),
-        ("local-then-cloud", "This machine, then cloud",
-         "Answer here when you can, reach a provider when you cannot",
-         "network-transmit-receive-symbolic"),
-        ("cloud", "Cloud",
-         "Answer from a provider even when this machine could",
-         "network-server-symbolic"),
+        (
+            "this-machine",
+            "Nothing leaves",
+            "Nothing leaves this machine, not even a question",
+            "security-high-symbolic",
+        ),
+        (
+            "local-answers",
+            "This machine answers",
+            "Questions are answered here; it may still look things up",
+            "computer-symbolic",
+        ),
+        (
+            "local-then-cloud",
+            "This machine, then cloud",
+            "Answer here when you can, reach a provider when you cannot",
+            "network-transmit-receive-symbolic",
+        ),
+        (
+            "cloud",
+            "Cloud",
+            "Answer from a provider even when this machine could",
+            "network-server-symbolic",
+        ),
     )
 
     def _auto_chip(self) -> Gtk.MenuButton:
@@ -684,8 +743,8 @@ class _ModeStrip(Gtk.Box):
         button.set_menu_model(menu)
         button.set_tooltip_text("Whether it stops you to ask before acting")
         button.update_property(
-            [Gtk.AccessibleProperty.LABEL],
-            ["Whether Chronoa interrupts you to ask"])
+            [Gtk.AccessibleProperty.LABEL], ["Whether Chronoa interrupts you to ask"]
+        )
         return button
 
     def _plan_chip(self) -> Gtk.MenuButton:
@@ -715,8 +774,8 @@ class _ModeStrip(Gtk.Box):
         button.set_menu_model(menu)
         button.set_tooltip_text("Whether it works out what it would do first")
         button.update_property(
-            [Gtk.AccessibleProperty.LABEL],
-            ["Whether Chronoa plans before acting"])
+            [Gtk.AccessibleProperty.LABEL], ["Whether Chronoa plans before acting"]
+        )
         return button
 
     def _capability_chip(self) -> Gtk.MenuButton:
@@ -749,7 +808,8 @@ class _ModeStrip(Gtk.Box):
         button.set_menu_model(menu)
         button.set_tooltip_text(
             "Whether Chronoa's automatic rules keep running when you are not "
-            "talking to it")
+            "talking to it"
+        )
         return button
 
     def _presence_chip(self) -> Gtk.MenuButton:
@@ -772,7 +832,8 @@ class _ModeStrip(Gtk.Box):
             menu.append(word, f"app.answer-presence::{key}")
         button.set_menu_model(menu)
         button.set_tooltip_text(
-            "Whether Chronoa is awake, letting go of the model, or asleep")
+            "Whether Chronoa is awake, letting go of the model, or asleep"
+        )
         return button
 
     def _read_presence(self) -> str:
@@ -790,7 +851,7 @@ class _ModeStrip(Gtk.Box):
             if chosen is None:
                 chosen = presence.detect(local_llm.is_up)
             return presence.reconcile(chosen, local_llm.is_up).value
-        except Exception:                               # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.warning("could not read the presence state", exc_info=True)
             return "drowsy"
 
@@ -806,8 +867,9 @@ class _ModeStrip(Gtk.Box):
         """
         try:
             from shani_chronoa import dream
+
             return dream.describe_last_dream()
-        except Exception:                               # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.warning("could not read the last dream", exc_info=True)
             return "Its last dream could not be read"
 
@@ -816,9 +878,10 @@ class _ModeStrip(Gtk.Box):
         try:
             from shani_chronoa import permissions
 
-            return ("auto" if permissions.get_mode() == permissions.Mode.DONT_ASK
-                    else "ask")
-        except Exception:                               # noqa: BLE001
+            return (
+                "auto" if permissions.get_mode() == permissions.Mode.DONT_ASK else "ask"
+            )
+        except Exception:  # noqa: BLE001
             logger.debug("mode strip: the posture is unreadable", exc_info=True)
             return "ask"
 
@@ -828,7 +891,7 @@ class _ModeStrip(Gtk.Box):
         action to disagree with."""
         try:
             return "plan" if planmode.is_enabled() else "working"
-        except Exception:                               # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.debug("mode strip: plan mode is unreadable", exc_info=True)
             return "working"
 
@@ -845,7 +908,7 @@ class _ModeStrip(Gtk.Box):
             from shani_chronoa import buildmode
 
             return "build" if buildmode.is_enabled() else "general"
-        except Exception:                               # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.debug("mode strip: build mode is unreadable", exc_info=True)
             return "general"
 
@@ -858,9 +921,8 @@ class _ModeStrip(Gtk.Box):
         """
         try:
             running = bool(self._config.get_bool("background-mode-enabled", True))
-        except Exception:                               # noqa: BLE001
-            logger.warning("could not read the background-mode setting",
-                           exc_info=True)
+        except Exception:  # noqa: BLE001
+            logger.warning("could not read the background-mode setting", exc_info=True)
             return "on-ask"
         return "background" if running else "on-ask"
 
@@ -911,7 +973,8 @@ class _ModeStrip(Gtk.Box):
         self._model_image = image
         button.set_tooltip_text(
             "Which model answers. Switching loads it and restarts the local "
-            "server, so the next reply uses it")
+            "server, so the next reply uses it"
+        )
         return button
 
     def _default_model_key(self) -> str:
@@ -928,7 +991,7 @@ class _ModeStrip(Gtk.Box):
             if callable(getter):
                 try:
                     got = getter()
-                except Exception:                       # noqa: BLE001
+                except Exception:  # noqa: BLE001
                     continue
                 if isinstance(got, str) and got:
                     return got
@@ -986,14 +1049,24 @@ class _ModeStrip(Gtk.Box):
             # prompt, so it is what the row is about.
             active = local_llm.answering_key() or ""
             if active:
-                rows.append((active, _tier_word(active),
-                              f"{active}: the model in use, which this data "
-                              "home does not hold",
-                              "object-select-symbolic"))
+                rows.append(
+                    (
+                        active,
+                        _tier_word(active),
+                        f"{active}: the model in use, which this data "
+                        "home does not hold",
+                        "object-select-symbolic",
+                    )
+                )
             else:
-                rows.append(("", "No model",
-                             "No model is installed on this machine",
-                             "object-select-symbolic"))
+                rows.append(
+                    (
+                        "",
+                        "No model",
+                        "No model is installed on this machine",
+                        "object-select-symbolic",
+                    )
+                )
         return rows
 
     def _read_model(self) -> str:
@@ -1008,7 +1081,7 @@ class _ModeStrip(Gtk.Box):
         """
         try:
             return local_llm.answering_key() or ""
-        except Exception:                               # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.warning("could not read the model in use", exc_info=True)
             return ""
 
@@ -1016,7 +1089,7 @@ class _ModeStrip(Gtk.Box):
         try:
             wake = bool(self._config.wake_word_enabled)
             barge = bool(self._config.barge_in_vad_enabled)
-        except Exception:                               # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.warning("could not read the hands-free state", exc_info=True)
             return "off"
         if wake and barge:
@@ -1061,7 +1134,7 @@ class _ModeStrip(Gtk.Box):
             if bool(self._config.privacy_mode):
                 return "this-machine"
             mode = str(getattr(self._config, "answer_mode", "") or "")
-        except Exception:                               # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.warning("could not read the egress settings", exc_info=True)
             return "local-then-cloud"
         # **Every reachable pair maps to exactly one word.** An earlier version
@@ -1069,8 +1142,10 @@ class _ModeStrip(Gtk.Box):
         # which was wrong in the only way that matters here: with privacy off and
         # `answer-mode=local` it read "then cloud" while the app answered locally
         # and never reached one. Measured, six combinations, before and after.
-        return {"cloud": "cloud",
-                "local": "local-answers"}.get(mode, "local-then-cloud")
+        return {"cloud": "cloud", "local": "local-answers"}.get(
+            mode, "local-then-cloud"
+        )
+
     #: Below this window width the chips show icons only. Measured: with words
     #: the strip needs 512px, the window can be 380px, and between the two the
     #: strip was clipped at the right - losing Dictate first.
@@ -1084,7 +1159,10 @@ class _ModeStrip(Gtk.Box):
         stack = [self]
         while stack:
             node = stack.pop()
-            if isinstance(node, Gtk.Label) and "mode-chip-label" in node.get_css_classes():
+            if (
+                isinstance(node, Gtk.Label)
+                and "mode-chip-label" in node.get_css_classes()
+            ):
                 node.set_visible(not compact)
             child = node.get_first_child()
             while child is not None:
@@ -1094,18 +1172,12 @@ class _ModeStrip(Gtk.Box):
     def _read_reply_style(self) -> str:
         try:
             style = str(self._config.reply_style or "ordinary")
-        except Exception:                               # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.warning("could not read the reply style", exc_info=True)
             style = "ordinary"
         return style if style in {row[0] for row in self._STYLES} else "ordinary"
 
-
-
     # -- the state, read from whoever owns it ---------------------------
-
-
-
-
 
     # -- keeping the chips honest ---------------------------------------
 
@@ -1128,22 +1200,37 @@ class _ModeStrip(Gtk.Box):
             # changed from anything/read-only to general/build and this tuple
             # did not, so `general` matched nothing and the chip was drawn as a
             # departure in the ordinary case - every window, every refresh.
-            self._draw(self._rules_chip, self._rules_label,
-                       self._read_capability(), self._CAPABILITY,
-                       "What it works on", quiet=("general",),
-                       image=self._rules_image)
+            self._draw(
+                self._rules_chip,
+                self._rules_label,
+                self._read_capability(),
+                self._CAPABILITY,
+                "What it works on",
+                quiet=("general",),
+                image=self._rules_image,
+            )
             # **Read live, not from the action's state.** Settings writes the
             # posture straight through `permissions.set_mode`, so an action
             # state would be stale until the next click. `refresh()` runs when
             # the window regains focus, which is when that becomes visible.
-            self._draw(self._auto_chip, self._auto_label,
-                       self._read_auto(), self._AUTO,
-                       "Whether it interrupts you", quiet=("ask",),
-                       image=self._auto_image)
-            self._draw(self._plan_chip, self._plan_label,
-                       self._read_plan(), self._PLAN,
-                       "Whether it plans first", quiet=("working",),
-                       image=self._plan_image)
+            self._draw(
+                self._auto_chip,
+                self._auto_label,
+                self._read_auto(),
+                self._AUTO,
+                "Whether it interrupts you",
+                quiet=("ask",),
+                image=self._auto_image,
+            )
+            self._draw(
+                self._plan_chip,
+                self._plan_label,
+                self._read_plan(),
+                self._PLAN,
+                "Whether it plans first",
+                quiet=("working",),
+                image=self._plan_image,
+            )
             # **The work chip carries two settings in one word.** `_draw` sets
             # word, icon and highlight from what it works on; plan mode then
             # appends itself and lights the chip, because a chip that stayed
@@ -1151,16 +1238,24 @@ class _ModeStrip(Gtk.Box):
             # about the one setting that changes nothing.
             plan = self._read_plan()
             capability = self._read_capability()
-            self._draw(self._work_chip, self._work_label, capability,
-                       self._CAPABILITY, "What it works on", quiet=("general",),
-                       image=self._work_image)
+            self._draw(
+                self._work_chip,
+                self._work_label,
+                capability,
+                self._CAPABILITY,
+                "What it works on",
+                quiet=("general",),
+                image=self._work_image,
+            )
             # The project's folder name rides on the chip in Build mode, so
             # "which code is it changing" is answered without opening anything.
             from shani_chronoa import buildmode
+
             folder = buildmode.project()
             if folder:
                 self._work_label.set_text(
-                    f"{self._work_label.get_text()} · {os.path.basename(folder.rstrip('/'))}")
+                    f"{self._work_label.get_text()} · {os.path.basename(folder.rstrip('/'))}"
+                )
             if plan != "working":
                 self._work_label.set_text(self._work_label.get_text() + " · Plan")
                 self._work_chip.add_css_class("mode-chip-on")
@@ -1168,43 +1263,77 @@ class _ModeStrip(Gtk.Box):
                 f"{self._answer_tooltip('Works on', capability, self._CAPABILITY)}. "
                 f"{self._answer_tooltip('Before acting', plan, self._PLAN)}."
                 + (f" Project: {folder}." if folder else "")
-                + self._project_state_sentence(folder))
+                + self._project_state_sentence(folder)
+            )
             ambient = self._read_ambient()
             auto = self._read_auto()
-            self._draw(self._permissions_chip, self._permissions_label, auto,
-                       self._AUTO, "Risky actions", quiet=("ask",),
-                       image=self._permissions_image)
+            self._draw(
+                self._permissions_chip,
+                self._permissions_label,
+                auto,
+                self._AUTO,
+                "Risky actions",
+                quiet=("ask",),
+                image=self._permissions_image,
+            )
             if ambient != "on-ask":
                 self._permissions_chip.add_css_class("mode-chip-on")
             self._permissions_chip.set_tooltip_text(
                 f"{self._answer_tooltip('Risky actions', auto, self._AUTO)}. "
-                f"{self._answer_tooltip('On its own', ambient, self._AMBIENT)}.")
-            self._draw(self._ambient_chip, self._ambient_label,
-                       self._read_ambient(), self._AMBIENT,
-                       "When it may act", quiet=("on-ask",),
-                       image=self._ambient_image)
+                f"{self._answer_tooltip('On its own', ambient, self._AMBIENT)}."
+            )
+            self._draw(
+                self._ambient_chip,
+                self._ambient_label,
+                self._read_ambient(),
+                self._AMBIENT,
+                "When it may act",
+                quiet=("on-ask",),
+                image=self._ambient_image,
+            )
             # Quiet is "here", not "asleep": an assistant that has gone to sleep
             # is a departure somebody should see at a glance.
             presence_state = self._read_presence()
-            self._draw(self._presence_chip, self._presence_label,
-                       presence_state, self._PRESENCE,
-                       "Whether Chronoa is here", quiet=("active",),
-                       image=self._presence_image)
+            self._draw(
+                self._presence_chip,
+                self._presence_label,
+                presence_state,
+                self._PRESENCE,
+                "Whether Chronoa is here",
+                quiet=("active",),
+                image=self._presence_image,
+            )
             self._presence_chip.set_tooltip_text(
-                f"{self._presence_chip.get_tooltip_text()}. "
-                f"{self._dream_sentence()}")
-            self._draw(self._hands_chip, self._hands_label,
-                       self._read_hands_free(), self._HANDS,
-                       "How Chronoa hears you", quiet=("off",),
-                       image=self._hands_image)
+                f"{self._presence_chip.get_tooltip_text()}. {self._dream_sentence()}"
+            )
+            self._draw(
+                self._hands_chip,
+                self._hands_label,
+                self._read_hands_free(),
+                self._HANDS,
+                "How Chronoa hears you",
+                quiet=("off",),
+                image=self._hands_image,
+            )
             style = self._read_reply_style()
-            self._draw(self._style_chip, self._style_label,
-                       style, self._STYLES, "Reply style",
-                       quiet=("ordinary",), image=self._style_image)
-            self._draw(self._answer_chip, self._mode_label,
-                       self._read_egress(), self._EGRESS, "Where it may go",
-                       quiet=("this-machine", "local-answers"),
-                       image=self._mode_image)
+            self._draw(
+                self._style_chip,
+                self._style_label,
+                style,
+                self._STYLES,
+                "Reply style",
+                quiet=("ordinary",),
+                image=self._style_image,
+            )
+            self._draw(
+                self._answer_chip,
+                self._mode_label,
+                self._read_egress(),
+                self._EGRESS,
+                "Where it may go",
+                quiet=("this-machine", "local-answers"),
+                image=self._mode_image,
+            )
             self._note_engine_disagreement()
             rows = self._model_rows()
             # The menu is rebuilt here rather than once at construction: the
@@ -1223,11 +1352,15 @@ class _ModeStrip(Gtk.Box):
             # by accident.
             offered = tuple(r[0] for r in rows)
             default = self._default_model_key()
-            self._draw(self._model_chip, self._model_label,
-                       self._read_model(), rows,
-                       "Which model answers",
-                       quiet=(default,) if default in offered else (),
-                       image=self._model_image)
+            self._draw(
+                self._model_chip,
+                self._model_label,
+                self._read_model(),
+                rows,
+                "Which model answers",
+                quiet=(default,) if default in offered else (),
+                image=self._model_image,
+            )
         finally:
             self._syncing = False
 
@@ -1257,7 +1390,7 @@ class _ModeStrip(Gtk.Box):
             return
         try:
             actual = str(reader() or "")
-        except Exception:                               # noqa: BLE001
+        except Exception:  # noqa: BLE001
             # No engine to compare against. A strip that cannot check is a
             # strip that says nothing, which is the status quo and not worse.
             return
@@ -1290,21 +1423,24 @@ class _ModeStrip(Gtk.Box):
             # cloud" it is what the person asked for.
             if not strict_local:
                 return
-            message = ("You chose to answer on this machine, but a cloud "
-                       "provider is answering - nothing you type is going "
-                       "there. Open Models to switch back.")
+            message = (
+                "You chose to answer on this machine, but a cloud "
+                "provider is answering - nothing you type is going "
+                "there. Open Models to switch back."
+            )
         elif chosen != "cloud":
             # Local answering, and local was either required or preferred.
             return
         else:
-            detail = str(getattr(self._app, "_answer_mode_problem", "") or "") \
+            detail = (
+                str(getattr(self._app, "_answer_mode_problem", "") or "")
                 or "no provider was reachable"
-            message = (f"You chose {word}, but this machine is answering: "
-                       f"{detail}.")
+            )
+            message = f"You chose {word}, but this machine is answering: {detail}."
         self._answer_chip.add_css_class("mode-disagrees")
         self._answer_chip.set_tooltip_text(
-            f"{self._answer_chip.get_tooltip_text() or 'Where it may go'}. "
-            f"{message}")
+            f"{self._answer_chip.get_tooltip_text() or 'Where it may go'}. {message}"
+        )
         logger.warning("mode strip: %s", message)
 
     def _project_state_sentence(self, folder: str) -> str:
@@ -1337,8 +1473,7 @@ class _ModeStrip(Gtk.Box):
             return ""
         said = f" Branch: {branch}."
         if changed:
-            said += (f" {changed} file" + ("" if changed == 1 else "s")
-                     + " changed.")
+            said += f" {changed} file" + ("" if changed == 1 else "s") + " changed."
         return said
 
     def _answer_tooltip(self, what: str, current: str, table) -> str:
@@ -1351,8 +1486,7 @@ class _ModeStrip(Gtk.Box):
         row = next((r for r in table if r[0] == current), None)
         return f"{what}: {row[1]}" if row else what
 
-    def _draw(self, chip, label, current, table, what, quiet=(),
-              image=None) -> None:
+    def _draw(self, chip, label, current, table, what, quiet=(), image=None) -> None:
         """One dropdown: the word, the icon, the highlight, from its table.
 
         **`quiet` names the states that are not flagged.** Highlighting every
@@ -1385,11 +1519,17 @@ class _ModeStrip(Gtk.Box):
             chip.add_css_class("mode-chip-on")
         chip.set_tooltip_text(f"{what}: {word}. {line}")
         chip.update_property(
-            [Gtk.AccessibleProperty.LABEL], [f"{what}, currently {word}"])
+            [Gtk.AccessibleProperty.LABEL], [f"{what}, currently {word}"]
+        )
 
-class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMixin,
-                    Adw.ApplicationWindow):
 
+class ChronoaWindow(
+    StyleMixin,
+    AskingMixin,
+    AttachingMixin,
+    ConversationsMenuMixin,
+    Adw.ApplicationWindow,
+):
     #: Short explanations for the thinking levels, in the answer popover.
     _THINKING_HINTS = {
         "off": "Answer straight away - the fastest reply.",
@@ -1423,23 +1563,35 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         button.set_tooltip_text("How Chronoa answers")
         thinking = tuple(
             (level, self._THINKING_WORDS[level], self._THINKING_HINTS[level])
-            for level in THINKING_LEVELS)
-        button.set_popover(model_picker.ModelPicker(
-            self._app,
-            before=(("Where it answers", "answer-egress", _ModeStrip._EGRESS),),
-            after=(("Model in memory", "answer-presence", self._PRESENCE_WORDS),
-                   ("How it works it out", "thinking", thinking),
-                   ("How it replies", "reply-style", _ModeStrip._STYLES)),
-            toggles=(("Speak replies aloud", "speak-replies",
-                      "Speak each reply out loud. Press to silence replies "
-                      "without silencing timers."),)))
+            for level in THINKING_LEVELS
+        )
+        button.set_popover(
+            model_picker.ModelPicker(
+                self._app,
+                before=(("Where it answers", "answer-egress", _ModeStrip._EGRESS),),
+                after=(
+                    ("Model in memory", "answer-presence", self._PRESENCE_WORDS),
+                    ("How it works it out", "thinking", thinking),
+                    ("How it replies", "reply-style", _ModeStrip._STYLES),
+                ),
+                toggles=(
+                    (
+                        "Speak replies aloud",
+                        "speak-replies",
+                        "Speak each reply out loud. Press to silence replies "
+                        "without silencing timers.",
+                    ),
+                ),
+            )
+        )
         # **Held, not inlined.** The palette fetches a provider's list into the
         # cache this picker reads, and an inline popover would keep showing the
         # rows it drew before the answer arrived until the next reopen.
         self._model_picker = button.get_popover()
         button.update_property(
             [Gtk.AccessibleProperty.LABEL],
-            ["How Chronoa answers: model, thinking, replies"])
+            ["How Chronoa answers: model, thinking, replies"],
+        )
 
         lead = Gtk.Image.new_from_icon_name("object-select-symbolic")
         lead.add_css_class("dim-label")
@@ -1480,21 +1632,34 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
     #: they have to describe the model. Same keys, same action.
     _PRESENCE_WORDS = (
         ("active", "Kept loaded", "Loaded and answering straight away"),
-        ("drowsy", "Freed when idle",
-         "Loaded now; it lets go of the memory when nothing is asked"),
-        ("sleeping", "Asleep",
-         "Not loaded, and it will not load itself to answer until woken"),
+        (
+            "drowsy",
+            "Freed when idle",
+            "Loaded now; it lets go of the memory when nothing is asked",
+        ),
+        (
+            "sleeping",
+            "Asleep",
+            "Not loaded, and it will not load itself to answer until woken",
+        ),
     )
 
     #: level -> menu word. Keys are `cloud_llm.THINKING_LEVELS`.
-    _THINKING_WORDS = {"off": "Off", "low": "Low", "medium": "Medium",
-                       "high": "High", "xhigh": "Extra high", "max": "Max"}
+    _THINKING_WORDS = {
+        "off": "Off",
+        "low": "Low",
+        "medium": "Medium",
+        "high": "High",
+        "xhigh": "Extra high",
+        "max": "Max",
+    }
 
     def _thinking_word(self) -> str:
         from shani_chronoa.cloud_llm import thinking_level
+
         try:
             level = thinking_level(getattr(self._config, "thinking", "off"))
-        except Exception:                               # noqa: BLE001
+        except Exception:  # noqa: BLE001
             level = "off"
         return level
 
@@ -1516,25 +1681,32 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         if strip is not None:
             try:
                 style = strip._read_reply_style()
-            except Exception:                           # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 style = "ordinary"
         style_word = next((r[1] for r in _ModeStrip._STYLES if r[0] == style), "")
         suffix = "" if style == "ordinary" else f" · {style_word}"
         label.set_label((f"Think: {word}" if compact else f"Thinking: {word}") + suffix)
         where = self._egress_row()
-        spoken = self._config.get_bool("speak-replies", False) \
-            if hasattr(self._config, "get_bool") else False
+        spoken = (
+            self._config.get_bool("speak-replies", True)
+            if hasattr(self._config, "get_bool")
+            else True
+        )
         button.set_tooltip_text(
             "How Chronoa answers: %s%s. Thinking: %s. Replies: %s. %s. "
-            "Click to change any of them." % (
+            "Click to change any of them."
+            % (
                 self._model_word(),
                 "" if where is None else " - " + where[1],
                 word,
                 style_word or "Ordinary",
-                "Replies are spoken" if spoken else "Replies are not spoken"))
+                "Replies are spoken" if spoken else "Replies are not spoken",
+            )
+        )
         button.update_property(
             [Gtk.AccessibleProperty.LABEL],
-            ["How Chronoa answers: model, thinking, replies"])
+            ["How Chronoa answers: model, thinking, replies"],
+        )
 
     def _refresh_model_word(self) -> None:
         """Redraw the chosen model's name under the composer.
@@ -1579,7 +1751,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             return None
         try:
             current = strip._read_egress()
-        except Exception:                               # noqa: BLE001
+        except Exception:  # noqa: BLE001
             return None
         return next((r for r in _ModeStrip._EGRESS if r[0] == current), None)
 
@@ -1605,9 +1777,8 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             return ""
         try:
             return str(reader() or "")
-        except Exception:                               # noqa: BLE001
-            logger.debug("could not read which engine is answering",
-                         exc_info=True)
+        except Exception:  # noqa: BLE001
+            logger.debug("could not read which engine is answering", exc_info=True)
             return ""
 
     def _model_word(self) -> str:
@@ -1704,16 +1875,18 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             action.connect("activate", lambda *_a: self._dictate_into_app())
             self.add_action(action)
             application.set_accels_for_action(
-                "win.dictate-into-app", ["<Ctrl><Shift><Alt>d"])
+                "win.dictate-into-app", ["<Ctrl><Shift><Alt>d"]
+            )
         except Exception:  # noqa: BLE001 - a hotkey is not the window
             logger.debug("dictation hotkey unavailable", exc_info=True)
         try:
             self._apply_organ_css()
-        except Exception:                               # noqa: BLE001
+        except Exception:  # noqa: BLE001
             # No display is the only way this fails, and a window with no strip
             # colour is a window that still shows what Chronoa is doing.
-            logger.debug("the organ strip stylesheet could not be applied",
-                         exc_info=True)
+            logger.debug(
+                "the organ strip stylesheet could not be applied", exc_info=True
+            )
         self._sync_from_state()
         # On an idle turn, not here: building twenty panels costs about two
         # seconds of subprocesses, and a window that is on screen but not
@@ -1737,14 +1910,17 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         """
         try:
             from shani_chronoa.config import ChronoaConfig
+
             return ChronoaConfig()
         except Exception:
-            logger.debug("no ChronoaConfig available; gates read as closed",
-                         exc_info=True)
+            logger.debug(
+                "no ChronoaConfig available; gates read as closed", exc_info=True
+            )
 
             class _Closed:
                 def sense_allowed(self, key):
                     return False
+
             return _Closed()
 
     @staticmethod
@@ -1758,7 +1934,8 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         caps, error = capabilities.live_capabilities()
         if error:
             logger.warning(
-                "skill registry unavailable; no suggestions or help: %s", error)
+                "skill registry unavailable; no suggestions or help: %s", error
+            )
         return caps
 
     def _apply_organ_css(self) -> None:
@@ -1800,7 +1977,9 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             provider.load_from_data(sheet.encode())
             Gtk.StyleContext.add_provider_for_display(
                 Gdk.Display.get_default(),
-                provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+                provider,
+                Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+            )
 
     def _setup_window(self) -> None:
         self.set_title("Shani Chronoa")
@@ -1881,8 +2060,12 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         if getattr(self, "_narrow_applied", False):
             return None
         app = getattr(self, "_app", None)
-        board = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14,
-                        margin_top=18, halign=Gtk.Align.FILL)
+        board = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=14,
+            margin_top=18,
+            halign=Gtk.Align.FILL,
+        )
         board.set_size_request(-1, -1)
 
         def heading(text: str) -> Gtk.Label:
@@ -1902,28 +2085,41 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # question.
         try:
             from shani_chronoa.ui_gtk.gui.surfaces.machine import _battery
+
             battery = _battery()
         except Exception:  # noqa: BLE001
             battery = None
         if battery:
-            tiles.append(("Battery", f"{battery['percent']}%", battery["status"].lower()))
+            tiles.append(
+                ("Battery", f"{battery['percent']}%", battery["status"].lower())
+            )
         try:
             from shani_chronoa import model_status
+
             missing = model_status.missing()
         except Exception:  # noqa: BLE001
             missing = []
         if tiles or missing:
             from shani_chronoa.ui_gtk.gui import charts
+
             board.append(heading("Today"))
             row = Gtk.Box(spacing=10, homogeneous=True)
             for title, value, detail in tiles:
                 row.append(charts.stat(title, value, detail))
             if missing:
-                tile = charts.stat("Extras", f"{len(missing)} to add", "vision, voice, memory…")
-                add = Gtk.Button(label=_("Set up"), halign=Gtk.Align.START, margin_start=12,
-                                 margin_bottom=10)
+                tile = charts.stat(
+                    "Extras", f"{len(missing)} to add", "vision, voice, memory…"
+                )
+                add = Gtk.Button(
+                    label=_("Set up"),
+                    halign=Gtk.Align.START,
+                    margin_start=12,
+                    margin_bottom=10,
+                )
                 add.add_css_class("pill")
-                add.connect("clicked", activate("setup-page", GLib.Variant("s", "extras")))
+                add.connect(
+                    "clicked", activate("setup-page", GLib.Variant("s", "extras"))
+                )
                 tile.append(add)
                 row.append(tile)
             board.append(row)
@@ -1931,8 +2127,14 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # -- pick up where you left off ------------------------------------
         try:
             from shani_chronoa import conversation_store
-            sessions = [x for x in conversation_store.list_sessions(conversation_store.session_dir())
-                        if not x["active"] and x["messages"]][:3]
+
+            sessions = [
+                x
+                for x in conversation_store.list_sessions(
+                    conversation_store.session_dir()
+                )
+                if not x["active"] and x["messages"]
+            ][:3]
         except Exception:  # noqa: BLE001
             sessions = []
         if sessions:
@@ -1940,21 +2142,35 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             listing = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
             listing.add_css_class("boxed-list")
             for session in sessions:
-                row = Adw.ActionRow(title=GLib.markup_escape_text(session["title"]),
-                                    subtitle=f"{session['messages']} messages",
-                                    activatable=True)
+                row = Adw.ActionRow(
+                    title=GLib.markup_escape_text(session["title"]),
+                    subtitle=f"{session['messages']} messages",
+                    activatable=True,
+                )
                 row.add_prefix(Gtk.Image(icon_name="chat-message-new-symbolic"))
                 row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
-                row.connect("activated", activate("switch-conversation",
-                                                  GLib.Variant("s", session["id"])))
+                row.connect(
+                    "activated",
+                    activate("switch-conversation", GLib.Variant("s", session["id"])),
+                )
                 listing.append(row)
             board.append(listing)
 
         # -- quick actions -------------------------------------------------
         wanted = [
-            ("Transcribe a recording", "audio-x-generic-symbolic", "transcribe-file", None),
+            (
+                "Transcribe a recording",
+                "audio-x-generic-symbolic",
+                "transcribe-file",
+                None,
+            ),
             ("Record a meeting", "media-record-symbolic", "", None),
-            ("Connect a device", "bluetooth-symbolic", "connect-device", GLib.Variant("s", "")),
+            (
+                "Connect a device",
+                "bluetooth-symbolic",
+                "connect-device",
+                GLib.Variant("s", ""),
+            ),
             ("Work on a project", "folder-open-symbolic", "choose-project", None),
             ("Dictate", "audio-input-microphone-symbolic", "dictate", None),
         ]
@@ -1966,8 +2182,13 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
                 # An action this app does not register is no button at all.
                 actions.append((label, icon, activate(name, value)))
         board.append(heading("Do something"))
-        flow = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, column_spacing=8,
-                           row_spacing=8, max_children_per_line=3, homogeneous=True)
+        flow = Gtk.FlowBox(
+            selection_mode=Gtk.SelectionMode.NONE,
+            column_spacing=8,
+            row_spacing=8,
+            max_children_per_line=3,
+            homogeneous=True,
+        )
         for label, icon, callback in actions:
             button = Gtk.Button(child=Adw.ButtonContent(icon_name=icon, label=label))
             button.add_css_class("pill")
@@ -2029,12 +2250,13 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         header_bar_holder = Adw.Bin()
         self._split = Adw.NavigationSplitView()
         self._sidebar_page = SidebarPage(
-            self._app, self._show_chat, self._show_surface,
-            on_close=self._hide_panels)
+            self._app, self._show_chat, self._show_surface, on_close=self._hide_panels
+        )
         self._split.set_sidebar(self._sidebar_page)
         self._content_view = Adw.NavigationView()
         self._chat_page = Adw.NavigationPage(
-            child=self._content_view, title="Conversation")
+            child=self._content_view, title="Conversation"
+        )
         self._split.set_content(self._chat_page)
         # Registered with the window, not merely constructed: an `Adw.Breakpoint`
         # that no window knows about is never evaluated. Verified by rendering
@@ -2065,8 +2287,9 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         toolbar = Adw.ToolbarView()
         toolbar.add_top_bar(header_bar_holder)
         toolbar.set_content(self._toasts)
-        self._content_view.add(Adw.NavigationPage(
-            child=toolbar, title="Conversation", tag=CHAT_TAG))
+        self._content_view.add(
+            Adw.NavigationPage(child=toolbar, title="Conversation", tag=CHAT_TAG)
+        )
         self.set_content(self._split)
 
         # Header: an Adw.HeaderBar, not a row of widgets in a box.
@@ -2090,7 +2313,8 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._sidebar_toggle.add_css_class("flat")
         self._sidebar_toggle.set_tooltip_text("Show or hide the panels (F9)")
         self._sidebar_toggle.update_property(
-            [Gtk.AccessibleProperty.LABEL], ["Show or hide the panels"])
+            [Gtk.AccessibleProperty.LABEL], ["Show or hide the panels"]
+        )
         self._sidebar_toggle.connect("toggled", self._on_sidebar_toggled)
         # ...and the other direction: the split view collapsing on its own has to
         # move the button, or the button lies about what is on screen.
@@ -2189,9 +2413,10 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         setup_button.set_icon_name("system-software-install-symbolic")
         setup_button.add_css_class("flat")
         setup_button.set_valign(Gtk.Align.CENTER)
-        setup_button.set_tooltip_text("Set Chronoa up: the model, listening and the voice")
-        setup_button.update_property(
-            [Gtk.AccessibleProperty.LABEL], ["Set Chronoa up"])
+        setup_button.set_tooltip_text(
+            "Set Chronoa up: the model, listening and the voice"
+        )
+        setup_button.update_property([Gtk.AccessibleProperty.LABEL], ["Set Chronoa up"])
         setup_button.set_action_name("app.setup")
         self._setup_button = setup_button
 
@@ -2201,9 +2426,13 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._conversations_button.add_css_class("flat")
         self._conversations_button.set_valign(Gtk.Align.CENTER)
         self._conversations_button.set_tooltip_text("Conversations")
-        self._conversations_button.update_property([Gtk.AccessibleProperty.LABEL], ["Conversations"])
+        self._conversations_button.update_property(
+            [Gtk.AccessibleProperty.LABEL], ["Conversations"]
+        )
         self._conversations_popover = Gtk.Popover()
-        self._conversations_popover.connect("show", lambda _p: self._fill_conversations())
+        self._conversations_popover.connect(
+            "show", lambda _p: self._fill_conversations()
+        )
         self._conversations_button.set_popover(self._conversations_popover)
 
         # A widget goes into the header bar OR the row, never both: appending to
@@ -2217,8 +2446,9 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # fired while the person was away left no trace at all, and a proposal
         # waiting for an answer was somewhere only the Memory panel could
         # find.
-        self._bell_button, self._bell_badge, self._bell_popover = \
+        self._bell_button, self._bell_badge, self._bell_popover = (
             self._build_activity_bell()
+        )
         header_bar.set_title_widget(header)
         header_bar.pack_start(self._conversations_button)
         header_bar.pack_start(self._mic_icon)
@@ -2226,8 +2456,14 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._help_button = help_button
         self._browser_available = True
         self._overflow_button = self._build_header_overflow()
-        for widget in (quick_button, self._browser_button, help_button,
-                       self._overflow_button, setup_button, settings_button):
+        for widget in (
+            quick_button,
+            self._browser_button,
+            help_button,
+            self._overflow_button,
+            setup_button,
+            settings_button,
+        ):
             header_bar.pack_end(widget)
         # **After the mode buttons, before the rail toggle.** The bell is
         # about what happened without you, so it belongs with the standing
@@ -2248,7 +2484,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # The rail is built *after* the column is complete, because it reads
         # state the column's own widgets report (the orb state, the live tool)
         # and pointing it at half-built widgets would show "Idle" forever.
-        self._rail = None                      # built at the end of this method
+        self._rail = None  # built at the end of this method
         #: What this session's skills declared they made, newest last.
         self._artifacts: list = []
         self._rail_row = None
@@ -2269,7 +2505,8 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._rail_toggle.set_valign(Gtk.Align.CENTER)
         self._rail_toggle.set_tooltip_text("Show or hide the Now rail (F10)")
         self._rail_toggle.update_property(
-            [Gtk.AccessibleProperty.LABEL], ["Show or hide the Now rail"])
+            [Gtk.AccessibleProperty.LABEL], ["Show or hide the Now rail"]
+        )
         self._rail_toggle.set_active(True)
         self._rail_toggle.connect("toggled", self._on_rail_toggled)
         header_bar.pack_end(self._rail_toggle)
@@ -2280,8 +2517,9 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         search.add_css_class("flat")
         search.set_valign(Gtk.Align.CENTER)
         search.set_tooltip_text("Find anything: panels, settings, actions (Ctrl+K)")
-        search.update_property([Gtk.AccessibleProperty.LABEL],
-                               ["Find a panel, setting or action"])
+        search.update_property(
+            [Gtk.AccessibleProperty.LABEL], ["Find a panel, setting or action"]
+        )
         search.connect("clicked", lambda _b: self._toggle_palette())
         self._palette_button = search
         header_bar.pack_start(search)
@@ -2322,9 +2560,12 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # with the label beside it. It is `app.setup`, the same action the
         # header button and `Ctrl+Shift+S` use, so all three are one path.
         self._setup_cta = Gtk.Button(
-            label="Set Chronoa up", css_classes=["suggested-action", "pill"],
-            halign=Gtk.Align.CENTER, visible=False,
-            tooltip_text="Install a language model, and the ears and voice")
+            label="Set Chronoa up",
+            css_classes=["suggested-action", "pill"],
+            halign=Gtk.Align.CENTER,
+            visible=False,
+            tooltip_text="Install a language model, and the ears and voice",
+        )
         # Deliberately not `set_action_name("app.setup")`: the header's setup
         # button already declares that action, and a tree walk for "the setup
         # button" must find the one that is always on screen rather than this
@@ -2333,11 +2574,15 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # shortcut, the header button and this reach one implementation.
         self._setup_cta.connect(
             "clicked",
-            lambda _b: self._app.activate_action("setup", None)
-            if self._app is not None else None)
+            lambda _b: (
+                self._app.activate_action("setup", None)
+                if self._app is not None
+                else None
+            ),
+        )
         self._setup_cta.update_property(
-            [Gtk.AccessibleProperty.LABEL],
-            ["Set Chronoa up: install a language model"])
+            [Gtk.AccessibleProperty.LABEL], ["Set Chronoa up: install a language model"]
+        )
         main_box.append(self._setup_cta)
 
         self._detail_label = Gtk.Label(label="")
@@ -2430,8 +2675,11 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._search_entry.set_hexpand(True)
         self._search_entry.set_placeholder_text("Find in this conversation")
         self._search_entry.update_property(
-            [Gtk.AccessibleProperty.LABEL], ["Find in this conversation"])
-        self._search_entry.connect("search-changed", lambda e: self._run_search(e.get_text()))
+            [Gtk.AccessibleProperty.LABEL], ["Find in this conversation"]
+        )
+        self._search_entry.connect(
+            "search-changed", lambda e: self._run_search(e.get_text())
+        )
         self._search_entry.connect("activate", lambda _e: self._search_next())
         self._search_bar.set_child(self._search_entry)
         self._search_bar.connect_entry(self._search_entry)
@@ -2453,8 +2701,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # one search uses. A second way to reach a turn is a second place for
         # "which turn is this" to be answered differently.
         self._minimap = TurnMinimap(on_jump=self._minimap_jump)
-        transcript_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
-                                 spacing=4)
+        transcript_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         # **Expands, always.** Its width used to come from its content: with
         # nothing but an approval drawn under it, measured 58px of a 722px row,
         # so the request the approval was about disappeared from view.
@@ -2554,7 +2801,9 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._input_placeholder.set_margin_top(6)
         # A placeholder is not an accessible name: a screen reader announced
         # this field as just "text" (shani-testbed a11y-lint, chronoa-voice)
-        self._input_entry.update_property([Gtk.AccessibleProperty.LABEL], ["Message to Chronoa"])
+        self._input_entry.update_property(
+            [Gtk.AccessibleProperty.LABEL], ["Message to Chronoa"]
+        )
         self._input_entry.add_css_class("cajita-input")
         self._input_entry.set_hexpand(True)
         # **A floor of one line.** A `Gtk.TextView` reports a minimum height of
@@ -2613,15 +2862,23 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # go with the next message as paths (see attachments.py), shown as
         # chips until it is sent; a chip's click removes it.
         self._attachments: list = []
-        self._attach_bar = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE,
-                                       max_children_per_line=4, column_spacing=6, row_spacing=6)
+        self._attach_bar = Gtk.FlowBox(
+            selection_mode=Gtk.SelectionMode.NONE,
+            max_children_per_line=4,
+            column_spacing=6,
+            row_spacing=6,
+        )
         self._attach_bar.set_visible(False)
         self._attach_button = Gtk.Button()
         self._attach_button.set_icon_name("mail-attachment-symbolic")
         self._attach_button.add_css_class("flat")
         self._attach_button.set_valign(Gtk.Align.CENTER)
-        self._attach_button.set_tooltip_text("Attach files (or drop them on this window)")
-        self._attach_button.update_property([Gtk.AccessibleProperty.LABEL], ["Attach files"])
+        self._attach_button.set_tooltip_text(
+            "Attach files (or drop them on this window)"
+        )
+        self._attach_button.update_property(
+            [Gtk.AccessibleProperty.LABEL], ["Attach files"]
+        )
         self._attach_button.connect("clicked", lambda _b: self._pick_files())
         drop = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY)
         drop.connect("drop", self._on_files_dropped)
@@ -2641,9 +2898,11 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._dictate_button.set_action_name("app.dictate")
         self._dictate_button.set_tooltip_text(
             "Dictate: speak a long message, it ends when you stop talking "
-            "(Ctrl+Shift+D)")
+            "(Ctrl+Shift+D)"
+        )
         self._dictate_button.update_property(
-            [Gtk.AccessibleProperty.LABEL], ["Dictate a message"])
+            [Gtk.AccessibleProperty.LABEL], ["Dictate a message"]
+        )
         input_row.append(self._dictate_button)
         # **The overlay, not the text view.** The migration to a `Gtk.TextView`
         # built `composer = Gtk.Overlay()`, gave the entry a real placeholder-less
@@ -2704,7 +2963,8 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._turn_stop_button.set_valign(Gtk.Align.CENTER)
         self._turn_stop_button.set_tooltip_text(
             "Stop this turn. It ends before the next action, so whatever is "
-            "already running finishes first.")
+            "already running finishes first."
+        )
         self._turn_stop_button.connect("clicked", self._on_turn_stop_clicked)
         self._turn_stop_button.set_visible(False)
         input_row.append(self._turn_stop_button)
@@ -2729,7 +2989,6 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._undo_button.set_visible(False)
         input_row.append(self._undo_button)
         self._refresh_undo_button()
-
 
         # **The model picker, under the composer.** Below the field and beside
         # it rather than on the mode strip, because "which model answers" is
@@ -2860,13 +3119,15 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # said "Ready" - not because either was wrong, but because the label it
         # reads did not exist yet. A rail that answers a question from
         # half-built widgets is worse than one built a moment later.
-        self._rail = rail_module.NowRail(get_state=self._rail_state,
-                                         get_tool=self._rail_tool,
-                                         on_open=self._show_surface,
-                                         get_context=self._rail_context,
-                                         get_artifacts=self._rail_artifacts,
-                                         get_events=self._rail_events,
-                                         get_senses=self._rail_senses)
+        self._rail = rail_module.NowRail(
+            get_state=self._rail_state,
+            get_tool=self._rail_tool,
+            on_open=self._show_surface,
+            get_context=self._rail_context,
+            get_artifacts=self._rail_artifacts,
+            get_events=self._rail_events,
+            get_senses=self._rail_senses,
+        )
         self._chat_row.append(self._rail)
         # **Hidden, not shrunk, on a narrow window.** At a fraction of its width
         # the rail wraps every label into two and three lines and reads as a
@@ -3003,11 +3264,19 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             box.append(entry)
             return entry
 
-        item("Ask one quick question", "mail-message-new-symbolic", action="app.quick-ask")
-        self._overflow_browser = item("Browse the web", "web-browser-symbolic",
-                                      action="app.open-browser")
-        item(capabilities.help_label(), "help-browser-symbolic",
-             handler=lambda _b: self.open_help())
+        item(
+            "Ask one quick question",
+            "mail-message-new-symbolic",
+            action="app.quick-ask",
+        )
+        self._overflow_browser = item(
+            "Browse the web", "web-browser-symbolic", action="app.open-browser"
+        )
+        item(
+            capabilities.help_label(),
+            "help-browser-symbolic",
+            handler=lambda _b: self.open_help(),
+        )
         button.set_popover(popover)
         button.set_visible(False)
         return button
@@ -3069,14 +3338,14 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         """
         try:
             made = len(self._artifacts)
-        except Exception:                                   # noqa: BLE001
+        except Exception:  # noqa: BLE001
             made = 0
         fired = 0
         source = getattr(self, "_event_source", None)
         if source is not None:
             try:
                 fired = len(source.event_results())
-            except Exception:                               # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 fired = 0
         return made, fired
 
@@ -3108,7 +3377,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             # recorded here rather than left as an un-caught mutation.
             return
         if now - left_at < self.AWAY_MINIMUM_SECONDS:
-            return                       # barely away: alt-tab, not "back"
+            return  # barely away: alt-tab, not "back"
         new_files, new_rules = counts[0] - previous[0], counts[1] - previous[1]
         if not new_files and not new_rules:
             return
@@ -3164,8 +3433,12 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._orb.set_state(self._state)
         # The halo pulses only while the mic is hot or the reply is being heard;
         # the last level must not freeze on a thinking/idle halo.
-        if self._state not in (AssistantState.LISTENING, AssistantState.DICTATING,
-                               AssistantState.SPEAKING, AssistantState.INTERRUPTING):
+        if self._state not in (
+            AssistantState.LISTENING,
+            AssistantState.DICTATING,
+            AssistantState.SPEAKING,
+            AssistantState.INTERRUPTING,
+        ):
             self._orb.set_level(0.0)
         # `set_can_answer` wins over the state machine's own label, because "no
         # model" is true of every state at once while "Ready" is only true of
@@ -3184,12 +3457,17 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         dictate = getattr(self, "_dictate_button", None)
         if dictate is not None:
             dictate.set_tooltip_text(
-                "Stop dictating (Ctrl+Shift+D)" if dictating else
-                "Dictate: speak a long message, it ends when you stop talking "
-                "(Ctrl+Shift+D)")
+                "Stop dictating (Ctrl+Shift+D)"
+                if dictating
+                else "Dictate: speak a long message, it ends when you stop talking "
+                "(Ctrl+Shift+D)"
+            )
         # The mic is genuinely hot in exactly two states.
-        hot = self._state in (AssistantState.LISTENING, AssistantState.DICTATING,
-                               AssistantState.INTERRUPTING)
+        hot = self._state in (
+            AssistantState.LISTENING,
+            AssistantState.DICTATING,
+            AssistantState.INTERRUPTING,
+        )
         self._mic_icon.set_visible(True)
         self._mic_icon.set_from_icon_name(
             "audio-input-microphone-symbolic" if hot else "microphone-disabled-symbolic"
@@ -3201,9 +3479,14 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         if hot:
             self._mic_icon.add_css_class("mic-off")
         # Stop works while thinking too: it cancels the turn (app._stop_speaking)
-        self._stop_button.set_visible(self._state in (AssistantState.SPEAKING, AssistantState.THINKING))
-        self._stop_button.set_tooltip_text("Stop speaking (Esc)" if self._state is AssistantState.SPEAKING
-                                           else "Stop thinking about this (Esc)")
+        self._stop_button.set_visible(
+            self._state in (AssistantState.SPEAKING, AssistantState.THINKING)
+        )
+        self._stop_button.set_tooltip_text(
+            "Stop speaking (Esc)"
+            if self._state is AssistantState.SPEAKING
+            else "Stop thinking about this (Esc)"
+        )
 
     def _voice_aware_label(self) -> str:
         """The state word, plus what the voice setting means right now.
@@ -3225,12 +3508,12 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             strip = getattr(self, "_mode_strip", None)
             try:
                 hands = strip._read_hands_free() if strip is not None else "off"
-            except Exception:                           # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 hands = "off"
             if hands in ("wake", "wake-over"):
                 try:
                     phrase = str(self._config.wake_phrase or "").strip()
-                except Exception:                       # noqa: BLE001
+                except Exception:  # noqa: BLE001
                     phrase = ""
                 if phrase:
                     return f"Ready - say “{phrase}”"
@@ -3266,7 +3549,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         """
         try:
             enabled = self._config.wake_word_enabled
-        except Exception:            # noqa: BLE001 - never leave the user unable to close
+        except Exception:  # noqa: BLE001 - never leave the user unable to close
             enabled = False
         if not enabled:
             # **Flushed before the close proceeds.** The pending save is ten
@@ -3450,8 +3733,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         box.append(badge)
         button.set_child(box)
         button.set_tooltip_text("Background activity")
-        button.update_property(
-            [Gtk.AccessibleProperty.LABEL], ["Background activity"])
+        button.update_property([Gtk.AccessibleProperty.LABEL], ["Background activity"])
         popover = Gtk.Popover()
         button.set_popover(popover)
         # **Hidden until there is something to say.** A bell that is always
@@ -3478,6 +3760,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             return int(cached[1])
         try:
             from shani_chronoa.senses import memory
+
             count = len(memory.pending_proposals())
         except Exception as exc:  # noqa: BLE001 - sleep not installed is no proposals
             logger.debug("bell: proposals unreadable: %s", exc)
@@ -3660,7 +3943,8 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._setup_cta.set_visible(not can)
         if not can:
             self._state_label.set_tooltip_text(
-                why or "Chronoa cannot answer until a language model is set up")
+                why or "Chronoa cannot answer until a language model is set up"
+            )
         else:
             self._state_label.remove_css_class("dim-label")
             self._state_label.set_tooltip_text("")
@@ -3683,10 +3967,10 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         """
         try:
             from shani_chronoa import body
+
             body.body.set_audible(self._play_organ_tone)
-        except Exception:                               # noqa: BLE001
-            logger.warning("could not install the organ tone",
-                           exc_info=True)
+        except Exception:  # noqa: BLE001
+            logger.warning("could not install the organ tone", exc_info=True)
 
     def _play_organ_tone(self, organ: str, what: str) -> None:
         """The body's sound hook: the short tone naming the organ's class.
@@ -3713,10 +3997,10 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         """
         try:
             from shani_chronoa import body
+
             body.body.set_notice(self.set_status)
-        except Exception:                               # noqa: BLE001
-            logger.warning("could not install the refusal notice",
-                           exc_info=True)
+        except Exception:  # noqa: BLE001
+            logger.warning("could not install the refusal notice", exc_info=True)
 
     def set_status(self, status: str) -> None:
         """Record **what last happened**, and show it.
@@ -3851,6 +4135,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
     def show_page(self, page_id: str) -> bool:
         from shani_chronoa import pages as page_registry
         from shani_chronoa.ui_gtk.gui.surfaces import available_surfaces
+
         page_id = page_registry.resolve("main", page_id) or page_id
         if page_id == "conversation":
             self.present()
@@ -4003,8 +4288,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         the overlay is allocated the whole window and covers the header - and so
         the one state where the sidebar has to carry a close control of its own.
         """
-        return bool(self._split.get_collapsed()
-                    and not self._split.get_show_content())
+        return bool(self._split.get_collapsed() and not self._split.get_show_content())
 
     def _on_sidebar_toggled(self, button: Gtk.ToggleButton) -> None:
         """Show or hide the panels - but only for a press, not for a sync.
@@ -4153,8 +4437,9 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         """
         from shani_chronoa.ui_gtk.gui import surfaces
 
-        names = [n for n in surfaces.SURFACE_IDS
-                 if n in self._sidebar_page._surface_rows]
+        names = [
+            n for n in surfaces.SURFACE_IDS if n in self._sidebar_page._surface_rows
+        ]
         if not names:
             return
 
@@ -4184,10 +4469,13 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
                         continue
                     try:
                         page = build[2](getattr(self, "_app", None))
-                    except Exception:                  # noqa: BLE001
-                        logger.info("panel %r did not build; its row keeps no "
-                                    "dot until it is opened", name,
-                                    exc_info=True)
+                    except Exception:  # noqa: BLE001
+                        logger.info(
+                            "panel %r did not build; its row keeps no "
+                            "dot until it is opened",
+                            name,
+                            exc_info=True,
+                        )
                         continue
                     # Kept, so opening it later is instant and the dot cannot
                     # change underneath the person who is looking at it.
@@ -4222,6 +4510,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         window that will not open.
         """
         from shani_chronoa.ui_gtk.gui import surfaces
+
         available = surfaces.available_surfaces()
         if name not in available:
             self.set_status(f"That panel is not available: {name}")
@@ -4307,7 +4596,9 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._search_entry.set_text(text)
         self._search_entry.set_placeholder_text(
             f"Find in this conversation - {found} match" + ("es" if found != 1 else "")
-            if text else "Find in this conversation")
+            if text
+            else "Find in this conversation"
+        )
 
     def _search_next(self) -> None:
         """Walk the hits: the first, then the next one."""
@@ -4319,9 +4610,15 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             self._search_cursor = 0
         self._transcript.scroll_to_turn(hits[self._search_cursor])
 
-    def add_tool_call(self, name: str, arguments: dict, result: str = "",
-                      ok: bool = True, artifacts: tuple = (),
-                      selection=None) -> None:
+    def add_tool_call(
+        self,
+        name: str,
+        arguments: dict,
+        result: str = "",
+        ok: bool = True,
+        artifacts: tuple = (),
+        selection=None,
+    ) -> None:
         """Show a skill's call, its arguments and what it returned.
 
         `artifacts` is what that dispatch **declared** it produced - never a
@@ -4333,8 +4630,9 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         builds cards for every turn at once and "the current selection" would
         answer about the wrong one.
         """
-        self._transcript.add_tool_call(name, arguments, result, ok, artifacts,
-                                      selection=selection)
+        self._transcript.add_tool_call(
+            name, arguments, result, ok, artifacts, selection=selection
+        )
         # **Collected here, where they are already resolved.** These have been
         # through `tools.artifacts_for`, so they are absolute and present - the
         # rail reads the same list the transcript drew its thumbnails from,
@@ -4353,7 +4651,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         for path in artifacts:
             if path not in self._artifacts:
                 self._artifacts.append(path)
-        self._artifacts = self._artifacts[-self.RAIL_ARTIFACT_LIMIT:]
+        self._artifacts = self._artifacts[-self.RAIL_ARTIFACT_LIMIT :]
         if getattr(self, "_rail", None) is not None:
             self._rail.refresh()
 
@@ -4419,10 +4717,13 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
     def _revert_turn(self, turn: str):
         """Put back the files `turn` changed; say so; refresh what shows them."""
         from shani_chronoa.skills.undo_last_change import revert_turn
+
         restored, skipped = revert_turn(turn)
         if restored:
-            self.set_status(f"Reverted {plural(len(restored), 'file')} to before that turn. "
-                            "Undo puts them back.")
+            self.set_status(
+                f"Reverted {plural(len(restored), 'file')} to before that turn. "
+                "Undo puts them back."
+            )
         refresh = getattr(self, "_refresh_undo_button", None)
         if callable(refresh):
             refresh()
@@ -4493,7 +4794,8 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         a Mac keyboard delivers Command as it, so one binding covers both.
         """
         if keyval in (Gdk.KEY_k, Gdk.KEY_K) and bool(
-                state & Gdk.ModifierType.CONTROL_MASK):
+            state & Gdk.ModifierType.CONTROL_MASK
+        ):
             self._toggle_palette()
             return True
         if keyval == Gdk.KEY_Escape and self._palette.get_visible():
@@ -4533,13 +4835,22 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             # Verified by `rglob` over `/usr/share/icons/Adwaita`, not by
             # `Gtk.IconTheme.has_icon` - which reported several icons Adwaita
             # does ship as missing.
-            palette_module.Entry("Conversation", "the main window",
-                                 "view-paged-symbolic",
-                                 self._show_conversation_page,
-                                 group="Go to", weight=0),
-            palette_module.Entry("Quick ask", "one question, no conversation",
-                                 "edit-clear-symbolic", self._show_quick_ask_page,
-                                 group="Go to", weight=1),
+            palette_module.Entry(
+                "Conversation",
+                "the main window",
+                "view-paged-symbolic",
+                self._show_conversation_page,
+                group="Go to",
+                weight=0,
+            ),
+            palette_module.Entry(
+                "Quick ask",
+                "one question, no conversation",
+                "edit-clear-symbolic",
+                self._show_quick_ask_page,
+                group="Go to",
+                weight=1,
+            ),
         ]
         for surface_id in surfaces.SURFACE_IDS:
             row = self._sidebar_page._surface_rows.get(surface_id)
@@ -4556,19 +4867,31 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             # "meetings" where the panel says "My files" and "Meetings". The
             # surface's own title is the one a person recognises.
             title = all_surfaces.get(surface_id, (_lowered, icon, None))[0]
-            entries.append(palette_module.Entry(
-                title, section or "Panel", icon,
-                (lambda sid=surface_id: self._show_surface(sid)),
-                group="Panels", weight=0))
+            entries.append(
+                palette_module.Entry(
+                    title,
+                    section or "Panel",
+                    icon,
+                    (lambda sid=surface_id: self._show_surface(sid)),
+                    group="Panels",
+                    weight=0,
+                )
+            )
         entries.extend(self._palette_skill_entries())
         entries.extend(self._palette_mode_entries())
         for name in slash.names():
             # `system-run-symbolic` rather than `terminal-symbolic`, for the
             # same reason as the conversation icon above.
-            entries.append(palette_module.Entry(
-                f"/{name}", "command", "system-run-symbolic",
-                (lambda n=name: self._run_command(f"/{n}")),
-                group="Commands", weight=0))
+            entries.append(
+                palette_module.Entry(
+                    f"/{name}",
+                    "command",
+                    "system-run-symbolic",
+                    (lambda n=name: self._run_command(f"/{n}")),
+                    group="Commands",
+                    weight=0,
+                )
+            )
         entries.extend(self._palette_cloud_entries())
         entries.extend(self._palette_action_entries())
         entries.extend(self._palette_settings_entries())
@@ -4598,6 +4921,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         from shani_chronoa import capabilities as caps
         from shani_chronoa import skills as skills_module
         from shani_chronoa.ui_gtk.gui import palette as palette_module
+
         try:
             schemas, _handlers = skills_module.discover_skills()
         except Exception as exc:  # noqa: BLE001 - a broken registry must not take the palette down
@@ -4622,47 +4946,119 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             # thing a search cannot tell them: whether this touches the
             # machine, and how.
             effect = caps.effect_of(capability.tool, capability.description)
-            out.append(palette_module.Entry(
-                title, effect, "system-run-symbolic",
-                (lambda p=prompt or label: self.set_input_text(p)),
-                group="Skills", weight=0))
+            out.append(
+                palette_module.Entry(
+                    title,
+                    effect,
+                    "system-run-symbolic",
+                    (lambda p=prompt or label: self.set_input_text(p)),
+                    group="Skills",
+                    weight=0,
+                )
+            )
         return out
 
     #: (title, subtitle, icon, app action) - things that were a shortcut or a
     #: chat request and nothing else. `app.<action>` so the palette fires the
     #: same action the shortcut does.
     _PALETTE_ACTIONS = (
-        ("Connect a device", "Bluetooth, Android, KDE Connect", "preferences-system-devices-symbolic", "connect-device::"),
-        ("Pair a Bluetooth device", "headphones, watch, keyboard, phone", "bluetooth-symbolic", "connect-device::bluetooth"),
-        ("Connect an Android phone", "USB cable or Wi-Fi debugging", "phone-symbolic", "connect-device::android"),
-        ("Pair a KDE Connect phone", "same Wi-Fi", "network-wireless-symbolic", "connect-device::kdeconnect"),
-        ("Dictate", "speak a long message", "audio-input-microphone-symbolic", "dictate"),
-        ("In-app browser", "open a page beside the conversation", "web-browser-symbolic",
-         "open-browser"),
-        ("Transcribe a recording", "an audio or video file, speakers told apart", "audio-x-generic-symbolic", "transcribe-file"),
-        ("Find in this conversation", "Ctrl+F", "edit-find-symbolic", "find-in-conversation"),
-        ("Choose project folder", "Build mode works in it", "folder-open-symbolic", "choose-project"),
-        ("Reload MCP servers", "ask each server for its tools again", "view-refresh-symbolic", "reload-mcp"),
-        ("Set Chronoa up", "model, listening, voice", "system-software-install-symbolic", "setup"),
+        (
+            "Connect a device",
+            "Bluetooth, Android, KDE Connect",
+            "preferences-system-devices-symbolic",
+            "connect-device::",
+        ),
+        (
+            "Pair a Bluetooth device",
+            "headphones, watch, keyboard, phone",
+            "bluetooth-symbolic",
+            "connect-device::bluetooth",
+        ),
+        (
+            "Connect an Android phone",
+            "USB cable or Wi-Fi debugging",
+            "phone-symbolic",
+            "connect-device::android",
+        ),
+        (
+            "Pair a KDE Connect phone",
+            "same Wi-Fi",
+            "network-wireless-symbolic",
+            "connect-device::kdeconnect",
+        ),
+        (
+            "Dictate",
+            "speak a long message",
+            "audio-input-microphone-symbolic",
+            "dictate",
+        ),
+        (
+            "In-app browser",
+            "open a page beside the conversation",
+            "web-browser-symbolic",
+            "open-browser",
+        ),
+        (
+            "Transcribe a recording",
+            "an audio or video file, speakers told apart",
+            "audio-x-generic-symbolic",
+            "transcribe-file",
+        ),
+        (
+            "Find in this conversation",
+            "Ctrl+F",
+            "edit-find-symbolic",
+            "find-in-conversation",
+        ),
+        (
+            "Choose project folder",
+            "Build mode works in it",
+            "folder-open-symbolic",
+            "choose-project",
+        ),
+        (
+            "Reload MCP servers",
+            "ask each server for its tools again",
+            "view-refresh-symbolic",
+            "reload-mcp",
+        ),
+        (
+            "Set Chronoa up",
+            "model, listening, voice",
+            "system-software-install-symbolic",
+            "setup",
+        ),
         ("Settings", "all settings", "emblem-system-symbolic", "open-settings"),
-        ("Body", "what each part of Chronoa is doing", "dialog-information-symbolic", "show-body"),
+        (
+            "Body",
+            "what each part of Chronoa is doing",
+            "dialog-information-symbolic",
+            "show-body",
+        ),
         ("Stop speaking", "Esc", "media-playback-stop-symbolic", "stop-speaking"),
     )
 
     def _palette_action_entries(self) -> list:
         from shani_chronoa.ui_gtk.gui import palette as palette_module
+
         app = getattr(self, "_app", None)
         out = []
         for title, subtitle, icon, action in self._PALETTE_ACTIONS:
             # `name::target` carries a string parameter, Gio's detailed form.
             name, _sep, target = action.partition("::")
             if app is None or app.lookup_action(name) is None:
-                continue        # not registered here: no entry that does nothing
+                continue  # not registered here: no entry that does nothing
             value = GLib.Variant("s", target) if _sep else None
-            out.append(palette_module.Entry(
-                title, subtitle, icon,
-                (lambda a=name, v=value: app.activate_action(a, v)),
-                group="Actions", weight=0))
+            out.append(
+                palette_module.Entry(
+                    title,
+                    subtitle,
+                    icon,
+                    (lambda a=name, v=value: app.activate_action(a, v)),
+                    group="Actions",
+                    weight=0,
+                )
+            )
         return out
 
     def _palette_settings_entries(self) -> list:
@@ -4670,6 +5066,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         from shani_chronoa import pages
         from shani_chronoa.ui_gtk.gui import palette as palette_module
         from shani_chronoa.ui_gtk.gui.surfaces import common
+
         out = []
         try:
             pairs = list(zip(pages.page_ids("settings"), pages.page_titles("settings")))
@@ -4677,11 +5074,20 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             logger.debug("palette: settings pages unreadable", exc_info=True)
             return out
         for page_id, title in pairs:
-            out.append(palette_module.Entry(
-                f"Settings: {title}", "settings page", "emblem-system-symbolic",
-                (lambda p=page_id: common.open_page(getattr(self, "_app", None),
-                                                    f"settings:{p}")),
-                group="Settings", weight=0))
+            out.append(
+                palette_module.Entry(
+                    f"Settings: {title}",
+                    "settings page",
+                    "emblem-system-symbolic",
+                    (
+                        lambda p=page_id: common.open_page(
+                            getattr(self, "_app", None), f"settings:{p}"
+                        )
+                    ),
+                    group="Settings",
+                    weight=0,
+                )
+            )
         return out
 
     def _palette_setup_entries(self) -> list:
@@ -4706,15 +5112,25 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         from shani_chronoa import setup_wizard
         from shani_chronoa.ui_gtk.gui import palette as palette_module
         from shani_chronoa.ui_gtk.gui.surfaces import common
+
         out = []
         for tag, title in setup_wizard._SETUP_PAGES:
             if tag in ("welcome", "done"):
                 continue
-            out.append(palette_module.Entry(
-                f"Setup: {title}", "setup page", "system-software-install-symbolic",
-                (lambda t=tag: common.open_setup(getattr(self, "_app", None),
-                                                  None, page=t)),
-                group="Setup", weight=0))
+            out.append(
+                palette_module.Entry(
+                    f"Setup: {title}",
+                    "setup page",
+                    "system-software-install-symbolic",
+                    (
+                        lambda t=tag: common.open_setup(
+                            getattr(self, "_app", None), None, page=t
+                        )
+                    ),
+                    group="Setup",
+                    weight=0,
+                )
+            )
         return out
 
     def _palette_cloud_entries(self):
@@ -4741,21 +5157,31 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         from shani_chronoa.ui_gtk.gui import palette as palette_module
 
         out = []
-        order = (list(cloud_llm.BYOK_PROVIDER_ORDER)
-                 + list(cloud_llm.DEFAULT_PROVIDER_ORDER)
-                 + [cloud_llm.CUSTOM_ID])
+        order = (
+            list(cloud_llm.BYOK_PROVIDER_ORDER)
+            + list(cloud_llm.DEFAULT_PROVIDER_ORDER)
+            + [cloud_llm.CUSTOM_ID]
+        )
         for provider_id in order:
             provider = cloud_llm.PROVIDERS.get(provider_id)
             if provider is None:
                 continue
-            label = provider.name if provider_id != cloud_llm.CUSTOM_ID \
+            label = (
+                provider.name
+                if provider_id != cloud_llm.CUSTOM_ID
                 else "Your own server"
+            )
             if not cloud_llm.models_asked(provider_id):
-                out.append(palette_module.Entry(
-                    f"{label} models", "read its model list",
-                    "network-transmit-receive-symbolic",
-                    (lambda p=provider_id: self._read_cloud_models(p)),
-                    group="Cloud models", weight=0))
+                out.append(
+                    palette_module.Entry(
+                        f"{label} models",
+                        "read its model list",
+                        "network-transmit-receive-symbolic",
+                        (lambda p=provider_id: self._read_cloud_models(p)),
+                        group="Cloud models",
+                        weight=0,
+                    )
+                )
                 continue
             models, why = cloud_llm.cached_models(provider_id)
             if not models:
@@ -4765,20 +5191,31 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
                 # provider that answered "HTTP 401" would read the same as one
                 # that was never configured. The reason stays on screen, and
                 # the press is the obvious thing to do about it.
-                out.append(palette_module.Entry(
-                    f"{label}", why or "gave no model list",
-                    "network-transmit-receive-symbolic",
-                    (lambda p=provider_id: self._read_cloud_models(p)),
-                    group="Cloud models", weight=0))
+                out.append(
+                    palette_module.Entry(
+                        f"{label}",
+                        why or "gave no model list",
+                        "network-transmit-receive-symbolic",
+                        (lambda p=provider_id: self._read_cloud_models(p)),
+                        group="Cloud models",
+                        weight=0,
+                    )
+                )
                 continue
             # **`collect()` drops an entry with no `run`,** so every row here
             # carries one - a model, a provider to read, and a refusal to ask
             # again - rather than silently vanishing from a filtered list.
             for model in models:
-                out.append(palette_module.Entry(
-                    model, label, "network-transmit-receive-symbolic",
-                    (lambda p=provider_id, m=model: self._answer_cloud_model(p, m)),
-                    group="Cloud models", weight=0))
+                out.append(
+                    palette_module.Entry(
+                        model,
+                        label,
+                        "network-transmit-receive-symbolic",
+                        (lambda p=provider_id, m=model: self._answer_cloud_model(p, m)),
+                        group="Cloud models",
+                        weight=0,
+                    )
+                )
         return out
 
     def _read_cloud_models(self, provider_id: str) -> None:
@@ -4797,12 +5234,11 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
 
         def work():
             try:
-                cloud_llm.fetch_models(provider_id,
-                                       api_key=keys.get(provider_id, ""),
-                                       base_url=base)
+                cloud_llm.fetch_models(
+                    provider_id, api_key=keys.get(provider_id, ""), base_url=base
+                )
             except Exception:  # noqa: BLE001
-                logger.debug("palette: %s would not answer", provider_id,
-                             exc_info=True)
+                logger.debug("palette: %s would not answer", provider_id, exc_info=True)
             # The picker shares this cache, so it refreshes too rather than
             # waiting for its own reopen to notice.
             picker = getattr(self, "_model_picker", None)
@@ -4811,8 +5247,10 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
                 self._palette.set_entries(self.palette_entries())
 
         import threading
-        threading.Thread(target=work, name="chronoa-palette-models",
-                         daemon=True).start()
+
+        threading.Thread(
+            target=work, name="chronoa-palette-models", daemon=True
+        ).start()
 
     def _answer_cloud_model(self, provider_id: str, model: str) -> None:
         """Hand a palette model choice to the app's own action, then close."""
@@ -4827,11 +5265,14 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             logger.debug("palette: nothing to hand the cloud choice to")
             return False
         try:
-            action("app.answer-cloud-model",
-                   GLib.Variant("(ss)", (provider_id, model)))
+            action("app.answer-cloud-model", GLib.Variant("(ss)", (provider_id, model)))
         except Exception:  # noqa: BLE001
-            logger.warning("palette: could not switch to %s on %s", model,
-                           provider_id, exc_info=True)
+            logger.warning(
+                "palette: could not switch to %s on %s",
+                model,
+                provider_id,
+                exc_info=True,
+            )
             return False
         return True
 
@@ -4892,13 +5333,22 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         try:
             rows = self._mode_strip._model_rows()
             if rows:
-                out.append(palette_module.Entry(
-                    "Which model answers", "a locally installed model",
-                    rows[0][3] if len(rows[0]) > 3 and rows[0][3]
-                    else "preferences-system-symbolic",
-                    (lambda: self._open_chip_dropdown(
-                        self._mode_strip._model_chip)),
-                    group="Modes", weight=0))
+                out.append(
+                    palette_module.Entry(
+                        "Which model answers",
+                        "a locally installed model",
+                        rows[0][3]
+                        if len(rows[0]) > 3 and rows[0][3]
+                        else "preferences-system-symbolic",
+                        (
+                            lambda: self._open_chip_dropdown(
+                                self._mode_strip._model_chip
+                            )
+                        ),
+                        group="Modes",
+                        weight=0,
+                    )
+                )
         except Exception:  # noqa: BLE001 - a missing tier list is not a reason
             logger.debug("palette: the model rows are unreadable", exc_info=True)
         for table, action_name, reader_name in self._MODE_TABLES:
@@ -4913,7 +5363,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             reader = getattr(strip, reader_name, None)
             try:
                 current = reader() if callable(reader) else ""
-            except Exception:                           # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 current = ""
             # **The same row `_draw` picks, for the title as well as the line.**
             # It used `table[0][1]`, which is the table's *first* row's word -
@@ -4933,10 +5383,16 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             # invisible until somebody changes something.
             row = next((r for r in table if r[0] == current), table[0])
             icon = row[3] if len(row) > 3 and row[3] else "preferences-system-symbolic"
-            out.append(palette_module.Entry(
-                row[1], row[2], icon,
-                (lambda a=action_name: self._activate_mode(a)),
-                group="Modes", weight=0))
+            out.append(
+                palette_module.Entry(
+                    row[1],
+                    row[2],
+                    icon,
+                    (lambda a=action_name: self._activate_mode(a)),
+                    group="Modes",
+                    weight=0,
+                )
+            )
         return out
 
     def _inside_window(self, widget) -> bool:
@@ -5109,19 +5565,22 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
 
             dialog = Adw.AlertDialog.new(
                 "Rewind from this turn?",
-                f"This removes {preview['sentence']}. It cannot be undone.")
+                f"This removes {preview['sentence']}. It cannot be undone.",
+            )
             dialog.set_default_response(1)
             dialog.add_response("cancel", "Keep everything")
             dialog.add_response("rewind", "Rewind")
 
-            dialog.connect("response",
-                           lambda d, name: self._rewind_responded(name, on_yes))
+            dialog.connect(
+                "response", lambda d, name: self._rewind_responded(name, on_yes)
+            )
             dialog.present(self)
             self._rewind_dialog = dialog
             return None
-        except Exception:                                   # noqa: BLE001
-            logger.warning("could not ask for rewind confirmation; refusing",
-                           exc_info=True)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "could not ask for rewind confirmation; refusing", exc_info=True
+            )
             return False
 
     def _show_conversation_page(self) -> None:
@@ -5146,7 +5605,8 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # method, and `handler` is only the answer to "is there an assistant to
         # rewind to", which is all it was ever for.
         self._transcript.set_rewind_handler(
-            self._on_rewind_requested if handler is not None else None)
+            self._on_rewind_requested if handler is not None else None
+        )
 
     def _on_rewind_requested(self, index: int, text: str) -> None:
         """Take turn `index` out of the conversation and put its text back.
@@ -5196,8 +5656,9 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # it is missing**: nothing currently follows it, so a refusal is honoured
         # only because this is the last statement. Stated explicitly so the next
         # thing added here cannot silently turn "Keep everything" into a rewind.
-        decided = self._confirm_rewind(preview, text,
-                                       lambda: self._perform_rewind(index, text))
+        decided = self._confirm_rewind(
+            preview, text, lambda: self._perform_rewind(index, text)
+        )
         if decided is False:
             self.set_status("Nothing was removed.")
             return
@@ -5205,17 +5666,21 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
     def _perform_rewind(self, index: int, text: str) -> None:
         """History first, transcript second, then the question back in the box."""
         if not self.emit("rewind-history", text):
-            self.set_status("That turn is too old to rewind to - earlier parts "
-                            "of this conversation have been compressed.")
+            self.set_status(
+                "That turn is too old to rewind to - earlier parts "
+                "of this conversation have been compressed."
+            )
             return
         removed = self._transcript.truncate_from_turn(index)
-        if removed is None:                # pragma: no cover - checked above
+        if removed is None:  # pragma: no cover - checked above
             logger.warning("turn %d vanished between the check and the cut", index)
             return
         self._set_input_text(text)
         self._input_entry.grab_focus()
-        self.set_status("Rewound - everything after that turn is removed. "
-                        "Edit it and press Enter to run it again.")
+        self.set_status(
+            "Rewound - everything after that turn is removed. "
+            "Edit it and press Enter to run it again."
+        )
 
     def _run_command(self, text: str) -> bool:
         """Run a `/command` if the text is one. True when it was handled.
@@ -5226,6 +5691,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         `/undo` runs the real skill, so the same consent key applies.
         """
         from shani_chronoa.ui_gtk.gui import commands as slash
+
         command, argument = slash.lookup(text)
         if command is None:
             return False
@@ -5273,6 +5739,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
 
     def _fill_command_menu(self, prefix: str) -> None:
         from shani_chronoa.ui_gtk.gui import commands as slash
+
         child = self._command_list.get_first_child()
         while child is not None:
             following = child.get_next_sibling()
@@ -5300,8 +5767,9 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             summary.set_margin_end(10)
             box.append(summary)
             row.set_child(box)
-            row.update_property([Gtk.AccessibleProperty.LABEL],
-                                [f"/{name}: {command.summary}"])
+            row.update_property(
+                [Gtk.AccessibleProperty.LABEL], [f"/{name}: {command.summary}"]
+            )
             row.connect("clicked", lambda _b, n=name: self._complete_command(n))
             self._command_list.append(row)
         # The person's own commands (`~/.config/shani-chronoa/commands/*.md`,
@@ -5311,6 +5779,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # name wins, as it does when the line is sent.
         try:
             from shani_chronoa import user_prompts
+
             own = user_prompts.commands()
         except Exception:  # noqa: BLE001 - a menu must not take the window
             own = {}
@@ -5336,8 +5805,10 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             box.append(summary)
             row.set_child(box)
             row.set_tooltip_text(str(path))
-            row.update_property([Gtk.AccessibleProperty.LABEL],
-                                [f"/{name}, your command: {summary_text}"])
+            row.update_property(
+                [Gtk.AccessibleProperty.LABEL],
+                [f"/{name}, your command: {summary_text}"],
+            )
             row.connect("clicked", lambda _b, n=name: self._complete_command(n))
             self._command_list.append(row)
 
@@ -5361,8 +5832,9 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         """
         try:
             from shani_chronoa.skills import undo_last_change
+
             changes = undo_last_change.recent_changes()
-        except Exception:                               # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.warning("could not read the undo ring", exc_info=True)
             return None
         if not changes:
@@ -5383,15 +5855,15 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         path, name = found
         try:
             allowed, why = self._consent_for_undo()
-        except Exception:                               # noqa: BLE001
+        except Exception:  # noqa: BLE001
             allowed, why = False, ""
         button.set_tooltip_text(
-            f"Undo the change to {name}" if allowed
-            else f"Undo is off: {why}")
+            f"Undo the change to {name}" if allowed else f"Undo is off: {why}"
+        )
         button.set_sensitive(True)
         button.update_property(
-            [Gtk.AccessibleProperty.LABEL],
-            [f"undo the change to {name}"])
+            [Gtk.AccessibleProperty.LABEL], [f"undo the change to {name}"]
+        )
 
     def _consent_for_undo(self):
         """The skill's own gate, asked here rather than guessed at.
@@ -5401,6 +5873,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         in a refusal.
         """
         from shani_chronoa.skills import undo_last_change
+
         return undo_last_change._consent(self._config)
 
     def _on_undo_clicked(self, _button: Gtk.Button) -> None:
@@ -5412,6 +5885,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         more useful than anything this could invent.
         """
         from shani_chronoa.skills import undo_last_change
+
         found = self._last_change()
         if found is None:
             self.set_status("There is nothing left to undo")
@@ -5420,7 +5894,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         path, name = found
         try:
             said = undo_last_change._run({})
-        except Exception:                               # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.warning("undo failed", exc_info=True)
             self.set_status(f"Could not undo the change to {name}")
             return
@@ -5441,7 +5915,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             return None
         try:
             return stats()
-        except Exception:                               # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.warning("could not read the turn's cost", exc_info=True)
             return None
 
@@ -5490,8 +5964,11 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         try:
             rows = self._transcript._turn_rows()
             self._minimap.update_from(
-                adjustment.get_value(), adjustment.get_upper(),
-                adjustment.get_page_size(), rows)
+                adjustment.get_value(),
+                adjustment.get_upper(),
+                adjustment.get_page_size(),
+                rows,
+            )
         except Exception:  # noqa: BLE001
             logger.debug("minimap: viewport not drawn", exc_info=True)
 
@@ -5531,19 +6008,22 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         thought. Flushed on shutdown, where "in ten seconds" would be a lie.
         """
         if self._draft_source:
-            return                      # restoring; do not save what we are reading
+            return  # restoring; do not save what we are reading
         if self._draft_timeout is not None:
             GLib.source_remove(self._draft_timeout)
         self._draft_timeout = GLib.timeout_add_seconds(
-            self.DRAFT_SAVE_SECONDS, self._flush_draft)
+            self.DRAFT_SAVE_SECONDS, self._flush_draft
+        )
 
     def _flush_draft(self) -> bool:
         from shani_chronoa import composer_draft
 
         self._draft_timeout = None
-        composer_draft.save(self._input_text(),
-                            composer_draft.draft_path(self._draft_key),
-                            files=[str(p) for p in getattr(self, "_attachments", ())])
+        composer_draft.save(
+            self._input_text(),
+            composer_draft.draft_path(self._draft_key),
+            files=[str(p) for p in getattr(self, "_attachments", ())],
+        )
         return GLib.SOURCE_REMOVE
 
     def restore_draft(self) -> None:
@@ -5553,7 +6033,8 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         from shani_chronoa import composer_draft
 
         text, files = composer_draft.load_entry(
-            composer_draft.draft_path(self._draft_key))
+            composer_draft.draft_path(self._draft_key)
+        )
         if not text:
             return
         self._draft_source = True
@@ -5675,7 +6156,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             return False
         shift = bool(state & Gdk.ModifierType.SHIFT_MASK)
         if shift:
-            return False            # let it through: a newline
+            return False  # let it through: a newline
         if self._composer_is_empty():
             self._app.activate_action("toggle-listening", None)
             return True
@@ -5719,14 +6200,16 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         chip that reports a state the app has overridden.
         """
         from shani_chronoa import permissions
+
         try:
             stopped = permissions.cancel_turn()
-        except Exception:                               # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.warning("could not stop the turn", exc_info=True)
             self.set_status("This turn could not be stopped")
             return
-        self.set_status("Stopping after this step" if stopped
-                        else "Nothing was running")
+        self.set_status(
+            "Stopping after this step" if stopped else "Nothing was running"
+        )
 
     def _on_send_clicked(self, _button: Gtk.Button) -> None:
         self._submit_input()
@@ -5809,20 +6292,25 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
 # destination every caller is most likely to name.
 def _register_main_pages() -> None:
     from shani_chronoa import pages as page_registry
+
     page_registry.register(
         "main",
-        [("conversation", "Conversation"), ("quick-ask", "Quick ask"),
-         ("conversations", "Saved conversations"), ("panels", "Panels"),
-         # The panel of changes, so a notification, a keybinding or the
-         # work chip's menu can name it. It was reachable only by holding
-         # the mouse - and the work chip's "See what changed" row needs a
-         # target that is an action.
-         ("diff", "Changes"),
-         # Registered here and not only in SURFACE_IDS: the button beside
-         # Dictate calls pages.show("listening"), and it returned False -
-         # found by pressing it, not by reading it. A surface nobody
-         # registered is the sidebar button nobody added.
-         ("listening", "Listening")],
+        [
+            ("conversation", "Conversation"),
+            ("quick-ask", "Quick ask"),
+            ("conversations", "Saved conversations"),
+            ("panels", "Panels"),
+            # The panel of changes, so a notification, a keybinding or the
+            # work chip's menu can name it. It was reachable only by holding
+            # the mouse - and the work chip's "See what changed" row needs a
+            # target that is an action.
+            ("diff", "Changes"),
+            # Registered here and not only in SURFACE_IDS: the button beside
+            # Dictate calls pages.show("listening"), and it returned False -
+            # found by pressing it, not by reading it. A surface nobody
+            # registered is the sidebar button nobody added.
+            ("listening", "Listening"),
+        ],
         factory=lambda app, config=None: ChronoaWindow(app),
     )
 

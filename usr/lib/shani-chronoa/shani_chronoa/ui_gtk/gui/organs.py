@@ -296,7 +296,7 @@ class OrganStrip(Gtk.FlowBox):
         if self._config is None:
             return False
         try:
-            return bool(self._config.get_bool("organ-audible-enabled", False))
+            return bool(self._config.get_bool("organ-audible-enabled", True))
         except Exception:                               # noqa: BLE001
             return False
 

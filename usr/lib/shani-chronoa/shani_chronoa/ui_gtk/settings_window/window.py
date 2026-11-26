@@ -951,7 +951,7 @@ class SettingsWindow(SensesPage, PrivacyPage, EmailPage, VoicePage, ActivityPage
         self._switch(
             group, "Show the desktop companion",
             "A small companion in the corner that mirrors what Chronoa is doing",
-            config.get_bool("mascot-enabled", False),
+            config.get_bool("mascot-enabled", True),
             lambda a: config.set("mascot-enabled", "true" if a else "false"))
         self._choice(
             group, "Where it sits",

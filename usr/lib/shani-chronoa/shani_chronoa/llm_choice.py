@@ -19,9 +19,9 @@ from __future__ import annotations
 import logging
 from typing import Optional, Tuple
 
-logger = logging.getLogger(__name__)
-
 from shani_chronoa.redaction import redactor
+
+logger = logging.getLogger(__name__)
 
 
 def local_first(ollama, *, wake: bool = True) -> Tuple[object, str]:

@@ -30,14 +30,10 @@ def _secret(key: str) -> bool:
 
 
 def _kind(config, key: str) -> str:
-    settings = getattr(config, "_settings", None)
-    if settings is not None:
-        try:
-            code = settings.get_value(key).get_type_string()
-        except Exception:  # noqa: BLE001 - a stand-in config has no GVariant
-            code = "s"
-        return {"b": "bool", "d": "number", "i": "number"}.get(code, "string")
-    return "string"
+    from shani_chronoa import settings_table
+
+    code = settings_table.kind(key)
+    return {"b": "bool", "d": "number", "i": "number"}.get(code, code)
 
 
 def _read(config, key: str, kind: str):

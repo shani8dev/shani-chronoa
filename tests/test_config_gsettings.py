@@ -422,130 +422,57 @@ class TestTheRefusalOnlyNamesASwitchThatExists:
                     "would silently lose a capability it had enabled")
 
 
-class TestTheKeyfileGroupSpelling:
-    """`gsettings get` must be able to read what this app writes.
+class TestTheSettingsFileIsTheSingleReader:
+    """The old keyfile spelling is gone: one JSON file, read by every caller.
 
-    **The defect, and why it was invisible.** `ChronoaConfig` built its keyfile
-    backend with `root_group=SCHEMA_ID`, so the app wrote `[org.shani.chronoa]`
-    while the default backend - the `gsettings` CLI and every other GLib process
-    on the machine - wrote `[org/shani/chronoa]`, after the schema's PATH. Both
-    landed in the same file, so `gsettings get org.shani.chronoa <key>` answered
-    `false` for a value the app had written as `true`: **the switch says on,
-    every gated skill refuses, and the CLI insists it is off.** The debugging
-    path contradicted the thing it exists to check.
-
-    It was invisible because the app reads back through `ChronoaConfig` too, so
-    the round-trip test above passed on both spellings. Only a SECOND READER
-    can tell them apart, which is what these assert.
+    The invariant these tests used to defend - a second reader must see what
+    the app wrote - is unchanged. The witness is now the settings file itself,
+    because GSettings is read only during the one-time migration.
     """
 
-    def _keyfile(self, gsettings_env):
-        from pathlib import Path
-        import os
-        return Path(os.environ["XDG_CONFIG_HOME"]) / "glib-2.0" / "settings" / "keyfile"
+    def _path(self):
+        from shani_chronoa import settings_file
 
-    def test_the_group_the_app_writes_is_the_group_the_cli_reads(self, chronoa_config, gsettings_env):
-        from shani_chronoa.config import _ROOT_GROUP
+        return settings_file.user_path()
+
+    def test_the_app_writes_the_persons_file(self, chronoa_config):
         chronoa_config.set("i2c-write-enabled", "true")
-        text = self._keyfile(gsettings_env).read_text()
-        assert f"[{_ROOT_GROUP}]" in text, (
-            f"the app did not write the group the gsettings CLI reads; the file is:\n{text}")
-        assert f"[{SCHEMA_ID}]" not in text.replace(f"[{_ROOT_GROUP}]", ""), (
-            "the old spelling is still being written alongside the right one")
+        text = self._path().read_text()
+        assert '"i2c-write-enabled": true' in text, text
 
-    def test_the_root_group_is_derived_from_the_path_not_a_second_literal(self):
-        from shani_chronoa.config import SCHEMA_PATH, _ROOT_GROUP
-        assert _ROOT_GROUP == SCHEMA_PATH.strip("/"), (
-            "_ROOT_GROUP is a second literal that can drift from SCHEMA_PATH")
+    def test_a_second_instance_reads_the_same_value(self, chronoa_config):
+        from shani_chronoa.config import ChronoaConfig
 
-    def test_a_legacy_keyfile_is_adopted_rather_than_left_unreadable(self, chronoa_config, gsettings_env):
-        """A keyfile written by an older build must not become dead settings.
+        chronoa_config.set("i2c-write-enabled", "true")
+        assert ChronoaConfig().get_bool("i2c-write-enabled") is True
 
-        Without the adoption step, a user who had already granted a consent key
-        would find every gated skill refusing while the switch reads on - the
-        dead-switch class, reached by a rename.
-        """
-        keyfile = self._keyfile(gsettings_env)
-        keyfile.parent.mkdir(parents=True, exist_ok=True)
-        keyfile.write_text(
-            f"[{SCHEMA_ID}]\n"
-            "i2c-write-enabled=true\n"
-            "driver-build-enabled=true\n"
-        )
-        from shani_chronoa.config import ChronoaConfig, _ROOT_GROUP
-        fresh = ChronoaConfig()
-        assert fresh.get_bool("i2c-write-enabled", False) is True, (
-            "a grant recorded under the legacy group was lost")
-        assert fresh.get_bool("driver-build-enabled", False) is True
-        text = keyfile.read_text()
-        assert f"[{_ROOT_GROUP}]" in text and f"[{SCHEMA_ID}]" not in text, (
-            f"the migration did not converge to one group:\n{text}")
+    def test_a_file_edit_is_visible_without_restarting(self, chronoa_config):
+        import json
 
-    def test_the_newer_group_wins_over_a_stale_legacy_copy(self, chronoa_config, gsettings_env):
-        from shani_chronoa.config import ChronoaConfig, _ROOT_GROUP
-        keyfile = self._keyfile(gsettings_env)
-        keyfile.parent.mkdir(parents=True, exist_ok=True)
-        keyfile.write_text(
-            f"[{SCHEMA_ID}]\nmodel=STALE\n\n[{_ROOT_GROUP}]\nmodel=FRESH\n"
-        )
-        assert ChronoaConfig().get("model") == "FRESH", (
-            "an old copy overwrote a newer value")
+        from shani_chronoa import settings_file
 
-    def test_the_migration_converges_and_leaves_no_group_behind(self, chronoa_config, gsettings_env):
-        """Run it repeatedly: the group must go, not just stop growing.
+        path = self._path()
+        data = json.loads(path.read_text()) if path.exists() else {}
+        data["i2c-write-enabled"] = True
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data))
+        settings_file.invalidate()
+        assert chronoa_config.get_bool("i2c-write-enabled") is True
 
-        The first version removed the legacy group only when something was
-        adopted, so a keyfile whose keys were all already correct kept the stale
-        spelling forever - two groups after any number of runs. **The plain case
-        could not catch that**: with only the legacy group present the first run
-        adopts its keys, `adopted` is non-zero, and the group goes anyway. The
-        control for it is `test_a_legacy_group_whose_keys_are_all_migrated_goes_too`
-        below - without that one, the mutation survived a green suite.
-        """
-        keyfile = self._keyfile(gsettings_env)
-        keyfile.parent.mkdir(parents=True, exist_ok=True)
-        keyfile.write_text(f"[{SCHEMA_ID}]\ni2c-write-enabled=true\n")
-        from shani_chronoa.config import ChronoaConfig, _ROOT_GROUP
-        for _ in range(3):
-            ChronoaConfig()
-        groups = [ln for ln in keyfile.read_text().splitlines() if ln.startswith("[")]
-        assert groups == [f"[{_ROOT_GROUP}]"], (
-            f"expected exactly one group after three runs, got {groups}")
+    def test_an_old_gsettings_value_is_migrated_once(self, monkeypatch):
+        import json
 
-    def test_a_legacy_group_whose_keys_are_all_migrated_goes_too(self, chronoa_config, gsettings_env):
-        """The case the migration leaves behind when it only removes on adoption.
+        from shani_chronoa import settings_file
+        from shani_chronoa.config import ChronoaConfig
 
-        Both spellings hold the same key, so nothing is adopted. A migration
-        guarded by `if adopted:` never removes the old group - measured as two
-        groups after any number of runs - and the stale copy stays readable by a
-        reader of the old spelling, which is exactly the ambiguity being closed.
-        """
-        from shani_chronoa.config import ChronoaConfig, _ROOT_GROUP
-        keyfile = self._keyfile(gsettings_env)
-        keyfile.parent.mkdir(parents=True, exist_ok=True)
-        keyfile.write_text(
-            f"[{SCHEMA_ID}]\ni2c-write-enabled=true\n\n"
-            f"[{_ROOT_GROUP}]\ni2c-write-enabled=true\n"
-        )
+        monkeypatch.setattr(settings_file, "_gsettings_values",
+                            lambda: {"i2c-write-enabled": True})
+        monkeypatch.setattr(settings_file, "retired_values", lambda: {})
         ChronoaConfig()
-        groups = [ln for ln in keyfile.read_text().splitlines() if ln.startswith("[")]
-        assert groups == [f"[{_ROOT_GROUP}]"], (
-            f"the legacy group survived a run that adopted nothing: {groups}")
+        data = json.loads(self._path().read_text())
+        assert data["i2c-write-enabled"] is True
+        assert data[settings_file.MIGRATION_KEY] is True
 
-    def test_a_second_process_reads_what_the_first_wrote(self, chronoa_config, gsettings_env):
-        """The whole point: a reader that is not this process.
-
-        Asserted with `gsettings` itself when it is available, which is the
-        external reader the bug was about - a second `ChronoaConfig` would have
-        passed on the broken code.
-        """
-        chronoa_config.set("i2c-write-enabled", "true")
-        try:
-            out = subprocess.run(
-                ["gsettings", "get", "org.shani.chronoa", "i2c-write-enabled"],
-                capture_output=True, text=True, timeout=30, check=False)
-        except OSError:
-            pytest.skip("gsettings is not installed, so the CLI cannot be the witness")
-        assert out.stdout.strip() == "true", (
-            f"gsettings reads {out.stdout.strip()!r} for a value the app wrote "
-            f"as true - the two readers still disagree:\n{out.stderr}")
+        monkeypatch.setattr(settings_file, "_gsettings_values",
+                            lambda: pytest.fail("read GSettings after migration"))
+        ChronoaConfig()

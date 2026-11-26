@@ -45,16 +45,20 @@ def test_get_accepts_a_key_or_a_readable_label(cfg):
 def test_set_requires_confirm_only_to_turn_a_consent_key_on(cfg):
     from shani_chronoa.engine_ops import settings
 
+    # The destructive switches ship ON, but each action still asks at run
+    # time; a refused settings write must leave that default untouched.
+    before = cfg.get_bool("file-delete-enabled")
     refused = settings.set("file-delete-enabled", "true", config=cfg)
     assert "confirmation required" in refused["error"]
+    assert cfg.get_bool("file-delete-enabled") is before
+
+    written = settings.set("file-delete-enabled", "false", confirm=True, config=cfg)
+    assert written["name"] == "file-delete-enabled"
+    assert written["value"] is False and written["changed"] is True
     assert cfg.get_bool("file-delete-enabled") is False
 
-    written = settings.set("file-delete-enabled", "true", confirm=True, config=cfg)
-    assert written["name"] == "file-delete-enabled"
-    assert written["value"] is True and written["changed"] is True
-    assert cfg.get_bool("file-delete-enabled") is True
-
-    # Turning a dangerous switch OFF is the safe direction.
+    # Turning a dangerous switch OFF is the safe direction: no confirm needed.
+    settings.set("file-delete-enabled", "true", confirm=True, config=cfg)
     off = settings.set("file-delete-enabled", "false", config=cfg)
     assert off["value"] is False and off["changed"] is True
 

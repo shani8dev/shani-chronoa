@@ -178,7 +178,7 @@ class VoicePage:
                      "A short tone when Chronoa starts and stops hearing, seeing, "
                      "speaking or acting. Off by default: it is a cue, not a "
                      "notification you asked for.",
-                     config.get_bool("organ-audible-enabled", False),
+                     config.get_bool("organ-audible-enabled", True),
                      lambda a: self._set_bool("organ-audible-enabled", a))
         self._number(group, "Speaking speed", "1.0 is normal; lower is slower",
                      config.get_double("speech-rate", 1.0), 0.5, 2.0, 0.1, self._set_speech_rate)
