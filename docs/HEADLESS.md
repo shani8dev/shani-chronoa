@@ -341,6 +341,26 @@ Sections are read-only. Setup, writes, approvals and the remaining ops in the
 table below are still to be provided by the shell bridge or by later engine
 interface work. `tests/test_agent_inventory.py` covers every section.
 
+### Additive Agent methods for a terminal client (2026-11-26)
+
+`chronoa` (the phase-5b terminal client) needs three things plain `Turn` could
+not express. They were added as **additive** methods; `Turn`, `Approve`,
+`Write`, `FindFiles`, `Inventory` and `Event` are unchanged.
+
+- `TurnWith(text, options_json) -> turn_id`: `options_json` may carry
+  `conversation` (`""` = open one, `"new"` = fresh, id/title = resume),
+  `paths` (attached file paths, using the same `attachments.block` as the GTK
+  paperclip) and `ephemeral` (a throwaway assistant with no transcript).
+- `Cancel(turn_id) -> ok`: cancels the running turn's future, resolves its
+  pending approval as no answer, and emits `notice` + `done` so any client
+  waiting on that turn can stop.
+
+**The shell's copy must gain both methods.** `shani-shell/bridge/agent_contract.py`
+is compared against this repo's contract by the shell's contract test; until it
+adds the `TurnWith` and `Cancel` XML blocks (same args as
+`shani_chronoa/agent_contract.py`), that test fails. The shell repo was not
+edited from this worktree.
+
 ### Per window/panel
 
 | window / panel | bridge path | payload / note |

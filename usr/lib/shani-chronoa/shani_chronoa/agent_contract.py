@@ -8,7 +8,10 @@ events, and moments where the person must decide.
 
 Methods:
   Turn(text) -> turn_id        # starts a turn; its events arrive via Event
+  TurnWith(text, options_json) -> turn_id
+                               # a turn with a conversation, files and/or no history
   Approve(id, decision) -> ok  # the person approves or denies a turn step
+  Cancel(id) -> ok             # stop waiting on a turn that is still running
   Write(instruction, text) -> text
   FindFiles(query, limit) -> json
   Inventory(section) -> json   # read-only facts for a shell's panels
@@ -60,9 +63,18 @@ XML = f"""<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 
       <arg name="text" type="s" direction="in"/>
       <arg name="turn_id" type="s" direction="out"/>
     </method>
+    <method name="TurnWith">
+      <arg name="text" type="s" direction="in"/>
+      <arg name="options_json" type="s" direction="in"/>
+      <arg name="turn_id" type="s" direction="out"/>
+    </method>
     <method name="Approve">
       <arg name="turn_id" type="s" direction="in"/>
       <arg name="decision" type="s" direction="in"/>
+      <arg name="ok" type="b" direction="out"/>
+    </method>
+    <method name="Cancel">
+      <arg name="turn_id" type="s" direction="in"/>
       <arg name="ok" type="b" direction="out"/>
     </method>
     <method name="Write">

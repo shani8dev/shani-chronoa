@@ -1,0 +1,52 @@
+"""Slash parsing is plain data; the engine still decides everything else."""
+
+from shani_chronoa.tui import commands
+
+
+def test_plain_text_is_not_a_command():
+    assert commands.parse("hello world") == ("", "hello world")
+    assert commands.parse("/") == ("", "/")
+    assert commands.parse("//") == ("", "//")
+
+
+def test_commands_are_lowercased_and_split_from_arguments():
+    assert commands.parse("/models conversion") == ("models", "conversion")
+    assert commands.parse("  /RESUME  turn-42  ") == ("resume", "turn-42")
+    assert commands.parse("/help") == ("help", "")
+
+
+def test_unknown_commands_still_parse_so_the_client_can_say_so():
+    assert commands.parse("/nonsense arg") == ("nonsense", "arg")
+
+
+def test_slash_completion_only_offers_real_commands():
+    assert commands.completions("/mod") == ["/models"]
+    assert commands.completions("/m") == ["/memory", "/models"]
+    assert commands.completions("/zzz") == []
+    assert all(name.startswith("/") for name in commands.completions("/"))
+
+
+def test_path_completion_expands_home_and_marks_directories(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / "notes.txt").write_text("hi", encoding="utf-8")
+    (tmp_path / "projects").mkdir()
+    assert any(
+        path.endswith("notes.txt") for path in commands.path_completions("@~/no")
+    )
+    assert any(
+        path.endswith("projects/") for path in commands.path_completions("@~/pro")
+    )
+    assert commands.path_completions("@~/missing") == []
+
+
+def test_help_covers_every_command():
+    lines = commands.help_lines()
+    assert len(lines) == len(commands.COMMANDS)
+    for name in commands.COMMANDS:
+        assert any(line.startswith(f"/{name} ") for line in lines)
+
+
+def test_skills_reads_the_capabilities_section_too():
+    assert commands.SECTION_COMMANDS["skills"] == "skills"
+    assert "capabilities" in commands.EXTRA_SECTIONS["skills"]
+    assert commands.SECTION_COMMANDS["conversations"] == "conversations"

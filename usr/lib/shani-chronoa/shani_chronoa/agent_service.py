@@ -281,6 +281,9 @@ class AgentService:
     def __init__(self, app: "ChronoaApplication") -> None:
         self._app = app
         self._pending: "dict[str, tuple[threading.Event, Callable[[str], None]]]" = {}
+        #: Turn id -> the AsyncBridge future, so `Cancel` can stop a running
+        #: turn instead of only telling the client to stop listening.
+        self._futures: "dict[str, object]" = {}
         self._lock = threading.Lock()
         self._owner = None
         self._registration = None
@@ -303,14 +306,7 @@ class AgentService:
         sink = _AgentSink(self, turn_id)
         try:
             coro = self._app.assistant.handle(text, sink=sink)
-            # **Bound only while the turn is scheduled.** The async bridge
-            # copies the context before the task runs, and the assistant
-            # copies it again into the tool thread, so the question a tool
-            # asks finds this turn's resolver - and no other turn can.
-            with ask_bridge.turn_resolver(sink.ask):
-                self._app._async.run(
-                    coro, lambda result: self._on_done(turn_id, result)
-                )
+            self._launch(turn_id, sink, coro)
         except Exception as exc:  # noqa: BLE001 - reported to the caller
             logger.exception("agent turn %s could not start", turn_id)
             invocation.return_dbus_error(
@@ -318,6 +314,165 @@ class AgentService:
             )
             return
         invocation.return_value(GLib.Variant("(s)", (turn_id,)))
+
+    def _launch(self, turn_id: str, sink: "_AgentSink", coro) -> None:
+        """Schedule a turn with its approval resolver bound to that turn only.
+
+        **Bound only while the turn is scheduled.** The async bridge copies the
+        context before the task runs, and the assistant copies it again into the
+        tool thread, so the question a tool asks finds this turn's resolver - and
+        no other turn can. Turn and TurnWith share this so Cancel can find the
+        future either way.
+        """
+        with ask_bridge.turn_resolver(sink.ask):
+            self._futures[turn_id] = self._app._async.run(
+                coro, lambda result: self._on_done(turn_id, result)
+            )
+
+    # -- TurnWith: attachments, conversation and one-shot turns ----------
+
+    def TurnWith(
+        self, connection, sender, path, interface, method, params, invocation
+    ) -> None:
+        """A turn with options: a conversation, files, or no saved history.
+
+        `options_json` is one JSON object with optional keys:
+
+        - `conversation`: `""` (the open one), `"new"`, or an id/title from
+          `Inventory("conversations")`.
+        - `paths`: file paths to attach (the block the GTK paperclip adds).
+        - `ephemeral`: true for a one-shot answer the conversation never keeps.
+
+        Additive: plain Turn still means "the open conversation, no files, keep
+        the answer", and nothing here changes that path.
+        """
+        text, options_json = (str(value or "") for value in params.unpack())
+        text = text.strip()
+        if not text:
+            invocation.return_dbus_error(
+                "org.freedesktop.DBus.Error.InvalidArgs",
+                "TurnWith needs text to start a turn",
+            )
+            return
+        try:
+            options = json.loads(options_json or "{}")
+        except (TypeError, ValueError) as exc:
+            invocation.return_dbus_error(
+                "org.freedesktop.DBus.Error.InvalidArgs",
+                f"TurnWith options are not JSON: {exc}",
+            )
+            return
+        if not isinstance(options, dict):
+            invocation.return_dbus_error(
+                "org.freedesktop.DBus.Error.InvalidArgs",
+                "TurnWith options must be a JSON object",
+            )
+            return
+        paths = options.get("paths") or []
+        if not isinstance(paths, (list, tuple)):
+            invocation.return_dbus_error(
+                "org.freedesktop.DBus.Error.InvalidArgs",
+                "TurnWith paths must be a list",
+            )
+            return
+
+        augmented = text
+        if paths:
+            from shani_chronoa import attachments
+
+            block = attachments.block(attachments.accept(paths, []))
+            if block:
+                augmented += block
+
+        try:
+            assistant = self._assistant_for_options(options)
+        except (ValueError, LookupError) as exc:
+            invocation.return_dbus_error(
+                "dev.shani.chronoa.Error.BadConversation", str(exc)
+            )
+            return
+
+        turn_id = "turn-" + uuid.uuid4().hex[:12]
+        sink = _AgentSink(self, turn_id)
+        try:
+            coro = assistant.handle(augmented, sink=sink)
+            self._launch(turn_id, sink, coro)
+        except Exception as exc:  # noqa: BLE001 - reported to the caller
+            logger.exception("agent turn %s could not start", turn_id)
+            invocation.return_dbus_error(
+                "dev.shani.chronoa.Error.TurnFailed", f"{type(exc).__name__}: {exc}"
+            )
+            return
+        invocation.return_value(GLib.Variant("(s)", (turn_id,)))
+
+    def _assistant_for_options(self, options: dict):
+        """Which assistant handles a TurnWith: the open one, a new/resumed
+        one, or a throwaway with no transcript for an ephemeral question."""
+        from shani_chronoa import conversation_store
+
+        assistant = self._app.assistant
+        conversation = str(options.get("conversation") or "")
+        if conversation == "new":
+            root = conversation_store.session_dir()
+            sid = conversation_store.new_session(root)
+            assistant.switch_session(conversation_store.session_path(root, sid))
+        elif conversation:
+            root = conversation_store.session_dir()
+            sid = conversation_store.switch(root, conversation)
+            if not sid:
+                raise ValueError(f"no conversation matches {conversation!r}")
+            assistant.switch_session(conversation_store.session_path(root, sid))
+        if options.get("ephemeral"):
+            from shani_chronoa.assistant import Assistant
+
+            assistant = Assistant(
+                self._app.llm,
+                percept_store=getattr(assistant, "percept_store", None),
+                context_builder=getattr(assistant, "context_builder", None),
+                session_path=None,
+                config=getattr(assistant, "config", None),
+            )
+        return assistant
+
+    # -- Cancel: stop a turn that is still running -----------------------
+
+    def Cancel(
+        self, connection, sender, path, interface, method, params, invocation
+    ) -> None:
+        """Stop a running turn; also closes its pending approval, if any.
+
+        Assistant.handle repairs the turn's history when it sees CancelledError,
+        so a cancelled tool batch leaves no orphaned call in the transcript. A
+        done event follows, so a client waiting on this turn can stop even when
+        the coroutine never runs its completion hook.
+        """
+        turn_id = str(params.unpack()[0] or "")
+        with self._lock:
+            future = self._futures.pop(turn_id, None)
+            entry = self._pending.pop(turn_id, None)
+        if entry is not None:
+            entry[1]("")  # no answer: a cancelled turn must not look approved
+        if future is None:
+            invocation.return_value(GLib.Variant("(b)", (False,)))
+            return
+        try:
+            future.cancel()
+        except Exception:  # noqa: BLE001 - a refusal must not kill the bus call
+            logger.debug("could not cancel turn %s", turn_id, exc_info=True)
+        self.emit_event(
+            json.dumps(
+                {
+                    "turn": turn_id,
+                    "event": "notice",
+                    "text": "Turn cancelled",
+                },
+                ensure_ascii=False,
+            )
+        )
+        self.emit_event(
+            json.dumps({"turn": turn_id, "event": "done", "text": "cancelled"})
+        )
+        invocation.return_value(GLib.Variant("(b)", (True,)))
 
     def Approve(
         self, connection, sender, path, interface, method, params, invocation
@@ -481,6 +636,7 @@ class AgentService:
         return True
 
     def _on_done(self, turn_id: str, result) -> None:
+        self._futures.pop(turn_id, None)
         if isinstance(result, Exception):
             self.emit_event(
                 json.dumps(
