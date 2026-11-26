@@ -535,7 +535,7 @@ class ChronoaConfig:
 
         settings_file.migrate_once()
         self._valid_keys = frozenset(settings_table.KEYS)
-        settings_file.watch(lambda: None)  # invalidation only; readers re-read
+        settings_file.ensure_watched()  # one monitor per process; readers re-read
 
     def _new_settings(self):
         """No GSettings object exists any more; kept as a compatibility hook."""

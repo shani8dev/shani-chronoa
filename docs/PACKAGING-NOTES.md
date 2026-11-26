@@ -180,7 +180,7 @@ Four layers, later wins:
 
 A distribution ships defaults by dropping one flat JSON object into
 `/usr/share/shani-chronoa/defaults.d/`, e.g.
-`50-shani-os.json` with `{"enable-camera-sense": false}`. Files are read in
+`50-shani-os.json` with `{"camera-sense-enabled": false}`. Files are read in
 sorted name order, so a later filename wins; admin and person layers then win
 over both. Only keys declared in `settings_table.KEYS` are accepted, values are
 coerced to that key's declared kind, and unknown keys are ignored. No schema

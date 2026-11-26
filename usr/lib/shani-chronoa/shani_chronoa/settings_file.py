@@ -94,6 +94,15 @@ _cache: "dict[str, object]" = {}
 _cache_lock = threading.Lock()
 _monitor = None
 _monitor_callbacks: "list[Callable[[], None]]" = []
+_watched = False
+
+
+def ensure_watched() -> None:
+    """One file monitor per process, however many ChronoaConfig objects exist."""
+    global _watched
+    if not _watched:
+        watch(lambda: None)
+        _watched = True
 
 
 def invalidate() -> None:
@@ -336,6 +345,7 @@ def _ensure_monitor() -> None:
 
 
 def unwatch_all() -> None:
-    global _monitor
+    global _monitor, _watched
     _monitor_callbacks.clear()
     _monitor = None
+    _watched = False
