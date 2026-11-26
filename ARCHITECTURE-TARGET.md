@@ -380,7 +380,7 @@ Paths are relative to `usr/lib/shani-chronoa/shani_chronoa/`.
 | Attention | 🟡 | tool selection, context fitting, compression; `salience.py` scores unattended urgences in a bounded queue with a DND/rhythm interrupt policy |
 | Memory | ✅ | durable facts with links and history; conversations and photos searched by words (FTS5) and by meaning (embeddings, setup's Memory) |
 | Self-model | ✅ | capabilities, hardware tier, model choice, model fit, child supervisor |
-| Brain | ✅ | llama.cpp (default), Ollama, cloud fallback chain, tool loop, MCP server |
+| Brain | ✅ | llama.cpp (default), Ollama, cloud fallback chain, tool loop, MCP server; the same engine starts headless (`engine.py`) with no GTK typelib, and `Agent.Inventory` exposes read-only panel data |
 | Imagination / Curiosity / Affect | ❌ | only fragments (plan mode, loop detection, ask_user) |
 | Motivation | 🟡 | todo list, reminders, timers, scheduled triggers; `goals.py` is a goal manager and `planner.py` orders and re-plans its steps |
 | Language | ✅ | LLM, STT, TTS, translation; **cloud STT as a fallback** (`cloud_voice.CloudSTT`, opt-in, and **only when no local model can listen**) - every cloud speech route measured needs a key, so it is never anonymous |
@@ -396,6 +396,19 @@ Paths are relative to `usr/lib/shani-chronoa/shani_chronoa/`.
 | Subconscious | 🟡 | ambient polling and unattended rules; no anomaly detection or prediction |
 | Homeostasis | 🟡 | senses cover every listed vital; correcting needs a rule the user arms |
 | Rhythm | 🟡 | daemon and user units, idle sense; no awake/idle/sleep state machine |
+
+**2026-11-26 — the engine is no longer the GTK app.** `shani_chronoa/engine.py`
+builds the model, tool loop and Agent D-Bus service with no import from `gui/`,
+`settings_window/`, `app/` or `ui_gtk/`. Verified by execution in
+`tests/test_headless_engine.py`: with `gi.repository.Gtk`/`Adw`/`Gdk` blocked,
+the engine answers a turn through the repo's stand-in Ollama, while importing
+`shani_chronoa.app` still raises. `ui_gtk/` is the single GTK process boundary;
+the launcher enters through it. `Agent.Inventory(section)` adds read-only
+conversations, models, skills, routines, triggers, privacy, senses, memory,
+capabilities and status for a shell that draws its own panels; writes and
+setup are deliberately not exposed that way. `docs/HEADLESS.md` maps every
+GTK surface to an engine op. Packaging is a proposal in
+`docs/PACKAGING-NOTES.md`, not an edit to `shani-pkgbuilds`.
 
 ### 🧬 Instinct / Safety
 
@@ -573,7 +586,7 @@ Paths are relative to `usr/lib/shani-chronoa/shani_chronoa/`.
 
 | Box | Status | Where |
 |---|---|---|
-| D-Bus | ✅ | many skills (media, power, notifications, Bluetooth) |
+| D-Bus | ✅ | many skills (media, power, notifications, Bluetooth); `dev.shani.chronoa.Agent` is the shell's engine interface (`Turn`, `Approve`, `Write`, `FindFiles`, `Inventory`, `Event`) and works without the GTK window |
 | systemd | ✅ | `control_service`, `list_services` |
 | GNOME APIs / KDE-KWin | ✅ | both backends exist and are run on both images (`desktop_session.py`, appearance and window skills) |
 | XDG portals | ✅ | `portal.py` (RemoteDesktop input, GlobalShortcuts), screenshot |
