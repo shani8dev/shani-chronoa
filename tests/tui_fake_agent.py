@@ -52,7 +52,12 @@ SECTIONS = {
     ],
     "routines": [{"name": "morning", "phrases": ["good morning"]}],
     "triggers": [{"name": "battery low", "enabled": True}],
-    "privacy": {"privacy_mode": True, "senses": [], "recent_egress": 0},
+    "privacy": {
+        "privacy_mode": True,
+        "granted_consent_key": None,
+        "senses": [],
+        "recent_egress": 0,
+    },
     "senses": [{"name": "battery", "key": "battery-sense-enabled", "enabled": True}],
     "memory": [
         {"content": "Likes tea", "source": "chat", "created_at": 1, "metadata": {}}
@@ -63,6 +68,92 @@ SECTIONS = {
         "stt_available": False,
         "tts_engine": "espeak-ng",
         "privacy_mode": True,
+    },
+}
+
+
+CAP_DATA = {
+    "settings_rows": [
+        {
+            "name": "privacy-mode",
+            "label": "Privacy mode",
+            "value": "true",
+            "kind": "b",
+            "secret": False,
+            "consent_key": "",
+        }
+    ],
+    "models": {
+        "items": [
+            {
+                "engine": "local",
+                "name": "qwen3:4b",
+                "detail": "llama.cpp server",
+                "installed": True,
+                "current": True,
+            }
+        ],
+        "how": "local first",
+    },
+    "setup": {
+        "state": {"brain": "ready"},
+        "needs_setup": False,
+        "stt_catalogue": [("en", "whisper-small")],
+    },
+    "memory": {
+        "facts": [
+            {"text": "Likes tea", "created": 1, "source": "chat", "confidence": 0.9}
+        ],
+        "proposals": [],
+    },
+    "notices": [
+        {
+            "id": "notice-1",
+            "title": "Something happened",
+            "body": "detail",
+            "why": "reason",
+        }
+    ],
+    "voice": {
+        "engines": [{"name": "espeak-ng", "installed": True, "detail": "speech"}],
+        "devices": {
+            "input": [
+                {
+                    "name": "default",
+                    "label": "Default",
+                    "description": "",
+                    "kind": "input",
+                }
+            ],
+            "output": [
+                {
+                    "name": "default",
+                    "label": "Default",
+                    "description": "",
+                    "kind": "output",
+                }
+            ],
+        },
+        "catalogue": [
+            {"key": "en", "label": "English", "detail": "", "engine": "espeak-ng"}
+        ],
+    },
+    "activity": {
+        "calls": [
+            {
+                "timestamp": "2026-11-26T00:00:00",
+                "tool_name": "read_file",
+                "duration_ms": 1,
+                "origin": "user",
+                "verdict": "ok",
+                "evidence": "",
+                "undone": False,
+            }
+        ],
+        "truncated": False,
+    },
+    "diagnostics": {
+        "checks": [{"title": "Local model", "status": "working", "detail": "ok"}]
     },
 }
 
@@ -219,6 +310,144 @@ class FakeAgent:
         invocation.return_value(
             GLib.Variant("(s)", (json.dumps(payload, ensure_ascii=False),))
         )
+
+    # -- additive capability methods -------------------------------------
+    # These shapes are the real engine_ops shapes, asserted by
+    # tests/test_agent_capability_parity.py against the real functions.
+
+    def _capability(self, payload, invocation):
+        invocation.return_value(
+            GLib.Variant("(s)", (json.dumps(payload, ensure_ascii=False, default=str),))
+        )
+
+    def SettingsList(self, params, invocation):
+        self._capability({"items": CAP_DATA["settings_rows"]}, invocation)
+
+    def SettingsGet(self, params, invocation):
+        name = str(params[0] or "")
+        row = dict(CAP_DATA["settings_rows"][0])
+        row["name"] = name or row["name"]
+        self._capability(row, invocation)
+
+    def SettingsSet(self, params, invocation):
+        name, value, confirm = params
+        if not confirm:
+            self._capability({"error": "confirmation required"}, invocation)
+        else:
+            self._capability(
+                {
+                    "name": str(name),
+                    "label": str(name).replace("-", " "),
+                    "value": "<set>",
+                    "changed": True,
+                },
+                invocation,
+            )
+
+    def SettingsPreset(self, params, invocation):
+        name, confirm = params
+        self._capability(
+            {"error": "confirmation required"}
+            if not confirm
+            else {"preset": str(name), "current": str(name)},
+            invocation,
+        )
+
+    def SettingsEmail(self, params, invocation):
+        values_json, confirm = params
+        self._capability(
+            {"error": "confirmation required"}
+            if not confirm
+            else {"status": "saved", "message": "", "path": "/tmp/email.json"},
+            invocation,
+        )
+
+    def ModelsList(self, params, invocation):
+        self._capability(CAP_DATA["models"], invocation)
+
+    def ModelsUse(self, params, invocation):
+        name, confirm = params
+        self._capability(
+            {"error": "confirmation required"}
+            if not confirm
+            else {
+                "name": str(name),
+                "engine": str(name),
+                "how": "chosen",
+                "changed": True,
+            },
+            invocation,
+        )
+
+    def SetupState(self, params, invocation):
+        self._capability(CAP_DATA["setup"], invocation)
+
+    def SetupStep(self, params, invocation):
+        step, value, confirm = params
+        self._capability(
+            {"error": "confirmation required"}
+            if not confirm
+            else {"step": str(step), "result": "done", "message": ""},
+            invocation,
+        )
+
+    def Conversations(self, params, invocation):
+        self._capability({"items": SECTIONS["conversations"]}, invocation)
+
+    def ConversationsResume(self, params, invocation):
+        self._capability(
+            {"session": "/tmp/conv-1.jsonl", "ref": str(params[0])}, invocation
+        )
+
+    def ConversationsRename(self, params, invocation):
+        self._capability({"ref": str(params[0]), "title": str(params[1])}, invocation)
+
+    def ConversationsDelete(self, params, invocation):
+        ref, confirm = params
+        self._capability(
+            {"error": "confirmation required"}
+            if not confirm
+            else {"deleted": str(ref)},
+            invocation,
+        )
+
+    def MemoryList(self, params, invocation):
+        self._capability(CAP_DATA["memory"], invocation)
+
+    def MemoryDecide(self, params, invocation):
+        item, decision, confirm = params
+        self._capability(
+            {"error": "confirmation required"}
+            if not confirm
+            else {"id": str(item), "decision": str(decision)},
+            invocation,
+        )
+
+    def Routines(self, params, invocation):
+        self._capability({"items": SECTIONS["routines"]}, invocation)
+
+    def RoutinesRun(self, params, invocation):
+        self._capability(
+            {"name": str(params[0]), "request": "good morning"}, invocation
+        )
+
+    def Triggers(self, params, invocation):
+        self._capability({"items": SECTIONS["triggers"]}, invocation)
+
+    def Notices(self, params, invocation):
+        self._capability({"items": CAP_DATA["notices"]}, invocation)
+
+    def NoticesDismiss(self, params, invocation):
+        self._capability({"dismissed": str(params[0])}, invocation)
+
+    def VoiceEngines(self, params, invocation):
+        self._capability(CAP_DATA["voice"], invocation)
+
+    def Activity(self, params, invocation):
+        self._capability(CAP_DATA["activity"], invocation)
+
+    def DiagnosticsProbe(self, params, invocation):
+        self._capability(CAP_DATA["diagnostics"], invocation)
 
     def Write(self, params, invocation):
         instruction, text = params

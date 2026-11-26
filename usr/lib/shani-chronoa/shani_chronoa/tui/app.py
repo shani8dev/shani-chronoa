@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 from typing import Callable, Optional, TextIO
 
-from shani_chronoa.tui import approve, commands
+from shani_chronoa.tui import approve, commands, display
 from shani_chronoa.tui.agent import AgentClient
 from shani_chronoa.tui.input import Input
 
@@ -117,7 +117,10 @@ def show_inventory(client: AgentClient, name: str, sections, stream: TextIO = No
                     value = ", ".join(str(v) for v in value) or "none"
                 elif isinstance(value, bool):
                     value = "yes" if value else "no"
-                print(f"  {key.replace('_', ' ')}: {value if value != '' else '-'}", file=out)
+                print(
+                    f"  {key.replace('_', ' ')}: {value if value != '' else '-'}",
+                    file=out,
+                )
             if data.get("error"):
                 print(f"  error: {data['error']}", file=out)
             continue
@@ -182,7 +185,9 @@ class Interactive:
             try:
                 self.command(name, arg)
             except Exception as exc:  # noqa: BLE001
-                print(f"/{name} did not work: {type(exc).__name__}: {exc}", file=self.out)
+                print(
+                    f"/{name} did not work: {type(exc).__name__}: {exc}", file=self.out
+                )
             return
         text, paths = extract_paths(line)
         options = dict(self.pending_options)
@@ -195,27 +200,59 @@ class Interactive:
 
     def command(self, name: str, arg: str) -> None:
         if name == "help":
-            for line in commands.help_lines():
+            for line in commands.help_lines() + commands.capability_help_lines():
                 print(line, file=self.out)
-        elif name == "quit":
+            return
+        if name == "quit":
             self.stop = True
-        elif name == "new":
+            return
+        if name == "new":
             self.pending_options["conversation"] = "new"
             print("Next message starts a new conversation.", file=self.out)
-        elif name == "resume":
+            return
+        if name == "resume":
             if not arg.strip():
                 print("Usage: /resume <conversation id or title>", file=self.out)
             else:
                 self.pending_options["conversation"] = arg.strip()
                 print(f"Next message continues {arg.strip()}.", file=self.out)
-        elif name == "skills":
+            return
+        if name == "skills":
             show_inventory(self.client, name, ("skills", "capabilities"), self.out)
+            return
+        method, args = commands.resolve(name, arg)
+        if method is not None:
+            self.capability(method, args)
         elif name in commands.SECTION_COMMANDS:
             show_inventory(
                 self.client, name, (commands.SECTION_COMMANDS[name],), self.out
             )
         else:
             print(f"Unknown command /{name}. Try /help.", file=self.out)
+
+    def capability(self, method: str, args: list) -> None:
+        """One additive Agent call: ask first when a person must say yes."""
+        from shani_chronoa.agent_capabilities import METHODS
+
+        spec = METHODS[method]
+        values = list(args)
+        if spec.confirm:
+            if "confirm" not in spec.arg_names:
+                values.append(True)
+            else:
+                answer = input(
+                    "This changes consent or sends data off this machine. Continue? [y/N] "
+                )
+                if answer.strip().lower() not in ("y", "yes"):
+                    print("Cancelled.", file=self.out)
+                    return
+                values.append(True)
+        try:
+            data = self.client.capability(method, *values)
+        except Exception as exc:  # noqa: BLE001 - one command must not end the session
+            print(f"/{method} did not work: {type(exc).__name__}: {exc}", file=self.out)
+            return
+        display.show(data, self.out, method)
 
     def _respond(self, event: dict) -> str:
         # The renderer already drew the number choices and the detail.

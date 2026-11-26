@@ -41,6 +41,12 @@ COMMANDS: dict[str, Command] = {
     "new": Command("new", "[title]", "start a new conversation"),
     "quit": Command("quit", "", "leave the terminal client"),
     "resume": Command("resume", "[id]", "resume a conversation by id"),
+    "settings": Command("settings", "", "read named settings"),
+    "setup": Command("setup", "", "first-run setup state"),
+    "notices": Command("notices", "", "list things Chronoa noticed"),
+    "voice": Command("voice", "", "list speech engines and devices"),
+    "activity": Command("activity", "", "list recent tool calls"),
+    "diagnostics": Command("diagnostics", "", "probe the engine's parts"),
 }
 
 #: Commands that read a same-named, read-only Inventory section.
@@ -83,8 +89,45 @@ def parse(line: str) -> tuple[str, str]:
 
 
 def completions(token: str) -> list[str]:
-    """Slash command names (with leading `/`) starting with `token`, sorted."""
-    return sorted("/" + name for name in COMMANDS if ("/" + name).startswith(token))
+    """Slash paths starting with `token`, sorted.
+
+    A token with a space is a partly typed method path (`/settings se`), so
+    the full additive paths are offered; a bare token offers only top-level
+    command names. Both come from the same table the CLI parser reads.
+    """
+    from shani_chronoa.agent_capabilities import METHODS
+
+    if " " in token:
+        paths = {"/" + " ".join(m.slash) for m in METHODS.values()}
+    else:
+        paths = {"/" + name for name in COMMANDS}
+    return sorted(path for path in paths if path.startswith(token))
+
+
+def resolve(name: str, rest: str) -> "tuple[str | None, list[str]]":
+    """Map a parsed slash command to an additive Agent method and its args.
+
+    Returns ``(None, [])`` for the commands the client owns itself (help,
+    quit, /new, /resume) and for the read-only Inventory sections that have
+    no method yet. The longest matching path wins, so ``/settings get NAME``
+    does not resolve to the bare ``/settings`` reader.
+    """
+    from shani_chronoa.agent_capabilities import METHODS
+
+    tokens = [name, *rest.split()]
+    best = None
+    for method in METHODS.values():
+        path = list(method.slash)
+        if tokens[: len(path)] == path and (
+            best is None or len(path) > len(best.slash)
+        ):
+            best = method
+    if best is None:
+        return None, []
+    args = tokens[len(best.slash) :]
+    if best.join_last and len(args) > 1:
+        args = [args[0], " ".join(args[1:])]
+    return best.name, args
 
 
 def path_completions(token: str) -> list[str]:
@@ -119,4 +162,16 @@ def help_lines() -> list[str]:
     for command in COMMANDS.values():
         left = f"/{command.name} {command.usage}".rstrip()
         lines.append(f"{left} - {command.help}")
+    return lines
+
+
+def capability_help_lines() -> list[str]:
+    """One line per additive Agent method, with the args a person types."""
+    from shani_chronoa.agent_capabilities import METHODS
+
+    lines = []
+    for method in METHODS.values():
+        names = [a for a in method.arg_names if a != "confirm"]
+        left = " ".join(("/" + " ".join(method.slash), *names))
+        lines.append(f"{left.rstrip()} - {method.help}")
     return lines

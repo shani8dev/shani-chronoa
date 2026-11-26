@@ -192,6 +192,21 @@ class AgentClient:
         except (TypeError, ValueError) as exc:
             raise AgentError(f"Inventory({section}) returned bad JSON: {exc}") from exc
 
+    def capability(self, method: str, *args) -> dict:
+        """Call one additive capability method and decode its single JSON row."""
+        from shani_chronoa.agent_capabilities import METHODS
+
+        spec = METHODS[method]
+        values = [
+            bool(a) if kind == "b" else str(a) for a, (_, kind) in zip(args, spec.args)
+        ]
+        raw = self.call(method, spec.signature_in, *values, reply="(s)")[0]
+        try:
+            result = json.loads(raw)
+        except (TypeError, ValueError) as exc:
+            raise AgentError(f"{method} returned bad JSON: {exc}") from exc
+        return result if isinstance(result, dict) else {"items": result}
+
     def close(self) -> None:
         if self._subscription is not None and self._connection is not None:
             try:

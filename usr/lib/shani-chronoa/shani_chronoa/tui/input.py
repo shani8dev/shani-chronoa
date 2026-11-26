@@ -48,6 +48,10 @@ def completer(text: str, state: int):
     get_end = getattr(readline, "get_endpos", None) or readline.get_endidx
     buffer = readline.get_line_buffer()[: get_end()]
     token = buffer[max(buffer.rfind(" "), buffer.rfind("\t")) + 1 :]
+    # Once a slash path has a space, complete the whole path so subcommands
+    # such as `/settings get` are offered, not just the first word.
+    if buffer.lstrip().startswith("/") and " " in buffer:
+        token = buffer.strip()
     if token.startswith("/"):
         matches = commands.completions(token)
     elif "@" in token:
