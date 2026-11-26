@@ -63,31 +63,10 @@ PATH = "/dev/shani/chronoa/Agent"
 IFACE = "dev.shani.chronoa.Agent"
 
 
-def _capability_xml() -> str:
-    """One XML block per additive method, read from the clients' table.
-
-    Generating this from `agent_capabilities` rather than naming the methods
-    twice is what lets the parity test prove that a method exposed on the bus
-    also has a slash command and a CLI subcommand. The shell's copy of this
-    module must gain the same blocks; its contract test compares the strings.
-    """
-    from shani_chronoa.agent_capabilities import METHODS
-
-    blocks = []
-    for method in METHODS.values():
-        args = "".join(
-            f'\n      <arg name="{name}" type="{kind}" direction="in"/>'
-            for name, kind in method.args
-        )
-        blocks.append(
-            f'    <method name="{method.name}">{args}\n'
-            '      <arg name="json" type="s" direction="out"/>\n'
-            "    </method>"
-        )
-    return "\n".join(blocks)
-
-
-#: The introspection XML. Interpolated so the name cannot drift from `IFACE`.
+#: The introspection XML. Literal blocks, not generated: the shell's contract
+#: test parses this file as text and compares it with its own copy. Every
+#: method here has a slash command and a CLI subcommand in `agent_capabilities`.
+#: Interpolated so the name cannot drift from `IFACE`.
 XML = f"""<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
  "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
 <node>
@@ -124,7 +103,98 @@ XML = f"""<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 
       <arg name="section" type="s" direction="in"/>
       <arg name="json" type="s" direction="out"/>
     </method>
-{_capability_xml()}
+    <method name="SettingsList">
+      <arg name="json" type="s" direction="out"/>
+    </method>
+    <method name="SettingsGet">
+      <arg name="name" type="s" direction="in"/>
+      <arg name="json" type="s" direction="out"/>
+    </method>
+    <method name="SettingsSet">
+      <arg name="name" type="s" direction="in"/>
+      <arg name="value" type="s" direction="in"/>
+      <arg name="confirm" type="b" direction="in"/>
+      <arg name="json" type="s" direction="out"/>
+    </method>
+    <method name="SettingsPreset">
+      <arg name="name" type="s" direction="in"/>
+      <arg name="confirm" type="b" direction="in"/>
+      <arg name="json" type="s" direction="out"/>
+    </method>
+    <method name="SettingsEmail">
+      <arg name="values_json" type="s" direction="in"/>
+      <arg name="confirm" type="b" direction="in"/>
+      <arg name="json" type="s" direction="out"/>
+    </method>
+    <method name="ModelsList">
+      <arg name="json" type="s" direction="out"/>
+    </method>
+    <method name="ModelsUse">
+      <arg name="name" type="s" direction="in"/>
+      <arg name="confirm" type="b" direction="in"/>
+      <arg name="json" type="s" direction="out"/>
+    </method>
+    <method name="SetupState">
+      <arg name="json" type="s" direction="out"/>
+    </method>
+    <method name="SetupStep">
+      <arg name="step" type="s" direction="in"/>
+      <arg name="value" type="s" direction="in"/>
+      <arg name="confirm" type="b" direction="in"/>
+      <arg name="json" type="s" direction="out"/>
+    </method>
+    <method name="Conversations">
+      <arg name="json" type="s" direction="out"/>
+    </method>
+    <method name="ConversationsResume">
+      <arg name="ref" type="s" direction="in"/>
+      <arg name="json" type="s" direction="out"/>
+    </method>
+    <method name="ConversationsRename">
+      <arg name="ref" type="s" direction="in"/>
+      <arg name="title" type="s" direction="in"/>
+      <arg name="json" type="s" direction="out"/>
+    </method>
+    <method name="ConversationsDelete">
+      <arg name="ref" type="s" direction="in"/>
+      <arg name="confirm" type="b" direction="in"/>
+      <arg name="json" type="s" direction="out"/>
+    </method>
+    <method name="MemoryList">
+      <arg name="json" type="s" direction="out"/>
+    </method>
+    <method name="MemoryDecide">
+      <arg name="id" type="s" direction="in"/>
+      <arg name="decision" type="s" direction="in"/>
+      <arg name="confirm" type="b" direction="in"/>
+      <arg name="json" type="s" direction="out"/>
+    </method>
+    <method name="Routines">
+      <arg name="json" type="s" direction="out"/>
+    </method>
+    <method name="RoutinesRun">
+      <arg name="name" type="s" direction="in"/>
+      <arg name="json" type="s" direction="out"/>
+    </method>
+    <method name="Triggers">
+      <arg name="json" type="s" direction="out"/>
+    </method>
+    <method name="Notices">
+      <arg name="json" type="s" direction="out"/>
+    </method>
+    <method name="NoticesDismiss">
+      <arg name="id" type="s" direction="in"/>
+      <arg name="json" type="s" direction="out"/>
+    </method>
+    <method name="VoiceEngines">
+      <arg name="json" type="s" direction="out"/>
+    </method>
+    <method name="Activity">
+      <arg name="json" type="s" direction="out"/>
+    </method>
+    <method name="DiagnosticsProbe">
+      <arg name="json" type="s" direction="out"/>
+    </method>
     <signal name="Event">
       <arg name="json" type="s"/>
     </signal>
