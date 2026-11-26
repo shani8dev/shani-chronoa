@@ -367,6 +367,25 @@ class AgentService:
         out = {"how": how, "hits": hits[:limit], "indexing": indexing}
         invocation.return_value(GLib.Variant("(s)", (json.dumps(out),)))
 
+    # -- Inventory: read-only facts for a shell's panels ------------------
+
+    def Inventory(
+        self, connection, sender, path, interface, method, params, invocation
+    ) -> None:
+        """One bounded JSON section for a panel the shell draws itself.
+
+        Conversion and skills models, routines, triggers, privacy switches,
+        senses, memory and engine status all used to be read by GTK panels
+        importing the stores directly. A shell on another edition gets the
+        same facts here instead, with no UI code in the engine and no new
+        write path around the skill whitelist. An unknown section is an
+        error in the JSON, never a blank panel presented as "nothing there".
+        """
+        from shani_chronoa import inventory
+
+        section = str(params.unpack()[0] or "")
+        invocation.return_value(GLib.Variant("(s)", (inventory.to_json(section),)))
+
     # None, never 0.0: time.monotonic() counts from boot, so for the first ten minutes
     # after a boot 0.0 looked fresh and the index was never built (measured: 350 s)
     _last_index = None

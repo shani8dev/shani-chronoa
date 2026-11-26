@@ -91,7 +91,7 @@ INVENTORY: Tuple[Organ, ...] = (
     Organ("skin", "Boundary", "Skin",
           "the outside edge: everything that leaves this machine, and the log of it",
           ("egress.py", "gui/", "app/", "windows/",
-                           "settings_window/", "senses/network.py"), BUILT, gerund="on the network", source="every request off this machine (egress.py)", indicator="skin",
+                           "settings_window/", "ui_gtk/", "senses/network.py"), BUILT, gerund="on the network", source="every request off this machine (egress.py)", indicator="skin",
           missing=""),
     Organ("immune", "Boundary", "Immune system",
           "what defends against a hostile world - untrusted input, privilege, secrets",

@@ -9,6 +9,9 @@ events, and moments where the person must decide.
 Methods:
   Turn(text) -> turn_id        # starts a turn; its events arrive via Event
   Approve(id, decision) -> ok  # the person approves or denies a turn step
+  Write(instruction, text) -> text
+  FindFiles(query, limit) -> json
+  Inventory(section) -> json   # read-only facts for a shell's panels
 
 Signal:
   Event(json)                   # the stream of events for a turn
@@ -70,6 +73,10 @@ XML = f"""<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 
     <method name="FindFiles">
       <arg name="query" type="s" direction="in"/>
       <arg name="limit" type="i" direction="in"/>
+      <arg name="json" type="s" direction="out"/>
+    </method>
+    <method name="Inventory">
+      <arg name="section" type="s" direction="in"/>
       <arg name="json" type="s" direction="out"/>
     </method>
     <signal name="Event">
