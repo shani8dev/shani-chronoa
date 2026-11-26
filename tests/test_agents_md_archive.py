@@ -40,6 +40,7 @@ CURRENT_HEADINGS = (
     "## Cross-repo impact",
     "## Deliberately not done (as of 2026-09-16)",
     "## History archive",
+    "## Shared architecture (all repos)",
 )
 
 INDEX_LINE = re.compile(r"^- \[(s\d{4})\]\(#\1\) — (.+)$")
