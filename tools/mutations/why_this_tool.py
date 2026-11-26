@@ -39,10 +39,10 @@ TEST_FILE = "tests/test_why_this_tool.py"
 
 _TS = "usr/lib/shani-chronoa/shani_chronoa/tool_select.py"
 _ASSISTANT = "usr/lib/shani-chronoa/shani_chronoa/assistant.py"
-_CONVERSATION = "usr/lib/shani-chronoa/shani_chronoa/app/conversation.py"
-_WINDOW = "usr/lib/shani-chronoa/shani_chronoa/gui/window.py"
-_WIDGETS = "usr/lib/shani-chronoa/shani_chronoa/gui/widgets.py"
-_BLOCKS = "usr/lib/shani-chronoa/shani_chronoa/gui/blocks.py"
+_CONVERSATION = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/app/conversation.py"
+_WINDOW = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/window.py"
+_WIDGETS = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/widgets.py"
+_BLOCKS = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/blocks.py"
 
 # --- the two doors are one function ----------------------------------------
 

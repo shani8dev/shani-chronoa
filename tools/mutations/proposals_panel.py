@@ -23,7 +23,7 @@ nobody asked about.
 
 TEST_FILE = "tests/test_memory_panel_proposals.py"
 
-_PANEL = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/memory.py"
+_PANEL = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/surfaces/memory.py"
 
 # --- the empty condition, in all three directions --------------------------
 

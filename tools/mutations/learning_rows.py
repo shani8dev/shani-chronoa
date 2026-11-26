@@ -13,7 +13,7 @@ kept in two lists.
 
 TEST_FILE = "tests/test_the_learning_rows_are_plain_words.py"
 
-_LEARNING = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/learning.py"
+_LEARNING = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/surfaces/learning.py"
 
 MUTATIONS = [
     {

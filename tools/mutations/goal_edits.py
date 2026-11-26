@@ -9,7 +9,7 @@ still work.
 TEST_FILE = "tests/test_goal_edits.py"
 
 _GOALS = "usr/lib/shani-chronoa/shani_chronoa/goals.py"
-_PANEL = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/goals.py"
+_PANEL = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/surfaces/goals.py"
 _SKILL = "usr/lib/shani-chronoa/shani_chronoa/skills/manage_goals.py"
 
 MUTATIONS = [

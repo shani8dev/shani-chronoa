@@ -31,9 +31,9 @@ written here, the way `mascot_wiring.py` says everyone should.
 from __future__ import annotations
 
 _BUS = "usr/lib/shani-chronoa/shani_chronoa/mascot_events.py"
-_MASCOT = "usr/lib/shani-chronoa/shani_chronoa/mascot.py"
+_MASCOT = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/mascot.py"
 _ASK = "usr/lib/shani-chronoa/shani_chronoa/ask_bridge.py"
-_CONV = "usr/lib/shani-chronoa/shani_chronoa/app/conversation.py"
+_CONV = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/app/conversation.py"
 
 TEST_FILE = "tests/test_mascot_events.py"
 

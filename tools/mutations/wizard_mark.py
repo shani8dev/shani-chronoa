@@ -27,9 +27,9 @@ by running it:
 
 TEST_FILE = "tests/test_ui_layout_contract.py"
 
-_W = "usr/lib/shani-chronoa/shani_chronoa/setup_wizard.py"
-_P = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/processes.py"
-_R = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/__init__.py"
+_W = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/setup_wizard.py"
+_P = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/surfaces/processes.py"
+_R = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/surfaces/__init__.py"
 
 MUTATIONS = [
     # -- 1. embedded, not looked up ------------------------------------------

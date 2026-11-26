@@ -17,7 +17,7 @@ reaches is a branch no panel-wide sweep can watch.**
 
 TEST_FILE = "tests/test_surface_desktop.py"
 
-_DESKTOP = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/desktop.py"
+_DESKTOP = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/surfaces/desktop.py"
 
 MUTATIONS = [
     {

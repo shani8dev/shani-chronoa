@@ -28,7 +28,7 @@ TEST_FILE = 'tests/test_call_log_rotation.py'
 _TT = 'usr/lib/shani-chronoa/shani_chronoa/tool_tracking.py'
 _LEARN = 'usr/lib/shani-chronoa/shani_chronoa/learning.py'
 _DREAM = 'usr/lib/shani-chronoa/shani_chronoa/dream.py'
-_ACTIVITY = ('usr/lib/shani-chronoa/shani_chronoa/settings_window/'
+_ACTIVITY = ('usr/lib/shani-chronoa/shani_chronoa/ui_gtk/settings_window/'
               'activity.py')
 
 MUTATIONS = [

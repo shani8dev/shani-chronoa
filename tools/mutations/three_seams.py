@@ -70,8 +70,8 @@ as a survivor, which is a false clean wearing a passing shape.
 TEST_FILE = "tests/test_mascot_three_seams.py"
 
 _ART = "usr/lib/shani-chronoa/shani_chronoa/mascot_art.py"
-_MSC = "usr/lib/shani-chronoa/shani_chronoa/mascot.py"
-_VOI = "usr/lib/shani-chronoa/shani_chronoa/app/voice.py"
+_MSC = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/mascot.py"
+_VOI = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/app/voice.py"
 _DRG = "usr/lib/shani-chronoa/shani_chronoa/mascot_drag.py"
 
 #: The quantisation as `svg()` spells it, two lines below the state check. The

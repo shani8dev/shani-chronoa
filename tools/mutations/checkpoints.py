@@ -40,7 +40,7 @@ fully green against a file where everything else built exactly one.
 
 TEST_FILE = "tests/test_surface_diagnostics.py"
 
-_CKPT = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/diagnostics.py"
+_CKPT = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/surfaces/diagnostics.py"
 
 # The two empty-store rows: what the shipped defect restored verbatim.
 _NO_DIR = _CKPT

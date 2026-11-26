@@ -10,9 +10,9 @@ The set is the two ways the page can go back to saying it twice.
 
 TEST_FILE = "tests/test_one_statement_per_page.py"
 
-_EXPORT = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/export.py"
-_MY_FILES = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/my_files.py"
-_CALENDAR = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/calendar.py"
+_EXPORT = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/surfaces/export.py"
+_MY_FILES = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/surfaces/my_files.py"
+_CALENDAR = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/surfaces/calendar.py"
 
 MUTATIONS = [
     {

@@ -59,48 +59,103 @@ Suggests: shani-link, shani-shell, ...
 `Recommends:` would also be defensible, but `Suggests:` matches the new
 contract: the engine is genuinely optional and its absence is reported.
 
-## 2. Engine / GTK UI split (proposal — not yet applied)
+## 2. Engine / GTK split — exact file lists (proposal — not applied)
 
-The engine now starts with no GTK: `shani_chronoa/engine.py` builds the model,
-tool loop and Agent D-Bus service; `tests/test_headless_engine.py` blocks
-`gi.repository.Gtk`, `Adw`, `Gdk` and `Gtk4LayerShell`, builds the engine with
-the repo's stand-in Ollama, and drives an ask to a reply. `tests/test_ui_gtk_boundary.py`
-checks that no engine module imports the GTK client (`gui/`, `settings_window/`,
-`app/`, `ui_gtk/`) at runtime except the browser's live-window branch.
+The GTK tree now lives in `shani_chronoa/ui_gtk/`; every old import path is a
+thin shim. `shani-chronoa` installs the engine and the shims, and must be
+installable on a box with **no GTK typelib**. `shani-chronoa-gtk` installs the
+GTK tree and depends on `shani-chronoa`. GNOME/Plasma/COSMIC install both;
+niri installs only `shani-chronoa` and the shell draws the windows.
 
-`usr/bin/shani-chronoa` now enters through `shani_chronoa.ui_gtk.main()`, the
-single GTK process boundary. The existing GTK app and its tests are unchanged.
+The engine starts from `usr/bin/shani-chronoa-engine` on D-Bus activation of
+`dev.shani.chronoa.Agent` (`usr/lib/systemd/user/shani-chronoa-engine.service`,
+`Type=dbus`, `BusName=dev.shani.chronoa.Agent`, `PartOf=graphical-session.target`,
+no `WantedBy`) via `usr/share/dbus-1/services/dev.shani.chronoa.Agent.service`.
+The GTK app is the Agent on a desktop; the engine yields the name when an
+owner is already there. The background daemon unit is unchanged.
 
-### Proposed Arch split
+### `shani-chronoa` — engine, no GTK
 
-- **`shani-chronoa-engine`** — `usr/lib/shani-chronoa/shani_chronoa/**`,
-  `usr/lib/systemd/user/shani-chronoa-daemon.service`,
-  `shani-chronoa-llm.service`, `usr/bin/shani-chronoa-mcp`, the Agent D-Bus
-  interface. Drops `gtk4`, `libadwaita`, `gtk4-layer-shell` and
-  `gir1.2-webkit-6.0` from `depends`; keeps `python`, `python-gobject` (GLib
-  and Gio are still used by the engine), `python-httpx`, and the model/voice
-  packages that a headless engine actually uses. The engine must be
-  installable on a box with no GTK typelib.
-- **`shani-chronoa-ui-gtk`** — `usr/bin/shani-chronoa`, the desktop entries,
-  and the GTK-specific payload. `Depends: shani-chronoa-engine`, `gtk4`,
-  `libadwaita`, `gtk4-layer-shell`, `gir1.2-webkit-6.0` in Arch naming
-  (`gir1.2-webkit-6.0` is Debian; use the Arch package that owns the WebKitGTK
-  6 typelib, verified in that repo before adding it).
-- **`shani-chronoa`** — a meta package pulling both, so GNOME/Plasma/COSMIC
-  installs behave exactly as today. The niri image installs only
-  `shani-chronoa-engine` and talks to it through shani-shell's bridge.
+**`usr/bin/`** (all executable):
 
-### Proposed Debian split
+```text
+shani-chronoa-engine        shani-chronoa-daemon       shani-chronoa-mcp
+shani-chronoa-bridge        shani-chronoa-lan-bridge   shani-chronoa-sense
+shani-chronoa-screen-stream shani-chronoa-search       shani-chronoa-lab-network
+shani-circle-to-search
+```
 
-Mirror the three packages in `DEBIAN/control`: `shani-chronoa-engine` without
-`gir1.2-gtk-4.0`, `gir1.2-adw-1` or `libgtk4-layer-shell0`, and
-`shani-chronoa-ui-gtk` with those plus `shani-chronoa-engine` in `Depends`.
-Keep `espeak-ng` as the only hard TTS floor in the engine package; the neural
-voices stay optional (see `docs/packaging-debian.md`).
+**`usr/lib/shani-chronoa/shani_chronoa/`**: every file and directory **except**
+`ui_gtk/` — that is, the 400+ engine modules, the skills/senses/triggers/sandbox
+packages, and the GTK compatibility shims at `gui/`, `app/`,
+`settings_window/`, `windows/`, `mascot.py`, `setup_wizard.py`,
+`automation_overlay.py`, `away.py`, `desktop_cue.py`, `mascot_notch.py` and
+`ui_driver.py`. A shim imports its GTK module only when something imports the
+old path; the engine never does.
+
+**`usr/lib/systemd/user/`**:
+
+```text
+shani-chronoa-engine.service     shani-chronoa-daemon.service
+shani-chronoa-lan-bridge.service shani-chronoa-llm.service
+shani-chronoa-model@.service
+```
+
+**`usr/share/dbus-1/services/`**:
+
+```text
+dev.shani.chronoa.Agent.service
+dev.shani.chronoa.SearchProvider.service
+```
+
+**Arch `depends`**: `python`, `python-gobject` (GLib/Gio only), `python-httpx`,
+`espeak-ng` (the only hard TTS floor), plus the model/voice packages a headless
+engine uses. **Do not depend on** `gtk4`, `libadwaita`, `gtk4-layer-shell`,
+`gir1.2-webkit-6.0` or `shani-link`. `shani-shell` and `shani-link` are
+`optdepends` (section 1).
+
+**Debian `Depends`**: `python3`, `python3-gi`, `python3-httpx`, `espeak-ng`,
+plus the same non-GTK floors. **Remove** `gir1.2-gtk-4.0`, `gir1.2-adw-1`,
+`libgtk4-layer-shell0`, `gir1.2-webkit-6.0` and `shani-link` from `Depends`.
+
+### `shani-chronoa-gtk` — the windows
+
+**`usr/bin/`**: `shani-chronoa` (enters through `shani_chronoa.ui_gtk.main`),
+`shani-chronoa-overlay` (the layer-shell cue, imports
+`shani_chronoa.ui_gtk.automation_overlay`).
+
+**`usr/lib/shani-chronoa/shani_chronoa/`**: the whole `ui_gtk/` tree —
+
+```text
+ui_gtk/__init__.py
+ui_gtk/gui/              (72 py + locale/ — 4 catalogue files)
+ui_gtk/app/              (8 py)
+ui_gtk/settings_window/  (7 py)
+ui_gtk/windows/          (6 py)
+ui_gtk/automation_overlay.py   ui_gtk/away.py
+ui_gtk/desktop_cue.py          ui_gtk/mascot.py
+ui_gtk/mascot_notch.py         ui_gtk/setup_wizard.py
+ui_gtk/ui_driver.py
+```
+
+**`usr/share/applications/`**: `shani-chronoa.desktop`,
+`shani-circle-to-search.desktop`.
+**`usr/share/krunner/dbusplugins/`**: `shani-chronoa.desktop`.
+**`usr/share/icons/hicolor/scalable/apps/`**: `shani-chronoa.svg`.
+**`usr/share/icons/hicolor/symbolic/apps/`**: `shani-chronoa-symbolic.svg`.
+
+**Arch `depends`**: `shani-chronoa`, `gtk4`, `libadwaita`, `gtk4-layer-shell`
+and the Arch package owning the WebKitGTK 6 typelib (name to be verified in
+`shani-pkgbuilds`; the Debian name `gir1.2-webkit-6.0` must not be copied
+straight across). `shani-link` stays optional here too — the GTK device
+screens say which engine is unavailable, exactly as the engine skills do.
+
+**Debian `Depends`**: `shani-chronoa`, `gir1.2-gtk-4.0`, `gir1.2-adw-1`,
+`libgtk4-layer-shell0`, `gir1.2-webkit-6.0`.
 
 ### Not part of this change
 
-No QML was written and no shell repo was edited. The new read-only
+No QML was written and no other repo was edited. The read-only
 `Agent.Inventory(section) -> json` method backs conversations, models,
 skills, routines, triggers, privacy, senses, memory, capabilities and engine
 status; `docs/HEADLESS.md` lists which GTK panel maps to it and what still

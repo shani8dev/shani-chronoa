@@ -17,7 +17,7 @@ so every anchor here was `grep -c`'d rather than trusted.
 
 TEST_FILE = "tests/test_mascot_wiring.py"
 
-_M = "usr/lib/shani-chronoa/shani_chronoa/mascot.py"
+_M = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/mascot.py"
 
 # The stage is arithmetic, and `212` is the number every measured engine figure in
 # `tests/test_mascot_drag.py` was taken against.

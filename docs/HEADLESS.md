@@ -8,6 +8,52 @@ from source in this tree on 2026-11-26, not from memory.
 
 ---
 
+## 0. Phase 5: what moved on disk (2026-11-26)
+
+The map below was written before the physical split. It is still the map of
+what each GTK surface does, but the files are now at these paths:
+
+| was | now | shim at the old path |
+|---|---|---|
+| `shani_chronoa/gui/` (72 `.py` + `locale/`) | `shani_chronoa/ui_gtk/gui/` | yes |
+| `shani_chronoa/app/` (8 `.py`) | `shani_chronoa/ui_gtk/app/` | yes |
+| `shani_chronoa/settings_window/` (7 `.py`) | `shani_chronoa/ui_gtk/settings_window/` | yes |
+| `shani_chronoa/windows/` (6 `.py`) | `shani_chronoa/ui_gtk/windows/` | yes |
+| `automation_overlay.py`, `away.py`, `desktop_cue.py`, `mascot.py`, `mascot_notch.py`, `setup_wizard.py`, `ui_driver.py` | `shani_chronoa/ui_gtk/` | yes |
+
+`git mv` carried history; each old path is a three-line alias that puts the
+*moved module object* into `sys.modules`, so patching an old-path name still
+patches the code that runs. Package `__init__.py` shims copy names but keep
+their own `__path__`, so every submodule import resolves through a shim too.
+`tests/_source.py` redirects source-reading tests to the real files.
+
+Count after the move: **0** modules outside `ui_gtk/` import `Gtk`, `Adw`,
+`Gdk`, `Gtk4LayerShell` or `WebKit`; `tests/test_ui_gtk_boundary.py` checks
+every package module, not just the engine list. `tests/test_headless_engine.py`
+still runs an ask with GTK blocked. Logger names were kept as
+`shani_chronoa.<old name>` so existing log filters do not go deaf.
+
+### The headless entry and the one owner
+
+`usr/bin/shani-chronoa-engine` runs `shani_chronoa.engine.main` with no GTK.
+`usr/lib/systemd/user/shani-chronoa-engine.service` is `Type=dbus` for
+`dev.shani.chronoa.Agent`, `PartOf=graphical-session.target`; it has no
+`WantedBy`, so it is started by D-Bus activation
+(`usr/share/dbus-1/services/dev.shani.chronoa.Agent.service`) rather than at
+login on a desktop. The background daemon
+(`shani-chronoa-daemon.service`) is unchanged.
+
+The GTK app is the Agent on a desktop; the engine calls
+`AgentService.export(yield_to_owner=True)` and checks `NameHasOwner` first.
+Both orders end with one owner: engine first, then the desktop app takes the
+name with `REPLACE` when it starts; desktop app first, then the engine sees an
+owner and stays a client. `tests/test_engine_entry_one_owner.py` drives both
+orders on a private bus, starts the real launcher there, calls
+`Agent.Inventory("status")` and one `Turn` answered by the repo's stand-in
+Ollama, and checks that every event carries that turn's id.
+
+---
+
 ## 1. Method and counts
 
 ### Enumeration

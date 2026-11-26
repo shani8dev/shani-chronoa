@@ -331,7 +331,7 @@ log "installing the desktop entry and icon"
 # The content is the shipped entry verbatim, so the desktop actions and the
 # single-instance hint survive.
 APP_ID="$(grep -oP 'application_id="\K[^"]+' \
-    "$REPO/usr/lib/shani-chronoa/shani_chronoa/app/application.py" | head -1)"
+    "$REPO/usr/lib/shani-chronoa/shani_chronoa/ui_gtk/app/application.py" | head -1)"
 APP_ID="${APP_ID:-dev.shani.chronoa}"
 cp -a "$REPO/usr/share/applications/shani-chronoa.desktop" \
       "$APPDIR/usr/share/applications/shani-chronoa.desktop"

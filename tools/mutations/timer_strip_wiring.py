@@ -15,7 +15,7 @@ adjacent and must change together.
 
 TEST_FILE = "tests/test_the_window_carries_the_timers.py"
 
-_WINDOW = "usr/lib/shani-chronoa/shani_chronoa/gui/window.py"
+_WINDOW = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/window.py"
 
 MUTATIONS = [
     {

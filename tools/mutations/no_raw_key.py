@@ -17,7 +17,7 @@ The set is the ways the key can come back.
 TEST_FILE = "tests/test_no_panel_names_a_raw_key.py"
 
 _SKILLS = "usr/lib/shani-chronoa/shani_chronoa/skills"
-_SURFACES = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces"
+_SURFACES = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/surfaces"
 _CAPS = "usr/lib/shani-chronoa/shani_chronoa/capabilities.py"
 
 MUTATIONS = [

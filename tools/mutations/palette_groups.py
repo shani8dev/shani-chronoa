@@ -18,7 +18,7 @@ another's.
 
 TEST_FILE = "tests/test_the_palette_shows_its_groups.py"
 
-_PALETTE = "usr/lib/shani-chronoa/shani_chronoa/gui/palette.py"
+_PALETTE = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/palette.py"
 
 MUTATIONS = [
     {

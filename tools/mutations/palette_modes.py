@@ -34,7 +34,7 @@ exists to make the two surfaces agree on.
 
 TEST_FILE = "tests/test_palette_agrees_with_the_mode_strip.py"
 
-_WINDOW = "usr/lib/shani-chronoa/shani_chronoa/gui/window.py"
+_WINDOW = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/window.py"
 
 # The shipped two lines, verbatim.
 _SHIPPED = (
