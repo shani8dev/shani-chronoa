@@ -60,15 +60,23 @@ logger = logging.getLogger(__name__)
 WRITE_SYSTEM = (
     "You change text as asked. Reply with only the resulting text: no preamble, "
     "no explanation, no quotes or code fences around it. Keep the language of the "
-    "text unless asked to translate, and keep names, numbers and links exactly.")
+    "text unless asked to translate, and keep names, numbers and links exactly."
+)
+
+
 #: Where FindFiles looks: the folders a person keeps their own things in
 #: (XDG's, else the usual names), the ones that exist.
 def find_roots():
     import os
     import pathlib
+
     home = pathlib.Path.home()
     out = []
-    for var, name in (("XDG_DOCUMENTS_DIR", "Documents"), ("XDG_DOWNLOAD_DIR", "Downloads"), ("XDG_DESKTOP_DIR", "Desktop")):
+    for var, name in (
+        ("XDG_DOCUMENTS_DIR", "Documents"),
+        ("XDG_DOWNLOAD_DIR", "Downloads"),
+        ("XDG_DESKTOP_DIR", "Desktop"),
+    ):
         p = pathlib.Path(os.environ.get(var) or home / name)
         if p.is_dir() and p not in out:
             out.append(p)
@@ -91,10 +99,19 @@ def clean_written(reply: str) -> str:
     out = out.strip()
     if out.startswith("```") and out.endswith("```") and out.count("```") == 2:
         out = out[3:-3]
-        out = out.split("\n", 1)[1] if "\n" in out and not out.split("\n", 1)[0].strip().count(" ") else out
+        out = (
+            out.split("\n", 1)[1]
+            if "\n" in out and not out.split("\n", 1)[0].strip().count(" ")
+            else out
+        )
         out = out.strip()
     for a, b in (('"', '"'), ("“", "”"), ("'", "'")):
-        if len(out) > 1 and out.startswith(a) and out.endswith(b) and out.count(a) == 1 + (a == b):
+        if (
+            len(out) > 1
+            and out.startswith(a)
+            and out.endswith(b)
+            and out.count(a) == 1 + (a == b)
+        ):
             out = out[1:-1].strip()
     return out
 
@@ -118,8 +135,8 @@ def _tool_line(name: str, arguments: object) -> str:
     """One line naming a tool call and the arguments that identify it."""
     if isinstance(arguments, dict) and arguments:
         pairs = ", ".join(
-            f"{key}={_short(value, 40)}"
-            for key, value in list(arguments.items())[:3])
+            f"{key}={_short(value, 40)}" for key, value in list(arguments.items())[:3]
+        )
         return _short(f"{name} · {pairs}", 160)
     return name
 
@@ -139,12 +156,20 @@ def _preview_detail(preview: object) -> str:
         return "\n".join(
             f"{key}: {_short(value, 160)}"
             for key, value in preview.items()
-            if value not in (None, "", False))
+            if value not in (None, "", False)
+        )
     if isinstance(preview, (tuple, list)) and len(preview) == 3:
         path, before, after = (str(part) for part in preview)
-        diff = list(difflib.unified_diff(
-            before.splitlines(), after.splitlines(),
-            fromfile="before", tofile="after", lineterm="", n=2))
+        diff = list(
+            difflib.unified_diff(
+                before.splitlines(),
+                after.splitlines(),
+                fromfile="before",
+                tofile="after",
+                lineterm="",
+                n=2,
+            )
+        )
         body = "\n".join(diff[2:]) if len(diff) > 2 else after
         text = f"{path}\n{body}" if body else path
         return text if len(text) <= PREVIEW_LIMIT else text[: PREVIEW_LIMIT - 1] + "…"
@@ -178,8 +203,11 @@ class _AgentSink(EventSink):
         return self._turn_id
 
     def _emit(self, event: str, **kw) -> None:
-        payload = json.dumps({"turn": self._turn_id, "event": event, **kw},
-                             ensure_ascii=False, default=str)
+        payload = json.dumps(
+            {"turn": self._turn_id, "event": event, **kw},
+            ensure_ascii=False,
+            default=str,
+        )
         GLib.idle_add(self._service.emit_event, payload)
 
     # -- core events, one wire event each -------------------------------
@@ -188,13 +216,17 @@ class _AgentSink(EventSink):
         self._emit("reply", text=text)
 
     def _on_tool_start(self, name: str, arguments: dict) -> None:
-        self._emit("tool", text=_tool_line(name, arguments),
-                   tool=name, args=arguments)
+        self._emit("tool", text=_tool_line(name, arguments), tool=name, args=arguments)
 
-    def _on_tool_finish(self, name: str, arguments: dict, result: str,
-                        ok: bool, artifacts: tuple) -> None:
-        self._emit("tool_done", tool=name, text=_short(result, TOOL_RESULT_PREVIEW),
-                   ok=bool(ok))
+    def _on_tool_finish(
+        self, name: str, arguments: dict, result: str, ok: bool, artifacts: tuple
+    ) -> None:
+        self._emit(
+            "tool_done",
+            tool=name,
+            text=_short(result, TOOL_RESULT_PREVIEW),
+            ok=bool(ok),
+        )
 
     def _on_state(self, state: str) -> None:
         # The core's states are the loop's ("tool_call"), the bar's are the
@@ -214,8 +246,7 @@ class _AgentSink(EventSink):
 
     # -- approvals ------------------------------------------------------
 
-    def ask(self, question: str, options: list, preview=None,
-            kind: str = "greet"):
+    def ask(self, question: str, options: list, preview=None, kind: str = "greet"):
         """Emit an approval, register it, and return the wait `ask()` uses."""
         done, resolve = ask_bridge.make_event()
         stale = self._service.register(self._turn_id, done, resolve)
@@ -228,10 +259,16 @@ class _AgentSink(EventSink):
             stale.set()
             self._emit("approval_closed", id=self._turn_id)
         done.chronoa_closed = lambda: self._service.forget(  # type: ignore[attr-defined]
-            self._turn_id, done, self._emit_closed)
-        self._emit("approval", id=self._turn_id, text=question,
-                   options=[str(option) for option in options],
-                   detail=_preview_detail(preview), kind=kind)
+            self._turn_id, done, self._emit_closed
+        )
+        self._emit(
+            "approval",
+            id=self._turn_id,
+            text=question,
+            options=[str(option) for option in options],
+            detail=_preview_detail(preview),
+            kind=kind,
+        )
         return done, resolve
 
     def _emit_closed(self) -> None:
@@ -244,6 +281,9 @@ class AgentService:
     def __init__(self, app: "ChronoaApplication") -> None:
         self._app = app
         self._pending: "dict[str, tuple[threading.Event, Callable[[str], None]]]" = {}
+        #: Turn id -> the AsyncBridge future, so `Cancel` can stop a running
+        #: turn instead of only telling the client to stop listening.
+        self._futures: "dict[str, object]" = {}
         self._lock = threading.Lock()
         self._owner = None
         self._registration = None
@@ -251,35 +291,192 @@ class AgentService:
 
     # -- the two methods ------------------------------------------------
 
-    def Turn(self, connection, sender, path, interface, method, params,
-             invocation) -> None:
+    def Turn(
+        self, connection, sender, path, interface, method, params, invocation
+    ) -> None:
         text = str(params.unpack()[0] or "").strip()
         if not text:
             invocation.return_dbus_error(
                 "org.freedesktop.DBus.Error.InvalidArgs",
-                "Turn needs text to start a turn")
+                "Turn needs text to start a turn",
+            )
             return
         turn_id = "turn-" + uuid.uuid4().hex[:12]
         logger.info("agent turn %s: %r", turn_id, text[:80])
         sink = _AgentSink(self, turn_id)
         try:
             coro = self._app.assistant.handle(text, sink=sink)
-            # **Bound only while the turn is scheduled.** The async bridge
-            # copies the context before the task runs, and the assistant
-            # copies it again into the tool thread, so the question a tool
-            # asks finds this turn's resolver - and no other turn can.
-            with ask_bridge.turn_resolver(sink.ask):
-                self._app._async.run(coro, lambda result: self._on_done(turn_id, result))
+            self._launch(turn_id, sink, coro)
         except Exception as exc:  # noqa: BLE001 - reported to the caller
             logger.exception("agent turn %s could not start", turn_id)
             invocation.return_dbus_error(
-                "dev.shani.chronoa.Error.TurnFailed",
-                f"{type(exc).__name__}: {exc}")
+                "dev.shani.chronoa.Error.TurnFailed", f"{type(exc).__name__}: {exc}"
+            )
             return
         invocation.return_value(GLib.Variant("(s)", (turn_id,)))
 
-    def Approve(self, connection, sender, path, interface, method, params,
-                invocation) -> None:
+    def _launch(self, turn_id: str, sink: "_AgentSink", coro) -> None:
+        """Schedule a turn with its approval resolver bound to that turn only.
+
+        **Bound only while the turn is scheduled.** The async bridge copies the
+        context before the task runs, and the assistant copies it again into the
+        tool thread, so the question a tool asks finds this turn's resolver - and
+        no other turn can. Turn and TurnWith share this so Cancel can find the
+        future either way.
+        """
+        with ask_bridge.turn_resolver(sink.ask):
+            self._futures[turn_id] = self._app._async.run(
+                coro, lambda result: self._on_done(turn_id, result)
+            )
+
+    # -- TurnWith: attachments, conversation and one-shot turns ----------
+
+    def TurnWith(
+        self, connection, sender, path, interface, method, params, invocation
+    ) -> None:
+        """A turn with options: a conversation, files, or no saved history.
+
+        `options_json` is one JSON object with optional keys:
+
+        - `conversation`: `""` (the open one), `"new"`, or an id/title from
+          `Inventory("conversations")`.
+        - `paths`: file paths to attach (the block the GTK paperclip adds).
+        - `ephemeral`: true for a one-shot answer the conversation never keeps.
+
+        Additive: plain Turn still means "the open conversation, no files, keep
+        the answer", and nothing here changes that path.
+        """
+        text, options_json = (str(value or "") for value in params.unpack())
+        text = text.strip()
+        if not text:
+            invocation.return_dbus_error(
+                "org.freedesktop.DBus.Error.InvalidArgs",
+                "TurnWith needs text to start a turn",
+            )
+            return
+        try:
+            options = json.loads(options_json or "{}")
+        except (TypeError, ValueError) as exc:
+            invocation.return_dbus_error(
+                "org.freedesktop.DBus.Error.InvalidArgs",
+                f"TurnWith options are not JSON: {exc}",
+            )
+            return
+        if not isinstance(options, dict):
+            invocation.return_dbus_error(
+                "org.freedesktop.DBus.Error.InvalidArgs",
+                "TurnWith options must be a JSON object",
+            )
+            return
+        paths = options.get("paths") or []
+        if not isinstance(paths, (list, tuple)):
+            invocation.return_dbus_error(
+                "org.freedesktop.DBus.Error.InvalidArgs",
+                "TurnWith paths must be a list",
+            )
+            return
+
+        augmented = text
+        if paths:
+            from shani_chronoa import attachments
+
+            block = attachments.block(attachments.accept(paths, []))
+            if block:
+                augmented += block
+
+        try:
+            assistant = self._assistant_for_options(options)
+        except (ValueError, LookupError) as exc:
+            invocation.return_dbus_error(
+                "dev.shani.chronoa.Error.BadConversation", str(exc)
+            )
+            return
+
+        turn_id = "turn-" + uuid.uuid4().hex[:12]
+        sink = _AgentSink(self, turn_id)
+        try:
+            coro = assistant.handle(augmented, sink=sink)
+            self._launch(turn_id, sink, coro)
+        except Exception as exc:  # noqa: BLE001 - reported to the caller
+            logger.exception("agent turn %s could not start", turn_id)
+            invocation.return_dbus_error(
+                "dev.shani.chronoa.Error.TurnFailed", f"{type(exc).__name__}: {exc}"
+            )
+            return
+        invocation.return_value(GLib.Variant("(s)", (turn_id,)))
+
+    def _assistant_for_options(self, options: dict):
+        """Which assistant handles a TurnWith: the open one, a new/resumed
+        one, or a throwaway with no transcript for an ephemeral question."""
+        from shani_chronoa import conversation_store
+
+        assistant = self._app.assistant
+        conversation = str(options.get("conversation") or "")
+        if conversation == "new":
+            root = conversation_store.session_dir()
+            sid = conversation_store.new_session(root)
+            assistant.switch_session(conversation_store.session_path(root, sid))
+        elif conversation:
+            root = conversation_store.session_dir()
+            sid = conversation_store.switch(root, conversation)
+            if not sid:
+                raise ValueError(f"no conversation matches {conversation!r}")
+            assistant.switch_session(conversation_store.session_path(root, sid))
+        if options.get("ephemeral"):
+            from shani_chronoa.assistant import Assistant
+
+            assistant = Assistant(
+                self._app.llm,
+                percept_store=getattr(assistant, "percept_store", None),
+                context_builder=getattr(assistant, "context_builder", None),
+                session_path=None,
+                config=getattr(assistant, "config", None),
+            )
+        return assistant
+
+    # -- Cancel: stop a turn that is still running -----------------------
+
+    def Cancel(
+        self, connection, sender, path, interface, method, params, invocation
+    ) -> None:
+        """Stop a running turn; also closes its pending approval, if any.
+
+        Assistant.handle repairs the turn's history when it sees CancelledError,
+        so a cancelled tool batch leaves no orphaned call in the transcript. A
+        done event follows, so a client waiting on this turn can stop even when
+        the coroutine never runs its completion hook.
+        """
+        turn_id = str(params.unpack()[0] or "")
+        with self._lock:
+            future = self._futures.pop(turn_id, None)
+            entry = self._pending.pop(turn_id, None)
+        if entry is not None:
+            entry[1]("")  # no answer: a cancelled turn must not look approved
+        if future is None:
+            invocation.return_value(GLib.Variant("(b)", (False,)))
+            return
+        try:
+            future.cancel()
+        except Exception:  # noqa: BLE001 - a refusal must not kill the bus call
+            logger.debug("could not cancel turn %s", turn_id, exc_info=True)
+        self.emit_event(
+            json.dumps(
+                {
+                    "turn": turn_id,
+                    "event": "notice",
+                    "text": "Turn cancelled",
+                },
+                ensure_ascii=False,
+            )
+        )
+        self.emit_event(
+            json.dumps({"turn": turn_id, "event": "done", "text": "cancelled"})
+        )
+        invocation.return_value(GLib.Variant("(b)", (True,)))
+
+    def Approve(
+        self, connection, sender, path, interface, method, params, invocation
+    ) -> None:
         """Approve or reject a pending turn.
 
         **No Python caller in this tree**: this is a D-Bus method invoked by
@@ -297,8 +494,9 @@ class AgentService:
 
     # -- Write: text in, text out, with no tools and no conversation ----
 
-    def Write(self, connection, sender, path, interface, method, params,
-              invocation) -> None:
+    def Write(
+        self, connection, sender, path, interface, method, params, invocation
+    ) -> None:
         """Transform a piece of text the way `instruction` says, and return it.
 
         The shell's writing tools (proofread, rewrite, shorter, ...), its smart
@@ -312,32 +510,49 @@ class AgentService:
         instruction, text = (str(v or "") for v in params.unpack())
         if not instruction.strip():
             invocation.return_dbus_error(
-                "org.freedesktop.DBus.Error.InvalidArgs", "Write needs an instruction")
+                "org.freedesktop.DBus.Error.InvalidArgs", "Write needs an instruction"
+            )
             return
         llm = getattr(self._app, "llm", None)
         if llm is None:
             invocation.return_dbus_error(
-                "dev.shani.chronoa.Error.NoModel", "Chronoa has no model to write with yet")
+                "dev.shani.chronoa.Error.NoModel",
+                "Chronoa has no model to write with yet",
+            )
             return
         messages = [
             {"role": "system", "content": WRITE_SYSTEM},
-            {"role": "user", "content": instruction.strip() + "\n\n<text>\n" + text[:WRITE_MAX_CHARS] + "\n</text>"},
+            {
+                "role": "user",
+                "content": instruction.strip()
+                + "\n\n<text>\n"
+                + text[:WRITE_MAX_CHARS]
+                + "\n</text>",
+            },
         ]
         logger.info("write: %r on %d characters", instruction[:60], len(text))
         try:
             # chat_message: what every client has (the local one has no chat())
-            message = self._app._async.run(llm.chat_message(messages)).result(timeout=WRITE_TIMEOUT_SECONDS)
-            reply = message.get("content", "") if isinstance(message, dict) else str(message or "")
+            message = self._app._async.run(llm.chat_message(messages)).result(
+                timeout=WRITE_TIMEOUT_SECONDS
+            )
+            reply = (
+                message.get("content", "")
+                if isinstance(message, dict)
+                else str(message or "")
+            )
         except Exception as exc:  # noqa: BLE001 - the caller is told, in words
             invocation.return_dbus_error(
-                "dev.shani.chronoa.Error.WriteFailed", f"{type(exc).__name__}: {exc}")
+                "dev.shani.chronoa.Error.WriteFailed", f"{type(exc).__name__}: {exc}"
+            )
             return
         invocation.return_value(GLib.Variant("(s)", (clean_written(reply),)))
 
     # -- FindFiles: the person's files by meaning (file_index) --------
 
-    def FindFiles(self, connection, sender, path, interface, method, params,
-                  invocation) -> None:
+    def FindFiles(
+        self, connection, sender, path, interface, method, params, invocation
+    ) -> None:
         """`{"how", "hits": [{path, kind, size, excerpt}], "indexing"}` as JSON.
 
         The shell's launcher asks this for "the electricity bill from March":
@@ -352,9 +567,14 @@ class AgentService:
         query = str(query or "").strip()
         limit = min(max(int(limit or 8), 1), 25)
         if len(query) < 3:
-            invocation.return_value(GLib.Variant("(s)", (json.dumps({"how": "", "hits": [], "indexing": False}),)))
+            invocation.return_value(
+                GLib.Variant(
+                    "(s)", (json.dumps({"how": "", "hits": [], "indexing": False}),)
+                )
+            )
             return
         from shani_chronoa import file_index
+
         hits, how = [], ""
         for root in find_roots():
             try:
@@ -393,13 +613,17 @@ class AgentService:
 
     def _reindex_if_stale(self) -> bool:
         import time
+
         last = AgentService._last_index
-        if (last is not None and time.monotonic() - last < FIND_REINDEX_SECONDS) or not AgentService._index_lock.acquire(blocking=False):
+        if (
+            last is not None and time.monotonic() - last < FIND_REINDEX_SECONDS
+        ) or not AgentService._index_lock.acquire(blocking=False):
             return False
         AgentService._last_index = time.monotonic()
 
         def run():
             from shani_chronoa import file_index
+
             try:
                 for root in find_roots():
                     file_index.index_directory(root, embed=True)
@@ -407,27 +631,37 @@ class AgentService:
                 logger.exception("indexing for FindFiles")
             finally:
                 AgentService._index_lock.release()
+
         threading.Thread(target=run, name="find-files-index", daemon=True).start()
         return True
 
     def _on_done(self, turn_id: str, result) -> None:
+        self._futures.pop(turn_id, None)
         if isinstance(result, Exception):
-            self.emit_event(json.dumps(
-                {"turn": turn_id, "event": "error",
-                 "text": f"{type(result).__name__}: {result}"}))
+            self.emit_event(
+                json.dumps(
+                    {
+                        "turn": turn_id,
+                        "event": "error",
+                        "text": f"{type(result).__name__}: {result}",
+                    }
+                )
+            )
         self.emit_event(json.dumps({"turn": turn_id, "event": "done"}))
 
     def emit_event(self, payload: str) -> bool:
         if self._connection is None:
             return False
         self._connection.emit_signal(
-            None, PATH, IFACE, "Event", GLib.Variant("(s)", (payload,)))
+            None, PATH, IFACE, "Event", GLib.Variant("(s)", (payload,))
+        )
         return False
 
     # -- the resolver ask_bridge binds to a turn ------------------------
 
-    def register(self, turn_id: str, done: threading.Event,
-                 resolve: Callable[[str], None]) -> "Optional[threading.Event]":
+    def register(
+        self, turn_id: str, done: threading.Event, resolve: Callable[[str], None]
+    ) -> "Optional[threading.Event]":
         """Register one turn's approval wait; return a stale one it replaces."""
         with self._lock:
             stale = self._pending.get(turn_id)
@@ -436,8 +670,9 @@ class AgentService:
             return stale[0]
         return None
 
-    def forget(self, turn_id: str, done: threading.Event,
-               closed: Callable[[], None]) -> None:
+    def forget(
+        self, turn_id: str, done: threading.Event, closed: Callable[[], None]
+    ) -> None:
         """Drop a wait that stopped waiting, telling the shell if it was live."""
         with self._lock:
             current = self._pending.get(turn_id)
@@ -456,13 +691,15 @@ class AgentService:
 
     # -- bus export -----------------------------------------------------
 
-    def _dispatch(self, connection_, sender, path, interface, method,
-                  params, invocation):
+    def _dispatch(
+        self, connection_, sender, path, interface, method, params, invocation
+    ):
         handler = getattr(self, method, None)
         if handler is None:
             invocation.return_dbus_error(
                 "org.freedesktop.DBus.Error.UnknownMethod",
-                f"{interface} has no method {method!r}")
+                f"{interface} has no method {method!r}",
+            )
             return
         handler(connection_, sender, path, interface, method, params, invocation)
 
@@ -472,19 +709,20 @@ class AgentService:
         node = Gio.DBusNodeInfo.new_for_xml(XML)
         self._connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
 
-        def dispatch(connection_, sender, path, interface, method, params,
-                     invocation):
-            call = (connection_, sender, path, interface, method, params,
-                    invocation)
+        def dispatch(connection_, sender, path, interface, method, params, invocation):
+            call = (connection_, sender, path, interface, method, params, invocation)
             off_the_main_loop(lambda: self._dispatch(*call), f"agent-{method}")
 
         self._registration = self._connection.register_object(
-            PATH, node.interfaces[0], dispatch, None, None)
+            PATH, node.interfaces[0], dispatch, None, None
+        )
         self._owner = Gio.bus_own_name_on_connection(
-            self._connection, BUS_NAME,
-            Gio.BusNameOwnerFlags.REPLACE
-            | Gio.BusNameOwnerFlags.ALLOW_REPLACEMENT,
-            None, None)
+            self._connection,
+            BUS_NAME,
+            Gio.BusNameOwnerFlags.REPLACE | Gio.BusNameOwnerFlags.ALLOW_REPLACEMENT,
+            None,
+            None,
+        )
         logger.info("agent interface requested at %s (%s)", PATH, BUS_NAME)
 
     def unexport(self) -> None:
