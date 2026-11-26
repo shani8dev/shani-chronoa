@@ -1,0 +1,20 @@
+#!/usr/bin/env python3
+"""Shani Chronoa's engine, with no GTK and no window.
+
+Started on demand by the Agent D-Bus name or by shani-chronoa-engine.service.
+The GTK app is the Agent on a desktop session; this process yields the name to
+it and is the Agent when no desktop app is running (see shani_chronoa.engine).
+"""
+
+import os
+import sys
+
+# Same layout as the other launchers: usr/bin -> usr/lib/shani-chronoa, not
+# just dirname(dirname(__file__)), which pointed at the wrong directory.
+_USR_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(_USR_DIR, "lib", "shani-chronoa"))
+
+from shani_chronoa.engine import main
+
+if __name__ == "__main__":
+    sys.exit(main())

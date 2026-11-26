@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=dev.shani.chronoa.Agent
+Exec=/usr/bin/shani-chronoa-engine
+SystemdService=shani-chronoa-engine.service

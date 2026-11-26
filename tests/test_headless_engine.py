@@ -48,7 +48,7 @@ _SCRIPT = textwrap.dedent(
     from test_tool_loop_continuity import _MockOllama, _final_reply
 
     exported = []
-    AgentService.export = lambda self: exported.append("agent")
+    AgentService.export = lambda self, **_kw: exported.append("agent")
 
     mock = _MockOllama([_final_reply("hello from a headless engine")])
     engine = Engine(llm=mock.build())

@@ -68,9 +68,15 @@ class Engine:
         )
         self.agent = AgentService(self)
 
-    def start(self) -> None:
-        """Own the Agent name on the session bus."""
-        self.agent.export()
+    def start(self) -> bool:
+        """Own the Agent name, unless a GTK desktop app already has it.
+
+        The desktop app is the Agent on GNOME/Plasma/COSMIC: it has the
+        microphone, the window and the person's conversation. The engine is
+        the Agent on a headless session, or when the desktop app is not
+        running; it yields instead of fighting over one bus name.
+        """
+        return self.agent.export(yield_to_owner=True)
 
     def stop(self) -> None:
         self.agent.unexport()
@@ -82,7 +88,12 @@ class Engine:
 
         loop = GLib.MainLoop()
         for sig in (signal.SIGTERM, signal.SIGINT):
-            GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, sig, loop.quit, None)
+            # PyGObject calls the callback with the signal number as its one
+            # argument; MainLoop.quit takes none, and passing it directly
+            # raised TypeError on every SIGTERM instead of stopping the loop.
+            GLib.unix_signal_add(
+                GLib.PRIORITY_DEFAULT, sig, lambda *_signal: loop.quit()
+            )
         self.start()
         try:
             loop.run()
