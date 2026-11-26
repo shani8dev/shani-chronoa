@@ -40,45 +40,32 @@ from shani_chronoa.gui.surfaces import triggers as triggers_surface  # noqa: E40
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "sentence,expected",
-    [
-        (
-            "not installed - no model file in /var/cache/shani-chronoa/models",
-            "not installed - no model file in <tt>/var/cache/shani-chronoa/models</tt>",
-        ),
-        (
-            "the file at /a/b.bin does not exist",
-            "the file at <tt>/a/b.bin</tt> does not exist",
-        ),
-        (
-            "From ~/.local/share/shani-chronoa/rules.jsonl and more",
-            "From <tt>~/.local/share/shani-chronoa/rules.jsonl</tt> and more",
-        ),
-        # A glob is a path. Stopping at the star left the half that most needs to be
-        # recognisable outside the fixed-width run.
-        (
-            "From /home/x/.config/shani-chronoa/triggers/*.jsonl",
-            "From <tt>/home/x/.config/shani-chronoa/triggers/*.jsonl</tt>",
-        ),
-        # Punctuation ends the path, it is not part of it.
-        ("look in /tmp/x, then stop", "look in <tt>/tmp/x</tt>, then stop"),
-        ("is it there? /a/b is not", "is it there? <tt>/a/b</tt> is not"),
-    ],
-)
+@pytest.mark.parametrize("sentence,expected", [
+    ("not installed - no model file in /var/cache/shani-chronoa/models",
+     "not installed - no model file in "
+     "<tt>/var/cache/shani-chronoa/models</tt>"),
+    ("the file at /a/b.bin does not exist",
+     "the file at <tt>/a/b.bin</tt> does not exist"),
+    ("From ~/.local/share/shani-chronoa/rules.jsonl and more",
+     "From <tt>~/.local/share/shani-chronoa/rules.jsonl</tt> and more"),
+    # A glob is a path. Stopping at the star left the half that most needs to be
+    # recognisable outside the fixed-width run.
+    ("From /home/x/.config/shani-chronoa/triggers/*.jsonl",
+     "From <tt>/home/x/.config/shani-chronoa/triggers/*.jsonl</tt>"),
+    # Punctuation ends the path, it is not part of it.
+    ("look in /tmp/x, then stop", "look in <tt>/tmp/x</tt>, then stop"),
+    ("is it there? /a/b is not", "is it there? <tt>/a/b</tt> is not"),
+])
 def test_a_path_inside_a_sentence_is_marked_and_the_prose_is_not(sentence, expected):
     assert common.paths_markup(sentence) == expected
 
 
-@pytest.mark.parametrize(
-    "prose",
-    [
-        "no path here at all",
-        "Root has 38G free of 120G",  # `38G/120G` is not a path
-        "a ratio of 3/4 is not a path",
-        "",
-    ],
-)
+@pytest.mark.parametrize("prose", [
+    "no path here at all",
+    "Root has 38G free of 120G",          # `38G/120G` is not a path
+    "a ratio of 3/4 is not a path",
+    "",
+])
 def test_prose_with_no_path_is_left_as_prose(prose):
     """The negative half, and the one that keeps this from being a toy.
 
@@ -110,8 +97,7 @@ def test_markup_in_the_text_cannot_inject_itself():
     label = common.paths_in(hostile)
     assert isinstance(label, Gtk.Label)
     assert label.get_use_markup() is True, (
-        "the label is not rendering markup, so it would show the tags"
-    )
+        "the label is not rendering markup, so it would show the tags")
 
     ok, _attrs, text, _accel = _parse(markup)
     assert ok, f"the markup does not parse, so the label renders blank: {markup}"
@@ -186,9 +172,7 @@ def test_the_triggers_source_paths_are_read_as_paths():
     how the line is rendered, and a fixture that depends on the host's trigger
     store would pass on a machine that has one and skip on one that has not.
     """
-    label = triggers_surface._note(
-        "From /home/x/.config/shani-chronoa/triggers/*.jsonl"
-    )
+    label = triggers_surface._note("From /home/x/.config/shani-chronoa/triggers/*.jsonl")
     rendered = label.get_label()
     # **Against the line breaks removed**, and the reason is worth keeping: the
     # label wraps mid-path at the hyphen ("shani-\nchronoa"), so the substring
@@ -240,9 +224,8 @@ def test_key_values_already_gives_paths_a_fixed_width_face():
     walk(widget)
     values = [t for t in texts if "key-value-text" in t.get_css_classes()]
     assert values, "no value label was built, so the table is not what it claims"
-    assert any("/var/cache/chronoa/ggml-q4.bin" in v.get_label() for v in values), [
-        v.get_label() for v in values
-    ]
+    assert any("/var/cache/chronoa/ggml-q4.bin" in v.get_label() for v in values), (
+        [v.get_label() for v in values])
 
 
 def test_the_stylesheet_gives_key_value_text_a_fixed_width_face():
@@ -256,14 +239,10 @@ def test_the_stylesheet_gives_key_value_text_a_fixed_width_face():
     from shani_chronoa.gui.style import StyleMixin
 
     source = Path(StyleMixin.__module__.replace(".", "/"))
-    css = (
-        Path(__file__).resolve().parents[1]
-        / "usr/lib/shani-chronoa/shani_chronoa"
-        / "ui_gtk/gui/style.py"
-    ).read_text()
+    css = (Path(__file__).resolve().parents[1] / "usr/lib/shani-chronoa/shani_chronoa"
+           / "ui_gtk/gui/style.py").read_text()
     assert ".key-value-text" in css, "the key-value value class is not styled"
     assert "font-family: monospace" in css, (
         "no fixed-width face anywhere in the stylesheet, so the table is "
-        "proportional like everything else"
-    )
+        "proportional like everything else")
     assert source is not None

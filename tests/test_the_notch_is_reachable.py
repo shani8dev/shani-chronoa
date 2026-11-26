@@ -65,16 +65,7 @@ APPLICATION = REPO / "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/app/application
 #: than derived from the client, because the whole claim is that the two agree -
 #: a set built from the client's own constants would be satisfied by any rename
 #: on both sides at once.
-CALLED_METHODS = (
-    "Status",
-    "Notch",
-    "PanelHeight",
-    "Art",
-    "Rect",
-    "Pointer",
-    "Show",
-    "Scale",
-)
+CALLED_METHODS = ("Status", "Notch", "PanelHeight", "Art", "Rect", "Pointer", "Show", "Scale")
 
 
 def _js_constants() -> dict:
@@ -108,7 +99,6 @@ def _iface_methods() -> list:
 # The Shell offers what the app calls
 # --------------------------------------------------------------------------
 
-
 class TestTheShellOffersWhatTheAppCalls:
     def test_every_method_the_client_calls_is_in_the_shell_interface(self):
         offered = set(_iface_methods())
@@ -116,8 +106,7 @@ class TestTheShellOffersWhatTheAppCalls:
         assert not missing, (
             "mascot_notch calls methods the Shell's IFACE does not declare: "
             f"{missing}. GDBus refuses an undeclared method, so each of these "
-            "is a call_sync that returns None forever."
-        )
+            "is a call_sync that returns None forever.")
 
     def test_the_three_that_carry_the_notch_are_declared_with_the_right_arity(self):
         """`Status` writes, `Notch` and `PanelHeight` read - and each shape matters.
@@ -131,24 +120,24 @@ class TestTheShellOffersWhatTheAppCalls:
         """
         text = EXTENSION_JS.read_text()
         start = text.index("const IFACE = `")
-        xml = text[start : text.index("`", start + len("const IFACE = `"))]
+        xml = text[start:text.index("`", start + len("const IFACE = `"))]
 
         def _shape(method: str) -> tuple:
-            block = re.search(rf'<method name="{method}">(.*?)</method>', xml, re.S)
+            block = re.search(
+                rf'<method name="{method}">(.*?)</method>', xml, re.S)
             assert block, f"{method} is not declared as a block in IFACE"
-            args = re.findall(
-                r'<arg type="(\w)" name="(\w+)" direction="(\w+)"', block.group(1)
-            )
+            args = re.findall(r'<arg type="(\w)" name="(\w+)" direction="(\w+)"',
+                              block.group(1))
             return tuple((t, n, d) for t, n, d in args)
 
-        assert _shape("Status") == (("s", "title", "in"), ("s", "detail", "in"))
+        assert _shape("Status") == (("s", "title", "in"),
+                                    ("s", "detail", "in"))
         for reader in ("Notch", "PanelHeight"):
             shape = _shape(reader)
             assert shape, f"{reader} declares no arguments"
             assert all(d == "out" for _, _, d in shape), (
                 f"{reader} must be a reader; a direction the client does not "
-                f"expect makes its reply unreadable: {shape}"
-            )
+                f"expect makes its reply unreadable: {shape}")
 
     def test_the_scanner_can_report_an_absence_at_all(self):
         """The control for the scan above, and the reason it is not a formality.
@@ -164,19 +153,16 @@ class TestTheShellOffersWhatTheAppCalls:
         offered = _iface_methods()
         assert fabricated not in offered, (
             "a fabricated method name came back as declared, so the scan "
-            "cannot tell present from absent and the test above means nothing"
-        )
+            "cannot tell present from absent and the test above means nothing")
         assert "PanelHeight" in offered, (
             "the control passed but the real method is not there either, so "
-            "the scan is reading nothing at all"
-        )
+            "the scan is reading nothing at all")
         assert offered, "the interface declares no methods; the file moved"
 
 
 # --------------------------------------------------------------------------
 # The strip is tall enough, and is derived rather than typed
 # --------------------------------------------------------------------------
-
 
 class TestTheStripFitsTheMascot:
     def test_the_strip_is_at_least_as_tall_as_the_sprite(self):
@@ -185,21 +171,16 @@ class TestTheStripFitsTheMascot:
             f"extension.js draws {constants['SIZE']}px; mascot.SIZE is "
             f"{mascot.SIZE}. The recorder checks this too, but a mismatch here "
             "means the two files have drifted and neither test can say which "
-            "is right."
-        )
-        numbers = {
-            name: int(text)
-            for name, text in constants.items()
-            if text.lstrip("-").isdigit()
-        }
+            "is right.")
+        numbers = {name: int(text) for name, text in constants.items()
+                   if text.lstrip("-").isdigit()}
         # The arithmetic is the extension's own expression over the extension's
         # own numbers - re-derived here it would be a number about this file.
         height = eval(constants["NOTCH_H"], {"__builtins__": {}}, numbers)  # noqa: S307
         assert height >= numbers["SIZE"], (
             f"the strip is {height}px tall and the sprite is "
             f"{numbers['SIZE']}px, so the mascot is cropped by the surface "
-            "meant to hold it"
-        )
+            "meant to hold it")
 
     def test_the_height_is_the_sprite_plus_padding_on_both_edges(self):
         """The property that makes the number above survive a redraw.
@@ -218,25 +199,20 @@ class TestTheStripFitsTheMascot:
         copy of the line, so it does not rot when the line is rewritten.
         """
         constants = _js_constants()
-        numbers = {
-            name: int(text)
-            for name, text in constants.items()
-            if text.lstrip("-").isdigit()
-        }
+        numbers = {name: int(text) for name, text in constants.items()
+                   if text.lstrip("-").isdigit()}
         expression = constants["NOTCH_H"]
         assert "SIZE" in expression and "NOTCH_PAD" in expression, (
             f"NOTCH_H is {expression!r}, which no longer mentions the sprite "
             "and its padding. The strip is still tall enough today, but the "
-            "size is now a number somebody has to remember updating."
-        )
+            "size is now a number somebody has to remember updating.")
         height = eval(expression, {"__builtins__": {}}, numbers)  # noqa: S307
         expected = numbers["SIZE"] + 2 * numbers["NOTCH_PAD"]
         assert height == expected, (
             f"NOTCH_H evaluates to {height} but the sprite is {numbers['SIZE']} "
             f"and the padding is {numbers['NOTCH_PAD']} on each edge, which is "
             f"{expected}. The strip is a different height from the one its own "
-            "parts describe."
-        )
+            "parts describe.")
 
     def test_the_padding_is_positive(self):
         """The other half of the derivation, and the one that can go wrong alone.
@@ -249,14 +225,12 @@ class TestTheStripFitsTheMascot:
         pad = eval(constants["NOTCH_PAD"], {"__builtins__": {}}, constants)  # noqa: S307
         assert pad > 0, (
             f"NOTCH_PAD is {pad}; a strip padded by a negative amount is "
-            "shorter than its sprite while still satisfying NOTCH_H >= SIZE"
-        )
+            "shorter than its sprite while still satisfying NOTCH_H >= SIZE")
 
 
 # --------------------------------------------------------------------------
 # The manifest
 # --------------------------------------------------------------------------
-
 
 def _schema_path() -> Path:
     """Where the schema `metadata.json` names actually lives in this tree.
@@ -273,7 +247,8 @@ def _schema_path() -> Path:
 
 
 #: The real file, under a name the controls do not touch. See `_SHIPPED_JS`.
-_SHIPPED_SCHEMA_XML = REPO / "usr/share/glib-2.0/schemas/org.shani.chronoa.gschema.xml"
+_SHIPPED_SCHEMA_XML = (REPO
+                       / "usr/share/glib-2.0/schemas/org.shani.chronoa.gschema.xml")
 
 #: Where `_place()`'s corner chain begins, and what each of its two shapes says.
 _CHAIN_START = "let nx, ny;"
@@ -315,8 +290,7 @@ def _place_branches(js: str) -> dict:
             f"extension.js has no {_CHAIN_START!r}, so the corner chain could "
             "not be found and nothing below was measured. This is a refactor, "
             "not a defect - the check follows the chain rather than searching "
-            "for corner names, so it has to be pointed at the new one."
-        )
+            "for corner names, so it has to be pointed at the new one.")
 
     def block(at: int):
         """The `(open, close)` span of the `{...}` starting at or after `at`."""
@@ -331,8 +305,7 @@ def _place_branches(js: str) -> dict:
                     return start, k
         raise AssertionError(
             "the corner chain's braces do not balance, so no branch body could "
-            "be read out of it"
-        )
+            "be read out of it")
 
     out: dict = {}
     i = js.index(_CHAIN_START)
@@ -341,12 +314,12 @@ def _place_branches(js: str) -> dict:
         if not guard:
             return out
         opening, closing = block(guard.end() - 1)
-        out[guard.group(1)] = js[opening + 1 : closing]
+        out[guard.group(1)] = js[opening + 1:closing]
         i = closing + 1
         plain = _ELSE.match(js, i)
         if plain:
             opening, closing = block(plain.end() - 1)
-            out[_ELSE_KEY] = js[opening + 1 : closing]
+            out[_ELSE_KEY] = js[opening + 1:closing]
             return out
 
 
@@ -364,28 +337,26 @@ class TestTheManifest:
             f"metadata.json declares {data.get('settings-schema')!r}; the "
             "extension reads the app's own schema, and the recording harness "
             "compiles the same one. A different or absent id means "
-            "getSettings() cannot resolve org.shani.chronoa."
-        )
+            "getSettings() cannot resolve org.shani.chronoa.")
 
     def test_the_schema_it_names_is_the_one_this_repository_ships(self):
         schema = json.loads(METADATA.read_text()).get("settings-schema")
         assert schema == "org.shani.chronoa"
-        xml = REPO / f"usr/share/glib-2.0/schemas/{schema}.gschema.xml"
+        xml = (REPO / f"usr/share/glib-2.0/schemas/{schema}.gschema.xml")
         assert xml.is_file(), (
             f"metadata.json names {schema} and the repository ships no "
             f"{xml.name}. The extension would resolve the app's real settings "
-            "on a user's machine and resolve nothing in this tree."
-        )
+            "on a user's machine and resolve nothing in this tree.")
 
     def test_it_declares_the_shell_versions_it_was_measured_on(self):
         versions = json.loads(METADATA.read_text())["shell-version"]
         assert versions == ["48", "49", "50"], (
             f"shell-version is {versions}. The measurements in "
             "HARVEST-COUCOU.md PART 9/10 were taken on the versions listed "
-            "here; widening it without measuring claims a surface nobody saw."
-        )
+            "here; widening it without measuring claims a surface nobody saw.")
 
-    def test_the_schema_compiles_into_a_store_that_still_holds_the_keys(self, tmp_path):
+    def test_the_schema_compiles_into_a_store_that_still_holds_the_keys(
+            self, tmp_path):
         """`glib-compile-schemas` **discards the entire file** for one bad
         declaration, **prints a warning and exits 0**, and the machine then has no
         `org.shani.chronoa` at all.
@@ -436,8 +407,7 @@ class TestTheManifest:
         gsettings = shutil.which("gsettings")
         assert compile_schema and gsettings, (
             "glib-compile-schemas and gsettings are both required to tell a "
-            "schema that compiled from one that compiled nothing"
-        )
+            "schema that compiled from one that compiled nothing")
 
         # **A directory of its own, holding only this file** - the layout is the
         # point: compiling a flattened copy gives a different answer, and reading
@@ -447,35 +417,26 @@ class TestTheManifest:
         stage.mkdir()
         shutil.copy(src, stage / src.name)
 
-        done = subprocess.run(
-            [compile_schema, str(stage)], capture_output=True, text=True, timeout=60
-        )
+        done = subprocess.run([compile_schema, str(stage)], capture_output=True,
+                              text=True, timeout=60)
         said = done.stdout + done.stderr
         assert done.returncode == 0, f"glib-compile-schemas failed:\n{said}"
         assert "has been ignored" not in said, (
             "glib-compile-schemas exited 0 and discarded the whole schema:\n"
             f"{said.strip()}\nEvery setting in the application now takes its "
-            "Python default, silently."
-        )
+            "Python default, silently.")
 
         assert (stage / "gschemas.compiled").is_file(), (
-            "no gschemas.compiled was written"
-        )
+            "no gschemas.compiled was written")
 
-        env = dict(
-            os.environ, GSETTINGS_SCHEMA_DIR=str(stage), GSETTINGS_BACKEND="memory"
-        )
+        env = dict(os.environ, GSETTINGS_SCHEMA_DIR=str(stage),
+                   GSETTINGS_BACKEND="memory")
         ask = subprocess.run(
             [gsettings, "get", schema, "mascot-corner"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-            env=env,
-        )
+            capture_output=True, text=True, timeout=60, env=env)
         assert ask.returncode == 0 and "No such schema" not in ask.stderr, (
             "the schema compiled to a file and the store cannot read a key out "
-            f"of it: {ask.stdout.strip()} {ask.stderr.strip()}"
-        )
+            f"of it: {ask.stdout.strip()} {ask.stderr.strip()}")
 
     def test_the_corner_the_schema_picks_is_a_corner_the_code_handles(self):
         """The default is the **only** thing that decides where the notch goes.
@@ -515,14 +476,12 @@ class TestTheManifest:
         """
         schema = json.loads(METADATA.read_text())["settings-schema"]
         root = ET.parse(_schema_path()).getroot()
-        key = next(
-            (k for k in root.iter("key") if k.get("name") == "mascot-corner"), None
-        )
+        key = next((k for k in root.iter("key")
+                    if k.get("name") == "mascot-corner"), None)
         assert key is not None, (
             f"{schema} declares no mascot-corner key. It is the key the "
             "extension reads to place the strip, and nothing writes it, so its "
-            "absence leaves _corner() on its own fallback."
-        )
+            "absence leaves _corner() on its own fallback.")
 
         default = (key.findtext("default") or "").strip().strip('"')
         choices = [c.get("value") for c in key.iter("choice")]
@@ -530,60 +489,53 @@ class TestTheManifest:
             f"mascot-corner's default is {default!r}, which is not one of its "
             f"own choices {choices}. glib-compile-schemas discards the ENTIRE "
             "schema for that, exits 0, and every setting in the application "
-            "silently takes its Python default."
-        )
+            "silently takes its Python default.")
 
         assert default == "top-center", (
             f"mascot-corner defaults to {default!r}. Nothing in the tree "
             "writes this key, so the default is the only thing that decides "
             "placement - and the notch is the top-centre strip, not the "
-            "bottom-right corner it was ported away from."
-        )
+            "bottom-right corner it was ported away from.")
 
         js = EXTENSION_JS.read_text()
         branches = _place_branches(js)
 
-        unhandled = [c for c in choices if c != "bottom-right" and c not in branches]
+        unhandled = [c for c in choices
+                     if c != "bottom-right" and c not in branches]
         assert not unhandled, (
             f"the schema offers mascot-corner={unhandled}, and _place() has no "
             "branch for it - so the value falls into its `else` and the strip "
             "is drawn at the bottom-right corner instead, with nothing saying "
             "the choice was not honoured. Either the branch or the choice is "
-            "missing."
-        )
+            "missing.")
 
         assert _ELSE_KEY in branches, (
             "the corner chain has no `else`, so the value `_corner()` falls back "
             "to when there is no schema - 'bottom-right' - and any corner the "
             "chain does not name has nowhere to land. `let nx, ny;` is handed "
-            "straight to set_position, so it would be `undefined`."
-        )
+            "straight to set_position, so it would be `undefined`.")
 
-        half = sorted(
-            "the `else`" if name == _ELSE_KEY else f"mascot-corner={name!r}"
-            for name, body in branches.items()
-            if "nx =" not in body or "ny =" not in body
-        )
+        half = sorted("the `else`" if name == _ELSE_KEY
+                      else f"mascot-corner={name!r}"
+                      for name, body in branches.items()
+                      if "nx =" not in body or "ny =" not in body)
         assert not half, (
             f"{half} positions only one axis. `let nx, ny;` is declared outside "
             "the chain, so the axis the branch does not assign is `undefined` "
             "and reaches `set_position` as such - the strip does not land at a "
-            "wrong corner, it lands nowhere."
-        )
+            "wrong corner, it lands nowhere.")
 
         assert branches["top-center"].strip() != branches["top-right"].strip(), (
             "top-center and top-right have the same body, so they place the "
             "strip in the same place and the choice between them means "
             "nothing. Centred is a claim about the arithmetic: top-center "
             "carries the `/ 2` and top-right the right margin, and one of them "
-            "stopped being that."
-        )
+            "stopped being that.")
 
 
 # --------------------------------------------------------------------------
 # create() - one call, either surface
 # --------------------------------------------------------------------------
-
 
 class TestCreatePicksASurface:
     @pytest.fixture(autouse=True)
@@ -650,8 +602,7 @@ class TestCreatePicksASurface:
         assert "no layer surface" in said, said
         assert "not enabled" in said, (
             f"the notch's reason is missing from the log: {said!r}. One reason "
-            "for two unavailable surfaces tells the reader half of what is wrong."
-        )
+            "for two unavailable surfaces tells the reader half of what is wrong.")
 
     def test_start_is_the_gate_rather_than_creation(self, monkeypatch):
         """`create()` picks a class; `start()` decides whether it runs.
@@ -667,8 +618,7 @@ class TestCreatePicksASurface:
         assert built.running is False
         assert built.start() is False, (
             "start() answered True with neither surface available, so a "
-            "companion would claim to be up when nothing is showing"
-        )
+            "companion would claim to be up when nothing is showing")
 
     def test_both_surfaces_answer_the_same_methods(self):
         """The property that lets one call site hold either object.
@@ -676,28 +626,18 @@ class TestCreatePicksASurface:
         Asked of the two classes rather than of one object, because a fixture
         that built only a `Mascot` would be satisfied by any method list at all.
         """
-        surface = (
-            "running",
-            "start",
-            "stop",
-            "set_state",
-            "set_level",
-            "express",
-            "say",
-            "notice",
-        )
+        surface = ("running", "start", "stop", "set_state", "set_level",
+                   "express", "say", "notice")
         for name in surface:
             for cls in (mascot.Mascot, mascot_notch.Notch):
                 assert hasattr(cls, name), (
                     f"{cls.__name__} has no {name}; application.py calls it on "
-                    "whichever object create() returned"
-                )
+                    "whichever object create() returned")
 
 
 # --------------------------------------------------------------------------
 # The app reaches it the same way whichever surface it got
 # --------------------------------------------------------------------------
-
 
 class TestTheAppAsksTheCompanionRatherThanTheWindow:
     def test_it_builds_through_create(self):
@@ -705,11 +645,9 @@ class TestTheAppAsksTheCompanionRatherThanTheWindow:
         assert "mascot.create(self)" in source, (
             "application.py constructs the companion directly. That is the bug "
             "the seam was written for: on Mutter the window never opens, so "
-            "the one surface that works is the one that would be skipped."
-        )
+            "the one surface that works is the one that would be skipped.")
         assert "mascot.Mascot(self)" not in source, (
-            "application.py still constructs the window directly somewhere."
-        )
+            "application.py still constructs the window directly somewhere.")
 
     def test_it_asks_running_rather_than_reading_the_window(self):
         """The reader that was replaced, named without spelling it in this file.
@@ -721,16 +659,12 @@ class TestTheAppAsksTheCompanionRatherThanTheWindow:
         and the extension was never started.
         """
         private = "_" + "win"
-        hits = [
-            n
-            for n, line in enumerate(APPLICATION.read_text().splitlines(), 1)
-            if re.search(rf"\b{private}\b", line) and not line.lstrip().startswith("#")
-        ]
+        hits = [n for n, line in enumerate(APPLICATION.read_text().splitlines(), 1)
+                if re.search(rf"\b{private}\b", line) and not line.lstrip().startswith("#")]
         assert not hits, (
             f"application.py reads {private} at line(s) {hits} - outside a "
             "comment. That is the window's private state, so the gate is a "
-            "question about the window rather than about the companion."
-        )
+            "question about the window rather than about the companion.")
 
     def test_running_agrees_with_the_state_it_wraps(self):
         """Both properties answer their own class's state, not a shared one.
@@ -756,8 +690,7 @@ class TestTheAppAsksTheCompanionRatherThanTheWindow:
             f'`getattr(self, "mascot", None)` in {found} place(s), not 2. A '
             "site that reached for the object directly would raise on a "
             "partially-started app instead of skipping - which is the reason "
-            "every reader here goes through getattr."
-        )
+            "every reader here goes through getattr.")
 
 
 # --------------------------------------------------------------------------
@@ -800,8 +733,7 @@ def _point_at(tmp_path, monkeypatch, plant: tuple = None):
         assert text.count(old) == 1, (
             f"the planted fact {old!r} occurs {text.count(old)} times in "
             "extension.js, not once - so this control would read the "
-            "unmutated file and pass for the wrong reason"
-        )
+            "unmutated file and pass for the wrong reason")
         text = text.replace(old, new)
     target.write_text(text)
     monkeypatch.setattr(_MOD, "EXTENSION_JS", target)
@@ -830,8 +762,7 @@ def _bites(check, tmp_path, monkeypatch, plant) -> str:
         return str(exc)
     raise AssertionError(
         f"{check.__qualname__} passed with the fact planted that this file "
-        "records as the reason it exists, so it is not a witness for it"
-    )
+        "records as the reason it exists, so it is not a witness for it")
 
 
 class TestEachDroppedMutationWouldHaveBeenCaught:
@@ -866,24 +797,20 @@ class TestEachDroppedMutationWouldHaveBeenCaught:
         the strip falls back to y=0 - *almost* right on a machine whose top bar
         is 0px and visibly wrong on every other one.
         """
-        plant = ('    <method name="PanelHeight">', '    <method name="PanelHeightV2">')
+        plant = ('    <method name="PanelHeight">',
+                 '    <method name="PanelHeightV2">')
 
         said = _bites(
-            TestTheShellOffersWhatTheAppCalls().test_every_method_the_client_calls_is_in_the_shell_interface,
-            tmp_path,
-            monkeypatch,
-            plant,
-        )
+            TestTheShellOffersWhatTheAppCalls()
+            .test_every_method_the_client_calls_is_in_the_shell_interface,
+            tmp_path, monkeypatch, plant)
         assert "PanelHeight" in said, said
 
         # The arity check goes red too, and separately: it looks the method up by
         # name and finds no block. Two readers of one file, catching one rename.
-        _bites(
-            TestTheShellOffersWhatTheAppCalls().test_the_three_that_carry_the_notch_are_declared_with_the_right_arity,
-            tmp_path,
-            monkeypatch,
-            plant,
-        )
+        _bites(TestTheShellOffersWhatTheAppCalls()
+               .test_the_three_that_carry_the_notch_are_declared_with_the_right_arity,
+               tmp_path, monkeypatch, plant)
 
         # **And the control for the scan goes red as well**, because the
         # fabricated name it builds is `PanelHeightV2` - the one now present.
@@ -891,12 +818,9 @@ class TestEachDroppedMutationWouldHaveBeenCaught:
         # while the real method was renamed into the shape of the fake one. A
         # control that can fail on the defect is worth more than one that only
         # ever passes.
-        said = _bites(
-            TestTheShellOffersWhatTheAppCalls().test_the_scanner_can_report_an_absence_at_all,
-            tmp_path,
-            monkeypatch,
-            plant,
-        )
+        said = _bites(TestTheShellOffersWhatTheAppCalls()
+                      .test_the_scanner_can_report_an_absence_at_all,
+                      tmp_path, monkeypatch, plant)
         assert "fabricated" in said, said
 
     def test_a_method_declared_as_a_reader_is_caught(self, tmp_path, monkeypatch):
@@ -907,18 +831,13 @@ class TestEachDroppedMutationWouldHaveBeenCaught:
         `TypeError` inside the Shell, which the client cannot distinguish from a
         missing method.
         """
-        plant = (
-            '      <arg type="s" name="title" direction="in"/>\n'
-            '      <arg type="s" name="detail" direction="in"/>',
-            '      <arg type="s" name="title" direction="out"/>\n'
-            '      <arg type="s" name="detail" direction="out"/>',
-        )
-        said = _bites(
-            TestTheShellOffersWhatTheAppCalls().test_the_three_that_carry_the_notch_are_declared_with_the_right_arity,
-            tmp_path,
-            monkeypatch,
-            plant,
-        )
+        plant = ('      <arg type="s" name="title" direction="in"/>\n'
+                 '      <arg type="s" name="detail" direction="in"/>',
+                 '      <arg type="s" name="title" direction="out"/>\n'
+                 '      <arg type="s" name="detail" direction="out"/>')
+        said = _bites(TestTheShellOffersWhatTheAppCalls()
+                      .test_the_three_that_carry_the_notch_are_declared_with_the_right_arity,
+                      tmp_path, monkeypatch, plant)
         # **This particular assertion carries no message of its own**, so the
         # evidence is pytest's own diff rather than prose from the check - and
         # the diff names the flipped direction, which is the planted fact. The
@@ -933,25 +852,19 @@ class TestEachDroppedMutationWouldHaveBeenCaught:
         sees it; the arithmetic check stops because the expression no longer
         names the sprite at all.
         """
-        plant = ("const NOTCH_H = SIZE + 2 * NOTCH_PAD;", "const NOTCH_H = 100;")
-        said = _bites(
-            TestTheStripFitsTheMascot().test_the_strip_is_at_least_as_tall_as_the_sprite,
-            tmp_path,
-            monkeypatch,
-            plant,
-        )
+        plant = ("const NOTCH_H = SIZE + 2 * NOTCH_PAD;",
+                 "const NOTCH_H = 100;")
+        said = _bites(TestTheStripFitsTheMascot()
+                      .test_the_strip_is_at_least_as_tall_as_the_sprite,
+                      tmp_path, monkeypatch, plant)
         assert "cropped" in said, said
 
-        _bites(
-            TestTheStripFitsTheMascot().test_the_height_is_the_sprite_plus_padding_on_both_edges,
-            tmp_path,
-            monkeypatch,
-            plant,
-        )
+        _bites(TestTheStripFitsTheMascot()
+               .test_the_height_is_the_sprite_plus_padding_on_both_edges,
+               tmp_path, monkeypatch, plant)
 
-    def test_a_taller_strip_is_caught_only_by_the_arithmetic(
-        self, tmp_path, monkeypatch
-    ):
+    def test_a_taller_strip_is_caught_only_by_the_arithmetic(self, tmp_path,
+                                                             monkeypatch):
         """`NOTCH_H = SIZE + 2 * NOTCH_PAD + 12` - and this is the case the file
         already paid for once.
 
@@ -967,21 +880,16 @@ class TestEachDroppedMutationWouldHaveBeenCaught:
         and saying so here is what stops the `>=` check being counted as
         coverage of this fact later.
         """
-        plant = (
-            "const NOTCH_H = SIZE + 2 * NOTCH_PAD;",
-            "const NOTCH_H = SIZE + 2 * NOTCH_PAD + 12;",
-        )
+        plant = ("const NOTCH_H = SIZE + 2 * NOTCH_PAD;",
+                 "const NOTCH_H = SIZE + 2 * NOTCH_PAD + 12;")
 
         _point_at(tmp_path, monkeypatch, plant)
         # Green, and that is the finding: the size check cannot see this.
         TestTheStripFitsTheMascot().test_the_strip_is_at_least_as_tall_as_the_sprite()
 
-        said = _bites(
-            TestTheStripFitsTheMascot().test_the_height_is_the_sprite_plus_padding_on_both_edges,
-            tmp_path,
-            monkeypatch,
-            plant,
-        )
+        said = _bites(TestTheStripFitsTheMascot()
+                      .test_the_height_is_the_sprite_plus_padding_on_both_edges,
+                      tmp_path, monkeypatch, plant)
         assert "different height" in said, said
 
     def test_a_negative_padding_is_caught(self, tmp_path, monkeypatch):
@@ -993,20 +901,13 @@ class TestEachDroppedMutationWouldHaveBeenCaught:
         asserted separately rather than left to the size comparison.
         """
         plant = ("const NOTCH_PAD = 11;", "const NOTCH_PAD = -11;")
-        said = _bites(
-            TestTheStripFitsTheMascot().test_the_padding_is_positive,
-            tmp_path,
-            monkeypatch,
-            plant,
-        )
+        said = _bites(TestTheStripFitsTheMascot().test_the_padding_is_positive,
+                      tmp_path, monkeypatch, plant)
         assert "negative" in said, said
 
-        _bites(
-            TestTheStripFitsTheMascot().test_the_strip_is_at_least_as_tall_as_the_sprite,
-            tmp_path,
-            monkeypatch,
-            plant,
-        )
+        _bites(TestTheStripFitsTheMascot()
+               .test_the_strip_is_at_least_as_tall_as_the_sprite,
+               tmp_path, monkeypatch, plant)
 
     def test_the_scratch_copy_is_a_faithful_one(self, tmp_path, monkeypatch):
         """The control for every case above, and it is the one that matters most.
@@ -1022,23 +923,19 @@ class TestEachDroppedMutationWouldHaveBeenCaught:
         target = _point_at(tmp_path, monkeypatch)
         assert target.read_text() == shipped, (
             "an unplanted scratch copy differs from extension.js, so a case "
-            "that went red would be red for a reason of the copy's making"
-        )
+            "that went red would be red for a reason of the copy's making")
         assert _SHIPPED_JS.read_text() == shipped, (
-            "a scratch run modified the shipped extension.js"
-        )
+            "a scratch run modified the shipped extension.js")
 
-        _point_at(
-            tmp_path, monkeypatch, ("const NOTCH_PAD = 11;", "const NOTCH_PAD = -11;")
-        )
+        _point_at(tmp_path, monkeypatch, ("const NOTCH_PAD = 11;",
+                                          "const NOTCH_PAD = -11;"))
         assert target.read_text() != shipped, "the planted copy is not different"
         assert _SHIPPED_JS.read_text() == shipped, (
-            "planting a fact into the scratch copy wrote through to extension.js"
-        )
+            "planting a fact into the scratch copy wrote through to "
+            "extension.js")
 
-    def test_the_helper_reports_a_witness_that_does_not_bite(
-        self, tmp_path, monkeypatch
-    ):
+    def test_the_helper_reports_a_witness_that_does_not_bite(self, tmp_path,
+                                                            monkeypatch):
         """`_bites` raising is the branch every case above depends on, and nothing
         had ever made it raise.
 
@@ -1053,18 +950,14 @@ class TestEachDroppedMutationWouldHaveBeenCaught:
         touches no geometry, so `test_the_padding_is_positive` still passes - and
         `_bites` must say so rather than hand back a case that looks like it bit.
         """
-        plant = ('    <method name="PanelHeight">', '    <method name="PanelHeightV2">')
+        plant = ('    <method name="PanelHeight">',
+                 '    <method name="PanelHeightV2">')
         with pytest.raises(AssertionError, match="passed with the fact planted"):
-            _bites(
-                TestTheStripFitsTheMascot().test_the_padding_is_positive,
-                tmp_path,
-                monkeypatch,
-                plant,
-            )
+            _bites(TestTheStripFitsTheMascot().test_the_padding_is_positive,
+                   tmp_path, monkeypatch, plant)
 
     def test_the_helper_does_not_swallow_a_check_that_is_itself_broken(
-        self, tmp_path, monkeypatch
-    ):
+            self, tmp_path, monkeypatch):
         """The other direction, and it is the one that would hide a gutted check.
 
         `_bites` runs the check against the **unmutated** copy first, so a check
@@ -1078,7 +971,6 @@ class TestEachDroppedMutationWouldHaveBeenCaught:
         The message is the discriminator: a check that fails against the real file
         says so, and `_bites`'s "passed with the fact planted" does not appear.
         """
-
         def broken():
             raise AssertionError("the check is broken against the real file")
 
@@ -1093,7 +985,6 @@ class TestEachDroppedMutationWouldHaveBeenCaught:
 # --------------------------------------------------------------------------
 # The two manifest checks can bite, measured rather than argued
 # --------------------------------------------------------------------------
-
 
 def _point_schema_at(tmp_path, monkeypatch, plant: tuple = None):
     """Copy the shipped schema into a scratch dir and read *that*.
@@ -1121,8 +1012,7 @@ def _point_schema_at(tmp_path, monkeypatch, plant: tuple = None):
         assert text.count(old) == 1, (
             f"the planted fact {old!r} occurs {text.count(old)} times in "
             "the schema, not once - so this control would read the unmutated "
-            "file and pass for the wrong reason"
-        )
+            "file and pass for the wrong reason")
         text = text.replace(old, new)
     target = scratch / _SHIPPED_SCHEMA_XML.name
     target.write_text(text)
@@ -1159,8 +1049,7 @@ def _schema_bites(check, tmp_path, monkeypatch, plant) -> str:
             return str(exc)
     raise AssertionError(
         f"{check.__qualname__} passed with the fact planted that this file "
-        "records as the reason it exists, so it is not a witness for it"
-    )
+        "records as the reason it exists, so it is not a witness for it")
 
 
 def _the_corner_check(half_dir):
@@ -1238,7 +1127,8 @@ class TestTheManifestChecksCanBite:
 
     _TOP_CENTRE = '<default>"top-center"</default>'
 
-    def test_a_default_that_is_not_top_centre_goes_red(self, tmp_path, monkeypatch):
+    def test_a_default_that_is_not_top_centre_goes_red(self, tmp_path,
+                                                       monkeypatch):
         """The top-centre claim, planted with a default that is a legal choice.
 
         `bottom-right` is deliberately the *valid* one: it isolates the assertion
@@ -1246,27 +1136,23 @@ class TestTheManifestChecksCanBite:
         first and make this look like coverage of the same fact twice.
         """
         said = _schema_bites(
-            _the_corner_check,
-            tmp_path,
-            monkeypatch,
-            (self._TOP_CENTRE, '<default>"bottom-right"</default>'),
-        )
+            _the_corner_check, tmp_path, monkeypatch,
+            (self._TOP_CENTRE, '<default>"bottom-right"</default>'))
         assert "defaults to 'bottom-right'" in said, said
         # And the choices assertion is *not* what fired: `bottom-right` is one of
         # them, so a case that let it fire would be passing for the wrong reason.
         assert "not one of its own choices" not in said, said
 
-    def test_a_default_outside_its_own_choices_goes_red(self, tmp_path, monkeypatch):
+    def test_a_default_outside_its_own_choices_goes_red(self, tmp_path,
+                                                       monkeypatch):
         """The choices assertion, on its own."""
         said = _schema_bites(
-            _the_corner_check,
-            tmp_path,
-            monkeypatch,
-            (self._TOP_CENTRE, '<default>"no-such-corner"</default>'),
-        )
+            _the_corner_check, tmp_path, monkeypatch,
+            (self._TOP_CENTRE, '<default>"no-such-corner"</default>'))
         assert "not one of its own choices" in said, said
 
-    def test_a_choice_extension_js_cannot_handle_goes_red(self, tmp_path, monkeypatch):
+    def test_a_choice_extension_js_cannot_handle_goes_red(self, tmp_path,
+                                                          monkeypatch):
         """The honest-placement claim: a `<choice>` with no branch behind it.
 
         This is the failure that does **not** announce itself. The schema
@@ -1275,28 +1161,23 @@ class TestTheManifestChecksCanBite:
         the bottom-right corner with nothing saying the choice was not honoured.
         A one-line addition to the `<choices>` is the whole plant.
         """
-        plant = (
-            '        <choice value="top-center"/>\n',
-            '        <choice value="top-center"/>\n'
-            '        <choice value="top-left"/>\n',
-        )
-        said = _schema_bites(_the_corner_check, tmp_path, monkeypatch, plant)
+        plant = ('        <choice value="top-center"/>\n',
+                 '        <choice value="top-center"/>\n'
+                 '        <choice value="top-left"/>\n')
+        said = _schema_bites(
+            _the_corner_check, tmp_path, monkeypatch, plant)
         assert "top-left" in said, said
 
     #: The `top-center` branch's two assignments, which are the two needles the
     #: next three plants share. `Math.round((monitor.width - nw) / 2)` is the
     #: centring and appears once, which is what keeps `old` unique - the other
     #: two branches carry the right-margin line instead.
-    _TC_BODY = (
-        "            nx = monitor.x + Math.round((monitor.width - nw) / 2);\n"
-        "            ny = monitor.y + bar;\n"
-    )
+    _TC_BODY = ("            nx = monitor.x + Math.round((monitor.width - nw) / 2);\n"
+                "            ny = monitor.y + bar;\n")
     #: What `top-right`'s branch says, copied over `top-center`'s in the second.
-    _TR_BODY = (
-        "            nx = monitor.x + monitor.width - nw - "
-        "Math.round(MARGIN * f);\n"
-        "            ny = monitor.y + bar;\n"
-    )
+    _TR_BODY = ("            nx = monitor.x + monitor.width - nw - "
+                "Math.round(MARGIN * f);\n"
+                "            ny = monitor.y + bar;\n")
 
     def test_a_branch_nothing_can_reach_goes_red(self, tmp_path, monkeypatch):
         """The dead branch, which the string-presence check could not see.
@@ -1312,20 +1193,17 @@ class TestTheManifestChecksCanBite:
         same branch can be wrong while still *being* a branch.
         """
         said = _bites(
-            _the_corner_check_against_the_js,
-            tmp_path,
-            monkeypatch,
-            ("if (corner === 'top-center') {", "if (corner === 'top-never') {"),
-        )
+            _the_corner_check_against_the_js, tmp_path, monkeypatch,
+            ("if (corner === 'top-center') {", "if (corner === 'top-never') {"))
         assert "no branch for it" in said, said
         # And it is this assertion, not the axes or the differ claim: both of
         # those read `branches[...]`, which is empty for a branch that is gone.
         assert "only one axis" not in said, said
         assert "same body" not in said, said
 
-    def test_two_corners_placing_the_strip_the_same_way_goes_red(
-        self, tmp_path, monkeypatch
-    ):
+    def test_two_corners_placing_the_strip_the_same_way_goes_red(self,
+                                                                  tmp_path,
+                                                                  monkeypatch):
         """The branch is present, both axes are set, and it is the wrong corner.
 
         Two claims that are separately satisfiable and jointly wrong: the string
@@ -1335,14 +1213,12 @@ class TestTheManifestChecksCanBite:
         something other than presence.
         """
         said = _bites(
-            _the_corner_check_against_the_js,
-            tmp_path,
-            monkeypatch,
-            (self._TC_BODY, self._TR_BODY),
-        )
+            _the_corner_check_against_the_js, tmp_path, monkeypatch,
+            (self._TC_BODY, self._TR_BODY))
         assert "same body" in said, said
 
-    def test_a_branch_that_positions_one_axis_goes_red(self, tmp_path, monkeypatch):
+    def test_a_branch_that_positions_one_axis_goes_red(self, tmp_path,
+                                                       monkeypatch):
         """`let nx, ny;` is declared outside the chain, so a branch that assigns
         only `nx` hands `set_position` an `undefined` y.
 
@@ -1351,18 +1227,14 @@ class TestTheManifestChecksCanBite:
         one this plant removes.
         """
         said = _bites(
-            _the_corner_check_against_the_js,
-            tmp_path,
-            monkeypatch,
-            (
-                self._TC_BODY,
-                "            nx = monitor.x + Math.round((monitor.width - nw) / 2);\n",
-            ),
-        )
+            _the_corner_check_against_the_js, tmp_path, monkeypatch,
+            (self._TC_BODY,
+             "            nx = monitor.x + Math.round((monitor.width - nw) / 2);\n"))
         assert "only one axis" in said, said
         assert "mascot-corner='top-center'" in said, said
 
-    def test_a_chain_with_no_fall_through_goes_red(self, tmp_path, monkeypatch):
+    def test_a_chain_with_no_fall_through_goes_red(self, tmp_path,
+                                                   monkeypatch):
         """The `else` is where the bottom-right corner lives, and it is load-bearing.
 
         `_corner()` answers `'bottom-right'` whenever there is no schema, so the
@@ -1372,16 +1244,11 @@ class TestTheManifestChecksCanBite:
         fall-through is therefore not a chain that handles everything.
         """
         said = _bites(
-            _the_corner_check_against_the_js,
-            tmp_path,
-            monkeypatch,
-            (
-                "        } else {\n            // The historical home, and the only "
-                "corner where the strip is not\n",
-                "        }\n            // The historical home, and the only "
-                "corner where the strip is not\n",
-            ),
-        )
+            _the_corner_check_against_the_js, tmp_path, monkeypatch,
+            ("        } else {\n            // The historical home, and the only "
+             "corner where the strip is not\n",
+             "        }\n            // The historical home, and the only "
+             "corner where the strip is not\n"))
         assert "no `else`" in said, said
 
     def test_the_schema_being_discarded_goes_red(self, tmp_path, monkeypatch):
@@ -1395,13 +1262,12 @@ class TestTheManifestChecksCanBite:
         """
         said = _schema_bites(
             TestTheManifest().test_the_schema_compiles_into_a_store_that_still_holds_the_keys,
-            tmp_path,
-            monkeypatch,
-            (self._TOP_CENTRE, '<default>"no-such-corner"</default>'),
-        )
+            tmp_path, monkeypatch,
+            (self._TOP_CENTRE, '<default>"no-such-corner"</default>'))
         assert "discarded the whole schema" in said, said
 
-    def test_the_helper_reports_a_check_that_does_not_bite(self, tmp_path, monkeypatch):
+    def test_the_helper_reports_a_check_that_does_not_bite(self, tmp_path,
+                                                           monkeypatch):
         """`_schema_bites`' own `raise`, which nothing above makes it reach.
 
         Four cases are green because a real check rejected a planted fact. If
@@ -1417,42 +1283,33 @@ class TestTheManifestChecksCanBite:
         a claim about the *other three* staying satisfied - true today, and the
         kind of coupling that quietly stops holding.
         """
-
         def only_the_choices_assertion(tmp_dir):
             root = ET.parse(_MOD._schema_path()).getroot()
-            key = next(k for k in root.iter("key") if k.get("name") == "mascot-corner")
+            key = next(k for k in root.iter("key")
+                       if k.get("name") == "mascot-corner")
             default = (key.findtext("default") or "").strip().strip('"')
             choices = [c.get("value") for c in key.iter("choice")]
             assert default in choices, (
                 f"mascot-corner's default is {default!r}, which is not one of "
-                f"its own choices {choices}"
-            )
+                f"its own choices {choices}")
 
         # The positive half first, and it is asserted on the **returned
         # message**: `_schema_bites` catches a rejection and hands it back rather
         # than re-raising, which is what lets a case above assert *why* it went
         # red. So only the "did not bite" direction raises.
-        said = _schema_bites(
-            only_the_choices_assertion,
-            tmp_path,
-            monkeypatch,
-            (self._TOP_CENTRE, '<default>"no-such-corner"</default>'),
-        )
+        said = _schema_bites(only_the_choices_assertion, tmp_path, monkeypatch,
+                             (self._TOP_CENTRE,
+                              '<default>"no-such-corner"</default>'))
         assert "not one of its own choices" in said, said
 
         with pytest.raises(AssertionError, match="passed with the fact planted"):
-            _schema_bites(
-                only_the_choices_assertion,
-                tmp_path,
-                monkeypatch,
-                (self._TOP_CENTRE, '<default>"bottom-right"</default>'),
-            )
+            _schema_bites(only_the_choices_assertion, tmp_path, monkeypatch,
+                          (self._TOP_CENTRE, '<default>"bottom-right"</default>'))
 
 
 # --------------------------------------------------------------------------
 # hosted() - the bus answer, not a guess
 # --------------------------------------------------------------------------
-
 
 class TestHosted:
     """`hosted()` against a real owner of the name on a private bus.
@@ -1501,16 +1358,10 @@ print(repr(out["r"]))
 
     def _hosted(self, kind: str):
         import ast
-
-        # The shim aliases the moved module, whose __file__ is now one level
-        # deeper; derive the library path from the repo, not from the module.
+        # The shim aliases the moved module, so derive the package root from the repo.
         lib = str(REPO / "usr/lib/shani-chronoa")
-        out = subprocess.run(
-            [sys.executable, "-c", self._SCRIPT, lib, kind],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        out = subprocess.run([sys.executable, "-c", self._SCRIPT, lib, kind],
+                             capture_output=True, text=True, timeout=30)
         assert out.returncode == 0, out.stderr
         return ast.literal_eval(out.stdout.strip().splitlines()[-1])
 
@@ -1528,15 +1379,13 @@ def test_show_is_sent_as_a_boolean():
     interface and the error swallowed, so after a Shell restart the strip
     never came back and an unloadable frame never hid it."""
     import inspect
-
     src = inspect.getsource(mascot_notch)
     assert '_call("Show", "true")' not in src and '_call("Show", "false")' not in src
     import types
-
     sent = []
     n = mascot_notch.Notch(None)
     n._proxy = types.SimpleNamespace(get_name_owner=lambda: ":1.42")
     n._call = lambda method, *args: sent.append((method, args))
     n._render = lambda: None
-    n._on_owner_changed(None, None)  # the Shell came back
+    n._on_owner_changed(None, None)     # the Shell came back
     assert ("Show", (True,)) in sent, sent

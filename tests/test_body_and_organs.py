@@ -136,13 +136,11 @@ class TestListeners:
                 for _ in range(50):
                     activity = fresh.use(organ, "working")
                     fresh.done(activity)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:                     # noqa: BLE001
                 errors.append(exc)
 
-        threads = [
-            threading.Thread(target=worker, args=(organ,))
-            for organ in ("ears", "hands", "skin", "brain")
-        ]
+        threads = [threading.Thread(target=worker, args=(organ,))
+                   for organ in ("ears", "hands", "skin", "brain")]
         for thread in threads:
             thread.start()
         for thread in threads:
@@ -165,9 +163,8 @@ class TestTheStrip:
         one."""
         strip = self._strip()
         assert len(strip._rows) == len(ORGANS)
-        assert all(
-            "organ-idle" in row.get_css_classes() for row in strip._rows.values()
-        )
+        assert all("organ-idle" in row.get_css_classes()
+                   for row in strip._rows.values())
 
     @pytest.mark.holds_organs
     def test_a_light_comes_on_and_names_what_is_happening(self, fresh, monkeypatch):
@@ -219,9 +216,8 @@ class TestTheStrip:
         before = len(fresh.snapshot())
         fresh.use("eyes", "capture")
         assert len(fresh.snapshot()) == before + 1  # the register still works
-        assert not fresh._listeners or all(fn is not strip.refresh for fn in []), (
-            "listener bookkeeping"
-        )
+        assert not fresh._listeners or all(fn is not strip.refresh
+                                           for fn in []), "listener bookkeeping"
 
 
 class TestARealActuatorLightsAndClearsTheHands:
@@ -242,14 +238,12 @@ class TestARealActuatorLightsAndClearsTheHands:
         body_module.body.subscribe(lambda b: seen.append(set(b.busy_organs())))
         try:
             tools.execute_tool("get_datetime", {})
-        except Exception:  # noqa: BLE001 - the sandbox may refuse
+        except Exception:                               # noqa: BLE001 - the sandbox may refuse
             pytest.skip("no actuator could run in this environment")
         assert any("hands" in snapshot for snapshot in seen), (
-            f"the hands never lit during a real actuator call; saw {seen}"
-        )
+            f"the hands never lit during a real actuator call; saw {seen}")
         assert "hands" not in body_module.body.busy_organs(), (
-            "the hands light stayed on after the call finished"
-        )
+            "the hands light stayed on after the call finished")
 
     def test_a_refused_call_also_clears_the_light(self):
         """A skill that fails is exactly when a stuck light does the most damage:
@@ -276,10 +270,8 @@ class TestSoundIsAvailableAndOffByDefault:
         # A click at the edges of a 140 ms tone is audible as a click, which is
         # the thing people find startling - so the first frame is near silence.
         assert frames > 1000
-        assert all(
-            abs(int.from_bytes(first[i : i + 2], "little")) < 4000
-            for i in range(0, 4, 2)
-        )
+        assert all(abs(int.from_bytes(first[i:i + 2], "little")) < 4000
+                   for i in range(0, 4, 2))
 
     def test_sound_is_off_unless_it_is_asked_for(self):
         """A machine that makes a noise every time it looks at a camera is a
@@ -289,7 +281,7 @@ class TestSoundIsAvailableAndOffByDefault:
         from shani_chronoa.gui.organs import ORGAN_TONE, OrganStrip
 
         assert set(ORGAN_TONE) == set(ORGANS), "an organ with no sound has no voice"
-        strip = OrganStrip()  # no config at all
+        strip = OrganStrip()          # no config at all
         assert strip.audible_enabled() is False
 
     def test_a_closed_config_reads_as_off_rather_than_raising(self):
@@ -321,22 +313,18 @@ class TestTheRegisterIsActuallyWired:
         assert path.exists(), f"{relative} moved; this list is now wrong"
         return path.read_text()
 
-    @pytest.mark.parametrize(
-        "relative,organ",
-        [
-            ("audio.py", "ears"),  # the microphone and the speaker
-            ("egress.py", "skin"),  # every request off this machine
-            ("tools.py", "hands"),  # every actuator
-            ("senses/store.py", "memory"),  # a percept being written
-        ],
-    )
+    @pytest.mark.parametrize("relative,organ", [
+        ("audio.py", "ears"),          # the microphone and the speaker
+        ("egress.py", "skin"),          # every request off this machine
+        ("tools.py", "hands"),          # every actuator
+        ("senses/store.py", "memory"),  # a percept being written
+    ])
     def test_the_choke_point_lights_its_organ(self, relative, organ):
         source = self._source(relative)
         assert "body" in source, f"{relative} does not report to the body at all"
         assert f'"{organ}"' in source or f"'{organ}'" in source, (
             f"{relative} reports to the body but never names the {organ} organ, "
-            f"so nothing lights up for it"
-        )
+            f"so nothing lights up for it")
 
     def test_the_window_shows_the_strip(self):
         """A register nothing displays is the dead-code class this repo keeps
@@ -345,15 +333,10 @@ class TestTheRegisterIsActuallyWired:
         assert "OrganStrip" in source
 
     def test_the_setting_exists_and_is_off(self):
-        schema = (
-            _REPO / "usr/share/glib-2.0/schemas/org.shani.chronoa.gschema.xml"
-        ).read_text()
+        schema = (_REPO / "usr/share/glib-2.0/schemas/org.shani.chronoa.gschema.xml").read_text()
         assert "organ-audible-enabled" in schema
         assert '<key name="organ-audible-enabled" type="b">' in schema
-        assert (
-            "<default>false</default>" in schema.split("organ-audible-enabled")[1][:200]
-        )
-
+        assert "<default>false</default>" in schema.split("organ-audible-enabled")[1][:200]
 
 class TestTheInventoryIsTrue:
     """The organism inventory, checked against the organism.
@@ -395,8 +378,7 @@ class TestTheInventoryIsTrue:
         assert not missing, f"the inventory names files that are not there: {missing}"
         assert not empty_claims, (
             f"directory claims that cover nothing: {empty_claims}. A claim that "
-            f"resolves to no file is a claim that checks nothing."
-        )
+            f"resolves to no file is a claim that checks nothing.")
 
     def test_every_shipped_directory_is_named_by_some_organ(self):
         """The other direction, which nothing checked until now.
@@ -411,44 +393,33 @@ class TestTheInventoryIsTrue:
         for organ in organism.INVENTORY:
             claimed.update(path for path in organ.code if path.endswith("/"))
         unowned = sorted(
-            d.name + "/"
-            for d in root.iterdir()
-            if d.is_dir() and d.name != "__pycache__" and d.name + "/" not in claimed
-        )
+            d.name + "/" for d in root.iterdir()
+            if d.is_dir() and d.name != "__pycache__"
+            and d.name + "/" not in claimed)
         assert not unowned, (
             f"these directories ship and no organ names them: {unowned}. Either "
             f"they belong to an organ or they do not - leaving them unclaimed is "
-            f"how a growing codebase becomes invisible to its own map."
-        )
+            f"how a growing codebase becomes invisible to its own map.")
 
     def test_every_state_is_one_of_the_three_words_the_target_uses(self):
         allowed = {organism.BUILT, organism.PART, organism.ABSENT}
-        bad = [
-            (organ.key, organ.state)
-            for organ in organism.INVENTORY
-            if organ.state not in allowed
-        ]
+        bad = [(organ.key, organ.state) for organ in organism.INVENTORY
+               if organ.state not in allowed]
         assert not bad, f"invented states: {bad}"
 
     def test_anything_not_fully_built_says_what_is_missing(self):
-        """ "part" and "absent" without a reason is a status light with a nice
+        """"part" and "absent" without a reason is a status light with a nice
         colour, and this document exists because that is not good enough."""
-        vague = [
-            (organ.key, organ.state)
-            for organ in organism.INVENTORY
-            if organ.state != organism.BUILT and len(organ.missing) < 20
-        ]
+        vague = [(organ.key, organ.state) for organ in organism.INVENTORY
+                 if organ.state != organism.BUILT and len(organ.missing) < 20]
         assert not vague, f"unfinished organs that do not say what is missing: {vague}"
 
     def test_an_indicator_named_in_the_inventory_is_a_real_organ(self):
         """A mapping to `nose` on an organ the strip has no light for would be a
         claim about the UI that the UI does not make."""
         real = set(body_module.ORGANS)
-        bad = [
-            (organ.key, organ.indicator)
-            for organ in organism.INVENTORY
-            if organ.indicator and organ.indicator not in real
-        ]
+        bad = [(organ.key, organ.indicator) for organ in organism.INVENTORY
+               if organ.indicator and organ.indicator not in real]
         assert not bad, f"indicators with no light behind them: {bad}"
 
     def test_the_human_functions_cover_more_than_the_light_strip(self):
@@ -462,16 +433,13 @@ class TestTheInventoryIsTrue:
     def test_the_tally_adds_up_to_the_inventory(self):
         counts = organism.tally()
         assert counts["total"] == len(organism.INVENTORY)
-        assert (
-            counts[organism.BUILT] + counts[organism.PART] + counts[organism.ABSENT]
-        ) == counts["total"]
+        assert (counts[organism.BUILT] + counts[organism.PART]
+                + counts[organism.ABSENT]) == counts["total"]
 
     def test_grouping_loses_nothing(self):
         """`by_system` is what the panel renders. A dropped entry would be an
         organ that exists and is invisible."""
-        shown = [
-            organ for _system, members in organism.by_system() for organ in members
-        ]
+        shown = [organ for _system, members in organism.by_system() for organ in members]
         assert sorted(o.key for o in shown) == sorted(o.key for o in organism.INVENTORY)
 
 
@@ -507,7 +475,6 @@ class TestTheStripAndTheInventoryAgree:
 
     def test_the_inventory_surfaces_are_all_registered(self):
         from shani_chronoa.gui.surfaces import SURFACE_IDS, all_surfaces
-
         available = all_surfaces()
         assert "inventory" in SURFACE_IDS
         assert "inventory" in available, "the Inventory panel does not import"
@@ -531,7 +498,6 @@ class TestTheMicrophoneLightGoesOffWhenTheMicrophoneDoes:
     def test_a_capture_lights_the_ears_and_clears_them(self):
         """The same thing, directly: open a capture and close it."""
         from shani_chronoa import audio, body as body_module
-
         recorder = audio.AudioRecorder.__new__(audio.AudioRecorder)
         recorder._organ = None
         recorder._proc = None
@@ -544,8 +510,7 @@ class TestTheMicrophoneLightGoesOffWhenTheMicrophoneDoes:
         finally:
             audio._put_organ(activity)
         assert not body_module.body.busy("ears"), (
-            "the ears light stayed on after the microphone stopped"
-        )
+            "the ears light stayed on after the microphone stopped")
 
 
 class TestTheMouthLightCoversPlaybackNotJustSynthesis:
@@ -581,12 +546,10 @@ class TestTheMouthLightCoversPlaybackNotJustSynthesis:
             audio._put_organ(superseded)
             # `what` is the gerund ("speaking") for both; the reply being
             # spoken is the `detail`.
-            still_lit = [
-                a.detail for a in body_module.body.snapshot() if a.organ == "mouth"
-            ]
+            still_lit = [a.detail for a in body_module.body.snapshot()
+                         if a.organ == "mouth"]
             assert still_lit == ["the new reply"], (
-                f"the replaced reply is still speaking: {still_lit}"
-            )
+                f"the replaced reply is still speaking: {still_lit}")
         finally:
             audio._put_organ(fresh)
         assert not body_module.body.busy("mouth")
