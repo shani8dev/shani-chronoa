@@ -516,6 +516,34 @@ def _schema_for(name: str) -> "dict | None":
             return function.get("parameters") or None
     return None
 
+def approval_step(name: str, *, remote: bool = False) -> str:
+    """What dispatch does before running `name` with nothing granted on record.
+
+    ``"ask"`` - put the question to the person; ``"refuse"`` - nothing is run
+    (a destructive tool with nobody to ask); ``""`` - no question, the tool's
+    own gate decides. One function so the rule can be tested for every tool
+    (tests/test_destructive_tools_always_ask.py), not only the ones a test
+    happens to name:
+
+    - a destructive (bypass-immune) tool is asked about every time, whether
+      its switch is on or off - the switch says it is available, not that it
+      is approved - and is refused when nobody can be asked;
+    - any other gated tool is asked about when its switch is off (so a "no" is
+      the person's to give) or the turn came from a remote channel.
+    """
+    consent_key = _consent_key_for(name)
+    if consent_key is None:
+        return ""
+    immune = permissions.is_bypass_immune(name)
+    can_ask = permissions.can_ask()
+    if immune and not can_ask:
+        return "refuse"
+    if can_ask and (remote or immune
+                    or not config_mod.ChronoaConfig().get_bool(consent_key, False)):
+        return "ask"
+    return ""
+
+
 def _consent_key_for(name: str) -> "str | None":
     """The consent key gating this tool, or None if it is not gated.
 
@@ -1510,17 +1538,14 @@ def _dispatch_inner(name: str, arguments: dict, by_reference: bool = False,
         # mounts, run commands) made the action run with no question at all -
         # the opposite of what `permissions.is_bypass_immune` promises and of
         # what the settings label says. With nobody to ask, it is refused.
-        immune = consent_key is not None and permissions.is_bypass_immune(name)
-        if immune and not permissions.can_ask():
+        step = approval_step(name, remote=remote)
+        if step == "refuse":
             return DispatchResult(
                 f"{name} is not permitted without asking, and nobody is here to "
                 "say yes, so nothing was done. Destructive actions are asked "
                 "about every time.",
                 verification.Verdict.UNVERIFIED, False)
-        if (consent_key is not None
-                and permissions.can_ask()
-                and (remote or immune
-                     or not config_mod.ChronoaConfig().get_bool(consent_key, False))):
+        if step == "ask":
             title = capabilities.tool_title(name) or name
             if remote:
                 title = f"{title} - asked from {channel}, not at this computer"
