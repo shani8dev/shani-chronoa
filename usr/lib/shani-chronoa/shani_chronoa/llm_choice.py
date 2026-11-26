@@ -221,3 +221,25 @@ def cloud_fallback(config=None) -> Tuple[Optional[object], str]:
     if shut:
         return None, shut
     return _cloud_chain(cfg)
+
+
+#: Where an answer may come from, and the three settings each choice is: the
+#: mode, whether privacy mode is on, whether the cloud may answer. One table,
+#: because the GTK app and the engine's `models use` each kept their own and
+#: the engine's switched to the cloud with privacy mode still on (and wrote the
+#: fallback as the string "true").
+EGRESS = {
+    "this-machine": ("local", True, False),
+    "local-answers": ("local", False, False),
+    "cloud": ("cloud", False, True),
+    "local-cloud": ("local-cloud", False, True),
+}
+
+
+def apply_egress(config, key: str) -> str:
+    """Write one egress choice as all three settings together; return the mode."""
+    mode, privacy, fallback = EGRESS[key]
+    config.set("privacy-mode", privacy)
+    config.set("cloud-fallback-enabled", fallback)
+    config.set("answer-mode", mode)
+    return mode

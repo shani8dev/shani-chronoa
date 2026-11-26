@@ -191,6 +191,12 @@ def list_models(config=None) -> dict:
     return {"items": items, "how": how}
 
 
+def _use_local(cfg) -> None:
+    """Answer on this machine; keep privacy mode as the person had it."""
+    on = bool(cfg.get_bool("privacy-mode")) if hasattr(cfg, "get_bool") else False
+    llm_choice.apply_egress(cfg, "this-machine" if on else "local-answers")
+
+
 def use(name, *, confirm: bool = False, config=None) -> dict:
     """Choose an engine (``local``/``cloud``) or a listed model id."""
     cfg = _config(config)
@@ -200,7 +206,7 @@ def use(name, *, confirm: bool = False, config=None) -> dict:
     before_mode = cfg.get("answer-mode", "") if hasattr(cfg, "get") else ""
 
     if want == "local":
-        cfg.set("answer-mode", "local")
+        _use_local(cfg)
         try:
             _llm, how = llm_choice.local_first(_ollama(cfg), wake=True)
         except Exception as exc:  # noqa: BLE001 - report the failed wake, not a lie
@@ -227,9 +233,9 @@ def use(name, *, confirm: bool = False, config=None) -> dict:
             )
             if not keys.get(want):
                 return {"error": "%s needs an API key" % want}
-        # The wizard writes both: answer-mode alone does not open the gate.
-        cfg.set("answer-mode", "cloud")
-        cfg.set("cloud-fallback-enabled", "true")
+        # All three together, as the GTK app's egress choice does: answer-mode
+        # alone does not open the gate, and privacy mode must not stay on.
+        llm_choice.apply_egress(cfg, "cloud")
         detail = "cloud via " + provider.name if provider is not None else "cloud"
         return {
             "name": want,
@@ -248,7 +254,7 @@ def use(name, *, confirm: bool = False, config=None) -> dict:
                     verdict.get("why") or "the quality gate refused the switch"
                 )
             }
-        cfg.set("answer-mode", "local")
+        _use_local(cfg)
         return {
             "name": want,
             "engine": "local",

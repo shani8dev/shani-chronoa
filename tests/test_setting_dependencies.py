@@ -54,7 +54,7 @@ PKG = pathlib.Path("usr/lib/shani-chronoa/shani_chronoa")
 #: description of the problem. `test_the_list_is_not_stale` fails when the code
 #: grows a call the list has not heard of, so it cannot rot quietly.
 MULTI_WRITE_SITES = {
-    ("ui_gtk/app/application.py", "_on_answer_egress"):
+    ("llm_choice.py", "apply_egress"):
         ("answer-mode",
         "cloud-fallback-enabled",
         "privacy-mode"),
@@ -199,7 +199,7 @@ def test_the_parser_this_file_relies_on_can_find_a_known_site():
     likely to move, and fails if a rename changes what a call looks like.
     """
     found = _multi_writes_in_code()
-    for site in (("ui_gtk/app/application.py", "_on_answer_egress"),
+    for site in (("llm_choice.py", "apply_egress"),
                  ("ui_gtk/setup_wizard.py", "pick_mode")):
         assert site in found, (
             f"the parser no longer recognises {site[1]} as a multi-write - "
@@ -274,13 +274,18 @@ def test_only_one_handler_writes_the_egress_triple():
     writes = _settings_written_by("ui_gtk/app/application.py", "_on_answer_mode")
     assert not writes, (
         f"_on_answer_mode writes {sorted(writes)} itself. It must translate its "
-        f"key and defer to _on_answer_egress: one owner of the mapping is what "
+        f"key and defer to llm_choice.apply_egress: one owner of the mapping is what "
         f"stops the two actions disagreeing, and a second writer is how the "
         f"defect came back.")
-    writes = _settings_written_by("ui_gtk/app/application.py", "_on_answer_egress")
+    writes = _settings_written_by("llm_choice.py", "apply_egress")
     assert "answer-mode" in writes and "privacy-mode" in writes, (
-        f"_on_answer_egress is supposed to own the mapping and writes "
+        f"llm_choice.apply_egress is supposed to own the mapping (the GTK app's "
+        f"_on_answer_egress and the engine's models.use both call it) and writes "
         f"{sorted(writes)}")
+    for site in (("ui_gtk/app/application.py", "_on_answer_egress"), ("engine_ops/models.py", "use")):
+        assert not (_settings_written_by(*site) & {"answer-mode", "privacy-mode", "cloud-fallback-enabled"}), (
+            f"{site[1]} writes the egress settings itself instead of calling "
+            f"llm_choice.apply_egress: a second owner of the mapping")
 
 
 def test_a_setting_written_alone_is_not_a_half_decision():

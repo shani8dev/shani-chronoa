@@ -708,23 +708,9 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         if key not in self._EGRESS_KEYS:
             logger.warning("unknown answer-egress choice %r", key)
             return
-        if key == "this-machine":
-            mode = "local"
-            self.config.set("privacy-mode", True)
-            self.config.set("cloud-fallback-enabled", False)
-        elif key == "local-answers":
-            mode = "local"
-            self.config.set("privacy-mode", False)
-            self.config.set("cloud-fallback-enabled", False)
-        elif key == "cloud":
-            mode = "cloud"
-            self.config.set("privacy-mode", False)
-            self.config.set("cloud-fallback-enabled", True)
-        else:
-            mode = "local-cloud"
-            self.config.set("privacy-mode", False)
-            self.config.set("cloud-fallback-enabled", True)
-        self.config.set("answer-mode", mode)
+        from shani_chronoa.llm_choice import apply_egress
+
+        mode = apply_egress(self.config, key if key in ("this-machine", "local-answers", "cloud") else "local-cloud")
         action.set_state(GLib.Variant("s", key))
         self._apply_answer_mode_if_present()
         self._refresh_strip()
