@@ -111,7 +111,7 @@ real, layered, and tested by running them:
 
 | Layer | What it does |
 |---|---|
-| **Named skills, not a shell** | The model can only call typed skills from a whitelist. The single command runner (`run_command`, for your tests and builds) is off by default, takes one program per call — no pipes, no `$(…)` — and asks every time. |
+| **Named skills, not a shell** | The model can only call typed skills from a whitelist. The single command runner (`run_command`, for your tests and builds) is on by the person's decision, takes one program per call — no pipes, no `$(…)` — and asks every time. |
 | **bubblewrap** | Each command runs in fresh PID, IPC, UTS and network namespaces, with a private `/tmp` and runtime dir and a read-only system. Your project is writable; files in the rest of your home — `~/.ssh`, keyrings, browser profiles — cannot be opened (their names can still be listed). |
 | **Landlock (ABI up to 8)** | Kernel-enforced file rules pinned to file descriptors, plus scoping that blocks abstract-socket and signal escapes — and it still applies where user namespaces are unavailable. |
 | **seccomp** | An optional filter denying 28 syscalls (mount, kexec, bpf, ptrace, io_uring, unshare, …); with it on, a machine that cannot install it runs nothing. Under bubblewrap it is skipped, because bubblewrap's own setup needs `mount` — there the namespaces stand in. |
@@ -152,7 +152,8 @@ its own **Download** button.
   rather than just chatting about it. **190 callable
   skills**, every one a named, schema-typed module under `skills/`. The
   whitelist is the design; the one command runner (`run_command`, for a
-  project's tests and builds) is sandboxed, off by default, and asks each time.
+  project's tests and builds) is sandboxed, on by the person's decision, and
+  asks each time.
   **They are all listed in [`CAPABILITIES.md`](CAPABILITIES.md)**, grouped by
   what they are for, each with the consent switch it needs and whether the
   assistant asks before running it — 64 are consent-gated and 14 are
@@ -174,27 +175,27 @@ its own **Download** button.
   name, is configurable.
 - **Barge-in support** — interrupt a long reply mid-sentence.
 - **Senses** — a perception layer beside `skills/`. **52 senses** deposit
-  *percepts* the assistant can reason about: **25 default on, 27 default
+  *percepts* the assistant can reason about: **45 default on, 7 default
   off**. The split is deliberate and machine-readable, see
   [the table below](#senses-percepts-and-consent).
 
   Those two numbers are about the **52 senses that are modules today**, which is
-  what the table lists. The schema holds **77** `<name>-sense-enabled` keys, and
-  they decompose as 52 senses + 19 *trigger event* types + 7 **retired** keys
-  **− `git`, which is both a sense module and an event type** (77, not 78 — one
-  name is counted twice by that sum). The retired keys (`camera`, `contention`,
-  `cooling`, `link`, `monitors`, `smart`, `thermal`) are kept because a rename
-  would silently revoke somebody's permission; they still grant their successor
-  through `config._SENSE_CONSENT_ALIASES`. Measured: **25 of the 77 default on,
-  and all 25 are senses** — no event type defaults on. So "25 on / 27 off" is true
-  of the senses and "25 on / 52 off" is true of every key. Stating both once here
-  rather than leaving a reader to work out which one a given number describes.
+  what the table lists. The shipped settings table holds **70**
+  `<name>-sense-enabled` keys: the 52 senses plus **19 *trigger event* types**
+  minus `git`, which is both a sense module and an event type (70, not 71 — one
+  name is counted twice by that sum). The seven **retired** keys (`camera`,
+  `contention`, `cooling`, `link`, `monitors`, `smart`, `thermal`) are gone from
+  the table; a grant made under one still reaches its successor through
+  `config._SENSE_CONSENT_ALIASES`, so a rename does not silently revoke a
+  permission. Measured: **62 of the 70 default on** — 45 senses and 17 of the
+  18 event-only names (all but `sound`). Stating both once here rather than
+  leaving a reader to work out which one a given number describes.
 
   These numbers are read out of the tree, not trusted from prose:
   `python3 tests/check_readme_numbers.py` re-derives every one of them from
-  `discover_senses()` and the schema, and fails if they drift. It reported **five
-  problems** when it was last run by hand, four of them counts like these and one
-  the serious one: **`monitoring`, `polkitpolicy` and `ups` were
+  `discover_senses()` and the shipped settings table, and fails if they drift.
+  It reported **five problems** when it was last run by hand, four of them
+  counts like these and one serious: **`monitoring`, `polkitpolicy` and `ups` were
   absent from the table entirely**, so `ups` defaulted on with nothing on the
   page saying so. `kernellog` used to be listed here too; it moved to the
   `shani-sysadmin` app with the rest of the kernel-level tooling.
@@ -258,15 +259,17 @@ its own **Download** button.
 A **sense** perceives; a **skill** acts. `senses/` is inbound and deposits
 **percepts**; `skills/` is outbound and is the whitelist the LLM can call.
 Neither is a "tool" in the shell-exec sense. The one command runner,
-`run_command`, exists for a project's tests and builds: off by default, one
-program per call with no shell syntax, sandboxed, and asked about every time.
+`run_command`, exists for a project's tests and builds: on by the person's
+decision, but one program per call with no shell syntax, sandboxed, and asked
+about every time.
 
-**The default split is a rule, not a listing.** Machine-state facts about
-*this* machine default on, because knowing your disks are full is not
-surveillance. Anything that reads the *user's world* or another person's
-presence defaults off: `sessions`, `git`, `web`, `capture`, `vision`,
-`listeners`, `containers`, `stale`, and the rest. `filesystem` is off while
-`memory` is on, and the `kind` column below is what separates them.
+**The default split is a decision, not a derived rule.** By the person's
+choice almost every local sense, event source and reversible helper starts on —
+including `sessions`, `git`, `capture`, `listeners`, `containers` and `stale`.
+What stays off is what captures a person's own words, image or position:
+`hearing`, `heard-sound`, `vision`, `location`, `rfsense`, and `web`.
+`filesystem` is on alongside `memory`, and the `kind` column below is what
+separates them. Turning any switch off denies immediately.
 
 | Sense | Kind | Default |
 |---|---|---|
@@ -296,36 +299,36 @@ presence defaults off: `sessions`, `git`, `web`, `capture`, `vision`,
 | `timebase` | machine-state | on |
 | `updates` | machine-state | on |
 | `usb` | machine-state | on |
-| `accessibility` | machine-state | off |
-| `bluetooth` | machine-state | off |
-| `capture` | machine-state | off |
-| `containers` | machine-state | off |
-| `dnsresolvers` | machine-state | off |
-| `filesystem` | text-file | off |
-| `git` | machine-state | off |
+| `accessibility` | machine-state | on |
+| `bluetooth` | machine-state | on |
+| `capture` | machine-state | on |
+| `containers` | machine-state | on |
+| `dnsresolvers` | machine-state | on |
+| `filesystem` | text-file | on |
+| `git` | machine-state | on |
 | `heard-sound` | machine-state | off |
 | `hearing` | utterance | off |
-| `hwmon` | machine-state | off |
-| `idle` | machine-state | off |
-| `labnetworks` | machine-state | off |
-| `listeners` | machine-state | off |
+| `hwmon` | machine-state | on |
+| `idle` | machine-state | on |
+| `labnetworks` | machine-state | on |
+| `listeners` | machine-state | on |
 | `location` | machine-state | off |
-| `modelfit` | machine-state | off |
-| `monitoring` | machine-state | off |
-| `ocr` | image_text | off |
-| `polkitpolicy` | machine-state | off |
-| `printing` | machine-state | off |
-| `privilege` | machine-state | off |
+| `modelfit` | machine-state | on |
+| `monitoring` | machine-state | on |
+| `ocr` | image_text | on |
+| `polkitpolicy` | machine-state | on |
+| `printing` | machine-state | on |
+| `privilege` | machine-state | on |
 | `rfsense` | machine-state | off |
-| `sessions` | machine-state | off |
-| `stale` | machine-state | off |
+| `sessions` | machine-state | on |
+| `stale` | machine-state | on |
 | `thermalgrid` | machine-state | off |
 | `vision` | image_description | off |
 | `web` | page | off |
 | `ups` | machine-state | on |
-| `wirelesslink` | machine-state | off |
+| `wirelesslink` | machine-state | on |
 
-**The table is generated, and the numbers in the prose above are checked against it.** The 49 rows are `senses.discover_senses()`; the Default column is each `<name>-sense-enabled` key's own `default` in the compiled schema, not a reading of intent. A row here that disagrees with the schema is a bug in the documentation, which is why the two are compared rather than trusted.
+**The table is generated, and the numbers in the prose above are checked against it.** The 52 rows are `senses.discover_senses()`; the Default column is each `<name>-sense-enabled` key's `default` in the shipped settings table (`usr/share/shani-chronoa/settings.json`), not a reading of intent. A row here that disagrees with the table is a bug in the documentation, which is why the two are compared rather than trusted.
 
 
 `filesystem` (one named text file, confined to `$HOME`) and `filesystems`
@@ -358,13 +361,13 @@ in-memory deque in front of the on-disk file — so the memory sense has a size
 you can state rather than one that grows with your session.
 
 **Consent is per-sense and fail-closed.** A missing key **denies**, so an
-older installed schema cannot silently switch a sense on. The schema carries
-**100+ keys**: 74 `<sense>-sense-enabled` (49 live senses, 24 on and 25 off;
-the rest are retired aliases kept honoured), the event triggers that are not
-senses, and the rest being non-consent settings. **Retired sense
-aliases are still honoured** — when a sense was merged away its old key keeps
-granting the successor, because a rename that silently revokes a grant is a
-permission revocation wearing a refactor's clothes.
+older installed schema cannot silently switch a sense on. The shipped settings
+table carries **218 keys**: 70 `<sense>-sense-enabled` (52 live senses, 45 on
+and 7 off; the rest are event types), plus the non-consent settings. **Retired
+sense aliases are still honoured** — when a sense was merged away its old key
+keeps granting the successor through `config._SENSE_CONSENT_ALIASES`, because a
+rename that silently revokes a grant is a permission revocation wearing a
+refactor's clothes.
 
 `web` is additionally denied while privacy mode is on, because it is the only
 sense that reaches off the machine. Pointer and keyboard control sit behind
@@ -403,9 +406,11 @@ The names are deliberately different from the machine-state *senses* above, so
 one switch is never shared between "the desktop is locked" and "something in
 the user's world changed". Both kinds are built by
 `triggers.build_rule`, which validates the rule's shape and refuses one that
-names a skill outside the whitelist. **No event type is default-on**, and
-arming either kind requires `trigger-control-enabled`, so nothing can watch
-for something and then act on it in a machine you have not agreed to.
+names a skill outside the whitelist. Arming either kind requires
+`trigger-control-enabled`, so a rule cannot act through a switch that is off.
+All event types but
+`sound` default on, and `trigger-control-enabled` does too: on a fresh install
+these are visible switches, not a barrier, and turning one off denies at once.
 
 ## What leaves this machine
 
@@ -551,15 +556,15 @@ of it sit four layers:
   loosen a guard: the ceiling only tightens, no allowlist widens, and
   `RLIMIT_CPU`/`RLIMIT_AS` are applied with `setrlimit` rather than left as
   decorative config.
-- **A seccomp filter, off by default** behind `sandbox-seccomp-enabled`,
-  denying **28 syscalls** — the mount and new-mount API, `memfd_create`, the
-  module and kexec calls, `bpf`, `perf_event_open`, `io_uring`, `ptrace`
-  onto another process, `process_vm_readv`/`writev`, `pidfd_getfd`,
-  `unshare`, `setns`, and `seccomp`/`prctl(PR_SET_SECCOMP)` so a command
-  cannot widen or replace its own filter. It is off by default because a
-  filter that denies one syscall too many breaks skills with no visible cause.
-  With it on, a machine that cannot install the filter **refuses every
-  command** rather than running it unfiltered.
+- **A seccomp filter, on by the person's decision** behind
+  `sandbox-seccomp-enabled`, denying **28 syscalls** — the mount and new-mount
+  API, `memfd_create`, the module and kexec calls, `bpf`, `perf_event_open`,
+  `io_uring`, `ptrace` onto another process, `process_vm_readv`/`writev`,
+  `pidfd_getfd`, `unshare`, `setns`, and `seccomp`/`prctl(PR_SET_SECCOMP)` so a
+  command cannot widen or replace its own filter. The switch is there because a
+  filter that denies one syscall too many breaks skills with no visible cause;
+  a machine that cannot install the filter **refuses every command** rather
+  than running it unfiltered.
 
 An explicit `sh -c` stays reachable as a visible opt-in, and one containing
 `$(`, a backtick or `${` is refused rather than guessed at.
@@ -725,10 +730,10 @@ look at your screen?" stay independent questions. The key is always
 | `memory-sense-enabled` | `true` | keeping durable notes across sessions |
 | `vision-sense-enabled` | `false` | capturing and describing the screen |
 | `hearing-sense-enabled` | `false` | turning an utterance into a percept |
-| `ocr-sense-enabled` | `false` | reading text out of images |
-| `filesystem-sense-enabled` | `false` | reading files you name, inside `$HOME` |
+| `ocr-sense-enabled` | `true` | reading text out of images |
+| `filesystem-sense-enabled` | `true` | reading files you name, inside `$HOME` |
 | `web-sense-enabled` | `false` | fetching pages (also needs privacy mode off) |
-| `input-control-enabled` | `false` | pointer, clicks and typing |
+| `input-control-enabled` | `true` | pointer, clicks and typing |
 | `vision-model` | `""` | pins the local vision model; empty auto-selects by hardware |
 
 ```bash
