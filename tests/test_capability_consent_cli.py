@@ -75,6 +75,19 @@ def test_an_api_key_comes_from_stdin(capsys, monkeypatch):
     assert "a-secret" not in captured.out and "a-secret" not in captured.err
 
 
+def test_email_details_in_argv_are_refused(capsys):
+    client = Client()
+    code = cli.run_capability(
+        client,
+        "SettingsEmail",
+        args_for(["settings", "email", '{"password": "secret"}', "--yes"]),
+        jsonl=True,
+    )
+    assert code == 2
+    assert "--stdin" in capsys.readouterr().err
+    assert client.calls == []
+
+
 def test_secret_value_is_never_even_parsed_as_an_optional_flag():
     # argparse sees the API key only as the positional value of --stdin input,
     # so a value that looks like a flag cannot become an option.

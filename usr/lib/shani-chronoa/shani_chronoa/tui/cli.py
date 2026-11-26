@@ -141,10 +141,15 @@ def run_capability(client: AgentClient, method: str, args, *, jsonl: bool) -> in
             )
             return 2
         values[1] = sys.stdin.read().rstrip("\n")
-    if spec.name == "SettingsEmail" and getattr(args, "stdin", False):
-        raw = sys.stdin.read()
+    if spec.name == "SettingsEmail":
+        if not getattr(args, "stdin", False):
+            print(
+                "email details must be piped with --stdin, not put in argv",
+                file=sys.stderr,
+            )
+            return 2
         try:
-            values[0] = json.dumps(json.loads(raw))
+            values[0] = json.dumps(json.loads(sys.stdin.read()))
         except ValueError as exc:
             print(f"email details are not JSON: {exc}", file=sys.stderr)
             return 2

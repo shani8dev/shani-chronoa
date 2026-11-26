@@ -98,7 +98,7 @@ def test_slash_resolution_matches_the_cli_table():
 class Terminal:
     """One short-lived `chronoa` process on the private fake-agent bus."""
 
-    def __init__(self, bus, argv):
+    def __init__(self, bus, argv, stdin=None):
         env = os.environ.copy()
         env.update(
             DBUS_SESSION_BUS_ADDRESS=bus.address,
@@ -111,13 +111,15 @@ class Terminal:
         self.proc = subprocess.Popen(
             [sys.executable, str(LAUNCHER), *argv],
             env=env,
+            stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
         )
+        self.stdin = stdin
 
     def done(self):
-        out, err = self.proc.communicate(timeout=30)
+        out, err = self.proc.communicate(self.stdin, timeout=30)
         return self.proc.returncode, out, err
 
 
@@ -142,7 +144,11 @@ def test_every_cli_subcommand_runs_against_the_standin(bus, method):
     argv = [*method.cli, *(f"arg{i}" for i in range(count)), "--json"]
     if method.confirm:
         argv.append("--yes")
-    code, out, err = Terminal(bus, argv).done()
+    stdin = None
+    if method.name == "SettingsEmail":
+        argv.append("--stdin")
+        stdin = '{"provider": "example"}'
+    code, out, err = Terminal(bus, argv, stdin=stdin).done()
     assert code == 0, (argv, code, out, err)
     payload = json.loads(out.strip().splitlines()[-1])
     assert isinstance(payload, dict) and payload, (argv, payload)
