@@ -54,6 +54,7 @@ watch-nowplaying-enabled watch-weather-enabled email-read-enabled
 cloud-stt-enabled cloud-tts-enabled web-sense-enabled
 """.split()
 DEFAULT_OFF_KEYS = """
+kokoro-tts-enabled
 email-send-enabled
 phone-messages-send-enabled git-push-enabled voice-clone-enabled
 vision-sense-enabled hearing-sense-enabled wake-word-enabled
@@ -99,6 +100,17 @@ def _default(element: ET.Element | None, kind: str):
     return text[1:-1] if len(text) >= 2 and text[0] == text[-1] == "'" else text
 
 
+#: Decided values for settings that are not switches. The image ships Piper
+#: (en_US-lessac-medium) and Whisper base (ggml-base-q5_1.bin, in
+#: /usr/share/whisper/models), so both work with nothing downloaded: Kokoro is
+#: opt-in (above) so Piper speaks, and the Whisper model is the shipped one
+#: rather than whatever the hardware profile would pick (which on a strong
+#: machine is a larger model the image does not ship - a download).
+DEFAULT_VALUES = {
+    "whisper-model": "base",
+}
+
+
 def _label(key: str) -> str:
     label = C.GATE_NAMES.get(key) or key.replace("-", " ").capitalize()
     if key in STILL_ASKS:
@@ -142,6 +154,8 @@ def build() -> dict:
             # switch is a runtime concern, not a property of the setting.
             "secret": key in secret_keys or key.endswith("-api-key"),
         }
+        if key in DEFAULT_VALUES:
+            row["default"] = DEFAULT_VALUES[key]
         if key in on:
             row["default"] = True
         elif key in off:
@@ -149,7 +163,7 @@ def build() -> dict:
         settings[key] = row
 
     declared = {e.get("name") for e in root.iter("key")}
-    missing = (on | off | removed) - declared
+    missing = (on | off | removed | set(DEFAULT_VALUES)) - declared
     if missing:
         raise RuntimeError(f"decision names no schema key: {sorted(missing)}")
     return {"settings": settings, "version": 1}

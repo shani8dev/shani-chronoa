@@ -288,7 +288,8 @@ def test_the_app_wires_the_factory_rather_than_a_backend_class():
     
     import pathlib
 
-    from shani_chronoa import app as app_mod
+    # the GTK app moved under ui_gtk/; shani_chronoa/app/ holds only import shims
+    from shani_chronoa.ui_gtk import app as app_mod
 
     # the app is a package: every module of it
     source = "".join(f.read_text() for f in sorted(pathlib.Path(app_mod.__file__).parent.glob("*.py")))

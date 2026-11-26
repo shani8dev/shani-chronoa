@@ -173,7 +173,7 @@
     },
     "whisper-model": {
       "type": "s",
-      "default": "",
+      "default": "base",
       "label": "Whisper model",
       "summary": "Whisper.cpp model override",
       "consent": false,
@@ -245,7 +245,7 @@
     },
     "kokoro-tts-enabled": {
       "type": "b",
-      "default": true,
+      "default": false,
       "label": "Use the Kokoro neural voice",
       "summary": "Speak with the Kokoro neural voice",
       "consent": false,
