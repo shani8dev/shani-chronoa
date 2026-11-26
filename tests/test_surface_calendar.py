@@ -43,6 +43,8 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import GLib, Gtk  # noqa: E402
 
+_REPO = Path(__file__).resolve().parents[1]
+
 from shani_chronoa import eds_calendar  # noqa: E402
 from shani_chronoa.capabilities import gate_label  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
@@ -50,7 +52,7 @@ from shani_chronoa.gui.surfaces import calendar as surface  # noqa: E402
 from shani_chronoa.skills import calendar_events as skill_calendar  # noqa: E402
 
 REGISTRY_SOURCE = Path(surface.__file__).parent / "__init__.py"
-SCHEMA_SOURCE = (Path(surface.__file__).resolve().parents[5]
+SCHEMA_SOURCE = (_REPO / "usr"
                  / "share" / "glib-2.0" / "schemas" / "org.shani.chronoa.gschema.xml")
 
 #: A fixed instant, so "today", "tomorrow" and a countdown are the same answer

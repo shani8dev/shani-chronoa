@@ -9,6 +9,10 @@ One guarded import is allowed: `skills/browse` uses the in-app WebKit browser
 only while `browser_bridge.has_provider()` says a GTK window is registered.
 With no window it takes the headless Chromium path, which is the whole point
 of the two-browser design.
+
+Phase 5 moved every GTK-importing module under `ui_gtk/`. The old paths are
+thin shims that alias the moved module objects, so a source check must look at
+type-library imports anywhere in the package, not just at the engine list.
 """
 
 import ast
@@ -23,14 +27,23 @@ UI_PREFIXES = (
     "shani_chronoa.app",
     "shani_chronoa.ui_gtk",
 )
-GUI_TYPILIBS = {"Gtk", "Adw", "Gdk", "Gtk4LayerShell"}
+GUI_TYPILIBS = {"Gtk", "Adw", "Gdk", "Gtk4LayerShell", "GtkLayerShell", "WebKit"}
 ALLOWED = {
     # (relative path, imported module) -> why the engine cannot reach it
     (
         "skills/browse.py",
         "shani_chronoa.gui",
     ): "only inside if browser_bridge.has_provider(): a GTK window exists",
+    (
+        "speech_gate.py",
+        "shani_chronoa.gui.widgets",
+    ): "only when a live GTK window is passed to window_busy(); None is headless",
 }
+
+
+def _is_shim(path: Path) -> bool:
+    return "Compatibility shim" in path.read_text().splitlines()[0]
+
 
 ENGINE_MODULES = (
     "engine.py",
@@ -55,6 +68,13 @@ def _engine_files():
         yield _PKG / name
     for package in ENGINE_PACKAGES:
         yield from sorted((_PKG / package).glob("*.py"))
+
+
+def _outside_ui_gtk():
+    """Every package module that is not the GTK client itself."""
+    for path in sorted(_PKG.rglob("*.py")):
+        if path.relative_to(_PKG).parts[0] != "ui_gtk":
+            yield path
 
 
 def _violations(path):
@@ -97,6 +117,19 @@ def _violations(path):
             for alias in node.names:
                 self._note(node, alias.name)
 
+        def visit_Call(self, node):
+            if (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr == "require_version"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and node.args[0].value in GUI_TYPILIBS
+            ):
+                found.append(
+                    (node.lineno, "require_version: " + str(node.args[0].value))
+                )
+            self.generic_visit(node)
+
     Scan().visit(tree)
     return found
 
@@ -108,6 +141,33 @@ def test_no_engine_module_imports_the_gtk_client():
         if found:
             bad[str(path.relative_to(_PKG))] = found
     assert not bad, f"engine imports GTK client: {bad}"
+
+
+def test_no_gtk_typelib_import_outside_ui_gtk():
+    """Every Gtk/Adw/Gdk/WebKit user now lives in one package.
+
+    A shim at an old path aliases a module object; it never imports a GTK
+    typelib itself. If a GTK import appears anywhere else, the engine is no
+    longer installable without GTK even if no engine module names it.
+    """
+    bad = {}
+    for path in _outside_ui_gtk():
+        if _is_shim(path):
+            continue
+        found = _violations(path)
+        if found:
+            bad[str(path.relative_to(_PKG))] = found
+    assert not bad, f"GTK imported outside ui_gtk: {bad}"
+
+
+def test_old_gtk_paths_are_thin_shims():
+    """The compatibility paths re-export; they must not grow a second copy."""
+    for name in ("gui", "app", "settings_window", "windows"):
+        source = (_PKG / name / "__init__.py").read_text()
+        assert "ui_gtk" in source, f"{name} is not a shim of the moved package"
+    for name in ("mascot", "setup_wizard", "automation_overlay"):
+        source = (_PKG / (name + ".py")).read_text()
+        assert "sys.modules[__name__]" in source, f"{name} is not an alias shim"
 
 
 def test_gtk_launcher_goes_through_the_boundary():

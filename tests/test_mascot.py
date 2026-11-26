@@ -298,7 +298,8 @@ shell, why = mascot._layer_shell()
 print("FOUND=%%s COLD_GETATTR=%%s SHELL=%%s" %% (
     ",".join(found), cold, "yes" if shell is not None else "no"))
 """
-    pkg = str(Path(mascot.__file__).resolve().parents[1])
+    # Shim aliases the moved module, so derive the package root from the repo.
+    pkg = str(ROOT / "usr/lib/shani-chronoa")
     env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
     out = subprocess.run([sys.executable, "-c", child % {"pkg": pkg}],
                          capture_output=True, text=True, timeout=60, env=env,

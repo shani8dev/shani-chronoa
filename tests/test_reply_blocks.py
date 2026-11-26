@@ -28,7 +28,7 @@ from gi.repository import Gtk  # noqa: E402
 
 from shani_chronoa.gui import blocks  # noqa: E402
 
-REPO_SOURCE = (_REPO / "usr/lib/shani-chronoa/shani_chronoa/gui/blocks.py").read_text()
+REPO_SOURCE = (_REPO / "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/blocks.py").read_text()
 
 
 def kinds(text):

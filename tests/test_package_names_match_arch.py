@@ -103,7 +103,8 @@ TOOL_MISSING_CALLED_WITH = {
 
 
 def _source(relative: str) -> str:
-    return (PACKAGE / relative).read_text()
+    from _source import source_path
+    return source_path(relative).read_text()
 
 
 def test_each_corrected_package_name_is_stated():

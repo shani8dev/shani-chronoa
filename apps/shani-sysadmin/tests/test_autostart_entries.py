@@ -84,18 +84,29 @@ NOT_AN_ENTRY = """\
 @pytest.fixture
 def desktops(monkeypatch):
     def install(value=None):
-        env = {k: v for k, v in __import__("os").environ.items()
-               if k != "XDG_CURRENT_DESKTOP"}
+        env = {
+            k: v
+            for k, v in __import__("os").environ.items()
+            if k != "XDG_CURRENT_DESKTOP"
+        }
         if value is not None:
             env["XDG_CURRENT_DESKTOP"] = value
         monkeypatch.setattr(ae.os, "environ", env)
+
     return install
 
 
 def entry(**kw):
-    base = {"name": "X", "exec": "/usr/bin/x", "kind": "Application",
-            "hidden": False, "only": [], "not_in": [], "target": "",
-            "path": "/x.desktop"}
+    base = {
+        "name": "X",
+        "exec": "/usr/bin/x",
+        "kind": "Application",
+        "hidden": False,
+        "only": [],
+        "not_in": [],
+        "target": "",
+        "path": "/x.desktop",
+    }
     base.update(kw)
     return base
 
@@ -104,8 +115,8 @@ def entry(**kw):
 # The three ways of saying no, which are not the same way
 # --------------------------------------------------------------------------
 
-class TestTheThreeNoes:
 
+class TestTheThreeNoes:
     def test_hidden_is_off_whatever_the_desktop(self, desktops):
         desktops("GNOME")
         assert ae._verdict(entry(hidden=True), ["GNOME"])[0] == "suppressed"
@@ -131,11 +142,9 @@ class TestTheThreeNoes:
         desktops("GNOME")
         assert ae._verdict(entry(only=["GNOME", "Unity"]), ["GNOME"])[0] == "runs"
 
-    def test_not_show_in_is_the_opposite_key_and_the_opposite_answer(self,
-                                                                      desktops):
+    def test_not_show_in_is_the_opposite_key_and_the_opposite_answer(self, desktops):
         desktops("KDE")
-        verdict, _ = ae._verdict(entry(not_in=["KDE", "GNOME", "Cinnamon"]),
-                                 ["KDE"])
+        verdict, _ = ae._verdict(entry(not_in=["KDE", "GNOME", "Cinnamon"]), ["KDE"])
         assert verdict == "suppressed"
 
     def test_not_show_in_lets_every_other_desktop_through(self, desktops):
@@ -146,8 +155,9 @@ class TestTheThreeNoes:
         # The spec's rule, and the case a boolean reading of either key gets
         # wrong: present in both means it starts nowhere.
         desktops("GNOME")
-        verdict, why = ae._verdict(entry(only=["GNOME", "KDE"],
-                                          not_in=["GNOME"]), ["GNOME"])
+        verdict, why = ae._verdict(
+            entry(only=["GNOME", "KDE"], not_in=["GNOME"]), ["GNOME"]
+        )
         assert verdict == "suppressed"
 
     def test_no_filter_at_all_always_runs(self, desktops):
@@ -159,10 +169,9 @@ class TestTheThreeNoes:
 # The measurement that shapes the answer
 # --------------------------------------------------------------------------
 
-class TestUnknownDesktopIsNotAFilteredDesktop:
 
-    def test_a_filtered_entry_cannot_be_told_when_the_desktop_is_unset(
-            self, desktops):
+class TestUnknownDesktopIsNotAFilteredDesktop:
+    def test_a_filtered_entry_cannot_be_told_when_the_desktop_is_unset(self, desktops):
         """**This is the whole reason the skill has three verdicts.**
 
         Measured: `XDG_CURRENT_DESKTOP` is unset in a slot. Answering "runs"
@@ -174,15 +183,13 @@ class TestUnknownDesktopIsNotAFilteredDesktop:
         assert verdict == "unknown"
         assert "XDG_CURRENT_DESKTOP" in why
 
-    def test_the_reason_says_the_desktop_not_the_file_is_missing(self,
-                                                                  desktops):
+    def test_the_reason_says_the_desktop_not_the_file_is_missing(self, desktops):
         desktops(None)
         _, why = ae._verdict(entry(not_in=["KDE"]), [])
         assert "desktop" in why
         assert "cannot be told" in why
 
-    def test_an_unfiltered_entry_still_runs_with_no_desktop_known(self,
-                                                                  desktops):
+    def test_an_unfiltered_entry_still_runs_with_no_desktop_known(self, desktops):
         # Over-correcting into "cannot tell" for everything would be the other
         # failure: refusing an answer that is available.
         desktops(None)
@@ -208,8 +215,8 @@ class TestUnknownDesktopIsNotAFilteredDesktop:
 # Parsing the real files
 # --------------------------------------------------------------------------
 
-class TestParsing:
 
+class TestParsing:
     def _entry(self, tmp_path, text, name="t.desktop"):
         path = tmp_path / name
         path.write_text(text, encoding="utf-8")
@@ -235,9 +242,12 @@ class TestParsing:
         assert self._entry(tmp_path, HIDDEN.replace("true", "TRUE"))["hidden"]
 
     def test_hidden_false_is_not_hidden(self, tmp_path):
-        assert self._entry(
-            tmp_path, HIDDEN.replace("Hidden=true", "Hidden=false"))["hidden"] \
+        assert (
+            self._entry(tmp_path, HIDDEN.replace("Hidden=true", "Hidden=false"))[
+                "hidden"
+            ]
             is False
+        )
 
     def test_a_type_link_entry_is_parsed_with_its_target(self, tmp_path):
         # **Chronoa's own autostart entry is a symlink**, which is `Type=Link`
@@ -253,8 +263,10 @@ class TestParsing:
     def test_a_duplicate_key_does_not_hide_the_entry(self, tmp_path):
         # `strict=False`: two `Exec=` lines is a real thing installers produce,
         # and refusing the file would hide an entry the desktop still runs.
-        parsed = self._entry(tmp_path, ATSPI.replace(
-            "Terminal=false", "Exec=/usr/bin/second\nTerminal=false"))
+        parsed = self._entry(
+            tmp_path,
+            ATSPI.replace("Terminal=false", "Exec=/usr/bin/second\nTerminal=false"),
+        )
         assert parsed is not None
 
     def test_a_non_utf8_byte_does_not_take_the_report_down(self, tmp_path):
@@ -268,8 +280,7 @@ class TestParsing:
     def test_an_empty_file_is_not_an_entry(self, tmp_path):
         assert self._entry(tmp_path, "") is None
 
-    def test_a_link_entry_renders_its_target_and_not_an_empty_column(
-            self, tmp_path):
+    def test_a_link_entry_renders_its_target_and_not_an_empty_column(self, tmp_path):
         """**Chronoa's own autostart entry is a `Type=Link` symlink**, so it has
         no `Exec` at all. A row built from `Exec` alone printed an empty column
         for the single entry a person most wants to see, and a mutation that
@@ -288,8 +299,9 @@ class TestParsing:
         assert "()" not in row, "an empty what-column is the defect"
 
     def test_the_row_shows_the_verdict_and_the_name(self, tmp_path):
-        row = ae._entry_line(entry(name="Helper", exec="/usr/bin/h"),
-                             "suppressed", "/usr/bin/h")
+        row = ae._entry_line(
+            entry(name="Helper", exec="/usr/bin/h"), "suppressed", "/usr/bin/h"
+        )
         assert "off" in row and "Helper" in row and "/usr/bin/h" in row
 
 
@@ -297,27 +309,34 @@ class TestParsing:
 # The user-session half, which is usually unknown rather than empty
 # --------------------------------------------------------------------------
 
-class TestUserUnitsAndCron:
 
+class TestUserUnitsAndCron:
     def test_no_session_bus_is_unknown_not_empty(self, monkeypatch):
         """Measured in a slot: `Failed to connect to user scope bus via local
         transport: $DBUS_SESSION_BUS_ADDRESS and $XDG_RUNTIME_DIR not
         defined`. "no user units" there is the confident wrong answer.
         """
+
         def run(argv, **kwargs):
             return subprocess.CompletedProcess(
-                argv, 1, "", "Failed to connect to user scope bus")
-        monkeypatch.setattr(ae.shutil if hasattr(ae, "shutil") else
-                            __import__("shutil"), "which",
-                            lambda n: "/usr/bin/systemctl")
+                argv, 1, "", "Failed to connect to user scope bus"
+            )
+
+        monkeypatch.setattr(
+            ae.shutil if hasattr(ae, "shutil") else __import__("shutil"),
+            "which",
+            lambda n: "/usr/bin/systemctl",
+        )
         monkeypatch.setattr(subprocess, "run", run)
         units, why = ae._user_units()
         assert units == []
         assert "user scope bus" in why
 
     def test_enabled_units_and_timers_are_listed(self, monkeypatch):
-        out = ("gamemoded.service enabled enabled\n"
-               "shani-update-tray.service enabled enabled\n")
+        out = (
+            "gamemoded.service enabled enabled\n"
+            "shani-update-tray.service enabled enabled\n"
+        )
         # **Timers are read through `list-unit-files --type=timer`, not
         # `list-timers`.** `list-timers` is a table whose first column is a
         # timestamp, so column 0 would read `Mon` as a timer's name - and it
@@ -328,9 +347,12 @@ class TestUserUnitsAndCron:
 
         def run(argv, **kwargs):
             return subprocess.CompletedProcess(
-                argv, 0, timers if "--type=timer" in argv else out, "")
-        monkeypatch.setattr(__import__("shutil"), "which",
-                            lambda n: "/usr/bin/systemctl")
+                argv, 0, timers if "--type=timer" in argv else out, ""
+            )
+
+        monkeypatch.setattr(
+            __import__("shutil"), "which", lambda n: "/usr/bin/systemctl"
+        )
         monkeypatch.setattr(subprocess, "run", run)
         units, why = ae._user_units()
         assert any("gamemoded" in u for u in units)
@@ -341,8 +363,8 @@ class TestUserUnitsAndCron:
         # which is the ordinary state.
         def run(argv, **kwargs):
             return subprocess.CompletedProcess(argv, 1, "", "no crontab for root")
-        monkeypatch.setattr(__import__("shutil"), "which",
-                            lambda n: "/usr/bin/crontab")
+
+        monkeypatch.setattr(__import__("shutil"), "which", lambda n: "/usr/bin/crontab")
         monkeypatch.setattr(subprocess, "run", run)
         entries, why = ae._cron()
         assert entries == []
@@ -351,9 +373,10 @@ class TestUserUnitsAndCron:
     def test_cron_comments_are_not_scheduled_work(self, monkeypatch):
         def run(argv, **kwargs):
             return subprocess.CompletedProcess(
-                argv, 0, "# a comment\n*/5 * * * * /usr/bin/thing\n\n", "")
-        monkeypatch.setattr(__import__("shutil"), "which",
-                            lambda n: "/usr/bin/crontab")
+                argv, 0, "# a comment\n*/5 * * * * /usr/bin/thing\n\n", ""
+            )
+
+        monkeypatch.setattr(__import__("shutil"), "which", lambda n: "/usr/bin/crontab")
         monkeypatch.setattr(subprocess, "run", run)
         entries, _ = ae._cron()
         assert entries == ["*/5 * * * * /usr/bin/thing"]
@@ -361,8 +384,8 @@ class TestUserUnitsAndCron:
     def test_a_real_crontab_failure_is_reported(self, monkeypatch):
         def run(argv, **kwargs):
             return subprocess.CompletedProcess(argv, 1, "", "permission denied")
-        monkeypatch.setattr(__import__("shutil"), "which",
-                            lambda n: "/usr/bin/crontab")
+
+        monkeypatch.setattr(__import__("shutil"), "which", lambda n: "/usr/bin/crontab")
         monkeypatch.setattr(subprocess, "run", run)
         _, why = ae._cron()
         assert "permission denied" in why
@@ -372,8 +395,8 @@ class TestUserUnitsAndCron:
 # Reachability
 # --------------------------------------------------------------------------
 
-class TestItIsReachable:
 
+class TestItIsReachable:
     def test_the_handler_is_importable_by_name(self):
         assert ae._run.__name__ == "_run"
         assert ae._run.__name__.isidentifier()
@@ -403,11 +426,15 @@ class TestItIsReachable:
 
         monkeypatch.setenv("XDG_CONFIG_HOME", "/tmp/somewhere-else/config")
         assert ae._autostart_dirs()[0] == str(
-            pathlib.Path(files.config_home()) / "autostart")
+            pathlib.Path(files.config_home()) / "autostart"
+        )
 
-        app = (pathlib.Path(__file__).resolve().parents[3]
-               / "usr/lib/shani-chronoa/shani_chronoa/app/desktop_integration.py")
+        app = (
+            pathlib.Path(__file__).resolve().parents[3]
+            / "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/app/desktop_integration.py"
+        )
         src = app.read_text(encoding="utf-8")
         assert '_AUTOSTART_DIR = str(files.config_home() / "autostart")' in src, (
             "the app's own autostart directory moved; this skill must follow "
-            "it rather than keep a second spelling")
+            "it rather than keep a second spelling"
+        )

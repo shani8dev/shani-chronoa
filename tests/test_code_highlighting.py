@@ -283,7 +283,7 @@ def test_the_stop_speaking_button_is_still_hidden():
     """
     from pathlib import Path
 
-    src = Path("usr/lib/shani-chronoa/shani_chronoa/gui/window.py").read_text()
+    src = Path("usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/window.py").read_text()
     assert 'set_tooltip_text("Stop speaking (Esc)")' in src, (
         "the tooltip Escape is documented by is gone; the shortcut may still "
         "work but nothing says so, which is the claim-without-a-mechanism shape")

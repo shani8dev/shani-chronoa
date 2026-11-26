@@ -30,7 +30,7 @@ import pytest
 
 sys.path.insert(0, "usr/lib/shani-chronoa")
 
-WINDOW = pathlib.Path("usr/lib/shani-chronoa/shani_chronoa/gui/window.py")
+WINDOW = pathlib.Path("usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/window.py")
 
 
 def _source():

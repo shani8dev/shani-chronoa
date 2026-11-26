@@ -353,7 +353,7 @@ class TestARefusalDoesNotConsumeTheFiles:
     def test_taking_attachments_remembers_them_for_the_handover(self):
         """The stash is what makes the restore possible at all."""
         source = (Path(__file__).resolve().parents[1]
-                  / "usr/lib/shani-chronoa/shani_chronoa/gui/attaching.py").read_text()
+                  / "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/attaching.py").read_text()
         assert "_sent_attachments = list(self._attachments)" in source, (
             "take_attachments no longer keeps a copy, so a refusal has nothing "
             "to hand back")

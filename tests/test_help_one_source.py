@@ -20,7 +20,8 @@ from shani_chronoa.gui import commands  # noqa: E402
 
 
 def _source(relative: str) -> str:
-    return (PKG / relative).read_text(encoding="utf-8")
+    from _source import source_path
+    return source_path(relative).read_text(encoding="utf-8")
 
 
 def test_all_four_surfaces_read_the_shared_registry():

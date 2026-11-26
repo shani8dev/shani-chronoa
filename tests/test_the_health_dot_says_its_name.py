@@ -14,7 +14,7 @@ it.
 import pathlib
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
-SIDEBAR = REPO / "usr/lib/shani-chronoa/shani_chronoa/gui/sidebar.py"
+SIDEBAR = REPO / "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/sidebar.py"
 
 
 class TestTheDotIsNotOnlyColour:

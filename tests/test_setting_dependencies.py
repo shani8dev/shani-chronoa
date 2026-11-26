@@ -220,7 +220,8 @@ def _settings_written_by(rel_path, function_name):
     import ast as _ast
     keys = _schema_keys()
     underscores = {k.replace("-", "_") for k in keys}
-    tree = _ast.parse((PKG / rel_path).read_text(encoding="utf-8"))
+    from _source import source_path
+    tree = _ast.parse(source_path(rel_path).read_text(encoding="utf-8"))
     out = set()
     for node in _ast.walk(tree):
         if not isinstance(node, _ast.FunctionDef) or node.name != function_name:
