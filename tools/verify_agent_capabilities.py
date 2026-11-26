@@ -107,6 +107,24 @@ def _child() -> int:
             status = result.get("error") or "ok"
             print(f"{name}: {status}")
         client.inventory("status")  # the seven legacy methods still work
+
+        # End-to-end: the real CLI binary against the real engine on this bus.
+        cli = REPO / "usr/bin/chronoa"
+        for argv in (
+            ("models", "--json"),
+            ("settings", "get", "privacy-mode", "--json"),
+        ):
+            run = subprocess.run(
+                [sys.executable, str(cli), *argv],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env=os.environ.copy(),
+            )
+            assert run.returncode == 0, (argv, run.stderr)
+            payload = json.loads(run.stdout.strip().splitlines()[-1])
+            assert isinstance(payload, dict) and payload, (argv, payload)
+            print(f"cli {' '.join(argv)}: ok")
     finally:
         client.close()
         engine.terminate()
