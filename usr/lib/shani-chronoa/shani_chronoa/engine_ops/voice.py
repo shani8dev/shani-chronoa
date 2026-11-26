@@ -147,7 +147,12 @@ def _cloud_row(config) -> dict:
     """A cloud row that never waits on the keyring to say it is not in use."""
     from shani_chronoa.engine_ops.models import NOT_CHECKED, bounded
 
-    answer = bounded(lambda: _cloud(config))
+    try:
+        answer = bounded(lambda: _cloud(config), reraise=True)
+    except Exception as exc:  # noqa: BLE001 - a failed probe is "not installed", like every row
+        def failed(exc=exc):
+            raise exc
+        return _row("cloud", failed, "the cloud speech provider is not available")
     if answer is NOT_CHECKED:
         return {
             "name": "cloud",

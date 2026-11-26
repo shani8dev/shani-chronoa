@@ -109,7 +109,7 @@ def test_interactive_turn_tool_approval_and_slash_command(bus):
         term.write("2\n")  # numbered choice -> the label "Deny" goes to Approve
         term.until("Approved with Deny.")
         term.write("/models\n")
-        term.until("models (1):")
+        term.until("Models (1):")
         term.until("conversion")
         term.write("/quit\n")
         assert term.wait() == 0

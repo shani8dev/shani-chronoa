@@ -12,6 +12,7 @@ from typing import Optional, TextIO
 
 #: Codes and common row keys that would read badly with an underscore in them.
 LABELS = {
+    "tasks": "Model for each task",
     "needs_setup": "Setup needed",
     "llm_model": "Answering model",
     "llm_installed": "Local model installed",
@@ -59,6 +60,36 @@ def _row(item) -> str:
     return f"  - {title}{': ' + rest if rest else ''}"
 
 
+def with_tasks(client, method: str, data):
+    """/models and `chronoa models` also say which model does each task.
+
+    The engine list (ModelsList) replaced the old /models, which showed
+    Inventory("models"): the model each task uses. Both belong under one
+    command, so the second is added to the first as `tasks`.
+    """
+    if method != "ModelsList" or not isinstance(data, dict) or data.get("error"):
+        return data
+    try:
+        tasks = client.inventory("models")
+    except Exception:  # noqa: BLE001 - the engine list still stands on its own
+        return data
+    items = tasks.get("items") if isinstance(tasks, dict) else None
+    if isinstance(items, list):
+        data = dict(data)
+        data["tasks"] = items
+    return data
+
+
+def method_title(method: str) -> str:
+    """"ModelsList" -> "Models": the words of a method name, without its verb."""
+    import re
+
+    words = re.findall(r"[A-Z][a-z0-9]*", method or "") or [method or ""]
+    if len(words) > 1 and words[-1] in ("List", "Get", "Read", "Status", "Show"):
+        words = words[:-1]
+    return " ".join(words).capitalize() or label(method)
+
+
 def lines(data: object, method: str = "") -> list[str]:
     """The human-readable lines for one capability result."""
     if isinstance(data, list):
@@ -73,7 +104,9 @@ def lines(data: object, method: str = "") -> list[str]:
         if key in ("value", "password") and data.get("secret") is True:
             continue
         if isinstance(value, list):
-            out.append(f"{label(key)} ({len(value)}):")
+            # "items" says nothing: the command's own name heads its list
+            heading = method_title(method) if key == "items" and method else label(key)
+            out.append(f"{heading} ({len(value)}):")
             out.extend(_row(item) for item in value[:30])
         elif isinstance(value, dict):
             out.append(f"{label(key)}:")

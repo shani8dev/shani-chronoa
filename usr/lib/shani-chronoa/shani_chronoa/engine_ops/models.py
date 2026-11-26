@@ -23,7 +23,7 @@ LIST_PROBE_SECONDS = 1.5
 NOT_CHECKED = object()
 
 
-def bounded(read, *, seconds: float = LIST_PROBE_SECONDS):
+def bounded(read, *, seconds: float = LIST_PROBE_SECONDS, reraise: bool = False):
     """`read()` in a worker, or `NOT_CHECKED` if it has not answered in time.
 
     A keyring activation can take tens of seconds on a fresh session; the
@@ -37,10 +37,15 @@ def bounded(read, *, seconds: float = LIST_PROBE_SECONDS):
             box["value"] = read()
         except Exception as exc:  # noqa: BLE001 - a failed probe is "not checked"
             logger.debug("bounded read failed: %s", exc)
+            box["error"] = exc
 
     thread = threading.Thread(target=worker, daemon=True, name="models-list-probe")
     thread.start()
     thread.join(seconds)
+    # a probe that answered with an error is not the same as one that did not
+    # answer in time: with `reraise` the caller hears the error
+    if reraise and "error" in box:
+        raise box["error"]
     return box.get("value", NOT_CHECKED)
 
 

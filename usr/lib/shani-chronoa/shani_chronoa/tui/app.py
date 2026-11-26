@@ -256,7 +256,7 @@ class Interactive:
         except Exception as exc:  # noqa: BLE001 - one command must not end the session
             print(f"/{method} did not work: {type(exc).__name__}: {exc}", file=self.out)
             return
-        display.show(data, self.out, method)
+        display.show(display.with_tasks(self.client, method, data), self.out, method)
 
     def _respond(self, event: dict) -> str:
         # The renderer already drew the number choices and the detail.

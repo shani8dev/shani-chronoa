@@ -162,7 +162,7 @@ def run_capability(client: AgentClient, method: str, args, *, jsonl: bool) -> in
             return 2
     if spec.confirm:
         values.append(True)
-    data = client.capability(method, *values)
+    data = display.with_tasks(client, method, client.capability(method, *values))
     if jsonl:
         print(json.dumps(data, ensure_ascii=False, separators=(",", ":")))
     else:
