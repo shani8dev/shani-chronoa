@@ -106,13 +106,34 @@ def _child() -> int:
             answers[name] = result
             status = result.get("error") or "ok"
             print(f"{name}: {status}")
-        client.inventory("status")  # the seven legacy methods still work
+        status = client.inventory("status")  # the seven legacy methods still work
+        print(f"status answering model: {status['items']['llm_model']}")
+
+        # Migration ran in the engine process with a COPY of the person's
+        # dconf file. Show that their non-default values landed in the
+        # throwaway settings.json, and that nothing was written to their home.
+        from shani_chronoa import settings_file, settings_table
+
+        migrated = json.loads(settings_file.user_path().read_text())
+        copied = {
+            key: value
+            for key, value in migrated.items()
+            if key in settings_table.TABLE and value != settings_table.default_for(key)
+        }
+        assert migrated.get(settings_file.MIGRATION_KEY) is True, migrated
+        print(
+            f"migrated non-default values ({len(copied)}): "
+            + ", ".join(f"{k}={v!r}" for k, v in sorted(copied.items())[:8])
+        )
 
         # End-to-end: the real CLI binary against the real engine on this bus.
         cli = REPO / "usr/bin/chronoa"
         for argv in (
             ("models", "--json"),
+            ("settings", "--json"),
             ("settings", "get", "privacy-mode", "--json"),
+            ("settings", "set", "privacy-mode", "false"),
+            ("settings", "set", "privacy-mode", "false", "--yes", "--json"),
         ):
             run = subprocess.run(
                 [sys.executable, str(cli), *argv],
@@ -121,10 +142,87 @@ def _child() -> int:
                 timeout=30,
                 env=os.environ.copy(),
             )
-            assert run.returncode == 0, (argv, run.stderr)
-            payload = json.loads(run.stdout.strip().splitlines()[-1])
-            assert isinstance(payload, dict) and payload, (argv, payload)
-            print(f"cli {' '.join(argv)}: ok")
+            expected = 2 if argv[-1] == "false" else 0
+            assert run.returncode == expected, (argv, run.returncode, run.stderr)
+            if expected == 0:
+                payload = json.loads(run.stdout.strip().splitlines()[-1])
+                assert isinstance(payload, dict) and payload, (argv, payload)
+            else:
+                assert "--yes" in run.stderr, run.stderr
+            print(f"cli {' '.join(argv)}: rc={run.returncode}")
+
+        # /settings in a pty: the same method, driven as a person types it.
+        import os as _os
+        import pty
+        import select
+
+        master, slave = pty.openpty()
+        term = subprocess.Popen(
+            [sys.executable, str(cli)],
+            stdin=slave,
+            stdout=slave,
+            stderr=slave,
+            env=os.environ.copy(),
+            close_fds=True,
+            start_new_session=True,
+        )
+        _os.close(slave)
+        screen = ""
+        try:
+            deadline = time.monotonic() + 20
+            while "chronoa>" not in screen and time.monotonic() < deadline:
+                ready, _, _ = select.select([master], [], [], 0.1)
+                if ready:
+                    screen += _os.read(master, 65536).decode("utf-8", "replace")
+            _os.write(master, b"/settings get privacy-mode\n")
+            deadline = time.monotonic() + 20
+            while screen.count("chronoa>") < 2 and time.monotonic() < deadline:
+                ready, _, _ = select.select([master], [], [], 0.1)
+                if ready:
+                    screen += _os.read(master, 65536).decode("utf-8", "replace")
+            assert "Privacy mode" in screen or "privacy mode" in screen, screen
+            _os.write(master, b"/quit\n")
+            term.wait(timeout=5)
+            print("pty /settings get privacy-mode: ok")
+        finally:
+            try:
+                _os.close(master)
+            except OSError:
+                pass
+
+        # The GTK app must still start on a private Broadway display and read
+        # the same layered settings. No window ever touches the person's X/Wayland.
+        broadway = subprocess.Popen(
+            ["gtk4-broadwayd", ":94"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        time.sleep(0.5)
+        gtk_env = os.environ.copy()
+        gtk_env.update(
+            GDK_BACKEND="broadway", BROADWAY_DISPLAY=":94", GSK_RENDERER="cairo"
+        )
+        gtk_env.pop("WAYLAND_DISPLAY", None)
+        gtk_env.pop("DISPLAY", None)
+        app = subprocess.Popen(
+            [sys.executable, str(REPO / "usr/bin/shani-chronoa")],
+            env=gtk_env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
+        time.sleep(6)
+        assert app.poll() is None, app.stderr.read().decode("utf-8", "replace")
+        print("gtk app started on private Broadway :94")
+        app.terminate()
+        try:
+            app.wait(timeout=8)
+        except subprocess.TimeoutExpired:
+            app.kill()
+        broadway.terminate()
+        try:
+            broadway.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            broadway.kill()
     finally:
         client.close()
         engine.terminate()
@@ -159,6 +257,12 @@ def _parent() -> int:
         (config / "dconf").mkdir(exist_ok=True)
         shutil.copy2(dconf, config / "dconf/user")
 
+    # A private runtime dir keeps dconf's own cache from reusing the person's
+    # session bus socket; the migration must read only the copied user file.
+    runtime = tmp / "runtime"
+    runtime.mkdir()
+    os.chmod(runtime, 0o700)
+
     schema_src = REPO / "usr/share/glib-2.0/schemas"
     schema_dir = tmp / "schemas"
     schema_dir.mkdir()
@@ -177,12 +281,13 @@ def _parent() -> int:
         XDG_CONFIG_HOME=str(config),
         XDG_DATA_HOME=str(data),
         XDG_CACHE_HOME=str(tmp / "cache"),
+        XDG_RUNTIME_DIR=str(runtime),
         GSETTINGS_SCHEMA_DIR=str(schema_dir),
         # No keyring daemon on this private bus, and no STT server: a probe
         # must answer from the copied settings, not wait for a service that
         # is not there (the same guard tests/conftest.py uses).
-        SHANI_CHRONOA_KEYRING="0",
-        SHANI_CHRONOA_STT_SERVER="0",
+        SHANI_CHRONOA_KEYRING=env.get("SHANI_CHRONOA_KEYRING", "0"),
+        SHANI_CHRONOA_STT_SERVER=env.get("SHANI_CHRONOA_STT_SERVER", "0"),
         PYTHONDONTWRITEBYTECODE="1",
         CHRONOA_LIVE_CHILD="1",
     )

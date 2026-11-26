@@ -143,6 +143,20 @@ def _playback():
     )
 
 
+def _cloud_row(config) -> dict:
+    """A cloud row that never waits on the keyring to say it is not in use."""
+    from shani_chronoa.engine_ops.models import NOT_CHECKED, bounded
+
+    answer = bounded(lambda: _cloud(config))
+    if answer is NOT_CHECKED:
+        return {
+            "name": "cloud",
+            "installed": False,
+            "detail": "not checked - the keyring did not answer quickly",
+        }
+    return _row("cloud", lambda: answer, "the cloud speech provider is not available")
+
+
 def _engine_rows(config):
     dispatcher, _problem = _dispatcher()
     chosen = ""
@@ -156,11 +170,7 @@ def _engine_rows(config):
         _row("piper", lambda: _piper(dispatcher), "Piper is not installed"),
         _row("rhvoice", _rhvoice, "RHVoice is not installed"),
         _row("espeak-ng", _espeak, "espeak-ng is not on this computer"),
-        _row(
-            "cloud",
-            lambda: _cloud(config),
-            "the cloud speech provider is not available",
-        ),
+        _cloud_row(config),
         _row("whisper", _whisper, "speech input is not available"),
         _row("parakeet", _parakeet, "Parakeet is not installed"),
         _row("capture", _capture, "no recording backend is installed"),

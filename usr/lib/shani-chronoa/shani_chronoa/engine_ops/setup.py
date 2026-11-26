@@ -34,13 +34,31 @@ def _config(config):
 
 
 def state(config=None) -> dict:
-    """What the wizard would show: state, whether to open it, and STT choices."""
+    """What the wizard would show, bounded so a keyring cannot hold the bus.
+
+    The wizard's state probe reads cloud keys; on a fresh session that can
+    activate the keyring and take tens of seconds. A panel gets the same three
+    keys either way, with "not checked" instead of a confident "no".
+    """
+    from shani_chronoa.engine_ops.models import NOT_CHECKED, bounded
+
     wizard = _wizard()
     cfg = _config(config)
+    ready = bounded(lambda: wizard.state(cfg))
+    if ready is NOT_CHECKED:
+        return {
+            "state": {
+                "detail": "not checked - the setup probes did not answer quickly"
+            },
+            "needs_setup": None,
+            "stt_catalogue": [],
+        }
+    needs = bounded(lambda: wizard.needs_setup(cfg))
+    catalogue = bounded(lambda: wizard.stt_catalogue())
     return {
-        "state": wizard.state(cfg),
-        "needs_setup": wizard.needs_setup(cfg),
-        "stt_catalogue": wizard.stt_catalogue(),
+        "state": ready,
+        "needs_setup": None if needs is NOT_CHECKED else needs,
+        "stt_catalogue": [] if catalogue is NOT_CHECKED else catalogue,
     }
 
 
