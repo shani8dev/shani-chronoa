@@ -109,6 +109,20 @@ def show_inventory(client: AgentClient, name: str, sections, stream: TextIO = No
     for section in sections:
         data = client.inventory(section)
         items = data.get("items", []) if isinstance(data, dict) else []
+        if isinstance(items, dict):
+            # a section that is one record (status, privacy) - key: value lines
+            print(f"{section}:", file=out)
+            for key, value in items.items():
+                if isinstance(value, (list, tuple)):
+                    value = ", ".join(str(v) for v in value) or "none"
+                elif isinstance(value, bool):
+                    value = "yes" if value else "no"
+                print(f"  {key.replace('_', ' ')}: {value if value != '' else '-'}", file=out)
+            if data.get("error"):
+                print(f"  error: {data['error']}", file=out)
+            continue
+        if not isinstance(items, list):
+            items = [items]
         print(f"{section} ({len(items)}):", file=out)
         for item in items[:30]:
             if isinstance(item, dict):
@@ -164,7 +178,11 @@ class Interactive:
     def handle(self, line: str) -> None:
         name, arg = commands.parse(line)
         if name:
-            self.command(name, arg)
+            # one command going wrong must not end the session
+            try:
+                self.command(name, arg)
+            except Exception as exc:  # noqa: BLE001
+                print(f"/{name} did not work: {type(exc).__name__}: {exc}", file=self.out)
             return
         text, paths = extract_paths(line)
         options = dict(self.pending_options)
