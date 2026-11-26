@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("shani_chronoa.desktop_cue")
 
 BUS_NAME = "org.shani.Chronoa.Windows"
 OBJECT_PATH = "/org/shani/Chronoa/Windows"
@@ -33,7 +33,7 @@ def show(text: str, hold: bool = False) -> None:
 def for_tool(name: str, arguments: dict) -> str:
     """The cue for one tool call: the tool card's own words, after "Chronoa: "."""
     try:
-        from shani_chronoa.gui.blocks import call_phrase, tool_words
+        from shani_chronoa.ui_gtk.gui.blocks import call_phrase, tool_words
         phrase = call_phrase(name, arguments or {})
         if not phrase or "=" in phrase:
             phrase = tool_words(name)

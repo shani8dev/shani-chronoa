@@ -16,14 +16,14 @@ import logging
 from datetime import datetime, timezone
 from typing import List, Optional
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("shani_chronoa.away")
 
 _STATE = {"locked_at": None, "subscription": 0, "bus": None}
 
 
 def summary(records: List[dict], since: datetime) -> str:
     """One sentence for the actions in `records` at or after `since`; "" if none."""
-    from shani_chronoa.desktop_cue import for_tool
+    from shani_chronoa.ui_gtk.desktop_cue import for_tool
     recent = []
     for record in records:
         try:
@@ -53,7 +53,7 @@ def summary(records: List[dict], since: datetime) -> str:
 def _records() -> List[dict]:
     try:
         from shani_chronoa import tool_tracking
-        from shani_chronoa.gui.surfaces import activity
+        from shani_chronoa.ui_gtk.gui.surfaces import activity
         return activity._records(tool_tracking.ToolTracker())  # noqa: SLF001
     except Exception:  # noqa: BLE001
         return []

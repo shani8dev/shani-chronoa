@@ -53,9 +53,9 @@ import sys
 import time
 from dataclasses import dataclass
 
-from shani_chronoa import automation_overlay as ao
+from shani_chronoa.ui_gtk import automation_overlay as ao
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("shani_chronoa.ui_driver")
 
 #: How deep the accessibility tree is walked, and how many nodes it holds.
 #: The depth is `ui_elements.MAX_DEPTH`'s own value - see `_walk_all` for the
@@ -1523,8 +1523,8 @@ def _niri_session() -> bool:
 def _niri_json(*args: str):
     import json
 
-    from shani_chronoa.windows import WindowError
-    from shani_chronoa.windows.niri import _niri
+    from shani_chronoa.ui_gtk.windows import WindowError
+    from shani_chronoa.ui_gtk.windows.niri import _niri
     try:
         return json.loads(_niri("-j", *args) or "null")
     except (WindowError, ValueError) as exc:
@@ -1532,8 +1532,8 @@ def _niri_json(*args: str):
 
 
 def _niri_action(*args: str) -> None:
-    from shani_chronoa.windows import WindowError
-    from shani_chronoa.windows.niri import _niri
+    from shani_chronoa.ui_gtk.windows import WindowError
+    from shani_chronoa.ui_gtk.windows.niri import _niri
     try:
         _niri("action", *args)
     except WindowError as exc:
@@ -3704,7 +3704,7 @@ def _focus_via_shell(title: str, window_id: str) -> str:
     that a second mechanism may well fix.
     """
     try:
-        from shani_chronoa.windows import gnome as _gnome
+        from shani_chronoa.ui_gtk.windows import gnome as _gnome
         backend, _why = _gnome.available()
         if backend is None:
             return ""

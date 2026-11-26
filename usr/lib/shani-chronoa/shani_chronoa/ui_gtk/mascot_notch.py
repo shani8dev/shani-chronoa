@@ -40,7 +40,7 @@ import os
 import tempfile
 import time
 
-from shani_chronoa import mascot
+from shani_chronoa.ui_gtk import mascot
 from shani_chronoa import mascot_art
 from shani_chronoa import mascot_events
 
@@ -73,7 +73,7 @@ def _play(kind: str) -> None:
         logger.debug("mascot notch: the note for %r did not play", kind,
                      exc_info=True)
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("shani_chronoa.mascot_notch")
 
 BUS_NAME = "org.shani.Chronoa.Mascot"
 OBJECT_PATH = "/org/shani/Chronoa/Mascot"

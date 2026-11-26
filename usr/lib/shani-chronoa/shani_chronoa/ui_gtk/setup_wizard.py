@@ -48,7 +48,7 @@ from shani_chronoa.config import (  # noqa: E402  (the factory above needs the r
     ChronoaConfig,
 )
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("shani_chronoa.setup_wizard")
 
 
 def _saved_cloud_model(config, provider_id: str) -> str:

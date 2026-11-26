@@ -43,7 +43,7 @@ from shani_chronoa import mascot_drag
 from shani_chronoa import mascot_events
 from shani_chronoa import mascot_sounds
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("shani_chronoa.mascot")
 
 CONSENT_KEY = "mascot-enabled"
 SIZE = 132                      # on-screen px of the sprite
@@ -240,7 +240,7 @@ def _motion_is_reduced() -> bool:
     feature rather than the preference - so the refusal is logged.
     """
     try:
-        from shani_chronoa.automation_overlay import reduced_motion
+        from shani_chronoa.ui_gtk.automation_overlay import reduced_motion
         return bool(reduced_motion())
     except Exception as error:  # noqa: BLE001
         logger.info("mascot: could not read the reduce-motion setting (%s); "
@@ -1105,7 +1105,7 @@ def create(app):
     """
     # The import is inside the function and not at module scope because
     # `mascot_notch` imports this module: a top-level import would be a cycle.
-    from shani_chronoa import mascot_notch
+    from shani_chronoa.ui_gtk import mascot_notch
     # A desktop shell that draws the companion in its own bar (shani-shell's
     # Island) asks for it over the bus; it wins even where a window could run,
     # because the window beside it would be the same mascot twice.

@@ -1,0 +1,820 @@
+"""The right rail: what Chronoa is doing, what it owes you, and how it is armed.
+
+The window had a left sidebar (the panels) and the conversation, and nothing
+else. The conversation is a *transcript* - it grows downward, and the answer
+scrolled off the top is gone - so the three questions a person actually has
+while talking to an assistant with its hands on their machine had no home:
+
+- **What is it doing right now?** The orb says one word; the tool it is
+  running lives in a card that scrolls away.
+- **What has it done to me that I can take back?** Every write is already on
+  disk by the time anyone could approve it, so the honest place for it is a
+  standing list, not a message.
+- **What is it allowed to do?** A reply means different things when the
+  permission posture is Normal, when nothing is allowed to ask, and when it
+  may only look.
+
+**What is deliberately not in it.** Not the sense feeds (the senses panels own
+that) and not health (Diagnostics owns it, with a per-row reason). Goals were
+left out while `goals.py` had no producer - a card for a queue nothing can
+enqueue is a dead control. `skills/manage_goals.py` produces them now, so the
+Goals section shows open runs, and hides itself when there are none. Every section below reads a store that already
+exists and shows an honest empty state, because a rail that renders decoration
+is worse than no rail: it looks like it knows something.
+
+Sections, in the order a person asks the questions:
+
+1. **Now** - the live state and the current tool, from the same
+   `AssistantState` the orb uses plus the turn the app already tracks.
+2. **Timers** - pending countdowns with the time left, refreshed on a tick,
+   because "3m 12s left" that says 3m 12s forever is worse than not showing it.
+3. **Changed** - files Chronoa wrote that the undo ring can still put back,
+   with the line counts. This is the same data the Diff panel shows in full.
+4. **Tasks** - outstanding items from the task list, *only* when that list's
+   consent key is on. Consent is read here, not assumed: a rail that lists
+   tasks the user switched off is a disclosure behind a switch.
+5. **Posture** - permission mode, memory consent, sandbox qualification. Three
+   lines, all of which change what a reply is allowed to mean.
+"""
+
+from __future__ import annotations
+
+import os
+
+import logging
+from typing import Callable, Optional
+
+import gi
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+gi.require_version("Pango", "1.0")
+from gi.repository import Adw, Gtk, Pango  # noqa: E402 - after require_version
+
+from pathlib import Path  # noqa: E402 - used by the Made section
+
+from shani_chronoa import config as config_mod  # noqa: E402
+from shani_chronoa import files  # noqa: E402
+from shani_chronoa.words import plural
+
+logger = logging.getLogger("shani_chronoa.gui.rail")
+
+#: Width of the rail. Wide enough for a filename and a time, narrow enough
+#: that the conversation keeps the majority of a 1280px window. Below the
+#: breakpoint the rail is hidden rather than shrunk: at 180px it wraps every
+#: label and reads as a column of broken words.
+RAIL_WIDTH = 280
+
+
+def _label(text: str, css: str = "") -> Gtk.Widget:
+    label = Gtk.Label(label=text)
+    label.set_xalign(0.0)
+    label.set_wrap(True)
+    label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+    if css:
+        label.add_css_class(css)
+    return label
+
+
+class _Section(Gtk.Box):
+    """A titled group of rows, with one honest line when it has nothing."""
+
+    def __init__(self, title: str) -> None:
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self.add_css_class("rail-section")
+        self.set_margin_top(10)
+        heading = _label(title, "rail-heading")
+        heading.add_css_class("heading")
+        #: Kept so the space left for the quiet line can be **measured** -
+        #: the line is right-aligned beside this heading, so it is the
+        #: heading's width that squeezes it, not the rail's.
+        self._heading = heading
+        heading.set_wrap(False)
+        # **A quiet section is one line, not a card.** Measured on a 1100px
+        # window: nine sections, seven of them "Nothing ..."/"No ...", each a
+        # full card - most of the rail said nothing. The words stay (an
+        # honest empty state is still the rule); they move up beside the
+        # heading and the body hides until there is something in it.
+        head = Gtk.Box(spacing=8)
+        head.append(heading)
+        self._quiet = _label("", "dim-label")
+        self._quiet.set_hexpand(True)
+        self._quiet.set_xalign(1.0)
+        self._quiet.set_wrap(False)
+        self._quiet.set_ellipsize(Pango.EllipsizeMode.END)
+        self._quiet.set_visible(False)
+        head.append(self._quiet)
+        self.append(head)
+        self._body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self.append(self._body)
+
+    #: Empty-state lines that are a fault, not a quiet moment: they keep the
+    #: full section, because they need reading.
+    _FAULT = ("Could not", "could not")
+
+    def clear(self) -> None:
+        child = self._body.get_first_child()
+        while child is not None:
+            following = child.get_next_sibling()
+            self._body.remove(child)
+            child = following
+        self._quiet.set_visible(False)
+        self._body.set_visible(True)
+        self.remove_css_class("rail-quiet")
+
+    def row(self, text: str, detail: str = "") -> None:
+        self._loud()
+        self._body.append(_label(text))
+        if detail:
+            self._body.append(_label(detail, "dim-label"))
+
+    def _loud(self) -> None:
+        """Something to show: the full section again.
+
+        **And the quiet line's text goes with it.** It was hidden rather than
+        emptied, so a stale claim stayed in the tree - and "No rule has fired"
+        left in a section that could not be read at all is a lie told to
+        anything that walks the labels, visible or not.
+        """
+        self._quiet.set_text("")
+        self._quiet.set_tooltip_text("")
+        self._quiet.set_visible(False)
+        self._body.set_visible(True)
+        self.remove_css_class("rail-quiet")
+
+    def empty(self, text: str) -> None:
+        has_rows = self._body.get_first_child() is not None
+        if not has_rows and not text.startswith(self._FAULT):
+            self._quiet.set_label(text)
+            self._quiet.set_tooltip_text(text)
+            self._quiet.set_visible(True)
+            self._body.set_visible(False)
+            self.add_css_class("rail-quiet")
+            return
+        # **A fault is loud, and the quiet line it replaces is a lie.** The
+        # section has usually already said "No rule has fired" - which is what
+        # it says when there is nothing to show - and a fault arriving after
+        # that was appended to a body that had been *hidden*, so the section
+        # kept saying nothing had fired when in fact it could not be read at
+        # all. So the quiet line goes and the body comes back.
+        self._loud()
+        self._body.append(_label(text, "dim-label"))
+
+    def controlled(self, text: str, detail: str,
+                   actions: "list[tuple[str, str, Callable[[], None]]]") -> None:
+        """A row with small buttons beside it: `(icon, tooltip, run)` each."""
+        self._loud()
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        words = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        words.set_hexpand(True)
+        words.append(_label(text))
+        if detail:
+            words.append(_label(detail, "dim-label"))
+        row.append(words)
+        for icon, tooltip, run in actions:
+            button = Gtk.Button(icon_name=icon)
+            button.add_css_class("flat")
+            button.add_css_class("circular")
+            button.set_valign(Gtk.Align.CENTER)
+            button.set_tooltip_text(tooltip)
+            button.update_property([Gtk.AccessibleProperty.LABEL], [tooltip])
+            button.connect("clicked", lambda _b, r=run: r())
+            row.append(button)
+        self._body.append(row)
+
+    def meter(self, fraction: float, tooltip: str = "") -> None:
+        """A level bar under a row: a share of something is read faster as a
+        length than as a number, and the context headline was only a number."""
+        self._loud()
+        bar = Gtk.LevelBar(min_value=0.0, max_value=1.0)
+        bar.set_value(max(0.0, min(1.0, float(fraction))))
+        # Offsets named for the theme's own colours: under 75% normal, then
+        # high, then full - where "it forgot what I said" starts.
+        bar.add_offset_value("low", 0.75)
+        bar.add_offset_value("high", 0.9)
+        bar.add_offset_value("full", 1.0)
+        bar.add_css_class("rail-meter")
+        if tooltip:
+            bar.set_tooltip_text(tooltip)
+        self._body.append(bar)
+
+    def link(self, text: str, detail: str, surface: str,
+             on_open: Callable[[str], None], icon: str = "") -> None:
+        """A row that opens the panel holding the rest of the story.
+
+        A rail that reports a fact a person must then go hunting for has moved
+        the work rather than removed it. The whole row is the target, not just
+        its text, and it is a real button so it is reachable by keyboard and
+        announced as one.
+        """
+        button = Gtk.Button()
+        button.add_css_class("flat")
+        button.set_has_frame(False)
+        button.set_valign(Gtk.Align.START)
+        # **`icon` is a named parameter, not the third positional.** It used to
+        # sit in that slot; the signature lost it and the call sites kept
+        # passing it, so an icon name was being used as the surface name -
+        # measured: the row's tooltip read "Open the preferences-system-symbolic
+        # panel" and clicking it asked the window for a surface that does not
+        # exist. Nothing raised, so nothing looked wrong.
+        if icon:
+            button.set_icon_name(icon)
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        content.append(_label(text))
+        if detail:
+            content.append(_label(detail, "dim-label"))
+        button.set_child(content)
+        button.set_tooltip_text(f"Open the {surface} panel")
+        button.update_property([Gtk.AccessibleProperty.LABEL],
+                               [f"Open the {surface} panel: {text}"])
+        button.connect("clicked", lambda _b: on_open(surface))
+        self._body.append(button)
+
+
+class RailBreakpoint:
+    """Hide the rail on a window too narrow to give it a real column.
+
+    Same libadwaita breakpoint machinery as the left sidebar
+    (`sidebar.SidebarBreakpoint`), for the same reason: below the threshold the
+    rail's labels wrap into two and three lines each and the conversation - the
+    reason the window exists - loses half its width to a column of fragments.
+    The threshold is higher than the sidebar's (1040 rather than 720) because
+    the window already has a left sidebar eating 260px before the rail is
+    considered.
+
+    `apply()` takes **the rail**, not the box that holds the conversation beside
+    it. The first version was handed the row and set `visible` on *that* - so
+    at 600px it hid the conversation too and the window rendered an empty right
+    half with no orb, no transcript and no composer. Found by rendering, not by
+    reading: the breakpoint code read correctly and the target was simply the
+    wrong widget.
+    """
+
+    @staticmethod
+    def apply(rail: "Gtk.Widget", max_width: int = 1040) -> "Adw.Breakpoint":
+        """Build the breakpoint that hides `rail` below `max_width`.
+
+        It must be handed to `window.add_breakpoint()`: a breakpoint no window
+        knows about is never evaluated, which is how this window's sidebar
+        breakpoint had been dead for its whole life.
+        """
+        condition = Adw.BreakpointCondition.parse(f"(max-width: {max_width}px)")
+        breakpoint = Adw.Breakpoint.new(condition)
+        breakpoint.add_setter(rail, "visible", False)
+        return breakpoint
+
+
+def describe_event(outcome) -> "tuple[str, str, bool]":
+    """(label, detail, failed) from whatever a fired rule handed back.
+
+    **Read defensively, because the shapes here are not uniform and none of them
+    are this function's to guarantee.** A fire result is a small record from
+    another subsystem; `getattr` with defaults means an unfamiliar one renders as
+    a bare line rather than taking the rail down - and the rail refreshing every
+    two seconds is exactly where an exception would be both easy to cause and
+    expensive to notice.
+    """
+    name = (getattr(outcome, "rule_name", None)
+            or getattr(outcome, "name", None)
+            or getattr(outcome, "rule", None) or "")
+    action = (getattr(outcome, "action", None)
+              or getattr(outcome, "what", None) or "")
+    refused = bool(getattr(outcome, "refused", False))
+    failed = bool(getattr(outcome, "failed", False))
+    detail = (getattr(outcome, "detail", None)
+              or getattr(outcome, "reason", None)
+              or getattr(outcome, "error", None) or "")
+    label = str(name or action or "").strip()
+    if not label and not detail:
+        return ("", "", False)
+    if not label:
+        label = "A rule fired"
+    note = str(detail or action or "").strip()
+    if refused:
+        note = note or "asked first, and was turned down"
+    return (label, note[:80], failed or refused)
+
+
+class NowRail(Gtk.Box):
+    """The right-hand rail. `refresh()` rebuilds it from the stores.
+
+    Reads are tiny (a JSON file or a config key), so this is a synchronous
+    rebuild on demand rather than a second thread: a rail whose sections update
+    a frame late from a polling thread is a rail that flickers.
+
+    `on_open(surface_name)` is the one action a row can take - "open the panel
+    that has the rest of this". It is a callback rather than a call into the
+    window so the rail stays buildable and testable on its own, which is what
+    lets every section below be verified without a GTK application.
+    """
+
+    def __init__(self, get_state: Optional[Callable[[], str]] = None,
+                 get_tool: Optional[Callable[[], str]] = None,
+                 on_open: Optional[Callable[[str], None]] = None,
+                 get_context: Optional[Callable[[], object]] = None,
+                 get_artifacts: Optional[Callable[[], object]] = None,
+                 get_events: Optional[Callable[[], object]] = None,
+                 get_senses: Optional[Callable[[], object]] = None) -> None:
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.add_css_class("now-rail")
+        self.set_size_request(RAIL_WIDTH, -1)
+        self.set_margin_start(12)
+        self.get_state = get_state or (lambda: "")
+        self.get_tool = get_tool or (lambda: "")
+        self.on_open = on_open or (lambda _name: None)
+        self.get_context = get_context or (lambda: None)
+        #: What this session's skills declared they made. A callback for the same
+        #: reason as the others: the rail reads, it does not own. The paths have
+        #: already been through `tools.artifacts_for`, so they are absolute and
+        #: present by the time they arrive here.
+        self.get_artifacts = get_artifacts or (lambda: ())
+        #: Triggered rules, from the ambient scheduler. A callback like the rest:
+        #: the rail reads, it does not own. **This exists because
+        #: `AmbientScheduler.event_results()` had no caller anywhere in `usr/`** -
+        #: event rules fired, the results were recorded, and nothing ever read
+        #: them, so an unattended rule did its work invisibly.
+        self.get_events = get_events or (lambda: ())
+        #: What the ambient senses are currently allowed to poll. A callback for
+        #: the same reason as the rest: the rail reads, it does not own.
+        self.get_senses = get_senses or (lambda: ())
+
+        scroller = Gtk.ScrolledWindow(vexpand=True)
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        # **No `set_propagate_natural_width`.** Rendered and measured: with it,
+        # the rail asked for its labels' natural width, the box honoured it, and
+        # a long posture line ("nothing is remembered, and nothing is disclosed")
+        # pushed the rail past its own `size_request` and off the right edge of
+        # the window - the one thing a fixed-width column exists to prevent. The
+        # scroller is given the rail's width and the labels wrap inside it.
+        scroller.set_hexpand(False)
+        scroller.set_propagate_natural_height(True)
+        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        inner.set_margin_top(8)
+        inner.set_margin_bottom(16)
+        inner.set_margin_start(14)
+        inner.set_margin_end(14)
+
+        self._now = _Section("Now")
+        self._context = _Section("Context")
+        # **"Changed recently", and the word is the point.** This card reads
+        # the undo ring - the last twenty changes on this machine, which
+        # spans sessions - while the card beside it reads the files *this
+        # conversation* made. Two scopes in neighbouring cards, and a person
+        # reading them as a pair could not tell. The card beside it says
+        # "yet", which is the conversation; this one now says "recently",
+        # which is the ring.
+        self._changed = _Section("Changed recently")
+        self._made = _Section("Made")
+        self._events = _Section("Triggers")
+        self._sensing = _Section("Sensing")
+        self._tasks = _Section("Tasks")
+        self._goals = _Section("Goals")
+        # "Safety", not "Posture": the section says how risky calls are
+        # treated and what is switched on, and "posture" is the code's word.
+        self._posture = _Section("Safety")
+        for section in (self._now, self._context, self._changed,
+                        self._made, self._events, self._sensing,
+                        self._tasks, self._goals, self._posture):
+            inner.append(section)
+
+        scroller.set_child(inner)
+        self.append(scroller)
+        self.refresh()
+
+    # -- sections ---------------------------------------------------------
+
+    def _fill_now(self) -> None:
+        self._now.clear()
+        # **The state word is not repeated here.** The window says "Ready"
+        # under the orb, and this card said it a second time - measured on a
+        # 1280px capture, "Ready" appeared three times on one screen. What
+        # the card is for is what is *running*, which the state word does not
+        # say.
+        tool = str(self.get_tool() or "").strip()
+        if tool:
+            self._now.row(f"Running {tool}", "")
+        else:
+            self._now.empty("Nothing is running")
+
+    def _fill_context(self) -> None:
+        """How full the model's window is, and what is filling it.
+
+        opencode's session header shows a progress circle with usage, tokens
+        and cost (`session-context-usage.tsx:128`) and its tooltip breaks the
+        prompt down by `system | user | assistant | tool | other`
+        (`session-context-breakdown.ts:4`). cline prints the numbers on its
+        compaction row. Chronoa had all of them internally and showed none,
+        which made "it forgot what I said" indistinguishable from "the window
+        is full" - the single most alarming thing that can happen to a local
+        assistant, and the one nobody can see coming.
+        """
+        self._context.clear()
+        report = None
+        try:
+            report = self.get_context()
+        except Exception as exc:  # noqa: BLE001 - a glance must not take the window down
+            logger.debug("rail: context report unreadable: %s", exc)
+        if report is None:
+            self._context.empty("Nothing measured yet")
+            return
+        self._context.row(report.headline())
+        # **The bar shows the *usable* share, not the raw one.** A window that
+        # is 80% full of input while 1,024 tokens are held back for the reply
+        # is 91% used, and the number that answers "can another question still
+        # fit" is the second one. `usable_percent` has been computed on every
+        # turn since the meter shipped and had no caller at all, so the rail
+        # read the one figure that cannot answer that question - the same
+        # "a feature that exists and is unreachable" gap as the organ strip's
+        # centring, found by the same never-called scan.
+        #
+        # The raw percentage stays in the row above it, so nothing is lost.
+        # With no reserve set the two are equal and the plain wording is the
+        # honest one.
+        usable = report.usable_percent
+        reserve = report.reply_reserve
+        if reserve and usable is not None and report.percent is not None:
+            self._context.meter(
+                usable / 100.0,
+                f"{usable:.0f}% of the room this turn can send "
+                f"({report.percent:.0f}% of the raw window, with "
+                f"{reserve:,} tokens held back for the reply)")
+        elif report.percent is not None:
+            self._context.meter(report.percent / 100.0,
+                                f"{report.percent:.0f}% of the model's window in use")
+        # **Every segment, not the first four.** The list is dynamic - the
+        # breakdown has a row per kind of message, and a real turn fills
+        # six of them - so `[:4]` dropped the rest *silently*, and a person
+        # reading the card could not tell the model had been given a whole
+        # other slice of its window.
+        for label, tokens, share in report.segment_rows():
+            self._context.row(label, f"{tokens:,} tokens ({share:.0f}%)")
+        if report.elided:
+            # The one line that has to be here: what was cut, so that a change
+            # in behaviour has a reason attached to it.
+            said = (f"{plural(report.elided_messages, 'tool result')} shortened" if
+                    report.elided_messages else
+                    f"{plural(report.dropped_messages, 'earlier message')} left out")
+            self._context.row(said, "the window was full")
+
+    # **The Timers section moved out of the rail.** The rail is deleted below
+    # 1040px - the width the app opens at is 460 - so a timer running was
+    # invisible on the window a person actually uses. The strip above the
+    # composer (`gui/timers.py`) carries them now, at every width, and a
+    # fact in two places is two answers to one question.
+
+
+    def _fill_changed(self) -> None:
+        self._changed.clear()
+        try:
+            from shani_chronoa.skills.undo_last_change import recent_changes
+            pairs = recent_changes()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("rail: undo ring unreadable: %s", exc)
+            self._changed.empty("Could not read what Chronoa changed")
+            return
+        if not pairs:
+            # **Short enough to be the one line it is promised to be.** The
+            # quiet line is right-aligned beside the heading and does not
+            # wrap, so a sentence that is too long is *clipped* - measured on
+            # a 1280px capture: "Nothing changed since th..." .
+            self._changed.empty("Nothing changed yet")
+            return
+        # **One row per file, its latest change.** The ring holds one entry
+        # per *write*, so a file edited ten times was listed ten times
+        # ("greet.py - 5 line(s) added" down the whole card, measured) - and
+        # the count ignored removed lines, so a rewrite read as pure addition.
+        import difflib
+        latest: dict = {}
+        for path, before, after in pairs:
+            latest.setdefault(str(path), (path, before, after))
+        files = list(latest.values())
+        for path, before, after in files[:6]:
+            added = removed = 0
+            for line in difflib.ndiff(before.splitlines(), after.splitlines()):
+                if line.startswith("+ "):
+                    added += 1
+                elif line.startswith("- "):
+                    removed += 1
+            self._changed.link(path.name or str(path), f"+{added} -{removed}",
+                               "diff", self.on_open)
+        if len(files) > 6:
+            self._changed.empty(f"and {plural(len(files) - 6, 'file', prefix='more')}")
+
+    def _fill_made(self) -> None:
+        """The files this session's skills declared they made.
+
+        **Next to "Changed" because they are the two halves of one thought** -
+        what Chronoa altered, and what it produced. A file made three turns ago
+        is otherwise only findable by scrolling back to the turn that mentioned
+        it, which is the same problem as having to remember which panel a thing
+        went into.
+
+        Newest first, because the file just made is the one being looked for,
+        and the transcript keeps the chronological order for anyone reading it as
+        a conversation.
+
+        A path that has since been deleted is dropped rather than listed: a row
+        that offers to open something that is not there is worse than the row
+        not existing. It is checked here rather than trusted from the caller
+        because a file made minutes ago can go in the time since.
+        """
+        self._made.clear()
+        try:
+            paths = list(self.get_artifacts() or ())
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("rail: artifacts unreadable: %s", exc)
+            self._made.empty("Could not read what Chronoa made")
+            return
+        present = [p for p in reversed(paths) if Path(p).exists()]
+        gone = len(paths) - len(present)
+        if not present:
+            # **And the same for this one** - "Nothing made yet in this
+            # conversation" was clipped to "Nothing made yet in this conve...".
+            self._made.empty("Nothing made yet")
+            return
+        for path in present[:6]:
+            p = Path(path)
+            try:
+                size = files.human_size(p.stat().st_size) if p.is_file() else "folder"
+            except OSError:
+                continue
+            # Same shape as the Triggers row above: the icon belongs to
+            # `icon=`. Passing it positionally named the surface after an icon
+            # theme name, so clicking a file in "Made" asked for a panel that
+            # does not exist.
+            self._made.link(p.name, size, "artifact_store", self.on_open,
+                            icon=self._icon_for(p))
+        if len(present) > 6:
+            self._made.empty(f"and {len(present) - 6} more in the conversation")
+        elif gone:
+            self._made.empty(f"{gone} removed since it was made")
+
+    #: Icons are checked with `Gtk.IconTheme.has_icon` against the themes on this
+    #: machine, not remembered. **`image-x-generic-symbolic` and
+    #: `image-missing-symbolic` do not exist here** - measured - and an earlier
+    #: draft reached for both, behind a `_has()` guard that would have quietly
+    #: substituted nothing at all. A missing icon renders as a blank, which looks
+    #: like a row with no icon rather than like a mistake.
+    IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
+    TEXT_SUFFIXES = (".md", ".txt", ".html")
+
+    @classmethod
+    def _icon_for(cls, path: Path) -> str:
+        """An icon that means the *kind* of thing, decided by what it is."""
+        if path.is_dir():
+            return "folder-symbolic"
+        suffix = path.suffix.lower()
+        if suffix in cls.IMAGE_SUFFIXES:
+            return "folder-documents-symbolic"
+        if suffix in cls.TEXT_SUFFIXES:
+            return "text-x-generic-symbolic"
+        return "document-open-symbolic"
+
+    def _fill_events(self) -> None:
+        """Rules that fired on their own, most recent first.
+
+        **The whole point of this section is that it used to read nothing.**
+        `AmbientScheduler.event_results()` had no caller anywhere in `usr/`: an
+        event rule could fire a skill, change a setting, or run a command and
+        the window showed no sign of it - the automation was real and invisible,
+        which is the worst of both.
+
+        Newest first, same as "Made", for the same reason: the thing that just
+        happened is the one being looked for.
+
+        **A rule that refused is shown as having refused**, not omitted. A
+        trigger that asked and was turned down is an action someone declined, and
+        a rail that listed only successes would make it look like nothing
+        happened at all.
+        """
+        self._events.clear()
+        try:
+            results = list(self.get_events() or ())
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("rail: event results unreadable: %s", exc)
+            self._events.empty("Could not read what the rules did")
+            return
+        if not results:
+            self._events.empty("No rule has fired on its own")
+            return
+        for outcome in reversed(results[-6:]):
+            label, detail, failed = describe_event(outcome)
+            if not label:
+                continue
+            if failed:
+                self._events.empty(f"{label} - {detail}")
+            else:
+                # **`icon=` by name, `surface` is the panel.** An icon name in
+                # the `surface` slot compiled, ran, and quietly opened nothing:
+                # `refresh()`'s per-section guard is there for *raising*
+                # sections, and this one never raised - it just named a surface
+                # that does not exist. Two ways a rail row lies at once, and
+                # both of them look like a row that works.
+                self._events.link(label, detail, "triggers", self.on_open,
+                                  icon="preferences-system-symbolic")
+
+    def _fill_senses(self) -> None:
+        """What the machine is watching right now, and what it is refused.
+
+        **53 senses exist and nothing on screen said which were live.** A user
+        who has turned on location and calendar has no way to check that either
+        is actually polling, and one who has refused something has no way to
+        confirm the refusal took. Both are questions this repository's posture
+        section was written to answer and did not.
+
+        **The count first, the names only when they are few.** A line reading
+        "12 senses are polling" is the thing someone wants at a glance; the list
+        belongs in the panel it links to. With nothing polling it says so rather
+        than showing an empty section - silence would be indistinguishable from
+        a rail that has not refreshed.
+
+        **Denials are counted as well as permissions.** "2 senses are refused"
+        is the honest half of the picture; reporting only what is allowed would
+        make a refusal look like an absence.
+        """
+        self._sensing.clear()
+        try:
+            entries = list(self.get_senses() or ())
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("rail: senses unreadable: %s", exc)
+            self._sensing.empty("Could not read what is being watched")
+            return
+        if not entries:
+            self._sensing.empty("No ambient sense is polling")
+            return
+
+        polling = [e for e in entries if getattr(e, "will_poll", False)]
+        refused = [e for e in entries
+                   if not getattr(e, "allowed", True)]
+        name = lambda e: getattr(e, "name", "")           # noqa: E731
+
+        if polling:
+            names = sorted(name(e).replace("_", " ") for e in polling)
+            detail = ", ".join(names[:4])
+            if len(names) > 4:
+                detail += f" and {len(names) - 4} more"
+            self._sensing.link(f"{plural(len(polling), 'sense')} polling", detail,
+                               "senses", self.on_open,
+                               icon="preferences-system-privacy-symbolic")
+        if refused:
+            # **Why, not just how many.** A refusal with a stated reason is
+            # answerable; a bare count makes the reader go and look.
+            reasons = [getattr(e, "denial", "") or getattr(e, "refusal", "")
+                       for e in refused]
+            stated = next((r for r in reasons if r), "")
+            summary = f"{plural(len(refused), 'sense')} refused"
+            if stated:
+                summary += f" - {stated}"
+            self._sensing.empty(summary)
+        if not polling and not refused:
+            self._sensing.empty("No ambient sense is polling")
+
+    def _fill_tasks(self) -> None:
+        self._tasks.clear()
+        config = config_mod.ChronoaConfig()
+        if not config.get_bool("todo-list-enabled", True):
+            # The consent key governs the rail exactly as it governs the skill:
+            # a list the user switched off is not shown here either. Saying so
+            # is better than silence, because silence would read as "no tasks"
+            # when the truth is "you are not looking at them".
+            self._tasks.empty("Task list is off (Settings → Privacy)")
+            return
+        try:
+            from shani_chronoa.skills import todo_list
+            items, problem = todo_list._load()  # noqa: SLF001 - one reader, same store
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("rail: task list unreadable: %s", exc)
+            self._tasks.empty("Could not read the task list")
+            return
+        if problem:
+            self._tasks.empty("The task list could not be read")
+            return
+        # Build mode: the project's own checklist, with progress - finished
+        # steps stay visible, ticked, because "3 of 5 done" is the point.
+        from shani_chronoa import buildmode
+        project = buildmode.project()
+        if project:
+            mine = todo_list.project_items(items or [], project)
+            if mine:
+                done = sum(1 for i in mine if i.get("status") == "completed")
+                self._tasks.row(f"{os.path.basename(project.rstrip('/'))}: {done} of {len(mine)} done")
+                self._tasks.meter(done / len(mine), f"{done} of {len(mine)} steps done")
+                marks = {"completed": "✓ ", "in_progress": "→ ", "blocked": "! "}
+                for item in mine[:8]:
+                    self._tasks.row(f"{marks.get(str(item.get('status')), '○ ')}{item.get('content', '')}")
+                return
+        outstanding = [i for i in (items or []) if i.get("status") != "completed"]
+        if not outstanding:
+            self._tasks.empty("Nothing outstanding")
+            return
+        marks = {"pending": "", "in_progress": "(doing) ", "blocked": "(blocked) "}
+        for item in outstanding[:8]:
+            mark = marks.get(str(item.get("status") or ""), "")
+            self._tasks.row(f"{mark}{item.get('content', '')}")
+        if len(outstanding) > 8:
+            self._tasks.empty(f"and {len(outstanding) - 8} more")
+
+    def _fill_goals(self) -> None:
+        """Open goal runs, each a link to the Goals panel. Hidden when none.
+
+        Hidden rather than "No goals" because, unlike tasks, there is no
+        consent switch whose state the silence could be mistaken for: saved
+        goals are either there or not, and an empty card on every window is
+        decoration.
+        """
+        self._goals.clear()
+        from shani_chronoa.ui_gtk.gui.surfaces.goals import open_runs
+        runs = open_runs()
+        self._goals.set_visible(bool(runs))
+        for run in runs[:4]:
+            word = {"awaiting": "waiting for you", "pending": "not started",
+                    "running": "in progress"}.get(run.phase.value, run.phase.value)
+            self._goals.link(run.goal, f"{word} - {min(run.index, len(run.steps))}/"
+                                       f"{len(run.steps)} steps", "goals", self.on_open)
+        if len(runs) > 4:
+            self._goals.empty(f"and {len(runs) - 4} more")
+
+    def _fill_posture(self) -> None:
+        self._posture.clear()
+        try:
+            from shani_chronoa import permissions
+            mode = permissions.get_mode()
+        except Exception:  # noqa: BLE001
+            mode = "unknown"
+        labels = {"default": "Normal - risky calls ask",
+                  "dont_ask": "No questions asked - risky calls are refused",
+                  "explore": "Explore - reads only, writes refused"}
+        self._posture.row(labels.get(mode, "Unknown mode"))
+        config = config_mod.ChronoaConfig()
+        # The same question the memory sense answers for itself - the rail is a
+        # summary of the senses, so it must not report a different answer than
+        # the one the scheduler will act on.
+        memory_on = config.memory_sense_enabled
+        self._posture.row(
+            "Memory is on" if memory_on else "Memory is off",
+            "" if memory_on else "nothing is remembered or disclosed")
+        try:
+            from shani_chronoa.sandbox.qualify import qualify
+            proven = qualify().proven
+        except Exception:  # noqa: BLE001
+            proven = False
+        self._posture.row(
+            "Sandbox proven here" if proven
+            else "Sandbox filter is per-child")
+        # The rules file is sent on every turn and appears nowhere in the
+        # transcript - so it changed every answer with nothing on screen saying
+        # it was there. One line, only when it is.
+        #
+        # A **refused** file gets its own row rather than no row. It is the same
+        # question either way - "are my rules in force?" - and silence reads as
+        # "yes, and there happen to be none", which is the one answer that is
+        # wrong in both directions at once. The row names the phrase, because a
+        # refusal the person cannot locate is a refusal they will not fix.
+        try:
+            from shani_chronoa import user_prompts
+            rules, refusal = user_prompts.rules_verdict()
+        except Exception:  # noqa: BLE001
+            rules, refusal = "", None
+        if refusal:
+            self._posture.row(
+                "Your rules file was refused",
+                f"not sent - {refusal!r} reads like changing the safety rules")
+        elif rules:
+            lines = len([ln for ln in rules.splitlines() if ln.strip()])
+            self._posture.row("Your rules apply to every answer",
+                              f"{plural(lines, 'line')} from rules.md")
+
+    # -- refresh ----------------------------------------------------------
+
+    def refresh(self) -> None:
+        """Rebuild every section. Never raises: a rail that cannot be built
+        must leave the window exactly as it was."""
+        # **Section and filler paired, not inferred.** The first version walked
+        # the fillers alone and recovered the section from `fill.__name__`, which
+        # is `_fill_events` for the real thing and `_explode` for any wrapper -
+        # so the guard silently did nothing exactly when it was being tested. A
+        # guard that cannot find its section cannot report on it.
+        for section, fill in (
+                (self._now, self._fill_now),
+                (self._context, self._fill_context),
+                (self._changed, self._fill_changed),
+                (self._made, self._fill_made),
+                (self._events, self._fill_events),
+                (self._sensing, self._fill_senses),
+                (self._tasks, self._fill_tasks),
+                (self._goals, self._fill_goals),
+                (self._posture, self._fill_posture)):
+            try:
+                fill()
+            except Exception as exc:  # noqa: BLE001
+                # **And said so in the section, not only in the log.** A section
+                # that raises on every two-second refresh is indistinguishable
+                # from one with nothing to report, which is how the duplicate
+                # `surface=` argument below went unnoticed. The log line is right
+                # and insufficient: nobody is reading the log at two-second
+                # intervals.
+                logger.warning("rail: %s failed: %s", fill.__name__, exc)
+                section.clear()
+                section.empty("Could not read this section")
+
+
