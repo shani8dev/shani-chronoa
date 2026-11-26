@@ -17,6 +17,8 @@ import os
 import re
 from dataclasses import dataclass
 
+from shani_chronoa.agent_capabilities import METHODS, inventory_views
+
 
 @dataclass(frozen=True)
 class Command:
@@ -49,23 +51,32 @@ COMMANDS: dict[str, Command] = {
     "diagnostics": Command("diagnostics", "", "probe the engine's parts"),
 }
 
+# The additive methods are part of this one table, not a second help list.
+# A bare name keeps its hand-written help; a subcommand gets the method's own
+# sentence and the arguments a person actually types (never `confirm`).
+for _method in METHODS.values():
+    _name = " ".join(_method.slash)
+    if _name not in COMMANDS:
+        COMMANDS[_name] = Command(
+            _name,
+            " ".join(a for a in _method.arg_names if a != "confirm"),
+            _method.help,
+        )
+
+# The Inventory views come from the engine's own SECTIONS, so a new panel
+# reaches both clients without a hand-edited list here.
+_VIEWS = inventory_views()
+for _view in _VIEWS.values():
+    if _view.section not in COMMANDS:
+        COMMANDS[_view.section] = Command(_view.section, "", _view.help)
+
 #: Commands that read a same-named, read-only Inventory section.
-SECTION_COMMANDS: dict[str, str] = {
-    "models": "models",
-    "skills": "skills",
-    "memory": "memory",
-    "routines": "routines",
-    "triggers": "triggers",
-    "privacy": "privacy",
-    "senses": "senses",
-    "status": "status",
-    "conversations": "conversations",
-}
+SECTION_COMMANDS: dict[str, str] = {name: name for name in _VIEWS}
 
 #: Some commands read more than one section. Skills are the visible whitelist
 #: and the gated capability list - the second is where a disabled skill shows.
 EXTRA_SECTIONS: dict[str, tuple[str, ...]] = {
-    "skills": ("capabilities",),
+    name: view.extra for name, view in _VIEWS.items() if view.extra
 }
 
 _COMMAND_RE = re.compile(r"^/(\S+)(?:\s+(.*))?$")
@@ -100,7 +111,7 @@ def completions(token: str) -> list[str]:
     if " " in token:
         paths = {"/" + " ".join(m.slash) for m in METHODS.values()}
     else:
-        paths = {"/" + name for name in COMMANDS}
+        paths = {"/" + name for name in COMMANDS if " " not in name}
     return sorted(path for path in paths if path.startswith(token))
 
 
@@ -162,16 +173,4 @@ def help_lines() -> list[str]:
     for command in COMMANDS.values():
         left = f"/{command.name} {command.usage}".rstrip()
         lines.append(f"{left} - {command.help}")
-    return lines
-
-
-def capability_help_lines() -> list[str]:
-    """One line per additive Agent method, with the args a person types."""
-    from shani_chronoa.agent_capabilities import METHODS
-
-    lines = []
-    for method in METHODS.values():
-        names = [a for a in method.arg_names if a != "confirm"]
-        left = " ".join(("/" + " ".join(method.slash), *names))
-        lines.append(f"{left.rstrip()} - {method.help}")
     return lines

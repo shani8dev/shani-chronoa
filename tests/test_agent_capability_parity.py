@@ -230,3 +230,101 @@ def test_every_slash_command_runs_in_a_pty(bus, method):
             os.close(master)
         except OSError:
             pass
+
+
+# -- Inventory views: every section reaches both clients -----------------
+
+SECTIONS = sorted(__import__("shani_chronoa.inventory", fromlist=["SECTIONS"]).SECTIONS)
+
+
+def test_every_inventory_section_has_a_cli_and_a_slash_command():
+    from shani_chronoa import agent_capabilities
+    from shani_chronoa.tui import commands
+    from shani_chronoa.tui.cli import build_parser
+
+    views = agent_capabilities.inventory_views()
+    assert set(views) == set(SECTIONS)
+    parser = build_parser()
+    for section in SECTIONS:
+        assert "/" + section in commands.completions("/" + section)
+        assert commands.SECTION_COMMANDS[section] == section
+        parsed = parser.parse_args([section])
+        assert (
+            getattr(parsed, "view", None) == section
+            or parsed.method == agent_capabilities.by_cli((section,)).name
+        )
+
+
+@pytest.mark.parametrize("section", SECTIONS)
+def test_every_inventory_subcommand_runs_against_the_standin(bus, section):
+    code, out, err = Terminal(bus, [section, "--json"]).done()
+    assert code == 0, (section, code, out, err)
+    payload = json.loads(out.strip().splitlines()[-1])
+    if agent_capabilities.by_cli((section,)) is None:
+        assert payload["section"] == section, (section, payload)
+    else:
+        assert isinstance(payload, dict) and payload, (section, payload)
+
+
+@pytest.mark.parametrize("section", SECTIONS)
+def test_every_inventory_slash_command_runs_in_a_pty(bus, section):
+    import pty
+    import select
+
+    master, slave = pty.openpty()
+    env = os.environ.copy()
+    env.update(
+        DBUS_SESSION_BUS_ADDRESS=bus.address,
+        NO_COLOR="1",
+        TERM="dumb",
+        PYTHONDONTWRITEBYTECODE="1",
+    )
+    env.pop("WAYLAND_DISPLAY", None)
+    env.pop("DISPLAY", None)
+    proc = subprocess.Popen(
+        [sys.executable, str(LAUNCHER)],
+        stdin=slave,
+        stdout=slave,
+        stderr=slave,
+        env=env,
+        close_fds=True,
+        start_new_session=True,
+    )
+    os.close(slave)
+    output = ""
+
+    def read_for(seconds=20):
+        nonlocal output
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            ready, _, _ = select.select([master], [], [], 0.1)
+            if ready:
+                try:
+                    output += os.read(master, 65536).decode("utf-8", "replace")
+                except OSError:
+                    return
+
+    def until(text, seconds=20):
+        deadline = time.monotonic() + seconds
+        while text not in output and time.monotonic() < deadline:
+            read_for(0.1)
+        assert text in output, (section, text, output)
+
+    try:
+        until("chronoa>", 20)
+        before = output.count("chronoa>")
+        os.write(master, (f"/{section}\n").encode())
+        deadline = time.monotonic() + 20
+        while output.count("chronoa>") <= before and time.monotonic() < deadline:
+            read_for(0.1)
+        assert output.count("chronoa>") > before, (section, output)
+        os.write(master, b"/quit\n")
+        read_for(1.0)
+        assert proc.wait(timeout=5) == 0, output
+        assert "Unknown command" not in output, output
+        assert "did not work" not in output, output
+    finally:
+        try:
+            os.close(master)
+        except OSError:
+            pass

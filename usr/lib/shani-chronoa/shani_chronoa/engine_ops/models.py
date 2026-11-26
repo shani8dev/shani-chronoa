@@ -8,9 +8,40 @@ a refusal names the gate instead of claiming a switch that did not happen.
 from __future__ import annotations
 
 import asyncio
+import logging
+import threading
 
 from shani_chronoa import cloud_llm, config as config_mod, local_llm, llm_choice
 from shani_chronoa.ollama_llm import OllamaLLM
+
+logger = logging.getLogger(__name__)
+
+#: A listing is a view, never a reason to wake a keyring or wait on a model
+#: server. Anything slower than this is reported as "not checked", not as
+#: absent and not as a blank that a panel would draw as "nothing here".
+LIST_PROBE_SECONDS = 1.5
+NOT_CHECKED = object()
+
+
+def bounded(read, *, seconds: float = LIST_PROBE_SECONDS):
+    """`read()` in a worker, or `NOT_CHECKED` if it has not answered in time.
+
+    A keyring activation can take tens of seconds on a fresh session; the
+    Agent call has to answer in a fraction of that. The worker is a daemon:
+    a slow keyring cannot keep the process alive.
+    """
+    box = {}
+
+    def worker():
+        try:
+            box["value"] = read()
+        except Exception as exc:  # noqa: BLE001 - a failed probe is "not checked"
+            logger.debug("bounded read failed: %s", exc)
+
+    thread = threading.Thread(target=worker, daemon=True, name="models-list-probe")
+    thread.start()
+    thread.join(seconds)
+    return box.get("value", NOT_CHECKED)
 
 
 def _config(config=None):
@@ -58,14 +89,48 @@ def _cloud_current(config, keys: dict) -> str:
     return ""
 
 
+def answering_model(config=None) -> str:
+    """The model that actually answers, in words a panel can show.
+
+    `config.model` is only an override: an empty value means "use whatever the
+    hardware profile picked", so showing the setting alone left /status with
+    a dash while a local Qwen answered. The same bounded choice the listing
+    uses names the live engine instead, and never waits on a keyring.
+    """
+    cfg = _config(config)
+    choice = bounded(lambda: llm_choice.local_first(_ollama(cfg), wake=False))
+    if choice is NOT_CHECKED:
+        return "not checked - the model servers did not answer quickly"
+    _llm, how = choice
+    if how == "ollama":
+        return str(cfg.get("model", "") or getattr(_llm, "model", "") or "ollama")
+    if how == "local":
+        from shani_chronoa.hardware_profile import HardwareProfile
+
+        return str(
+            cfg.get("model", "")
+            or local_llm.active()
+            or HardwareProfile().get_model()
+            or "local model"
+        )
+    return how
+
+
 def list_models(config=None) -> dict:
     """``{"items": [{"engine","name","detail","installed","current"}], "how": str}``."""
     cfg = _config(config)
     ollama = _ollama(cfg)
-    _llm, how = llm_choice.local_first(ollama, wake=False)
+    choice = bounded(lambda: llm_choice.local_first(ollama, wake=False))
+    if choice is NOT_CHECKED:
+        how = "not checked - the model servers did not answer quickly"
+    else:
+        _llm, how = choice
 
     items: list[dict] = []
-    ids = _ollama_ids(ollama) if how == "ollama" else []
+    ids = bounded(lambda: _ollama_ids(ollama)) if how == "ollama" else []
+    if ids is NOT_CHECKED:
+        ids = []
+        how = "Ollama not checked - it did not answer quickly"
     chosen = cfg.get("model", "") if hasattr(cfg, "get") else ""
     for index, name in enumerate(ids):
         current = how == "ollama" and name == (chosen or (ids[0] if ids else ""))
@@ -92,15 +157,28 @@ def list_models(config=None) -> dict:
             }
         )
 
-    keys = cfg.cloud_llm_api_keys() if hasattr(cfg, "cloud_llm_api_keys") else {}
-    models = cfg.cloud_llm_models() if hasattr(cfg, "cloud_llm_models") else {}
-    current_cloud = _cloud_current(cfg, keys)
+    keys = NOT_CHECKED
+    if hasattr(cfg, "cloud_llm_api_keys"):
+        keys = bounded(lambda: cfg.cloud_llm_api_keys())
+    models = (
+        bounded(lambda: cfg.cloud_llm_models())
+        if hasattr(cfg, "cloud_llm_models")
+        else {}
+    )
+    if models is NOT_CHECKED:
+        models = {}
+    current_cloud = _cloud_current(cfg, keys if keys is not NOT_CHECKED else {})
     for pid, provider in cloud_llm.PROVIDERS.items():
-        ready = bool(keys.get(pid)) if provider.requires_key else True
+        if keys is NOT_CHECKED:
+            ready = False
+            key_note = " (key not checked - the keyring did not answer quickly)"
+        else:
+            ready = bool(keys.get(pid)) if provider.requires_key else True
+            key_note = (
+                " (needs an API key)" if provider.requires_key and not ready else ""
+            )
         model = models.get(pid + "_model") or provider.default_model or "default"
-        detail = provider.name + " - " + model
-        if provider.requires_key and not ready:
-            detail += " (needs an API key)"
+        detail = provider.name + " - " + model + key_note
         items.append(
             {
                 "engine": "cloud",

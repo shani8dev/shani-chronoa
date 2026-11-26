@@ -191,3 +191,34 @@ def test_use_ollama_model_id_writes_the_model(cfg, monkeypatch):
         "changed": True,
     }
     assert cfg.get("model") == "qwen3:4b"
+
+
+def test_list_never_waits_for_a_slow_keyring(cfg, monkeypatch):
+    import time
+
+    from shani_chronoa.engine_ops import models
+
+    def slow_keys():
+        time.sleep(5)
+        return {"kilo": "a-secret"}
+
+    monkeypatch.setattr(cfg, "cloud_llm_api_keys", slow_keys)
+    monkeypatch.setattr(models, "LIST_PROBE_SECONDS", 0.2)
+    started = time.monotonic()
+    data = models.list_models(config=cfg)
+    assert time.monotonic() - started < 2.0
+    assert "not checked" in data["how"] or any(
+        "not checked" in row["detail"] for row in data["items"]
+    )
+    assert all("a-secret" not in row["detail"] for row in data["items"])
+
+
+def test_bounded_returns_not_checked_on_a_stuck_read(monkeypatch):
+    import time
+
+    from shani_chronoa.engine_ops import models
+
+    started = time.monotonic()
+    assert models.bounded(lambda: time.sleep(5), seconds=0.1) is models.NOT_CHECKED
+    assert time.monotonic() - started < 1.0
+    assert models.bounded(lambda: 42, seconds=0.1) == 42

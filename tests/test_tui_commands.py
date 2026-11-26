@@ -69,3 +69,12 @@ def test_skills_reads_the_capabilities_section_too():
     assert commands.SECTION_COMMANDS["skills"] == "skills"
     assert "capabilities" in commands.EXTRA_SECTIONS["skills"]
     assert commands.SECTION_COMMANDS["conversations"] == "conversations"
+
+
+def test_help_has_one_line_per_command():
+    lines = commands.help_lines()
+    heads = [line.split(" - ", 1)[0] for line in lines]
+    assert len(heads) == len(set(heads)), [h for h in heads if heads.count(h) > 1]
+    for name in ("settings", "models", "memory", "notices"):
+        help_text = commands.COMMANDS[name].help
+        assert sum(line.split(" - ", 1)[1] == help_text for line in lines) == 1

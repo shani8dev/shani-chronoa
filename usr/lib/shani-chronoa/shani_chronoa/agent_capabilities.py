@@ -236,6 +236,33 @@ METHODS: dict[str, Method] = {
 }
 
 
+@dataclass(frozen=True)
+class View:
+    """A read-only Inventory section, drawn by the same name in both clients."""
+
+    section: str
+    slash: tuple
+    cli: tuple
+    help: str
+    extra: tuple = ()  # other sections a panel draws with this one
+
+
+def inventory_views() -> "dict[str, View]":
+    """One view per Inventory section. The engine owns the list of sections."""
+    from shani_chronoa import inventory
+
+    return {
+        section: View(
+            section,
+            (section,),
+            (section,),
+            "read the %s inventory section" % section,
+            ("capabilities",) if section == "skills" else (),
+        )
+        for section in inventory.SECTIONS
+    }
+
+
 def by_slash(path: tuple) -> "Method | None":
     """The method whose slash path matches, or None."""
     return next((m for m in METHODS.values() if m.slash == tuple(path)), None)

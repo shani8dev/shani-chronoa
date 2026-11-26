@@ -13,7 +13,7 @@ import json
 import os
 import sys
 
-from shani_chronoa.agent_capabilities import METHODS
+from shani_chronoa.agent_capabilities import METHODS, inventory_views
 from shani_chronoa.tui import display
 from shani_chronoa.tui.agent import AgentClient, AgentError
 from shani_chronoa.tui.app import Interactive, Session
@@ -96,6 +96,13 @@ def build_parser() -> argparse.ArgumentParser:
             )
         else:
             add_leaf(children[head], method, path)
+
+    for section, view in inventory_views().items():
+        if section in groups:
+            continue  # a method of the same name already answers this section
+        leaf = subparsers.add_parser(section, help=view.help)
+        leaf.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+        leaf.set_defaults(view=section, method=None)
     return parser
 
 
@@ -165,9 +172,17 @@ def run_capability(client: AgentClient, method: str, args, *, jsonl: bool) -> in
 
 def run_args(client: AgentClient, args) -> int:
     method = getattr(args, "method", None)
-    if method is None:
+    view = getattr(args, "view", None)
+    if method is None and view is None:
         print("Choose a capability; see --help.", file=sys.stderr)
         return 2
+    if method is None:
+        data = client.inventory(view)
+        if getattr(args, "json", False):
+            print(json.dumps(data, ensure_ascii=False, separators=(",", ":")))
+        else:
+            display.show(data, sys.stdout, view)
+        return 1 if data.get("error") else 0
     names = [n for n in METHODS[method].arg_names if n != "confirm"]
     missing = [n for n in names if getattr(args, n, None) is None]
     if missing:

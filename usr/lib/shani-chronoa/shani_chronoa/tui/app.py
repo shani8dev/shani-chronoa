@@ -200,7 +200,7 @@ class Interactive:
 
     def command(self, name: str, arg: str) -> None:
         if name == "help":
-            for line in commands.help_lines() + commands.capability_help_lines():
+            for line in commands.help_lines():
                 print(line, file=self.out)
             return
         if name == "quit":

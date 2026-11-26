@@ -88,184 +88,419 @@ class Organ:
 
 INVENTORY: Tuple[Organ, ...] = (
     # -- Boundary --------------------------------------------------------
-    Organ("skin", "Boundary", "Skin",
-          "the outside edge: everything that leaves this machine, and the log of it",
-          ("egress.py", "gui/", "app/", "windows/", "settings_window/", "ui_gtk/",
-           "ui_gtk/gui/", "ui_gtk/app/", "ui_gtk/windows/",
-           "ui_gtk/settings_window/", "senses/network.py"), BUILT, gerund="on the network", source="every request off this machine (egress.py)", indicator="skin",
-          missing=""),
-    Organ("immune", "Boundary", "Immune system",
-          "what defends against a hostile world - untrusted input, privilege, secrets",
-          ("guardrail.py", "redaction.py", "sandbox/", "permissions.py",
-           "senses/security.py"), BUILT,
-          missing=""),
-    Organ("barrier", "Boundary", "Scar tissue",
-          "the wall between a skill and the machine it runs on",
-          ("sandbox/executor.py", "sandbox/profiles.py", "sandbox/landlock.py",
-           "sandbox/seccomp.py"), BUILT, missing=""),
-
+    Organ(
+        "skin",
+        "Boundary",
+        "Skin",
+        "the outside edge: everything that leaves this machine, and the log of it",
+        (
+            "egress.py",
+            "gui/",
+            "app/",
+            "windows/",
+            "settings_window/",
+            "ui_gtk/",
+            "ui_gtk/gui/",
+            "ui_gtk/app/",
+            "ui_gtk/windows/",
+            "ui_gtk/settings_window/",
+            "senses/network.py",
+        ),
+        BUILT,
+        gerund="on the network",
+        source="every request off this machine (egress.py)",
+        indicator="skin",
+        missing="",
+    ),
+    Organ(
+        "immune",
+        "Boundary",
+        "Immune system",
+        "what defends against a hostile world - untrusted input, privilege, secrets",
+        (
+            "guardrail.py",
+            "redaction.py",
+            "sandbox/",
+            "permissions.py",
+            "senses/security.py",
+        ),
+        BUILT,
+        missing="",
+    ),
+    Organ(
+        "barrier",
+        "Boundary",
+        "Scar tissue",
+        "the wall between a skill and the machine it runs on",
+        (
+            "sandbox/executor.py",
+            "sandbox/profiles.py",
+            "sandbox/landlock.py",
+            "sandbox/seccomp.py",
+        ),
+        BUILT,
+        missing="",
+    ),
     # -- Senses ----------------------------------------------------------
-    Organ("ears", "Senses", "Ears",
-          "hearing: the microphone, speech recognition, wake phrase, and what is heard",
-          ("audio.py", "stt.py", "stt_provision.py", "wakeword.py", "vad.py",
-           "senses/hearing.py"), BUILT, gerund="listening", source="the microphone (audio.py, stt.py, wakeword.py)", indicator="ears"),
-    Organ("eyes", "Senses", "Eyes",
-          "sight: the camera, the screen, OCR, faces, objects, and the vision model",
-          ("screengrab.py", "local_vision.py", "opencv/",
-           "photo_library.py", "senses/vision.py"), BUILT, gerund="looking", source="the camera and the screen (screengrab.py, local_vision.py)", indicator="eyes"),
-    Organ("nose", "Senses", "Nose",
-          "smell: the machine's own state - power, heat, disks, services, network",
-          ("senses/", "senses/power.py", "senses/thermalgrid.py",
-           "senses/hwmon.py",
-           "senses/services.py", "senses/network.py", "senses/security.py"),
-          BUILT, gerund="feeling the machine", source="the machine-state senses (senses/*)", indicator="nose"),
-    Organ("fingertip", "Senses", "Fingertips",
-          "reaching outward: looking something up beyond this machine",
-          ("websearch.py", "webtext.py", "senses/web.py"), PART,
-          missing="the only sense that leaves the machine by default - it is "
-                  f"gated on the {gate_label('web-sense-enabled')} switch and "
-                  "the egress layer records it, "
-                  "but no organ owned it until now, and it is the one sense a "
-                  "person would assume is covered by eyes or skin"),
-
-    Organ("skin_touch", "Senses", "Touch",
-          "contact: idle time, and what is plugged into it",
-          ("senses/idle.py", "senses/devices.py", "senses/usb.py",
-           "senses/bluetooth.py"), PART, gerund="feeling the machine", source="the machine-state senses (senses/*)", indicator="nose",
-          missing="no raw input events, on purpose - it watches devices, not you"),
-    Organ("tongue", "Senses", "Tongue",
-          "taste: judging whether an action actually worked",
-          ("verification.py", "history_repair.py", "guardrail.py"), BUILT),
-    Organ("balance", "Senses", "Vestibular sense",
-          "balance: what deserves attention now, out of everything that happened",
-          ("tool_select.py", "compression.py", "triggers/events.py"), PART,
-          missing="salience.py scores unattended urgences into a bounded "
-                  "priority queue and reflex.announce applies a DND/rhythm "
-                  "speak/notify/hold policy; percept selection is still by "
-                  "relevance, not by that score"),
-
+    Organ(
+        "ears",
+        "Senses",
+        "Ears",
+        "hearing: the microphone, speech recognition, wake phrase, and what is heard",
+        (
+            "audio.py",
+            "stt.py",
+            "stt_provision.py",
+            "wakeword.py",
+            "vad.py",
+            "senses/hearing.py",
+        ),
+        BUILT,
+        gerund="listening",
+        source="the microphone (audio.py, stt.py, wakeword.py)",
+        indicator="ears",
+    ),
+    Organ(
+        "eyes",
+        "Senses",
+        "Eyes",
+        "sight: the camera, the screen, OCR, faces, objects, and the vision model",
+        (
+            "screengrab.py",
+            "local_vision.py",
+            "opencv/",
+            "photo_library.py",
+            "senses/vision.py",
+        ),
+        BUILT,
+        gerund="looking",
+        source="the camera and the screen (screengrab.py, local_vision.py)",
+        indicator="eyes",
+    ),
+    Organ(
+        "nose",
+        "Senses",
+        "Nose",
+        "smell: the machine's own state - power, heat, disks, services, network",
+        (
+            "senses/",
+            "senses/power.py",
+            "senses/thermalgrid.py",
+            "senses/hwmon.py",
+            "senses/services.py",
+            "senses/network.py",
+            "senses/security.py",
+        ),
+        BUILT,
+        gerund="feeling the machine",
+        source="the machine-state senses (senses/*)",
+        indicator="nose",
+    ),
+    Organ(
+        "fingertip",
+        "Senses",
+        "Fingertips",
+        "reaching outward: looking something up beyond this machine",
+        ("websearch.py", "webtext.py", "senses/web.py"),
+        PART,
+        missing="the only sense that leaves the machine by default - it is "
+        f"gated on the {gate_label('web-sense-enabled')} switch and "
+        "the egress layer records it, "
+        "but no organ owned it until now, and it is the one sense a "
+        "person would assume is covered by eyes or skin",
+    ),
+    Organ(
+        "skin_touch",
+        "Senses",
+        "Touch",
+        "contact: idle time, and what is plugged into it",
+        ("senses/idle.py", "senses/devices.py", "senses/usb.py", "senses/bluetooth.py"),
+        PART,
+        gerund="feeling the machine",
+        source="the machine-state senses (senses/*)",
+        indicator="nose",
+        missing="no raw input events, on purpose - it watches devices, not you",
+    ),
+    Organ(
+        "tongue",
+        "Senses",
+        "Tongue",
+        "taste: judging whether an action actually worked",
+        ("verification.py", "history_repair.py", "guardrail.py"),
+        BUILT,
+    ),
+    Organ(
+        "balance",
+        "Senses",
+        "Vestibular sense",
+        "balance: what deserves attention now, out of everything that happened",
+        ("tool_select.py", "compression.py", "triggers/events.py"),
+        PART,
+        missing="salience.py scores unattended urgences into a bounded "
+        "priority queue and reflex.announce applies a DND/rhythm "
+        "speak/notify/hold policy; percept selection is still by "
+        "relevance, not by that score",
+    ),
     # -- Action ----------------------------------------------------------
-    Organ("mouth", "Action", "Mouth",
-          "speech: saying things, in the voice that was chosen",
-          ("tts.py", "voices.py", "sherpa.py", "audio.py"), BUILT, gerund="speaking", source="the speaker (tts.py, audio.py playback)", indicator="mouth"),
-    Organ("hands", "Action", "Hands",
-          "acting: changing the world - files, windows, services, settings, devices",
-          ("tools.py", "skills/", "office/", "portal.py",
-           "desktop_session.py", "phone.py", "landline/"),
-          BUILT, gerund="acting", source="an actuator (tools.py execute_tool)", indicator="hands"),
-    Organ("legs", "Action", "Legs",
-          "getting about without being asked: rules that fire on their own",
-          ("triggers/rules.py", "triggers/event_rules.py", "skills/timer.py",
-           "approvals.py"), BUILT),
-    Organ("lungs", "Action", "Diaphragm",
-          "breath: the rhythm of a day - awake, active, idle, asleep",
-          ("daemon.py", "senses/idle.py", "model_service.py", "presence.py"), PART,
-          missing="the awake/active/asleep cycle now exists for the *model* "
-                  "(on the mode strip, and it reaches SLEEPING), "
-                  "but nothing sleeps the rest of it: the daemon keeps its rules "
-                  "and senses running through every state"),
-
+    Organ(
+        "mouth",
+        "Action",
+        "Mouth",
+        "speech: saying things, in the voice that was chosen",
+        ("tts.py", "voices.py", "sherpa.py", "audio.py"),
+        BUILT,
+        gerund="speaking",
+        source="the speaker (tts.py, audio.py playback)",
+        indicator="mouth",
+    ),
+    Organ(
+        "hands",
+        "Action",
+        "Hands",
+        "acting: changing the world - files, windows, services, settings, devices",
+        (
+            "tools.py",
+            "skills/",
+            "office/",
+            "portal.py",
+            "desktop_session.py",
+            "phone.py",
+            "landline/",
+        ),
+        BUILT,
+        gerund="acting",
+        source="an actuator (tools.py execute_tool)",
+        indicator="hands",
+    ),
+    Organ(
+        "legs",
+        "Action",
+        "Legs",
+        "getting about without being asked: rules that fire on their own",
+        (
+            "triggers/rules.py",
+            "triggers/event_rules.py",
+            "skills/timer.py",
+            "approvals.py",
+        ),
+        BUILT,
+    ),
+    Organ(
+        "lungs",
+        "Action",
+        "Diaphragm",
+        "breath: the rhythm of a day - awake, active, idle, asleep",
+        ("daemon.py", "senses/idle.py", "model_service.py", "presence.py"),
+        PART,
+        missing="the awake/active/asleep cycle now exists for the *model* "
+        "(on the mode strip, and it reaches SLEEPING), "
+        "but nothing sleeps the rest of it: the daemon keeps its rules "
+        "and senses running through every state",
+    ),
     # -- Core ------------------------------------------------------------
-    Organ("brain", "Core", "Brain",
-          "thinking: the language model and the tool loop it drives",
-          ("assistant.py", "local_llm.py", "ollama_llm.py", "cloud_llm.py",
-           "mcp.py"), BUILT, gerund="thinking", source="a model call (assistant.py)", indicator="brain"),
-    Organ("prefrontal", "Core", "Prefrontal cortex",
-          "judgement before acting: permissions, plan mode, and the refusals",
-          ("capabilities.py", "planmode.py", "permissions.py", "approvals.py"),
-          BUILT),
-    Organ("cerebellum", "Core", "Cerebellum",
-          "checking its own work: post-conditions, and repairing a broken turn",
-          ("verification.py", "history_repair.py", "guardrail.py"), BUILT),
-    Organ("amygdala", "Core", "Amygdala",
-          "fast evaluation of danger, before the slow part of the brain is asked",
-          ("guardrail.py", "permissions.py", "approvals.py",
-           "senses/security.py"), BUILT),
-    Organ("attention", "Core", "Reticular formation",
-          "attention: deciding what is worth interrupting for",
-          ("triggers/events.py", "cues.py", "speech.py"), PART,
-          missing="salience.policy now decides speak, notify or hold under "
-                  "DND and rhythm, but barge-in is still the only interrupt "
-                  "inside a turn; a held item waits for the next one"),
-
+    Organ(
+        "brain",
+        "Core",
+        "Brain",
+        "thinking: the language model and the tool loop it drives",
+        ("assistant.py", "local_llm.py", "ollama_llm.py", "cloud_llm.py", "mcp.py"),
+        BUILT,
+        gerund="thinking",
+        source="a model call (assistant.py)",
+        indicator="brain",
+    ),
+    Organ(
+        "prefrontal",
+        "Core",
+        "Prefrontal cortex",
+        "judgement before acting: permissions, plan mode, and the refusals",
+        ("capabilities.py", "planmode.py", "permissions.py", "approvals.py"),
+        BUILT,
+    ),
+    Organ(
+        "cerebellum",
+        "Core",
+        "Cerebellum",
+        "checking its own work: post-conditions, and repairing a broken turn",
+        ("verification.py", "history_repair.py", "guardrail.py"),
+        BUILT,
+    ),
+    Organ(
+        "amygdala",
+        "Core",
+        "Amygdala",
+        "fast evaluation of danger, before the slow part of the brain is asked",
+        ("guardrail.py", "permissions.py", "approvals.py", "senses/security.py"),
+        BUILT,
+    ),
+    Organ(
+        "attention",
+        "Core",
+        "Reticular formation",
+        "attention: deciding what is worth interrupting for",
+        ("triggers/events.py", "cues.py", "speech.py"),
+        PART,
+        missing="salience.policy now decides speak, notify or hold under "
+        "DND and rhythm, but barge-in is still the only interrupt "
+        "inside a turn; a held item waits for the next one",
+    ),
     # -- Regulation ------------------------------------------------------
-    Organ("heart", "Regulation", "Heart",
-          "pulse: is it alive, is the model up, is the clock sane",
-          ("model_service.py", "local_llm.py", "senses/timebase.py"), PART,
-          missing="a liveness signal exists per subsystem; nothing consumes it yet"),
-    Organ("temperature", "Regulation", "Thermoregulation",
-          "keeping itself at a working temperature, and noticing when it cannot",
-          ("senses/thermalgrid.py", "senses/hwmon.py", "skills/power_profile.py"),
-          PART, gerund="feeling the machine", source="the machine-state senses (senses/*)", indicator="nose",
-          missing="it reads its temperature; it does not act on it unasked"),
-    Organ("homeostasis", "Regulation", "Hypothalamus",
-          "setpoints: the conditions it should notice on its own",
-          ("triggers/rules.py", "approvals.py"), PART,
-          missing="setpoints.py offers built-in off-by-default presets "
-                  "through manage_triggers; a preset still has to be armed "
-                  "by the user and never switches a consent key on"),
-    Organ("pituitary", "Regulation", "Pituitary gland",
-          "the master gland: the setpoints the hypothalamus has none of",
-          ("triggers/rules.py", "approvals.py"), PART,
-          missing="setpoints.py proposals are wired through manage_triggers; "
-                  "the per-context default posture that would set a policy "
-                  "once is still absent"),
-
-    Organ("brainstem", "Core", "Brainstem",
-          "the involuntary: what keeps running when nobody is deciding",
-          ("model_service.py", "daemon.py", "senses/idle.py"), PART,
-          missing="the Heart below says 'a liveness signal exists per subsystem; "
-                  "nothing consumes it yet' - this is what would consume it. The "
-                  "daemon's rules and senses survive every state, and the "
-                  "model's own cycle does not govern them"),
-
-    Organ("circadian", "Regulation", "Circadian rhythm",
-          "rhythm: knowing what time it is and whether that matters now",
-          ("senses/timebase.py", "senses/idle.py", "triggers/"), PART,
-          missing="the clock is read; nothing is scheduled *because* of the hour"),
-
+    Organ(
+        "heart",
+        "Regulation",
+        "Heart",
+        "pulse: is it alive, is the model up, is the clock sane",
+        ("model_service.py", "local_llm.py", "senses/timebase.py"),
+        PART,
+        missing="a liveness signal exists per subsystem; nothing consumes it yet",
+    ),
+    Organ(
+        "temperature",
+        "Regulation",
+        "Thermoregulation",
+        "keeping itself at a working temperature, and noticing when it cannot",
+        ("senses/thermalgrid.py", "senses/hwmon.py", "skills/power_profile.py"),
+        PART,
+        gerund="feeling the machine",
+        source="the machine-state senses (senses/*)",
+        indicator="nose",
+        missing="it reads its temperature; it does not act on it unasked",
+    ),
+    Organ(
+        "homeostasis",
+        "Regulation",
+        "Hypothalamus",
+        "setpoints: the conditions it should notice on its own",
+        ("triggers/rules.py", "approvals.py"),
+        PART,
+        missing="setpoints.py offers built-in off-by-default presets "
+        "through manage_triggers; a preset still has to be armed "
+        "by the user and never switches a consent key on",
+    ),
+    Organ(
+        "pituitary",
+        "Regulation",
+        "Pituitary gland",
+        "the master gland: the setpoints the hypothalamus has none of",
+        ("triggers/rules.py", "approvals.py"),
+        PART,
+        missing="setpoints.py proposals are wired through manage_triggers; "
+        "the per-context default posture that would set a policy "
+        "once is still absent",
+    ),
+    Organ(
+        "brainstem",
+        "Core",
+        "Brainstem",
+        "the involuntary: what keeps running when nobody is deciding",
+        ("model_service.py", "daemon.py", "senses/idle.py"),
+        PART,
+        missing="the Heart below says 'a liveness signal exists per subsystem; "
+        "nothing consumes it yet' - this is what would consume it. The "
+        "daemon's rules and senses survive every state, and the "
+        "model's own cycle does not govern them",
+    ),
+    Organ(
+        "circadian",
+        "Regulation",
+        "Circadian rhythm",
+        "rhythm: knowing what time it is and whether that matters now",
+        ("senses/timebase.py", "senses/idle.py", "triggers/"),
+        PART,
+        missing="the clock is read; nothing is scheduled *because* of the hour",
+    ),
     # -- Memory and learning ---------------------------------------------
-    Organ("memory", "Memory and learning", "Hippocampus",
-          "what it was told, and what it perceived",
-          ("senses/store.py", "conversation_store.py", "local_embed.py"), BUILT,
-          gerund="remembering", source="the percept store (senses/store.py)", indicator="memory"),
-    Organ("consolidation", "Memory and learning", "Sleep",
-          "consolidation: turning a long conversation into something usable",
-          ("consolidation.py", "compression.py"), BUILT,
-          missing="an extractive digest and a queue of proposed facts, both "
-                  "written without calling a model; a dream runs over the "
-                  "tool-call log (`dream.py`, on the daemon tick, and gated on "
-                  "`background-mode-enabled`), but nothing proposes while a "
-                  "conversation is still in progress"),
-    Organ("learning", "Memory and learning", "Synaptic plasticity",
-          "learning from how a call went - the outcome, whether it was approved, undone",
-          ("learning.py", "tool_tracking.py", "tool_select.py"), BUILT,
-          gerund="weighing what worked", indicator="brain",
-          missing="verification verdicts reorder the tools that are already "
-                  "allowed; there is no preference learning from what you "
-                  "liked, and a score can never grant a tool"),
-    Organ("thymus", "Memory and learning", "Thymus",
-          "the foundry: producing the cells that do the defending",
-          ("learning.py", "tool_tracking.py"), PART,
-          missing="Immune system guards the boundary and that organ is built, "
-                  "but nothing *produces* anything. Learning reorders the tools "
-                  "already allowed by their verdicts, which is immune memory with "
-                  "nowhere to be made; there is no factory, only the record"),
-
-    Organ("kidney", "Regulation", "Kidney",
-          "filtration: what gets thrown away rather than kept",
-          ("skills/cleanup_apply.py", "skills/empty_trash.py",
-           "skills/power_profile.py", "cues.py"), PART,
-          missing="cleanup and empty-trash are consented skills with no organ at "
-                  "all - they are the only actuators that discard rather than "
-                  "change, and a body filters continuously rather than when asked"),
-
-    Organ("endocrine", "Memory and learning", "Endocrine system",
-          "slow signals about how things are going: pain and reward",
-          ("tool_tracking.py", "cues.py", "verification.py"), PART,
-          missing="reward.py now supplies the per-outcome number that "
-                   "tool_tracking records; it is advisory only and changes "
-                   "no consent decision"),
+    Organ(
+        "memory",
+        "Memory and learning",
+        "Hippocampus",
+        "what it was told, and what it perceived",
+        ("senses/store.py", "conversation_store.py", "local_embed.py"),
+        BUILT,
+        gerund="remembering",
+        source="the percept store (senses/store.py)",
+        indicator="memory",
+    ),
+    Organ(
+        "consolidation",
+        "Memory and learning",
+        "Sleep",
+        "consolidation: turning a long conversation into something usable",
+        ("consolidation.py", "compression.py"),
+        BUILT,
+        missing="an extractive digest and a queue of proposed facts, both "
+        "written without calling a model; a dream runs over the "
+        "tool-call log (`dream.py`, on the daemon tick, and gated on "
+        "`background-mode-enabled`), but nothing proposes while a "
+        "conversation is still in progress",
+    ),
+    Organ(
+        "learning",
+        "Memory and learning",
+        "Synaptic plasticity",
+        "learning from how a call went - the outcome, whether it was approved, undone",
+        ("learning.py", "tool_tracking.py", "tool_select.py"),
+        BUILT,
+        gerund="weighing what worked",
+        indicator="brain",
+        missing="verification verdicts reorder the tools that are already "
+        "allowed; there is no preference learning from what you "
+        "liked, and a score can never grant a tool",
+    ),
+    Organ(
+        "thymus",
+        "Memory and learning",
+        "Thymus",
+        "the foundry: producing the cells that do the defending",
+        ("learning.py", "tool_tracking.py"),
+        PART,
+        missing="Immune system guards the boundary and that organ is built, "
+        "but nothing *produces* anything. Learning reorders the tools "
+        "already allowed by their verdicts, which is immune memory with "
+        "nowhere to be made; there is no factory, only the record",
+    ),
+    Organ(
+        "kidney",
+        "Regulation",
+        "Kidney",
+        "filtration: what gets thrown away rather than kept",
+        (
+            "skills/cleanup_apply.py",
+            "skills/empty_trash.py",
+            "skills/power_profile.py",
+            "cues.py",
+        ),
+        PART,
+        missing="cleanup and empty-trash are consented skills with no organ at "
+        "all - they are the only actuators that discard rather than "
+        "change, and a body filters continuously rather than when asked",
+    ),
+    Organ(
+        "endocrine",
+        "Memory and learning",
+        "Endocrine system",
+        "slow signals about how things are going: pain and reward",
+        ("tool_tracking.py", "cues.py", "verification.py"),
+        PART,
+        missing="reward.py now supplies the per-outcome number that "
+        "tool_tracking records; it is advisory only and changes "
+        "no consent decision",
+    ),
+    Organ(
+        "interface",
+        "Boundary",
+        "Voice and hands",
+        "the same engine reached without a window: terminal, command line and shell",
+        (
+            "tui/",
+            "engine_ops/",
+            "agent_service.py",
+            "agent_contract.py",
+            "inventory.py",
+        ),
+        BUILT,
+        missing="",
+    ),
 )
 
 
@@ -277,29 +512,64 @@ INVENTORY: Tuple[Organ, ...] = (
 #: app could not tell "not built yet" from "will not be built" - and a refused
 #: request read like a missing feature.
 STANDING_DECISIONS: "Tuple[Tuple[str, str, str, str], ...]" = (
-    ("Shell / CLI", "Run any shell command", "no generic shell exec",
-     "a fixed whitelist of typed skills is the safety model; the sandbox exists "
-     "for those, not for free-form commands"),
-    ("MCP", "Use other apps' tools (an MCP client)", "server only; ask before a client",
-     "a client imports someone else's tools and bypasses the whitelist's reasoning"),
-    ("Skill learning", "Write its own new skills", "skills are code a person writes",
-     "a self-written skill is generic exec by another route"),
-    ("Rust / Tokio", "A rewrite for speed", "stays on Python with GLib and asyncio",
-     "latency is set by the model (first word about 5 s on CPU), not the language"),
-    ("Qdrant, LanceDB, Chroma", "A vector database server", "one SQLite file",
-     "a server is another daemon to keep alive; SQLite with full-text search "
-     "covers a personal-scale index"),
-    ("libinput / evdev", "Read every keystroke", "no raw input capture",
-     "reading every key is a keylogger whatever the intent; idle time is read "
-     "as a single number instead"),
-    ("AppArmor / udev rules", "Ship system security policy", "owned by the OS layer",
-     "Chronoa ships no system policy; that belongs to shani-settings"),
-    ("Video, 3D, audio generation", "Make video, 3D or music", "out of scope on this hardware",
-     "with no GPU, generating one item takes minutes on the processor"),
-    ("Affect, Curiosity, Dream acting alone", "Act on its own initiative",
-     "everything unattended asks first",
-     "unattended is the riskiest origin; any background behaviour is off by "
-     "default and goes through consent and approvals"),
+    (
+        "Shell / CLI",
+        "Run any shell command",
+        "no generic shell exec",
+        "a fixed whitelist of typed skills is the safety model; the sandbox exists "
+        "for those, not for free-form commands",
+    ),
+    (
+        "MCP",
+        "Use other apps' tools (an MCP client)",
+        "server only; ask before a client",
+        "a client imports someone else's tools and bypasses the whitelist's reasoning",
+    ),
+    (
+        "Skill learning",
+        "Write its own new skills",
+        "skills are code a person writes",
+        "a self-written skill is generic exec by another route",
+    ),
+    (
+        "Rust / Tokio",
+        "A rewrite for speed",
+        "stays on Python with GLib and asyncio",
+        "latency is set by the model (first word about 5 s on CPU), not the language",
+    ),
+    (
+        "Qdrant, LanceDB, Chroma",
+        "A vector database server",
+        "one SQLite file",
+        "a server is another daemon to keep alive; SQLite with full-text search "
+        "covers a personal-scale index",
+    ),
+    (
+        "libinput / evdev",
+        "Read every keystroke",
+        "no raw input capture",
+        "reading every key is a keylogger whatever the intent; idle time is read "
+        "as a single number instead",
+    ),
+    (
+        "AppArmor / udev rules",
+        "Ship system security policy",
+        "owned by the OS layer",
+        "Chronoa ships no system policy; that belongs to shani-settings",
+    ),
+    (
+        "Video, 3D, audio generation",
+        "Make video, 3D or music",
+        "out of scope on this hardware",
+        "with no GPU, generating one item takes minutes on the processor",
+    ),
+    (
+        "Affect, Curiosity, Dream acting alone",
+        "Act on its own initiative",
+        "everything unattended asks first",
+        "unattended is the riskiest origin; any background behaviour is off by "
+        "default and goes through consent and approvals",
+    ),
 )
 
 
@@ -323,6 +593,7 @@ def compute_gpu() -> "tuple[Optional[str], List[str]]":
     """
     try:
         from shani_chronoa.senses.gpu import read_gpus
+
         drivers = [str(g.get("driver") or "unknown") for g in read_gpus()]
     except Exception:  # noqa: BLE001 - a panel must not raise over hardware
         return None, []
@@ -342,8 +613,11 @@ def by_system() -> "List[Tuple[str, List[Organ]]]":
         members = [organ for organ in INVENTORY if organ.system == system]
         if members:
             grouped.append((system, members))
-    elsewhere = [organ for organ in INVENTORY
-                 if organ not in [o for _s, members in grouped for o in members]]
+    elsewhere = [
+        organ
+        for organ in INVENTORY
+        if organ not in [o for _s, members in grouped for o in members]
+    ]
     if elsewhere:
         grouped.append(("Everything else", elsewhere))
     return grouped
@@ -351,8 +625,11 @@ def by_system() -> "List[Tuple[str, List[Organ]]]":
 
 def live_organs() -> "List[str]":
     """Which organs the indicator strip can actually show."""
-    return [organ.indicator for organ in INVENTORY
-            if organ.indicator and organ.state in (BUILT, PART)]
+    return [
+        organ.indicator
+        for organ in INVENTORY
+        if organ.indicator and organ.state in (BUILT, PART)
+    ]
 
 
 def tally() -> "dict":
