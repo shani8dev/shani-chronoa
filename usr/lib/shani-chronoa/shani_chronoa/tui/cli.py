@@ -70,6 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
         # SUPPRESS: a --json/--yes given before the subcommand still counts.
         leaf.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
         leaf.add_argument("--yes", action="store_true", default=argparse.SUPPRESS)
+        leaf.add_argument("--stdin", action="store_true", default=argparse.SUPPRESS)
         leaf.set_defaults(method=method.name)
 
     groups, children = {}, {}
@@ -89,6 +90,9 @@ def build_parser() -> argparse.ArgumentParser:
             )
             groups[head].add_argument(
                 "--yes", action="store_true", default=argparse.SUPPRESS
+            )
+            groups[head].add_argument(
+                "--stdin", action="store_true", default=argparse.SUPPRESS
             )
         else:
             add_leaf(children[head], method, path)

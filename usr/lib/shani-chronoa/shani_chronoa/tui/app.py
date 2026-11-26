@@ -236,6 +236,10 @@ class Interactive:
 
         spec = METHODS[method]
         values = list(args)
+        if method == "SettingsSet" and values and str(values[0]).endswith("-api-key"):
+            import getpass
+
+            values[1] = getpass.getpass("Secret (not shown): ")
         if spec.confirm:
             if "confirm" not in spec.arg_names:
                 values.append(True)
