@@ -48,11 +48,20 @@ class Engine:
         if persisted in ("low", "medium", "high", "gpu"):
             self.hardware.profile = persisted
         model = self.config.model or self.hardware.get_model()
-        self.llm = llm or OllamaLLM(
-            host=self.config.ollama_host,
-            model=model,
-            context_window=self.hardware.get_context_window(),
-        )
+        if llm is None:
+            # Ollama first, else the local llama.cpp server - the same choice
+            # the GTK app makes, which this engine did not: it asked Ollama
+            # alone and could not answer on a machine running a local model.
+            from shani_chronoa.llm_choice import local_first
+
+            llm, self.llm_how = local_first(OllamaLLM(
+                host=self.config.ollama_host,
+                model=model,
+                context_window=self.hardware.get_context_window(),
+            ))
+        else:
+            self.llm_how = "given"
+        self.llm = llm
         self._async = AsyncBridge()
         self.percept_store = PerceptStore()
         self.context = ContextBuilder(
