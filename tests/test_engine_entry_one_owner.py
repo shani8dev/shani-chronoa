@@ -25,17 +25,21 @@ _DBUS = _REPO / "usr/share/dbus-1/services/dev.shani.chronoa.Agent.service"
 
 
 def _run_private_bus(
-    script: str, timeout: int = 90, args: tuple = ()
+    script: str,
+    timeout: int = 90,
+    args: tuple = (),
+    extra_env: dict | None = None,
 ) -> subprocess.CompletedProcess:
     if not shutil.which("dbus-run-session"):
         pytest.skip("dbus-run-session is not installed")
+    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", **(extra_env or {})}
     return subprocess.run(
         ["dbus-run-session", "--", sys.executable, "-c", script, *args],
         capture_output=True,
         text=True,
         timeout=timeout,
         cwd=str(_REPO),
-        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        env=env,
     )
 
 
@@ -198,3 +202,46 @@ print("RESULT " + json.dumps({
     proc = _run_private_bus(script)
     result = _result(proc)
     assert all(result.values()), result
+
+
+def test_calling_the_agent_name_activates_the_engine(tmp_path):
+    """A client that only knows the bus name starts the headless entry.
+
+    The installed file points at /usr/bin, which is not present on a dev
+    box; the service is copied with this checkout's launcher as `Exec` so
+    dbus-daemon can actually run it. The rest of the file is unchanged.
+    """
+    services = tmp_path / "dbus-1" / "services"
+    services.mkdir(parents=True)
+    service = services / "dev.shani.chronoa.Agent.service"
+    service.write_text(
+        _DBUS.read_text().replace("Exec=/usr/bin/shani-chronoa-engine", f"Exec={_BIN}"),
+        encoding="utf-8",
+    )
+    script = """
+import json, time
+from gi.repository import Gio, GLib
+proxy = Gio.DBusProxy.new_for_bus_sync(
+    Gio.BusType.SESSION, Gio.DBusProxyFlags.NONE, None,
+    "dev.shani.chronoa.Agent", "/dev/shani/chronoa/Agent",
+    "dev.shani.chronoa.Agent", None)
+out = ""
+for _ in range(80):
+    time.sleep(0.25)
+    try:
+        out = proxy.call_sync("Inventory", GLib.Variant("(s)", ("status",)),
+            Gio.DBusCallFlags.NONE, 3000, None).unpack()[0]
+        break
+    except Exception:
+        pass
+print("RESULT " + json.dumps({"activated": bool(out),
+                             "section": json.loads(out).get("section") if out else ""}))
+"""
+    proc = _run_private_bus(
+        script,
+        extra_env={
+            "XDG_DATA_DIRS": f"{tmp_path}:{os.environ.get('XDG_DATA_DIRS', '/usr/share')}"
+        },
+    )
+    result = _result(proc)
+    assert result == {"activated": True, "section": "status"}, result
