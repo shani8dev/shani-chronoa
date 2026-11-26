@@ -1503,9 +1503,23 @@ def _dispatch_inner(name: str, arguments: dict, by_reference: bool = False,
         # prompt. Asking there would put a question to the user whose "yes"
         # could not possibly work.
         consent_key = _consent_key_for(name)
+        # **A destructive tool is asked about every time, switch on or off.**
+        # The switch says the action is available; it is not a standing yes.
+        # This block used to ask only when the key was off, so turning a
+        # destructive key on (delete files, stop processes, power, services,
+        # mounts, run commands) made the action run with no question at all -
+        # the opposite of what `permissions.is_bypass_immune` promises and of
+        # what the settings label says. With nobody to ask, it is refused.
+        immune = consent_key is not None and permissions.is_bypass_immune(name)
+        if immune and not permissions.can_ask():
+            return DispatchResult(
+                f"{name} is not permitted without asking, and nobody is here to "
+                "say yes, so nothing was done. Destructive actions are asked "
+                "about every time.",
+                verification.Verdict.UNVERIFIED, False)
         if (consent_key is not None
                 and permissions.can_ask()
-                and (remote
+                and (remote or immune
                      or not config_mod.ChronoaConfig().get_bool(consent_key, False))):
             title = capabilities.tool_title(name) or name
             if remote:

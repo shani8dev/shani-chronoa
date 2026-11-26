@@ -136,8 +136,9 @@ def test_every_atspi_init_in_the_module_goes_through_the_guard():
     inside `_a11y_init()` - so a new reader that inits AT-SPI directly
     fails here rather than taking a CI run down at 28%.
     """
+    # the GTK driver moved under ui_gtk/; the old path is an import shim
     source = (_REPO / "usr" / "lib" / "shani-chronoa" / "shani_chronoa"
-              / "ui_driver.py").read_text(encoding="utf-8")
+              / "ui_gtk" / "ui_driver.py").read_text(encoding="utf-8")
     # **A bare call, not the string.** The module's own docstrings name
     # `Atspi.init()` to explain why it is guarded, and a search that counted
     # those would report every explanation as a second way in.
@@ -163,8 +164,9 @@ def test_every_desktop_query_is_guarded_too():
     and a reader who moves the call out of the branch breaks the distance
     before the regex.
     """
+    # the GTK driver moved under ui_gtk/; the old path is an import shim
     source = (_REPO / "usr" / "lib" / "shani-chronoa" / "shani_chronoa"
-              / "ui_driver.py").read_text(encoding="utf-8")
+              / "ui_gtk" / "ui_driver.py").read_text(encoding="utf-8")
     lines = source.splitlines()
     unguarded = []
     for i, line in enumerate(lines):

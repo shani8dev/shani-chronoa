@@ -176,6 +176,11 @@ class TestStageTwoEnumeratesTheScope:
         # user's home, and a refusal for *that* reason proves nothing about
         # which grant matched.
         home = Path(os.environ["HOME"])
+        # The sibling is refused by the tool's own gate only while that gate is
+        # shut. git reading is on by default now, so the test shuts it itself:
+        # what it proves is the scope of a grant, not the default.
+        from shani_chronoa.config import ChronoaConfig
+        ChronoaConfig().set("git-sense-enabled", False)
         granted = home / "granted-tree"
         granted.mkdir()
         sibling = home / "other-tree"
@@ -573,3 +578,40 @@ class TestTheOrderCarriesMeaning:
         ask_bridge.set_presenter(_presenter(permissions.ALLOW_ONCE_CHOICE, seen))
         permissions.decide("delete_file", "/tmp/x", "file-delete-enabled")
         assert seen, "a consumed one-shot grant let the next call through"
+
+
+class TestADestructiveSwitchOnStillAsks:
+    """A destructive switch says the action is available, not that it is pre-approved.
+
+    Dispatch used to ask only when a tool's key was off, so with
+    `file-delete-enabled` on (a default since 2026-11-26) `delete_file` ran
+    with no question at all.
+    """
+
+    def _with_delete_on(self):
+        from shani_chronoa.config import ChronoaConfig
+        ChronoaConfig().set("file-delete-enabled", True)
+        target = Path(os.environ["HOME"]) / "keep.txt"
+        target.write_text("x")
+        return target
+
+    def test_the_person_is_asked_and_a_no_keeps_the_file(self):
+        target = self._with_delete_on()
+        seen = []
+        ask_bridge.set_presenter(_presenter("Deny", seen))
+        result = execute_tool("delete_file", {"path": str(target)})
+        assert seen, "the switch was on and nobody was asked before deleting"
+        assert target.exists(), f"a 'no' did not stop the delete: {result!r}"
+
+    def test_a_yes_deletes(self):
+        target = self._with_delete_on()
+        seen = []
+        ask_bridge.set_presenter(_presenter("Allow this once", seen))
+        execute_tool("delete_file", {"path": str(target)})
+        assert seen and not target.exists(), "an approved delete did not happen"
+
+    def test_with_nobody_to_ask_it_is_refused(self):
+        target = self._with_delete_on()
+        ask_bridge.set_presenter(None)
+        refused = execute_tool("delete_file", {"path": str(target)})
+        assert "not permitted" in refused.lower() and target.exists(), refused
