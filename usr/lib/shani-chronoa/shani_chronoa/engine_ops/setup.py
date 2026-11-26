@@ -13,8 +13,14 @@ STEPS = ("brain", "ears", "voice", "eyes", "memory", "languages", "kokoro")
 
 
 def _wizard():
-    """Import the wizard's pure layer lazily: its package is the GTK client."""
-    from shani_chronoa.ui_gtk import setup_wizard
+    """Import the wizard's pure layer lazily, through its old-path shim.
+
+    The shim aliases the wizard's module object; the wizard's step functions
+    import no GTK typelib at module scope, so the engine stays GTK-free. The
+    GTK window and its widgets are built only by `build_window()`, which the
+    engine never calls.
+    """
+    from shani_chronoa import setup_wizard
 
     return setup_wizard
 
