@@ -353,7 +353,7 @@
     },
     "cloud-stt-enabled": {
       "type": "b",
-      "default": false,
+      "default": true,
       "label": "Cloud speech recognition",
       "summary": "Allow cloud speech recognition when no local speech model is installed",
       "consent": false,
@@ -362,7 +362,7 @@
     },
     "cloud-tts-enabled": {
       "type": "b",
-      "default": false,
+      "default": true,
       "label": "Cloud speech synthesis",
       "summary": "Allow cloud speech synthesis when no local neural voice is installed",
       "consent": false,
@@ -632,7 +632,7 @@
     },
     "web-sense-enabled": {
       "type": "b",
-      "default": false,
+      "default": true,
       "label": "Web search",
       "summary": "Let Chronoa retrieve web content",
       "consent": true,

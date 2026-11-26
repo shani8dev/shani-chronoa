@@ -175,7 +175,7 @@ its own **Download** button.
   name, is configurable.
 - **Barge-in support** — interrupt a long reply mid-sentence.
 - **Senses** — a perception layer beside `skills/`. **52 senses** deposit
-  *percepts* the assistant can reason about: **45 default on, 7 default
+  *percepts* the assistant can reason about: **46 default on, 6 default
   off**. The split is deliberate and machine-readable, see
   [the table below](#senses-percepts-and-consent).
 
@@ -324,7 +324,7 @@ separates them. Turning any switch off denies immediately.
 | `stale` | machine-state | on |
 | `thermalgrid` | machine-state | off |
 | `vision` | image_description | off |
-| `web` | page | off |
+| `web` | page | on |
 | `ups` | machine-state | on |
 | `wirelesslink` | machine-state | on |
 
@@ -362,8 +362,8 @@ you can state rather than one that grows with your session.
 
 **Consent is per-sense and fail-closed.** A missing key **denies**, so an
 older installed schema cannot silently switch a sense on. The shipped settings
-table carries **218 keys**: 70 `<sense>-sense-enabled` (52 live senses, 45 on
-and 7 off; the rest are event types), plus the non-consent settings. **Retired
+table carries **218 keys**: 70 `<sense>-sense-enabled` (52 live senses, 46 on
+and 6 off; the rest are event types), plus the non-consent settings. **Retired
 sense aliases are still honoured** — when a sense was merged away its old key
 keeps granting the successor through `config._SENSE_CONSENT_ALIASES`, because a
 rename that silently revokes a grant is a permission revocation wearing a

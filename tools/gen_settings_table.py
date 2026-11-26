@@ -51,9 +51,10 @@ window-close-enabled service-control-enabled mount-control-enabled
 trash-empty-enabled bulk-edit-enabled run-command-enabled
 phone-control-enabled phone-messages-read-enabled landline-enabled
 watch-nowplaying-enabled watch-weather-enabled email-read-enabled
+cloud-stt-enabled cloud-tts-enabled web-sense-enabled
 """.split()
 DEFAULT_OFF_KEYS = """
-cloud-stt-enabled cloud-tts-enabled web-sense-enabled email-send-enabled
+email-send-enabled
 phone-messages-send-enabled git-push-enabled voice-clone-enabled
 vision-sense-enabled hearing-sense-enabled wake-word-enabled
 heard-sound-sense-enabled sound-sense-enabled rfsense-sense-enabled
