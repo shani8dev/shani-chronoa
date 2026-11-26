@@ -26,6 +26,25 @@ def test_slash_completion_only_offers_real_commands():
     assert all(name.startswith("/") for name in commands.completions("/"))
 
 
+def test_subcommand_completion_offers_the_additive_paths():
+    assert "/settings get" in commands.completions("/settings g")
+    assert "/models use" in commands.completions("/models u")
+    assert "/conversations delete" in commands.completions("/conversations d")
+
+
+def test_additive_commands_resolve_to_agent_methods():
+    assert commands.resolve("models", "") == ("ModelsList", [])
+    assert commands.resolve("models", "use local") == ("ModelsUse", ["local"])
+    assert commands.resolve("settings", "set privacy-mode true") == (
+        "SettingsSet",
+        ["privacy-mode", "true"],
+    )
+    assert commands.resolve("conversations", "rename abc A longer title") == (
+        "ConversationsRename",
+        ["abc", "A longer title"],
+    )
+
+
 def test_path_completion_expands_home_and_marks_directories(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     (tmp_path / "notes.txt").write_text("hi", encoding="utf-8")
