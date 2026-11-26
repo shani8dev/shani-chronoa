@@ -13,3 +13,4 @@ add a line to the plan's Status section when you finish something:
 - New skills: logic in GTK-free functions returning data, described so the registry can generate the skill and its MCP tool later.
 - Packaging proposals go to `docs/PACKAGING-NOTES.md` (engine without GTK, `shani-link` optional).
 - Phase 5b: a terminal UI (`chronoa`), like the coding-agent TUIs: a client of the same engine interface the shell's panel uses, no logic of its own; streamed replies, approvals, slash commands from the registry, resume, `@file`, `-p`/`--json` for scripts; standard library only; works over SSH and on the server image. Build it on the engine split, not on the GTK app.
+- Upstream-ready (see the plan): to be renamed `chronoa` and usable on any distribution - ShaniOS-only skills and defaults move behind providers and the ShaniOS vendor config in the extras package; no ShaniOS names in code.
