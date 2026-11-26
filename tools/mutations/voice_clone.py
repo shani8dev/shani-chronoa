@@ -44,7 +44,7 @@ TEST_FILE = 'tests/test_voice_clone.py'
 
 _TTS = 'usr/lib/shani-chronoa/shani_chronoa/tts.py'
 _CLONE = 'usr/lib/shani-chronoa/shani_chronoa/voice_clone.py'
-_VOICE = 'usr/lib/shani-chronoa/shani_chronoa/settings_window/voice.py'
+_VOICE = 'usr/lib/shani-chronoa/shani_chronoa/ui_gtk/settings_window/voice.py'
 
 MUTATIONS = [
     {

@@ -50,8 +50,8 @@ committing to.
 
 TEST_FILE = "tests/test_the_status_line_has_two_lifetimes.py"
 
-_WIN = "usr/lib/shani-chronoa/shani_chronoa/gui/window.py"
-_CONV = "usr/lib/shani-chronoa/shani_chronoa/app/conversation.py"
+_WIN = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/window.py"
+_CONV = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/app/conversation.py"
 
 MUTATIONS = [
     # -- the shipped defect: the clock takes the line back --------------------

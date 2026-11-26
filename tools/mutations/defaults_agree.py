@@ -29,9 +29,9 @@ Three real instances of it, all found on 2026-10-19 and all the same shape:
 TEST_FILE = 'tests/test_schema_and_code_defaults_agree.py'
 
 _CUES = 'usr/lib/shani-chronoa/shani_chronoa/cues.py'
-_VOICE = 'usr/lib/shani-chronoa/shani_chronoa/settings_window/voice.py'
-_SENSES_SURFACE = 'usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/senses.py'
-_WIZARD = 'usr/lib/shani-chronoa/shani_chronoa/setup_wizard.py'
+_VOICE = 'usr/lib/shani-chronoa/shani_chronoa/ui_gtk/settings_window/voice.py'
+_SENSES_SURFACE = 'usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/surfaces/senses.py'
+_WIZARD = 'usr/lib/shani-chronoa/shani_chronoa/ui_gtk/setup_wizard.py'
 
 MUTATIONS = [
     {

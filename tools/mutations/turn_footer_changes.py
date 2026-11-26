@@ -12,7 +12,7 @@ open.
 
 TEST_FILE = "tests/test_the_turn_footer_has_a_door_to_the_changes.py"
 
-_WIDGETS = "usr/lib/shani-chronoa/shani_chronoa/gui/widgets.py"
+_WIDGETS = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/widgets.py"
 
 MUTATIONS = [
     {

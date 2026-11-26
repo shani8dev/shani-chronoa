@@ -17,7 +17,7 @@ plain form, and the arguments can become unreachable.
 
 TEST_FILE = "tests/test_the_rule_builder_says_what_a_person_would_say.py"
 
-_TRIGGERS = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/triggers.py"
+_TRIGGERS = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/surfaces/triggers.py"
 
 MUTATIONS = [
     {

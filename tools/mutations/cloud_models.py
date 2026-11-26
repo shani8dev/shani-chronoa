@@ -44,10 +44,10 @@ mutation names the test that fails rather than the behaviour it hopes to break.
 
 TEST_FILE = "tests/test_cloud_models_are_chooseable.py"
 
-_PICKER = "usr/lib/shani-chronoa/shani_chronoa/gui/model_picker.py"
-_PALETTE = "usr/lib/shani-chronoa/shani_chronoa/gui/palette.py"
-_WINDOW = "usr/lib/shani-chronoa/shani_chronoa/gui/window.py"
-_APP = "usr/lib/shani-chronoa/shani_chronoa/app/application.py"
+_PICKER = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/model_picker.py"
+_PALETTE = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/palette.py"
+_WINDOW = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/window.py"
+_APP = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/app/application.py"
 _CLOUD = "usr/lib/shani-chronoa/shani_chronoa/cloud_llm.py"
 
 MUTATIONS = [

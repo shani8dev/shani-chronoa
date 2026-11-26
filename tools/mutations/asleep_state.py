@@ -41,9 +41,9 @@ a mutation that only breaks one of the three transitions is still caught.
 
 TEST_FILE = "tests/test_asleep_is_reachable.py"
 
-_WIN = "usr/lib/shani-chronoa/shani_chronoa/settings_window/window.py"
-_BRAIN = "usr/lib/shani-chronoa/shani_chronoa/app/brain.py"
-_MODELS = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/models.py"
+_WIN = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/settings_window/window.py"
+_BRAIN = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/app/brain.py"
+_MODELS = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/surfaces/models.py"
 _PRESENCE = "usr/lib/shani-chronoa/shani_chronoa/presence.py"
 
 MUTATIONS = [

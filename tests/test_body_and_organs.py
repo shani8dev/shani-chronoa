@@ -329,7 +329,7 @@ class TestTheRegisterIsActuallyWired:
     def test_the_window_shows_the_strip(self):
         """A register nothing displays is the dead-code class this repo keeps
         paying for."""
-        source = self._source("gui/window.py")
+        source = self._source("ui_gtk/gui/window.py")
         assert "OrganStrip" in source
 
     def test_the_setting_exists_and_is_off(self):

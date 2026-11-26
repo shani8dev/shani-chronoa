@@ -40,6 +40,8 @@ import pytest
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk  # noqa: E402
 
+_REPO = Path(__file__).resolve().parents[1]
+
 from shani_chronoa import secret_store  # noqa: E402
 from shani_chronoa.capabilities import gate_label  # noqa: E402
 from shani_chronoa.gui.surfaces import common, desktop  # noqa: E402
@@ -75,10 +77,10 @@ def _listing(*names):
 def _packaged(*parts) -> Path:
     """A path inside this checkout's `usr/`, the way the package installs it.
 
-    `.../usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/desktop.py`, so the
+    `.../usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/surfaces/desktop.py`, so the
     package root under `lib/` is four parents up and `usr/` is five.
     """
-    return Path(desktop.__file__).resolve().parents[5].joinpath(*parts)
+    return _REPO.joinpath("usr", *parts)
 
 
 @pytest.fixture(autouse=True)

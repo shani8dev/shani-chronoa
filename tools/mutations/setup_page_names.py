@@ -18,7 +18,7 @@ failed; the sentence round it did.
 
 TEST_FILE = "tests/test_the_setup_pages_are_named_for_people.py"
 
-_WIZARD = "usr/lib/shani-chronoa/shani_chronoa/setup_wizard.py"
+_WIZARD = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/setup_wizard.py"
 _CAPS = "usr/lib/shani-chronoa/shani_chronoa/capabilities.py"
 
 MUTATIONS = [

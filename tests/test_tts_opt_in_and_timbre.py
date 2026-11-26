@@ -203,18 +203,19 @@ def test_kokoro_is_the_engine_when_the_setting_is_on(kokoro_installed, only_espe
 
 
 
-def test_the_kokoro_setting_is_on_in_a_fresh_profile(chronoa_config):
+def test_the_kokoro_setting_is_off_in_a_fresh_profile(chronoa_config):
     """The default, read through the dispatcher's own reader.
 
-    A schema default of `false` would be invisible here and obvious everywhere
-    else: this is the state every new install starts in.
-
-    **Reversed from opt-in to on.** See
-    `test_kokoro_is_the_engine_when_the_setting_is_on` for the measurement behind
-    the choice and for the switch that still gets espeak-ng back.
+    **Opt-in again (decided 2026-11-26): Piper is the default voice.** The image
+    ships Piper and its en_US-lessac-medium voice (shani-piper-tts,
+    shani-piper-voice), so a fresh install speaks with nothing downloaded. With
+    Kokoro on by default the setup wizard pre-selected a Kokoro voice, and the
+    first Next downloaded Kokoro's engine and model; and Kokoro's measured
+    RTF 1.22 opened every reply with seconds of silence. Kokoro stays one switch
+    away (`test_kokoro_is_the_engine_when_the_setting_is_on`).
     """
-    assert chronoa_config.get_bool(tts.PiperTTS.KOKORO_KEY, True) is True
-    assert tts.PiperTTS(config=chronoa_config)._kokoro_enabled() is True
+    assert chronoa_config.get_bool(tts.PiperTTS.KOKORO_KEY, True) is False
+    assert tts.PiperTTS(config=chronoa_config)._kokoro_enabled() is False
 
 
 
@@ -561,16 +562,19 @@ def _kokoro_schema_default() -> bool:
     silently is whether the row writes at all, and that is asserted against the
     opposite of this value rather than against a constant.
     """
-    from xml.etree import ElementTree
+    # The defaults live in the shipped settings table now (GSettings is gone),
+    # so "the schema" is that table.
+    import json
     import pathlib
 
     root = pathlib.Path(__file__).resolve().parents[1]
-    schema = (root / "usr/share/glib-2.0/schemas"
-              / "org.shani.chronoa.gschema.xml")
-    for key in ElementTree.parse(schema).getroot().iter("key"):
-        if key.get("name") == tts.PiperTTS.KOKORO_KEY:
-            return key.findtext("default") == "true"
-    raise AssertionError("%s is not declared in the schema" % tts.PiperTTS.KOKORO_KEY)
+    table = json.loads((root / "usr/share/shani-chronoa/settings.json").read_text())
+    rows = table if isinstance(table, list) else table.get("settings", table)
+    items = rows.items() if isinstance(rows, dict) else ((r.get("key") or r.get("name"), r) for r in rows)
+    for key, row in items:
+        if key == tts.PiperTTS.KOKORO_KEY:
+            return row.get("default") is True
+    raise AssertionError("%s is not in the settings table" % tts.PiperTTS.KOKORO_KEY)
 
 
 class TestTheVoiceRowsAreRealControls:

@@ -13,7 +13,7 @@ say.
 
 TEST_FILE = "tests/test_surface_triggers.py"
 
-_PANEL = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/triggers.py"
+_PANEL = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/surfaces/triggers.py"
 
 MUTATIONS = [
     {

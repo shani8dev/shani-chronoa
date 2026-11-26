@@ -26,7 +26,7 @@ Two ways this breaks, and the third one is the mutation set's real reason:
 TEST_FILE = "tests/test_calibration_comparison.py"
 
 _LLM = "usr/lib/shani-chronoa/shani_chronoa/local_llm.py"
-_WINDOW = "usr/lib/shani-chronoa/shani_chronoa/settings_window/window.py"
+_WINDOW = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/settings_window/window.py"
 
 MUTATIONS = [
     {

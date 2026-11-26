@@ -98,8 +98,8 @@ two-representations-of-one-thing trap `gaze_iris.py` records.
 
 TEST_FILE = "tests/test_the_notch_is_reachable.py"
 
-_MSC = "usr/lib/shani-chronoa/shani_chronoa/mascot.py"
-_APP = "usr/lib/shani-chronoa/shani_chronoa/app/application.py"
+_MSC = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/mascot.py"
+_APP = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/app/application.py"
 _META = "usr/share/gnome-shell/extensions/chronoa-mascot@shani.dev/metadata.json"
 
 #: `create()`'s preference, as the whole two-line decision.

@@ -27,7 +27,7 @@ TEST_FILE = 'tests/test_the_voice_recording_is_checked.py'
 
 _TTS = 'usr/lib/shani-chronoa/shani_chronoa/tts.py'
 _VOICE = 'usr/lib/shani-chronoa/shani_chronoa/voice_clone.py'
-_PAGE = 'usr/lib/shani-chronoa/shani_chronoa/settings_window/voice.py'
+_PAGE = 'usr/lib/shani-chronoa/shani_chronoa/ui_gtk/settings_window/voice.py'
 
 MUTATIONS = [
     {

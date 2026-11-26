@@ -48,11 +48,20 @@ class Engine:
         if persisted in ("low", "medium", "high", "gpu"):
             self.hardware.profile = persisted
         model = self.config.model or self.hardware.get_model()
-        self.llm = llm or OllamaLLM(
-            host=self.config.ollama_host,
-            model=model,
-            context_window=self.hardware.get_context_window(),
-        )
+        if llm is None:
+            # Ollama first, else the local llama.cpp server - the same choice
+            # the GTK app makes, which this engine did not: it asked Ollama
+            # alone and could not answer on a machine running a local model.
+            from shani_chronoa.llm_choice import local_first
+
+            llm, self.llm_how = local_first(OllamaLLM(
+                host=self.config.ollama_host,
+                model=model,
+                context_window=self.hardware.get_context_window(),
+            ))
+        else:
+            self.llm_how = "given"
+        self.llm = llm
         self._async = AsyncBridge()
         self.percept_store = PerceptStore()
         self.context = ContextBuilder(
@@ -68,9 +77,15 @@ class Engine:
         )
         self.agent = AgentService(self)
 
-    def start(self) -> None:
-        """Own the Agent name on the session bus."""
-        self.agent.export()
+    def start(self) -> bool:
+        """Own the Agent name, unless a GTK desktop app already has it.
+
+        The desktop app is the Agent on GNOME/Plasma/COSMIC: it has the
+        microphone, the window and the person's conversation. The engine is
+        the Agent on a headless session, or when the desktop app is not
+        running; it yields instead of fighting over one bus name.
+        """
+        return self.agent.export(yield_to_owner=True)
 
     def stop(self) -> None:
         self.agent.unexport()
@@ -82,7 +97,12 @@ class Engine:
 
         loop = GLib.MainLoop()
         for sig in (signal.SIGTERM, signal.SIGINT):
-            GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, sig, loop.quit, None)
+            # PyGObject calls the callback with the signal number as its one
+            # argument; MainLoop.quit takes none, and passing it directly
+            # raised TypeError on every SIGTERM instead of stopping the loop.
+            GLib.unix_signal_add(
+                GLib.PRIORITY_DEFAULT, sig, lambda *_signal: loop.quit()
+            )
         self.start()
         try:
             loop.run()

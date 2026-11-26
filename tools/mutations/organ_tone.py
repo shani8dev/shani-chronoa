@@ -26,8 +26,8 @@ one restores the shipped defect verbatim.
 TEST_FILE = 'tests/test_the_organ_tone_is_wired.py'
 
 _BODY = 'usr/lib/shani-chronoa/shani_chronoa/body.py'
-_WINDOW = 'usr/lib/shani-chronoa/shani_chronoa/gui/window.py'
-_ORGANS = 'usr/lib/shani-chronoa/shani_chronoa/gui/organs.py'
+_WINDOW = 'usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/window.py'
+_ORGANS = 'usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/organs.py'
 
 MUTATIONS = [
     {

@@ -15,7 +15,7 @@ The set is the ways each of those can come back.
 
 TEST_FILE = "tests/test_surface_memory.py"
 
-_MEMORY = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/memory.py"
+_MEMORY = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/surfaces/memory.py"
 
 MUTATIONS = [
     {

@@ -14,7 +14,7 @@ folding one count into the other - plus the one way it invents a denominator.
 
 TEST_FILE = "tests/test_tool_activity_panel.py"
 
-_ACTIVITY = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/activity.py"
+_ACTIVITY = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/surfaces/activity.py"
 
 MUTATIONS = [
     {

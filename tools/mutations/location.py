@@ -13,7 +13,7 @@ than hiding it.
 TEST_FILE = "tests/test_location_coordinates.py"
 
 _LOC = "usr/lib/shani-chronoa/shani_chronoa/senses/location.py"
-_DIFF = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/diff.py"
+_DIFF = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/surfaces/diff.py"
 
 MUTATIONS = [
     # -- the shared predicate's own checks ------------------------------------

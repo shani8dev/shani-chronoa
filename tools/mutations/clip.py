@@ -105,7 +105,7 @@ MUTATIONS = [
 
     # -- the two call sites ----------------------------------------------------
     {
-        "file": "usr/lib/shani-chronoa/shani_chronoa/gui/blocks.py",
+        "file": "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/blocks.py",
         "old": "            summary = markdown_lite.clip(summary, 60)\n",
         "new": "            summary = summary[:57] + \"...\"\n",
         "label": "the tool-card summary is a hard slice again",

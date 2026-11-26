@@ -16,7 +16,7 @@ asks for the wrong thing.
 
 TEST_FILE = "tests/test_the_palette_reaches_the_setup_pages.py"
 
-_WINDOW = "usr/lib/shani-chronoa/shani_chronoa/gui/window.py"
+_WINDOW = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/window.py"
 
 MUTATIONS = [
     {

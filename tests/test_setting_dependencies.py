@@ -54,44 +54,44 @@ PKG = pathlib.Path("usr/lib/shani-chronoa/shani_chronoa")
 #: description of the problem. `test_the_list_is_not_stale` fails when the code
 #: grows a call the list has not heard of, so it cannot rot quietly.
 MULTI_WRITE_SITES = {
-    ("app/application.py", "_on_answer_egress"):
+    ("llm_choice.py", "apply_egress"):
         ("answer-mode",
         "cloud-fallback-enabled",
         "privacy-mode"),
-    ("app/application.py", "_parse_args"):
+    ("ui_gtk/app/application.py", "_parse_args"):
         ("debug-mode",
         "model",
         "piper-voice"),
     ("config.py", "set_audio_devices"):
         ("audio-input-device",
         "audio-output-device"),
-    ("gui/surfaces/models.py", "_pick"):
+    ("ui_gtk/gui/surfaces/models.py", "_pick"):
         ("model",
         "piper-voice",
         "stt-backend",
         "vision-model",
         "whisper-model"),
-    ("settings_window/window.py", "_desktop_companion"):
+    ("ui_gtk/settings_window/window.py", "_desktop_companion"):
         ("mascot-corner",
         "mascot-enabled",
         "mascot-sounds",
         "mascot-sounds-volume"),
-    ("settings_window/privacy.py", "_build_privacy"):
+    ("ui_gtk/settings_window/privacy.py", "_build_privacy"):
         ("custom-llm-base-url",
         "custom-llm-model",
         "home-place",
         "screen-capture-excluded-apps"),
-    ("settings_window/voice.py", "_build_voice"):
+    ("ui_gtk/settings_window/voice.py", "_build_voice"):
         ("end-of-speech-pause",
         "language",
         "voice-style"),
-    ("settings_window/window.py", "_build_models"):
+    ("ui_gtk/settings_window/window.py", "_build_models"):
         ("model",
         "ollama-host",
         "piper-voice",
         "vision-model",
         "whisper-model"),
-    ("setup_wizard.py", "build_window"):
+    ("ui_gtk/setup_wizard.py", "build_window"):
         ("answer-mode",
         "cloud-fallback-enabled",
         "privacy-mode",
@@ -99,23 +99,23 @@ MULTI_WRITE_SITES = {
         "setup-dismissed",
         "setup-mode",
         "stt-backend"),
-    ("setup_wizard.py", "pick_mode"):
+    ("ui_gtk/setup_wizard.py", "pick_mode"):
         ("answer-mode",
         "cloud-fallback-enabled",
         "privacy-mode",
         "setup-mode"),
-    ("setup_wizard.py", "setup_ears"):
+    ("ui_gtk/setup_wizard.py", "setup_ears"):
         ("stt-backend",
         "whisper-model"),
-    ("setup_wizard.py", "setup_kokoro"):
+    ("ui_gtk/setup_wizard.py", "setup_kokoro"):
         ("kokoro-tts-enabled",
         "kokoro-voice"),
-    ("setup_wizard.py", "setup_voice"):
+    ("ui_gtk/setup_wizard.py", "setup_voice"):
         ("kokoro-tts-enabled",
         "piper-voice"),
 }
 
-#: `("app/application.py", "_on_answer_mode")` **was** on that list and is no
+#: `("ui_gtk/app/application.py", "_on_answer_mode")` **was** on that list and is no
 #: longer, because it no longer writes the triple itself: it translates its key
 #: and defers to `_on_answer_egress`. That removal is the fix, and the parser -
 #: not this comment - is what proves it: a list entry that stops matching is a
@@ -199,8 +199,8 @@ def test_the_parser_this_file_relies_on_can_find_a_known_site():
     likely to move, and fails if a rename changes what a call looks like.
     """
     found = _multi_writes_in_code()
-    for site in (("app/application.py", "_on_answer_egress"),
-                 ("setup_wizard.py", "pick_mode")):
+    for site in (("llm_choice.py", "apply_egress"),
+                 ("ui_gtk/setup_wizard.py", "pick_mode")):
         assert site in found, (
             f"the parser no longer recognises {site[1]} as a multi-write - "
             f"the scan is looking for the wrong shape and every test here is "
@@ -220,7 +220,8 @@ def _settings_written_by(rel_path, function_name):
     import ast as _ast
     keys = _schema_keys()
     underscores = {k.replace("-", "_") for k in keys}
-    tree = _ast.parse((PKG / rel_path).read_text(encoding="utf-8"))
+    from _source import source_path
+    tree = _ast.parse(source_path(rel_path).read_text(encoding="utf-8"))
     out = set()
     for node in _ast.walk(tree):
         if not isinstance(node, _ast.FunctionDef) or node.name != function_name:
@@ -270,16 +271,21 @@ def test_only_one_handler_writes_the_egress_triple():
     # scan never saw the second writer at all. The claim being made is not "writes
     # several settings" but "does not write the mapping itself", and only that
     # claim bites.
-    writes = _settings_written_by("app/application.py", "_on_answer_mode")
+    writes = _settings_written_by("ui_gtk/app/application.py", "_on_answer_mode")
     assert not writes, (
         f"_on_answer_mode writes {sorted(writes)} itself. It must translate its "
-        f"key and defer to _on_answer_egress: one owner of the mapping is what "
+        f"key and defer to llm_choice.apply_egress: one owner of the mapping is what "
         f"stops the two actions disagreeing, and a second writer is how the "
         f"defect came back.")
-    writes = _settings_written_by("app/application.py", "_on_answer_egress")
+    writes = _settings_written_by("llm_choice.py", "apply_egress")
     assert "answer-mode" in writes and "privacy-mode" in writes, (
-        f"_on_answer_egress is supposed to own the mapping and writes "
+        f"llm_choice.apply_egress is supposed to own the mapping (the GTK app's "
+        f"_on_answer_egress and the engine's models.use both call it) and writes "
         f"{sorted(writes)}")
+    for site in (("ui_gtk/app/application.py", "_on_answer_egress"), ("engine_ops/models.py", "use")):
+        assert not (_settings_written_by(*site) & {"answer-mode", "privacy-mode", "cloud-fallback-enabled"}), (
+            f"{site[1]} writes the egress settings itself instead of calling "
+            f"llm_choice.apply_egress: a second owner of the mapping")
 
 
 def test_a_setting_written_alone_is_not_a_half_decision():

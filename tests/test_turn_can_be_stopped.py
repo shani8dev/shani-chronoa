@@ -93,7 +93,7 @@ def test_the_button_appears_only_while_a_turn_exists():
     A stop control that is built and never revealed is worse than none, because
     the tooltip is a promise.
     """
-    source = open("usr/lib/shani-chronoa/shani_chronoa/gui/window.py",
+    source = open("usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/window.py",
                   encoding="utf-8").read()
     assert "self._turn_stop_button = Gtk.Button()" in source, (
         "the turn-stop button is not built at all")
@@ -122,7 +122,7 @@ def test_the_button_promises_only_what_it_delivers():
     mid-stream, the tooltip has to change with it - and a control whose label
     overstates it is the same defect as a chip that lies.
     """
-    source = open("usr/lib/shani-chronoa/shani_chronoa/gui/window.py",
+    source = open("usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/window.py",
                   encoding="utf-8").read()
     assert "Stop this turn" in source
     assert "already running finishes" in source, (

@@ -1,0 +1,17 @@
+[Unit]
+Description=Shani Chronoa headless engine (dev.shani.chronoa.Agent)
+Documentation=file:///usr/lib/shani-chronoa/shani_chronoa/engine.py
+PartOf=graphical-session.target
+
+[Service]
+Type=dbus
+BusName=dev.shani.chronoa.Agent
+ExecStart=/usr/bin/shani-chronoa-engine
+Restart=on-failure
+RestartSec=10
+# The user's own model, tools and conversations run as the user.
+NoNewPrivileges=yes
+
+# Deliberately no [Install] WantedBy: on a desktop the GTK app is the Agent.
+# D-Bus activates this unit only when a client asks for the name and nobody
+# owns it, so the two processes cannot fight over the name at login.

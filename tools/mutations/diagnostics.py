@@ -21,7 +21,7 @@ carries it explicitly rather than trusting the fix to be narrow.
 
 TEST_FILE = "tests/test_surface_diagnostics.py"
 
-_DIAG = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/diagnostics.py"
+_DIAG = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/surfaces/diagnostics.py"
 
 _GREEN = "test_a_server_setup_never_configured_is_not_a_fault"
 

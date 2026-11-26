@@ -1,0 +1,188 @@
+"""Files attached to the next message: dropped, picked, listed and removed."""
+
+import logging
+
+import gi
+
+gi.require_version('Gtk', '4.0')
+gi.require_version('Gdk', '4.0')
+gi.require_version('GLib', '2.0')
+
+from gi.repository import Gio, GLib, Gtk
+
+
+
+logger = logging.getLogger("shani_chronoa.gui.attaching")
+
+
+
+
+#: Suffixes the `recording` skill can transcribe (anything ffmpeg decodes;
+#: these are the ones a person drops).
+TRANSCRIBABLE = frozenset({".wav", ".mp3", ".m4a", ".ogg", ".opus", ".flac", ".aac",
+                           ".webm", ".mp4", ".mkv", ".mov", ".avi"})
+
+
+class AttachingMixin:
+    """Files attached to the next message: dropped, picked, listed and removed. - a part of ChronoaWindow, which mixes it in."""
+
+
+    def add_attachments(self, paths) -> None:
+        from shani_chronoa import attachments
+        self._attachments = attachments.accept(paths, self._attachments)
+        self._refresh_attach_bar()
+
+    def take_attachments(self):
+        """(names, block) for the message being sent, and clear the chips."""
+        from shani_chronoa import attachments
+        # **Kept, so a refusal can hand the chips back.** `window._submit_input`
+        # takes the attachments before it emits, and the refusal paths in
+        # `brain._explain_no_model` run *after* that - so by the time a turn is
+        # declined for want of a model, the chips are already gone and the files
+        # with them. Restoring only the sentence would return half a message.
+        self._sent_attachments = list(self._attachments)
+        names, block = attachments.take(self._attachments)
+        self._attachments = []
+        self._refresh_attach_bar()
+        return names, block
+
+    def restore_last_sent(self, text: str) -> None:
+        """Put back what was typed and attached, for a turn that never ran.
+
+        **The one door for "a refusal ate my message".** It exists because the
+        composer, the draft and the attachment chips are three separate pieces of
+        state that `_submit_input` clears in one place, and a refusal that
+        restored only some of them would be worse than one that restored none:
+        the person sees their question sitting in the box and reasonably
+        concludes the files came back too.
+        """
+        saved = list(getattr(self, "_sent_attachments", ()) or ())
+        if saved:
+            self._attachments = saved
+            self._refresh_attach_bar()
+        self.set_input_text(text)
+
+    def _refresh_attach_bar(self) -> None:
+        child = self._attach_bar.get_first_child()
+        while child is not None:
+            nxt = child.get_next_sibling()
+            self._attach_bar.remove(child)
+            child = nxt
+        for path in self._attachments:
+            chip = Gtk.Button(label=f"{path.name}  ✕")
+            chip.add_css_class("pill")
+            chip.set_tooltip_text(str(path))
+            chip.update_property([Gtk.AccessibleProperty.LABEL], [f"Remove attachment {path.name}"])
+            chip.connect("clicked", lambda _b, p=path: self._remove_attachment(p))
+            if path.suffix.lower() in TRANSCRIBABLE:
+                # **Transcription had no door.** The `recording` skill turns
+                # any audio or video file into text, subtitles or who-said-what,
+                # and the only ways in were the Meetings panel and asking in
+                # words. A recording on the composer is the moment to offer it.
+                row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+                row.append(chip)
+                transcribe = Gtk.Button(label="Transcribe")
+                transcribe.add_css_class("pill")
+                transcribe.add_css_class("suggested-action")
+                transcribe.set_tooltip_text(f"Write out what is said in {path.name}, on this computer")
+                transcribe.connect("clicked", lambda _b, p=path: self._transcribe_attachment(p))
+                row.append(transcribe)
+                self._attach_bar.append(row)
+                continue
+            self._attach_bar.append(chip)
+        self._attach_bar.set_visible(bool(self._attachments))
+
+    def _transcribe_attachment(self, path) -> None:
+        """Ask for this one file's transcript, as its own turn.
+
+        `/recording` names the tool, so only the arguments are left to the
+        model (`user_prompts.forced_tool`). **The draft and the other chips are
+        set aside and put back**: `submit_text` sends whatever is in the
+        composer and every attachment on it, and a person who pressed
+        Transcribe on one file did not ask to send their half-written message
+        or the other files with it.
+        """
+        others = [p for p in self._attachments if p != path]
+        draft = self._input_text() if hasattr(self, "_input_text") else ""
+        self._attachments = []
+        self._refresh_attach_bar()
+        self.submit_text(f"/recording transcribe what is said in {path}")
+        self._attachments = others
+        self._refresh_attach_bar()
+        if draft and hasattr(self, "_set_input_text"):
+            self._set_input_text(draft)
+
+    def _remove_attachment(self, path) -> None:
+        self._attachments = [p for p in self._attachments if p != path]
+        self._refresh_attach_bar()
+
+    def _on_files_dropped(self, _target, value, _x, _y) -> bool:
+        try:
+            self.add_attachments(f.get_path() for f in value.get_files() if f.get_path())
+        except Exception as e:  # noqa: BLE001 - a bad drop must not break the window
+            logger.warning(f"Could not take the dropped files: {e}")
+            return False
+        return True
+
+    #: What "Transcribe a recording..." asks, with the file attached. The
+    #: `recording` skill does the work (speakers told apart where it can).
+    TRANSCRIBE_REQUEST = "Make a transcript of this recording, telling the speakers apart."
+
+    def pick_recording_to_transcribe(self) -> None:
+        """Choose an audio or video file and ask for its transcript.
+
+        Transcribing a file had no door but the Meetings panel (MAIN-UI-TODO
+        8k); the skill already took a path. This is attach + one request,
+        through the same send path as typing it.
+        """
+        audio = Gtk.FileFilter(name="Recordings")
+        audio.add_mime_type("audio/*")
+        audio.add_mime_type("video/*")
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(audio)
+        dialog = Gtk.FileDialog(title="Transcribe a recording", modal=True,
+                                filters=filters, default_filter=audio)
+
+        def done(dlg, result):
+            try:
+                chosen = dlg.open_finish(result)
+            except GLib.Error:
+                return              # dismissed, or no portal: nothing was asked
+            path = chosen.get_path() if chosen is not None else None
+            if path:
+                self.add_attachments([path])
+                self.submit_text(self.TRANSCRIBE_REQUEST)
+        try:
+            dialog.open(self, None, done)
+        except Exception:  # noqa: BLE001
+            logger.warning("could not open the file dialog", exc_info=True)
+
+    def _pick_files(self) -> None:
+        dialog = Gtk.FileDialog(title="Attach files", modal=True)
+
+        def done(dlg, result):
+            try:
+                chosen = dlg.open_multiple_finish(result)
+            except GLib.Error as exc:
+                if exc.code == Gtk.DialogError.DISMISSED:
+                    return  # cancelled: the right answer is silence
+                # Any other failure - no portal, the dialog never really ran,
+                # the endpoint died behind it - is the "looks like nothing
+                # happened" shape this repo keeps documenting. It now says
+                # itself on screen, and the log keeps the details for a bug
+                # report.
+                logger.warning("file dialog did not finish: %s (%s)", exc.message, exc.domain)
+                toast = getattr(self, "toast", None)
+                if callable(toast):
+                    toast("Can't open the file picker here - drop files on the window instead",
+                          seconds=4)
+                return
+            self.add_attachments(chosen.get_item(i).get_path() for i in range(chosen.get_n_items())
+                                 if chosen.get_item(i).get_path())
+        try:
+            dialog.open_multiple(self, None, done)
+        except Exception as exc:  # noqa: BLE001 - opening the dialog failed, so say it
+            logger.warning("could not open the file dialog: %s", exc, exc_info=True)
+            toast = getattr(self, "toast", None)
+            if callable(toast):
+                toast("Can't open the file picker here - drop files on the window instead", seconds=4)

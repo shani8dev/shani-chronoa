@@ -36,7 +36,7 @@ Adw.init()
 
 sys.path.insert(0, "usr/lib/shani-chronoa")
 
-BLOCKS = pathlib.Path("usr/lib/shani-chronoa/shani_chronoa/gui/blocks.py")
+BLOCKS = pathlib.Path("usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/blocks.py")
 
 
 def _src():

@@ -41,8 +41,8 @@ TEST_FILE = "tests/test_a_refusal_names_the_row_not_the_key.py"
 
 _CFG = "usr/lib/shani-chronoa/shani_chronoa/config.py"
 _CAP = "usr/lib/shani-chronoa/shani_chronoa/capabilities.py"
-_COMMON = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/common.py"
-_SENSES = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/senses.py"
+_COMMON = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/surfaces/common.py"
+_SENSES = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/surfaces/senses.py"
 
 MUTATIONS = [
     # -- the shipped defect, restored verbatim ------------------------------

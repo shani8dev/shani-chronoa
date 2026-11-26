@@ -1,23 +1,5 @@
-"""Main application module for Shani Chronoa.
-
-Orchestrates the STT, LLM, TTS, GUI, and MCP components.
-"""
-
-# The package's public API - every name the module had, from where it now lives.
-from .voice import (  # noqa: F401
-    _is_echo,
-)
-from .common import (  # noqa: F401
-    _set_log_level,
-)
-from .application import (  # noqa: F401
-    ChronoaApplication,
-    launch_paths,
-    main,
-)
-from .voice import VoiceMixin  # noqa: F401
-from .brain import BrainMixin  # noqa: F401
-from .conversation import ConversationMixin  # noqa: F401
-from .desktop_integration import DesktopIntegrationMixin  # noqa: F401
-from shani_chronoa import stt_provision  # noqa: F401
-from shani_chronoa import conversation_store  # noqa: F401
+"""Compatibility shim: shani_chronoa.app moved to shani_chronoa.ui_gtk.app."""
+from shani_chronoa.ui_gtk import app as _real
+_g = globals()
+_g.update({k: v for k, v in vars(_real).items() if not k.startswith("__")})
+del _g, _real

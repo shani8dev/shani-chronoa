@@ -13,7 +13,7 @@ The set is the ways the id can come back.
 
 TEST_FILE = "tests/test_no_panel_names_a_sense_by_its_id.py"
 
-_PRIVACY = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/privacy.py"
+_PRIVACY = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/surfaces/privacy.py"
 
 MUTATIONS = [
     {

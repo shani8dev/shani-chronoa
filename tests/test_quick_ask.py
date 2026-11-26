@@ -202,7 +202,7 @@ class TestTheNoAudioPromises:
         clicking anything, so this is checked against the code - docstrings
         stripped, or the words explaining the rule would match the rule's own
         keywords."""
-        code = _code_without_docstrings(_REPO / "usr/lib/shani-chronoa/shani_chronoa/gui/quick_ask.py")
+        code = _code_without_docstrings(_REPO / "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/quick_ask.py")
         for forbidden in ("tts", "synthesize", "speak", "pw-record", "pw-play",
                           "arecord", "aplay", "listening", "AudioRecorder", "record"):
             assert forbidden not in code, forbidden

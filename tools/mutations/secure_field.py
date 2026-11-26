@@ -43,7 +43,7 @@ hang.
 
 TEST_FILE = "tests/test_injection_never_types_into_a_secret.py"
 
-_UI = "usr/lib/shani-chronoa/shani_chronoa/ui_driver.py"
+_UI = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/ui_driver.py"
 
 _ROLES = '_SECURE_ROLES = ("password text", "password", "pin")'
 

@@ -42,7 +42,7 @@ where it lives.
 
 TEST_FILE = "tests/test_mascot.py"
 
-_MASCOT = "usr/lib/shani-chronoa/shani_chronoa/mascot.py"
+_MASCOT = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/mascot.py"
 
 # The bearing guard as the function spells it, both lines - one anchor for one
 # edit, because `tools/mutate.py` applies a pair in order and would report the

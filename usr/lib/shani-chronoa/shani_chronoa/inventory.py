@@ -181,10 +181,11 @@ def _status(limit: int) -> dict:
     """Which engines are ready, without starting any of them."""
     from shani_chronoa import local_llm, stt, tts
     from shani_chronoa.config import ChronoaConfig
+    from shani_chronoa.engine_ops.models import answering_model
 
     config = ChronoaConfig()
     return {
-        "llm_model": config.model,
+        "llm_model": answering_model(config),
         "llm_installed": local_llm.installed(),
         "stt_available": stt.WhisperSTT().is_available(),
         "tts_engine": tts.PiperTTS().engine(),

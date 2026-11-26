@@ -1,0 +1,1967 @@
+{
+  "settings": {
+    "model-download-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Model download enabled",
+      "summary": "Allow downloading a model on first use",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "speech-rate": {
+      "type": "d",
+      "default": 1.0,
+      "label": "Speech rate",
+      "summary": "How fast Chronoa speaks",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "tts-pitch": {
+      "type": "d",
+      "default": 0.0,
+      "label": "Tts pitch",
+      "summary": "Shift the voice's pitch, in semitones",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "tts-tempo": {
+      "type": "d",
+      "default": 1.0,
+      "label": "Tts tempo",
+      "summary": "Speed the voice up or slow it down, keeping its pitch",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "voice-style": {
+      "type": "s",
+      "default": "natural",
+      "label": "Voice style",
+      "summary": "A named voice character",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "reply-style": {
+      "type": "s",
+      "default": "ordinary",
+      "label": "Reply style",
+      "summary": "How a reply is paced",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "thinking": {
+      "type": "s",
+      "default": "off",
+      "label": "Thinking",
+      "summary": "How hard the model thinks before answering",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "answer-mode": {
+      "type": "s",
+      "default": "local",
+      "label": "Answer mode",
+      "summary": "Where answers come from",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "tts-rate": {
+      "type": "d",
+      "default": 1.0,
+      "label": "Tts rate",
+      "summary": "Resample: change speed and pitch together",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "end-of-speech-pause": {
+      "type": "d",
+      "default": 1.2,
+      "label": "End of speech pause",
+      "summary": "Pause that ends what you are saying, in seconds",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "sound-cues-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Sound cues enabled",
+      "summary": "Play a short sound when Chronoa starts listening or did not understand",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "follow-up-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Follow up enabled",
+      "summary": "Listen for a follow-up after a spoken reply",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "setup-dismissed": {
+      "type": "b",
+      "default": false,
+      "label": "Setup dismissed",
+      "summary": "The setup window was closed before it was finished",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "setup-complete": {
+      "type": "b",
+      "default": false,
+      "label": "Setup complete",
+      "summary": "First-run setup has been finished",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "setup-mode": {
+      "type": "s",
+      "default": "local",
+      "label": "Setup mode",
+      "summary": "Where setup was pointed: on this computer, or in the cloud",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "model": {
+      "type": "s",
+      "default": "",
+      "label": "Model",
+      "summary": "LLM model override",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "vision-model": {
+      "type": "s",
+      "default": "",
+      "label": "Vision model",
+      "summary": "Vision model override",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "hardware-profile": {
+      "type": "s",
+      "default": "auto",
+      "label": "Hardware profile",
+      "summary": "Hardware profile for model selection",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "privacy-mode": {
+      "type": "b",
+      "default": false,
+      "label": "Privacy mode",
+      "summary": "Enable privacy-first local-only mode",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "whisper-model": {
+      "type": "s",
+      "default": "base",
+      "label": "Whisper model",
+      "summary": "Whisper.cpp model override",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "stt-backend": {
+      "type": "s",
+      "default": "whisper",
+      "label": "Stt backend",
+      "summary": "Local speech-to-text engine",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "extra-languages": {
+      "type": "s",
+      "default": "",
+      "label": "Extra languages",
+      "summary": "Languages besides English",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "piper-voice": {
+      "type": "s",
+      "default": "en_US-lessac-medium",
+      "label": "Piper voice",
+      "summary": "Piper TTS voice to use",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "kokoro-voice": {
+      "type": "s",
+      "default": "af_sarah",
+      "label": "Kokoro voice",
+      "summary": "Kokoro voice",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "piper-tts-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Piper tts enabled",
+      "summary": "Speak with Piper when it is installed",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "voice-clone-voice": {
+      "type": "s",
+      "default": "",
+      "label": "Voice clone voice",
+      "summary": "Which recorded voice to speak with",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "voice-clone-enabled": {
+      "type": "b",
+      "default": false,
+      "label": "Clone a recorded voice",
+      "summary": "Let Chronoa speak with a recorded voice",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "kokoro-tts-enabled": {
+      "type": "b",
+      "default": false,
+      "label": "Use the Kokoro neural voice",
+      "summary": "Speak with the Kokoro neural voice",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "ollama-host": {
+      "type": "s",
+      "default": "http://localhost:11434",
+      "label": "Ollama host",
+      "summary": "Ollama server host URL",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "auto-start": {
+      "type": "b",
+      "default": true,
+      "label": "Auto start",
+      "summary": "Auto-start on login",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "start-hidden-at-login": {
+      "type": "b",
+      "default": false,
+      "label": "Start hidden at login",
+      "summary": "Start hidden at login",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "speak-replies": {
+      "type": "b",
+      "default": true,
+      "label": "Speak replies",
+      "summary": "Speak replies aloud",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "notification-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Spoken replies and notifications",
+      "summary": "Enable spoken replies and timer notifications",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "language": {
+      "type": "s",
+      "default": "en",
+      "label": "Language",
+      "summary": "Interface and processing language",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "debug-mode": {
+      "type": "b",
+      "default": false,
+      "label": "Debug mode",
+      "summary": "Enable debug logging",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "wake-word-enabled": {
+      "type": "b",
+      "default": false,
+      "label": "Wake word enabled",
+      "summary": "Enable hands-free wake-word activation",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "wake-phrase": {
+      "type": "s",
+      "default": "hey chronoa",
+      "label": "Wake phrase",
+      "summary": "Wake phrase to listen for",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "cloud-fallback-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Cloud fallback when no local model answers",
+      "summary": "Allow falling back to a free cloud LLM when no local model answers",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "gateways": {
+      "type": "s",
+      "default": "",
+      "label": "Gateways",
+      "summary": "Inbound channels that may send text to Chronoa, by name",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "cloud-stt-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Cloud speech recognition",
+      "summary": "Allow cloud speech recognition when no local speech model is installed",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "cloud-tts-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Cloud speech synthesis",
+      "summary": "Allow cloud speech synthesis when no local neural voice is installed",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "custom-llm-base-url": {
+      "type": "s",
+      "default": "",
+      "label": "Custom llm base url",
+      "summary": "Any OpenAI-compatible endpoint to use as a cloud LLM",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "custom-llm-model": {
+      "type": "s",
+      "default": "",
+      "label": "Custom llm model",
+      "summary": "Model name to ask a custom endpoint for",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "custom-llm-api-key": {
+      "type": "s",
+      "default": "",
+      "label": "Custom llm api key",
+      "summary": "Bearer token for a custom endpoint, if it wants one",
+      "consent": false,
+      "destructive": false,
+      "secret": true
+    },
+    "barge-in-vad-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Barge in vad enabled",
+      "summary": "Interrupt spoken replies as soon as you start talking",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "audio-input-device": {
+      "type": "s",
+      "default": "",
+      "label": "Audio input device",
+      "summary": "PipeWire node name to record from",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "audio-output-device": {
+      "type": "s",
+      "default": "",
+      "label": "Audio output device",
+      "summary": "PipeWire node name to play through",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "llm7-api-key": {
+      "type": "s",
+      "default": "",
+      "label": "Llm7 api key",
+      "summary": "Optional LLM7 API key (BYOK)",
+      "consent": false,
+      "destructive": false,
+      "secret": true
+    },
+    "llm7-model": {
+      "type": "s",
+      "default": "",
+      "label": "Llm7 model",
+      "summary": "LLM7 model Chronoa answers with",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "kilo-api-key": {
+      "type": "s",
+      "default": "",
+      "label": "Kilo api key",
+      "summary": "Optional Kilo Gateway API key (BYOK)",
+      "consent": false,
+      "destructive": false,
+      "secret": true
+    },
+    "kilo-model": {
+      "type": "s",
+      "default": "",
+      "label": "Kilo model",
+      "summary": "Kilo Gateway model Chronoa answers with",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "blockrun-api-key": {
+      "type": "s",
+      "default": "",
+      "label": "Blockrun api key",
+      "summary": "Optional BlockRun API key (BYOK)",
+      "consent": false,
+      "destructive": false,
+      "secret": true
+    },
+    "blockrun-model": {
+      "type": "s",
+      "default": "",
+      "label": "Blockrun model",
+      "summary": "BlockRun model Chronoa answers with",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "openai-api-key": {
+      "type": "s",
+      "default": "",
+      "label": "Openai api key",
+      "summary": "OpenAI API key",
+      "consent": false,
+      "destructive": false,
+      "secret": true
+    },
+    "openai-model": {
+      "type": "s",
+      "default": "",
+      "label": "Openai model",
+      "summary": "OpenAI model Chronoa answers with",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "anthropic-api-key": {
+      "type": "s",
+      "default": "",
+      "label": "Anthropic api key",
+      "summary": "Anthropic API key",
+      "consent": false,
+      "destructive": false,
+      "secret": true
+    },
+    "anthropic-model": {
+      "type": "s",
+      "default": "",
+      "label": "Anthropic model",
+      "summary": "Anthropic model Chronoa answers with",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "google-api-key": {
+      "type": "s",
+      "default": "",
+      "label": "Google api key",
+      "summary": "Google Gemini API key",
+      "consent": false,
+      "destructive": false,
+      "secret": true
+    },
+    "google-model": {
+      "type": "s",
+      "default": "",
+      "label": "Google model",
+      "summary": "Google Gemini model Chronoa answers with",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "groq-api-key": {
+      "type": "s",
+      "default": "",
+      "label": "Groq api key",
+      "summary": "Groq API key",
+      "consent": false,
+      "destructive": false,
+      "secret": true
+    },
+    "groq-model": {
+      "type": "s",
+      "default": "",
+      "label": "Groq model",
+      "summary": "Groq model Chronoa answers with",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "sarvam-api-key": {
+      "type": "s",
+      "default": "",
+      "label": "Sarvam api key",
+      "summary": "Sarvam API key",
+      "consent": false,
+      "destructive": false,
+      "secret": true
+    },
+    "openrouter-api-key": {
+      "type": "s",
+      "default": "",
+      "label": "Openrouter api key",
+      "summary": "OpenRouter API key",
+      "consent": false,
+      "destructive": false,
+      "secret": true
+    },
+    "sarvam-model": {
+      "type": "s",
+      "default": "",
+      "label": "Sarvam model",
+      "summary": "Sarvam model Chronoa answers with",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "openrouter-model": {
+      "type": "s",
+      "default": "",
+      "label": "Openrouter model",
+      "summary": "OpenRouter model Chronoa answers with",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "opencode-zen-api-key": {
+      "type": "s",
+      "default": "",
+      "label": "Opencode zen api key",
+      "summary": "OpenCode Zen API key",
+      "consent": false,
+      "destructive": false,
+      "secret": true
+    },
+    "opencode-zen-model": {
+      "type": "s",
+      "default": "",
+      "label": "Opencode zen model",
+      "summary": "OpenCode Zen model Chronoa answers with",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "vision-sense-enabled": {
+      "type": "b",
+      "default": false,
+      "label": "Take and describe photos",
+      "summary": "Let Chronoa see the screen",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "ocr-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Ocr sense enabled",
+      "summary": "Let Chronoa read text from images",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "filesystem-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Files and folders",
+      "summary": "Let Chronoa read files",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "web-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Web search",
+      "summary": "Let Chronoa retrieve web content",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "gpu-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Gpu sense enabled",
+      "summary": "Graphics",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "polkitpolicy-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Polkitpolicy sense enabled",
+      "summary": "Let Chronoa report what you may do without a password",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "security-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Firmware security",
+      "summary": "Firmware security",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "devices-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Devices sense enabled",
+      "summary": "Let Chronoa inventory the hardware buses",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "audio-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Audio sense enabled",
+      "summary": "Audio devices",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "capture-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Capture sense enabled",
+      "summary": "Let Chronoa read the capture devices and who is holding them",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "screen-capture-excluded-apps": {
+      "type": "s",
+      "default": "",
+      "label": "Screen capture excluded apps",
+      "summary": "Applications that must never appear in a screen capture",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "heard-sound-sense-enabled": {
+      "type": "b",
+      "default": false,
+      "label": "Let Chronoa name a sound when you ask",
+      "summary": "Let Chronoa listen for sounds in the room, like a doorbell",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "printing-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Printing sense enabled",
+      "summary": "Let Chronoa read which printers and scanners this machine has",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "cpu-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Cpu sense enabled",
+      "summary": "Let Chronoa read processor and load state",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "storage-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Disks",
+      "summary": "Let Chronoa read disk inventory",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "power-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Power sense enabled",
+      "summary": "Let Chronoa read battery and power state",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "memory-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Memory sense enabled",
+      "summary": "Let Chronoa remember things between sessions",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "hearing-sense-enabled": {
+      "type": "b",
+      "default": false,
+      "label": "Hearing sense enabled",
+      "summary": "Let Chronoa hear what you say",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "privilege-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Privilege sense enabled",
+      "summary": "Let Chronoa report which programs hold elevated Linux capabilities",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "display-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Display sense enabled",
+      "summary": "Let Chronoa read the screen's brightness and output state",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "network-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Network sense enabled",
+      "summary": "Let Chronoa read local network interface state",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "dnsresolvers-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Dnsresolvers sense enabled",
+      "summary": "Let Chronoa report how this machine resolves names",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "wirelesslink-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Wirelesslink sense enabled",
+      "summary": "Let Chronoa read this machine's own WiFi link",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "labnetworks-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Labnetworks sense enabled",
+      "summary": "Let Chronoa report which lab networks exist",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "idle-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Idle sense enabled",
+      "summary": "Let Chronoa read how long since this machine was last used",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "accessibility-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Accessibility sense enabled",
+      "summary": "Let Chronoa list the applications the desktop exposes on its accessibility bus",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "bluetooth-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Bluetooth sense enabled",
+      "summary": "Let Chronoa list paired and nearby Bluetooth devices",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "rfsense-sense-enabled": {
+      "type": "b",
+      "default": false,
+      "label": "Rfsense sense enabled",
+      "summary": "Let Chronoa sample the WiFi link and notice movement",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "home-place": {
+      "type": "s",
+      "default": "",
+      "label": "Home place",
+      "summary": "Home place, for weather when this computer cannot locate itself",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "location-sense-enabled": {
+      "type": "b",
+      "default": false,
+      "label": "Location",
+      "summary": "Let Chronoa find where this computer is",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "thermalgrid-sense-enabled": {
+      "type": "b",
+      "default": false,
+      "label": "Thermalgrid sense enabled",
+      "summary": "Let Chronoa read a thermal camera array if one is attached",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "hwmon-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Temperatures, fans and power",
+      "summary": "Let Chronoa read the machine's hardware monitoring sensors",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "modelfit-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Modelfit sense enabled",
+      "summary": "Let Chronoa check which language models this machine can actually run",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "mount-control-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa mount disks — still asks before each action",
+      "summary": "Let Chronoa mount and unmount filesystems",
+      "consent": true,
+      "destructive": true,
+      "secret": false
+    },
+    "idle-timeout-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa change when the screen blanks",
+      "summary": "Let Chronoa change when the screen blanks",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "sleep-inhibit-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa hold the machine awake",
+      "summary": "Let Chronoa hold the machine awake",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "appearance-control-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa change the desktop look",
+      "summary": "Let Chronoa change the desktop appearance",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "timezone-control-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa change the timezone",
+      "summary": "Let Chronoa change the system timezone",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "default-apps-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa change which apps open files",
+      "summary": "Let Chronoa change which apps open your files",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "print-control-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa cancel print jobs",
+      "summary": "Let Chronoa cancel print jobs",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "hostname-control-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa rename this computer",
+      "summary": "Let Chronoa rename this computer",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "locale-control-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa change the language and formats",
+      "summary": "Let Chronoa change the system language and formats",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "speed-test-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa run speed tests",
+      "summary": "Let Chronoa run internet speed tests",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "bluetooth-control-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa switch Bluetooth",
+      "summary": "Let Chronoa switch the Bluetooth adapter",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "bluetooth-call-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa call through your paired phone",
+      "summary": "Let Chronoa make and answer calls on your paired phone",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "landline-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa use your JioFiber landline",
+      "summary": "Let Chronoa use your JioFiber landline",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "mascot-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Mascot enabled",
+      "summary": "Show the Chronoa desktop companion",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "mascot-sounds": {
+      "type": "b",
+      "default": false,
+      "label": "Mascot sounds",
+      "summary": "Play the mascot's little sounds",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "mascot-sounds-volume": {
+      "type": "d",
+      "default": 0.6,
+      "label": "Mascot sounds volume",
+      "summary": "Volume of the mascot's sounds",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "mascot-corner": {
+      "type": "s",
+      "default": "\"top-center\"",
+      "label": "Mascot corner",
+      "summary": "Where the companion lives",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "bluetooth-gatt-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa read your Bluetooth devices",
+      "summary": "Let Chronoa read your Bluetooth devices",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "bluetooth-media-remote-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Bluetooth media remote enabled",
+      "summary": "Let Bluetooth remotes control music on this computer",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "phone-remote-enabled": {
+      "type": "b",
+      "default": false,
+      "label": "Let my phone pair this computer as a Bluetooth keyboard",
+      "summary": "Let my phone pair this computer as a Bluetooth keyboard",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "watch-companion-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Watch companion enabled",
+      "summary": "Keep my watch connected to this computer",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "watch-nowplaying-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Watch nowplaying enabled",
+      "summary": "Show what this computer is playing on my watch",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "watch-weather-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Watch weather enabled",
+      "summary": "Send this computer's weather to my watch",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "fm-radio-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa tune an FM radio",
+      "summary": "Let Chronoa tune an FM radio receiver",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "lan-phone-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa find phones on the same Wi-Fi",
+      "summary": "Let Chronoa find phones on the same Wi-Fi network",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "screen-share-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa share this screen with a phone",
+      "summary": "Let Chronoa share this screen with a phone",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "file-index-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa index and search your own files",
+      "summary": "Let Chronoa index and search your own files by meaning",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "meeting-enabled": {
+      "type": "b",
+      "default": false,
+      "label": "Let Chronoa record a whole meeting",
+      "summary": "Let Chronoa record a whole meeting",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "ir-remote-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa send and receive infrared",
+      "summary": "Let Chronoa send and receive infrared remote-control codes",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "nfc-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa read and write NFC tags",
+      "summary": "Let Chronoa read and write NFC tags",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "mic-control-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa mute the microphone",
+      "summary": "Let Chronoa mute the microphone",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "screen-lock-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa lock this session",
+      "summary": "Let Chronoa lock this session",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "trash-empty-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa empty the trash — still asks before each action",
+      "summary": "Let Chronoa empty the trash",
+      "consent": true,
+      "destructive": true,
+      "secret": false
+    },
+    "service-control-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa change system services — still asks before each action",
+      "summary": "Let Chronoa change system services",
+      "consent": true,
+      "destructive": true,
+      "secret": false
+    },
+    "bulk-edit-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa edit many files at once — still asks before each action",
+      "summary": "Let Chronoa edit many files at once",
+      "consent": true,
+      "destructive": true,
+      "secret": false
+    },
+    "run-command-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa run commands in your project — still asks before each action",
+      "summary": "Let Chronoa run commands in your project",
+      "consent": true,
+      "destructive": true,
+      "secret": false
+    },
+    "mcp-client-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa use tools from MCP servers",
+      "summary": "Let Chronoa use tools from MCP servers",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "mcp-servers": {
+      "type": "s",
+      "default": "",
+      "label": "Mcp servers",
+      "summary": "MCP servers whose tools Chronoa may use",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "project-dir": {
+      "type": "s",
+      "default": "",
+      "label": "Project dir",
+      "summary": "The project folder Build mode works in",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "git-write-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa record commits and branches",
+      "summary": "Let Chronoa record commits and branches",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "git-push-enabled": {
+      "type": "b",
+      "default": false,
+      "label": "Let Chronoa push a branch to a remote",
+      "summary": "Let Chronoa push a branch to a remote",
+      "consent": true,
+      "destructive": true,
+      "secret": false
+    },
+    "cleanup-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa clear caches and unused Flatpak runtimes",
+      "summary": "Let Chronoa clear caches and unused Flatpak runtimes",
+      "consent": true,
+      "destructive": true,
+      "secret": false
+    },
+    "usb-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "USB devices",
+      "summary": "Let Chronoa read the USB devices attached to this machine",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "coredumps-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Crashes",
+      "summary": "Let Chronoa report programs that crashed",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "firewall-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Firewall sense enabled",
+      "summary": "Let Chronoa report whether a firewall is actually enforcing",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "updates-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Updates sense enabled",
+      "summary": "Let Chronoa check for waiting package updates",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "comms-typing-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa type into chat and mail windows",
+      "summary": "Let Chronoa type into chat and mail windows",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "ui-require-verified-focus": {
+      "type": "b",
+      "default": false,
+      "label": "Only type into a known field",
+      "summary": "Only type into a known field",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "monitoring-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Who is capturing on this machine",
+      "summary": "Let Chronoa report who is capturing on this machine",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "faults-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Faults sense enabled",
+      "summary": "Let Chronoa read recent system errors",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "snapshots-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Rollback points",
+      "summary": "Let Chronoa list rollback points",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "ups-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Ups sense enabled",
+      "summary": "Let Chronoa report whether the machine is on mains or on a UPS",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "sessions-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Who is on this machine",
+      "summary": "Let Chronoa see who else is on this machine",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "resources-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Resources sense enabled",
+      "summary": "Let Chronoa check for resources running out",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "filesystems-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Filesystems and room",
+      "summary": "Let Chronoa read what is mounted and how much room is left",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "services-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Services sense enabled",
+      "summary": "Let Chronoa read which system services have failed",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "timebase-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Timebase sense enabled",
+      "summary": "Let Chronoa check whether the system clock is trustworthy",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "hardware-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Hardware sense enabled",
+      "summary": "Let Chronoa identify this machine",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "kernel-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Kernel sense enabled",
+      "summary": "Let Chronoa read which kernel this booted with",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "cgroup-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Cgroup sense enabled",
+      "summary": "Let Chronoa read the limits this process is held to",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "containers-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Containers",
+      "summary": "Let Chronoa report what containers are running",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "listeners-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Listeners sense enabled",
+      "summary": "Let Chronoa list what is listening on this machine's ports",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "stale-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Stale sense enabled",
+      "summary": "Let Chronoa check for programs running after being replaced",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "git-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Git working trees",
+      "summary": "Let Chronoa read your git working tree",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "boots-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Boot history",
+      "summary": "Let Chronoa read this machine's boot history",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "fswatch-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa watch files for changes",
+      "summary": "Let Chronoa watch files for changes",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "failure-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa act on system failures",
+      "summary": "Let Chronoa act on system failures",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "expiry-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa watch stored deadlines",
+      "summary": "Let Chronoa watch stored deadlines",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "containerrun-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa act on container runs",
+      "summary": "Let Chronoa act on container runs",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "unithealth-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa watch system units",
+      "summary": "Let Chronoa watch system units",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "screenlock-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa act when the screen locks",
+      "summary": "Let Chronoa act when the screen locks",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "powerstate-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa act on power changes",
+      "summary": "Let Chronoa act on power changes",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "netstate-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa act on network changes",
+      "summary": "Let Chronoa act on network changes",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "usbplug-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa act on USB devices",
+      "summary": "Let Chronoa act on USB devices",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "btconnect-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa act on Bluetooth devices",
+      "summary": "Let Chronoa act on Bluetooth devices",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "schedule-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa act on a schedule",
+      "summary": "Let Chronoa act on a schedule",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "sleepwake-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa act when the machine wakes",
+      "summary": "Let Chronoa act when the machine wakes",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "audiodevice-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa act on audio devices",
+      "summary": "Let Chronoa act on audio devices",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "journalmatch-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa act on log messages",
+      "summary": "Let Chronoa act on log messages",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "dbusprop-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa watch system properties",
+      "summary": "Let Chronoa watch system properties",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "document-search-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa search inside your files",
+      "summary": "Let Chronoa search inside your files",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "calendar-read-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa read your calendar",
+      "summary": "Let Chronoa read your calendar",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "calendar-write-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa change your calendar",
+      "summary": "Let Chronoa change your calendar",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "calendar-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa act before calendar events",
+      "summary": "Let Chronoa act before calendar events",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "container-control-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa run containers",
+      "summary": "Let Chronoa run containers",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "vm-control-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa run and drive virtual machines",
+      "summary": "Let Chronoa run and drive virtual machines",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "phone-control-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa use your paired phone",
+      "summary": "Let Chronoa use your paired phone",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "phone-messages-read-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa read your phone's text messages",
+      "summary": "Let Chronoa read your phone's text messages",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "phone-messages-send-enabled": {
+      "type": "b",
+      "default": false,
+      "label": "Let Chronoa send texts and place calls from your phone",
+      "summary": "Let Chronoa send text messages and place calls from your phone",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "phone-sense-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa act on your phone connecting",
+      "summary": "Let Chronoa act on your phone connecting",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "sound-sense-enabled": {
+      "type": "b",
+      "default": false,
+      "label": "Sound sense enabled",
+      "summary": "Let Chronoa listen for sounds like the doorbell",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "organ-audible-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Organ audible enabled",
+      "summary": "Play a short tone when Chronoa starts using one of its senses",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "background-mode-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Background mode enabled",
+      "summary": "Keep Chronoa's automatic rules running in the background",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "global-shortcut-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Talk to Chronoa with a keyboard shortcut",
+      "summary": "Talk to Chronoa with a keyboard shortcut",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "global-shortcut": {
+      "type": "s",
+      "default": "CTRL+ALT+space",
+      "label": "Global shortcut",
+      "summary": "The shortcut Chronoa asks for",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "radio-control-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa switch airplane mode",
+      "summary": "Let Chronoa switch airplane mode",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "file-delete-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa delete files — still asks before each action",
+      "summary": "Let Chronoa delete files",
+      "consent": true,
+      "destructive": true,
+      "secret": false
+    },
+    "process-kill-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa stop processes — still asks before each action",
+      "summary": "Let Chronoa stop processes",
+      "consent": true,
+      "destructive": true,
+      "secret": false
+    },
+    "app-install-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa install and remove apps",
+      "summary": "Let Chronoa install and remove apps",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "power-control-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa suspend, restart or shut down — still asks before each action",
+      "summary": "Let Chronoa suspend, restart or shut down",
+      "consent": true,
+      "destructive": true,
+      "secret": false
+    },
+    "window-close-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa close windows — still asks before each action",
+      "summary": "Let Chronoa close windows",
+      "consent": true,
+      "destructive": true,
+      "secret": false
+    },
+    "wifi-connect-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa change WiFi",
+      "summary": "Let Chronoa change WiFi connections",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "network-provision-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa build lab networks",
+      "summary": "Let Chronoa build and remove local lab networks",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "packet-capture-enabled": {
+      "type": "b",
+      "default": false,
+      "label": "Let Chronoa watch network packets",
+      "summary": "Let Chronoa watch the packets crossing a network interface",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "input-control-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa act",
+      "summary": "Let Chronoa control the pointer and keyboard",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "file-edit-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa edit your files",
+      "summary": "Let Chronoa edit your files",
+      "consent": true,
+      "destructive": true,
+      "secret": false
+    },
+    "driver-build-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa compile a kernel module",
+      "summary": "Let Chronoa compile a kernel module",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "i2c-write-enabled": {
+      "type": "b",
+      "default": false,
+      "label": "Let Chronoa write to a device",
+      "summary": "Let Chronoa write to a device register",
+      "consent": true,
+      "destructive": true,
+      "secret": false
+    },
+    "todo-list-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa keep a task list",
+      "summary": "Let Chronoa keep a task list",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "goals-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa keep multi-step goals",
+      "summary": "Let Chronoa keep multi-step goals",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "email-read-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa read your email",
+      "summary": "Let Chronoa read your email",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "email-send-enabled": {
+      "type": "b",
+      "default": false,
+      "label": "Let Chronoa send email",
+      "summary": "Let Chronoa send email",
+      "consent": true,
+      "destructive": false,
+      "secret": false
+    },
+    "trigger-control-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Let Chronoa arm automatic rules",
+      "summary": "Let Chronoa arm automatic rules",
+      "consent": true,
+      "destructive": true,
+      "secret": false
+    },
+    "sandbox-command-memory-mb": {
+      "type": "d",
+      "default": 2048.0,
+      "label": "Sandbox command memory mb",
+      "summary": "Memory a project command may use (MB)",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "sandbox-command-timeout": {
+      "type": "d",
+      "default": 600.0,
+      "label": "Sandbox command timeout",
+      "summary": "How long a project command may run (seconds)",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "sandbox-command-cores": {
+      "type": "d",
+      "default": 4.0,
+      "label": "Sandbox command cores",
+      "summary": "CPU cores' worth of time a project command may use",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "sandbox-command-low-priority": {
+      "type": "b",
+      "default": true,
+      "label": "Sandbox command low priority",
+      "summary": "Run project commands at low priority",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    },
+    "sandbox-seccomp-enabled": {
+      "type": "b",
+      "default": true,
+      "label": "Restrict tools to a seccomp sandbox",
+      "summary": "Filter the syscalls a sandboxed skill may make",
+      "consent": false,
+      "destructive": false,
+      "secret": false
+    }
+  },
+  "version": 1
+}

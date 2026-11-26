@@ -18,8 +18,8 @@ The set is the ways a file's name can come back.
 
 TEST_FILE = "tests/test_no_panel_names_a_file.py"
 
-_DIAGNOSTICS = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/diagnostics.py"
-_DESKTOP = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/desktop.py"
+_DIAGNOSTICS = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/surfaces/diagnostics.py"
+_DESKTOP = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/surfaces/desktop.py"
 _ORGANISM = "usr/lib/shani-chronoa/shani_chronoa/organism.py"
 
 MUTATIONS = [

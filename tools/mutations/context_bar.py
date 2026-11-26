@@ -11,7 +11,7 @@ breakdown that says what is filling the window.
 
 TEST_FILE = "tests/test_the_context_bar.py"
 
-_BAR = "usr/lib/shani-chronoa/shani_chronoa/gui/context_bar.py"
+_BAR = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/gui/context_bar.py"
 
 MUTATIONS = [
     {

@@ -1,7 +1,8 @@
 """Configuration module for Shani Chronoa.
 
-Handles GSettings schema loading, hardware-based model selection,
-and privacy controls.
+Handles the layered settings files, hardware-based model selection and privacy
+controls. Every caller goes through `ChronoaConfig`; only
+`settings_file.write_user` writes the person's file, atomically.
 """
 
 import logging
@@ -13,7 +14,7 @@ from urllib.parse import urlparse
 import gi
 
 gi.require_version("Gio", "2.0")
-from gi.repository import GLib, Gio
+from gi.repository import GLib
 
 from shani_chronoa.capabilities import gate_label
 
@@ -77,8 +78,12 @@ _DEFAULT_OLLAMA_HOST = "http://localhost:11434"
 try:
     gi.require_version("Secret", "1")
     from gi.repository import Secret  # type: ignore
-    _SECRET_SCHEMA = Secret.Schema.new("org.shani.chronoa.ApiKey", Secret.SchemaFlags.NONE,
-                                       {"key": Secret.SchemaAttributeType.STRING})
+
+    _SECRET_SCHEMA = Secret.Schema.new(
+        "org.shani.chronoa.ApiKey",
+        Secret.SchemaFlags.NONE,
+        {"key": Secret.SchemaAttributeType.STRING},
+    )
 except (ImportError, ValueError):  # no libsecret GIR
     Secret = None  # type: ignore[assignment]
     _SECRET_SCHEMA = None
@@ -87,7 +92,9 @@ except (ImportError, ValueError):  # no libsecret GIR
 def _is_secret(key: str) -> bool:
     # SHANI_CHRONOA_KEYRING=0: settings only (the hermetic test suite - it
     # must not read or write the real session keyring)
-    return key.endswith("-api-key") and os.environ.get("SHANI_CHRONOA_KEYRING", "1") != "0"
+    return (
+        key.endswith("-api-key") and os.environ.get("SHANI_CHRONOA_KEYRING", "1") != "0"
+    )
 
 
 def _adopt_legacy_group(keyfile: str) -> None:
@@ -122,7 +129,7 @@ def _adopt_legacy_group(keyfile: str) -> None:
         adopted = 0
         for key in kf.get_keys(_LEGACY_GROUP)[0]:
             if key in already:
-                continue          # the newer group already has an answer
+                continue  # the newer group already has an answer
             value = kf.get_string(_LEGACY_GROUP, key)
             kf.set_string(_ROOT_GROUP, key, value)
             adopted += 1
@@ -134,8 +141,12 @@ def _adopt_legacy_group(keyfile: str) -> None:
         # dropping the old copy is always right once it has been read.
         kf.remove_group(_LEGACY_GROUP)
         if adopted:
-            logger.info("migrated %d setting(s) from [%s] to [%s]",
-                        adopted, _LEGACY_GROUP, _ROOT_GROUP)
+            logger.info(
+                "migrated %d setting(s) from [%s] to [%s]",
+                adopted,
+                _LEGACY_GROUP,
+                _ROOT_GROUP,
+            )
         _atomic_write(keyfile, kf.to_data()[0])
     except GLib.Error:
         # An unreadable keyfile is not this function's decision to make: the
@@ -370,6 +381,13 @@ def _default_on(name: str, key: str) -> bool:
     the running schema does not declare, so it is also what an older installed
     schema falls back to.
     """
+    try:
+        from shani_chronoa import settings_table
+
+        if key in settings_table.KEYS:
+            return bool(settings_table.default_for(key))
+    except Exception:  # noqa: BLE001 - table not shipped yet; use the old sets
+        pass
     if key in frozenset(_SENSE_CONSENT_KEYS.values()):
         return name in _SENSE_DEFAULT_ENABLED
     return name in _EVENT_DEFAULT_ENABLED
@@ -418,45 +436,66 @@ _SENSE_CONSENT_ALIASES = {
 # sense reports that health was not determined rather than a clean bill of
 # health, and a missing tool must not be what decides a default. Everything
 # that captures or reads the user's world waits to be asked for.
-_SENSE_DEFAULT_ENABLED = frozenset({
-    "memory", "power", "storage", "network", "cpu", "gpu", "devices",
-    "audio", "display", "security",
-    # Default-on alongside `storage` and `cpu`: this is the machine's
-    # own state, and `services` reports only failures rather than the whole
-    # service list, so it is not the noise a default-on sense should avoid.
-    "filesystems", "services", "timebase", "usb", "resources",
-    # Default-on with the rest of the machine's own state: `updates` reads the
-    # local package database, `faults` reads the local journal, and `snapshots`
-    # reads the filesystem layout. None of them leaves the machine.
-    "updates", "faults", "snapshots", "coredumps", "firewall",
-    # Default-on with the rest of the machine's own state: whether utility power
-    # is present, and how much battery is left. Read from sysfs, which needs no
-    # binary, and an absent UPS reports absent rather than as a fault.
-    "ups",
-    # Default-on: the machine's own immutable and current facts. Identity, the
-    # running kernel, the limits this process is held to, and when it last
-    # booted. Each reads a kernel-owned value and none of them leaves the
-    # machine.
-    "hardware", "kernel", "cgroup", "boots",
-    # `containers`, `listeners` and `stale` were moved OFF here on 2026-09-30.
-    # They sat with the block above under the claim that they "read the kernel's
-    # own view of the machine", which measurement contradicts: `listeners`
-    # resolves each socket to an OWNER PROCESS NAME and PID, `stale` reports a
-    # per-PID EXECUTABLE PATH, and `containers` reports names and images. That is
-    # process identity and the user's work - which is why all three already
-    # declared themselves SENSITIVITY_PERSONAL and so contradicted the default
-    # they shipped with. `SENSITIVITY` is declared and enforced nowhere, so the
-    # default was the only thing deciding this. ("git" is off for the same
-    # class of reason - see `_SENSE_CONSENT_KEYS`.)
-    # `sessions` defaults OFF deliberately. It reports who *else* is on this
-    # machine and what is running as root outside the service tree - that is
-    # other people's presence, not this machine's own hardware, and it belongs to
-    # the "reads the user's world" side of the line rather than the "reports a
-    # disk-free reading" side. `git` defaults off for the same class of reason:
-    # uncommitted filenames and branch names are the user's work product.
-    #
-    # ("sessions" and "git" are intentionally absent from this frozenset.)
-})
+_SENSE_DEFAULT_ENABLED = frozenset(
+    {
+        "memory",
+        "power",
+        "storage",
+        "network",
+        "cpu",
+        "gpu",
+        "devices",
+        "audio",
+        "display",
+        "security",
+        # Default-on alongside `storage` and `cpu`: this is the machine's
+        # own state, and `services` reports only failures rather than the whole
+        # service list, so it is not the noise a default-on sense should avoid.
+        "filesystems",
+        "services",
+        "timebase",
+        "usb",
+        "resources",
+        # Default-on with the rest of the machine's own state: `updates` reads the
+        # local package database, `faults` reads the local journal, and `snapshots`
+        # reads the filesystem layout. None of them leaves the machine.
+        "updates",
+        "faults",
+        "snapshots",
+        "coredumps",
+        "firewall",
+        # Default-on with the rest of the machine's own state: whether utility power
+        # is present, and how much battery is left. Read from sysfs, which needs no
+        # binary, and an absent UPS reports absent rather than as a fault.
+        "ups",
+        # Default-on: the machine's own immutable and current facts. Identity, the
+        # running kernel, the limits this process is held to, and when it last
+        # booted. Each reads a kernel-owned value and none of them leaves the
+        # machine.
+        "hardware",
+        "kernel",
+        "cgroup",
+        "boots",
+        # `containers`, `listeners` and `stale` were moved OFF here on 2026-09-30.
+        # They sat with the block above under the claim that they "read the kernel's
+        # own view of the machine", which measurement contradicts: `listeners`
+        # resolves each socket to an OWNER PROCESS NAME and PID, `stale` reports a
+        # per-PID EXECUTABLE PATH, and `containers` reports names and images. That is
+        # process identity and the user's work - which is why all three already
+        # declared themselves SENSITIVITY_PERSONAL and so contradicted the default
+        # they shipped with. `SENSITIVITY` is declared and enforced nowhere, so the
+        # default was the only thing deciding this. ("git" is off for the same
+        # class of reason - see `_SENSE_CONSENT_KEYS`.)
+        # `sessions` defaults OFF deliberately. It reports who *else* is on this
+        # machine and what is running as root outside the service tree - that is
+        # other people's presence, not this machine's own hardware, and it belongs to
+        # the "reads the user's world" side of the line rather than the "reports a
+        # disk-free reading" side. `git` defaults off for the same class of reason:
+        # uncommitted filenames and branch names are the user's work product.
+        #
+        # ("sessions" and "git" are intentionally absent from this frozenset.)
+    }
+)
 
 # Input control is not a sense (it has no percept to emit), so it lives here
 # rather than in `_SENSE_CONSENT_KEYS`. It still needs the same fail-closed
@@ -476,222 +515,194 @@ def granted_consent_key() -> Optional[str]:
     return os.environ.get(CONSENT_GRANT_ENV) or None
 
 
-
 class ChronoaConfig:
-    """Configuration manager using GSettings.
+    """Configuration manager over the layered settings files.
 
-    Reads and writes through Gio.Settings' typed accessors (`get_string` /
-    `get_boolean`) rather than shelling out to the `gsettings` CLI, so
-    values are never GVariant-quoted and booleans are real Python bools.
-    A fresh instance reads the same persisted values the instance that
-    wrote them did - both share the GSettings backend (the keyfile backend
-    under the test harness, dconf on a real install).
+    Values come from one shipped table plus the vendor, admin and person
+    layers (`settings_file`). A fresh instance reads what a writer stored,
+    and a file edit made elsewhere is picked up by every instance. The API is
+    unchanged: callers still ask for strings, booleans and numbers by key.
     """
 
     def __init__(self) -> None:
-        self._settings: Optional[Gio.Settings] = None
+        self._settings = None  # kept for readers that used to ask for the backend
         self._valid_keys: frozenset[str] = frozenset()
         self._load_settings()
 
     def _load_settings(self) -> None:
-        """Load the GSettings object for the Chronoa schema.
+        """Adopt the shipped key list, migrate once, and watch for edits."""
+        from shani_chronoa import settings_file, settings_table
 
-        The schema is looked up through `SettingsSchemaSource` first because
-        `Gio.Settings.new()` aborts the process (GLib-GIO-ERROR, not a
-        catchable exception) when the schema is missing - the lookup lets us
-        degrade to Python defaults instead of crashing.
-        """
-        source = Gio.SettingsSchemaSource.get_default()
-        schema = source.lookup(SCHEMA_ID, True) if source is not None else None
-        if schema is None:
-            logger.warning("GSettings schema %s not found - using Python defaults", SCHEMA_ID)
-            self._settings = None
-            self._valid_keys = frozenset()
-            return
-        self._settings = self._new_settings()
-        self._valid_keys = frozenset(schema.list_keys())
+        settings_file.migrate_once()
+        self._valid_keys = frozenset(settings_table.KEYS)
+        settings_file.ensure_watched()  # one monitor per process; readers re-read
 
-    def _new_settings(self) -> Gio.Settings:
-        """Create the Gio.Settings object for this instance.
-
-        Under the test harness (`GSETTINGS_BACKEND=keyfile`) the default
-        backend is a process-wide singleton that caches the keyfile path
-        from its first use, so per-test `XDG_CONFIG_HOME` isolation would be
-        ignored and values would leak between tests. Creating an explicit
-        keyfile backend per instance at the current `XDG_CONFIG_HOME` makes
-        each instance deterministically read/write that test's store, and a
-        fresh instance over the same path still sees persisted values. On a
-        real install (no `GSETTINGS_BACKEND=keyfile`) the default backend
-        (dconf) is used so settings persist normally.
-
-        The backend is built with `_ROOT_GROUP`, the group spelling the
-        default backend uses - see the note beside it. Passing `SCHEMA_ID`
-        there instead made `gsettings get` unable to read anything this app
-        wrote.
-        """
-        if os.environ.get("GSETTINGS_BACKEND") == "keyfile":
-            config_home = os.environ.get("XDG_CONFIG_HOME") or os.path.join(
-                os.path.expanduser("~"), ".config"
-            )
-            keyfile = os.path.join(config_home, "glib-2.0", "settings", "keyfile")
-            _adopt_legacy_group(keyfile)
-            backend = Gio.keyfile_settings_backend_new(keyfile, SCHEMA_PATH, _ROOT_GROUP)
-            return Gio.Settings.new_with_backend(SCHEMA_ID, backend)
-        return Gio.Settings.new(SCHEMA_ID)
+    def _new_settings(self):
+        """No GSettings object exists any more; kept as a compatibility hook."""
+        return None
 
     def get(self, key: str, default: str = "") -> str:
-        """Get a string configuration value (schema type "s").
+        """A string value from the merged layers, never GVariant-quoted."""
+        from shani_chronoa import settings_file, settings_table
 
-        Returns `default` if the schema is unavailable or the key is not a
-        known string key. Values come back unquoted - Gio.Settings never
-        wraps them in the GVariant quotes the `gsettings` CLI prints.
-        """
-        if self._settings is None or key not in self._valid_keys:
+        if key not in self._valid_keys:
             return default
         if _is_secret(key):
             got = self._secret_get(key)
             if got is not None:
                 return got
-        value = self._settings.get_value(key)
-        if value.get_type_string() == "s":
-            return value.get_string()
-        return default
+        value = settings_file.get(key, default)
+        if str(settings_table.kind(key)).lower() not in (
+            "s",
+            "string",
+        ) or not isinstance(value, str):
+            return default if not isinstance(value, str) else value
+        return value
 
     # --- keyring (Secret Service) for *-api-key ---------------------------
     def _secret_get(self, key: str) -> Optional[str]:
-        """The key from the keyring (migrating a plaintext GSettings value
-        there first); None when no keyring is available."""
+        """The key from the keyring, moving a plaintext file value there once."""
         if _SECRET_SCHEMA is None:
             return None
         try:
+            from shani_chronoa import settings_file
+
             val = Secret.password_lookup_sync(_SECRET_SCHEMA, {"key": key}, None)
-            legacy = self._settings.get_string(key)
+            legacy = settings_file.get(key, "")
             if legacy:
                 if not val:
-                    Secret.password_store_sync(_SECRET_SCHEMA, {"key": key}, Secret.COLLECTION_DEFAULT,
-                                               f"Chronoa {key}", legacy, None)
+                    Secret.password_store_sync(
+                        _SECRET_SCHEMA,
+                        {"key": key},
+                        Secret.COLLECTION_DEFAULT,
+                        f"Chronoa {key}",
+                        legacy,
+                        None,
+                    )
                     val = legacy
-                self._settings.reset(key)  # no plaintext copy left behind
-                logger.info("Moved %s from settings to the keyring", key)
+                settings_file.set_value(key, "")
+                logger.info("Moved %s from the settings file to the keyring", key)
             return val or ""
         except Exception as e:  # no Secret Service on this session
-            logger.warning("Keyring unavailable (%s); %s stays in settings", type(e).__name__, key)
+            logger.warning(
+                "Keyring unavailable (%s); %s stays in settings", type(e).__name__, key
+            )
             return None
 
     def _secret_set(self, key: str, value: str) -> bool:
         if _SECRET_SCHEMA is None:
             return False
         try:
+            from shani_chronoa import settings_file
+
             if value:
-                Secret.password_store_sync(_SECRET_SCHEMA, {"key": key}, Secret.COLLECTION_DEFAULT,
-                                           f"Chronoa {key}", value, None)
+                Secret.password_store_sync(
+                    _SECRET_SCHEMA,
+                    {"key": key},
+                    Secret.COLLECTION_DEFAULT,
+                    f"Chronoa {key}",
+                    value,
+                    None,
+                )
             else:
                 Secret.password_clear_sync(_SECRET_SCHEMA, {"key": key}, None)
-            self._settings.reset(key)
+            settings_file.set_value(key, "")
             return True
         except Exception as e:
-            logger.warning("Keyring unavailable (%s); %s stays in settings", type(e).__name__, key)
+            logger.warning(
+                "Keyring unavailable (%s); %s stays in settings", type(e).__name__, key
+            )
             return False
 
     def setting_readable(self, key: str) -> bool:
-        """Whether `key` can actually be READ, as opposed to taking a default.
+        """Whether `key` is in the shipped table (a default is still a reading)."""
+        return key in self._valid_keys
 
-        `get_bool` answers `default` for a key the running schema does not
-        declare, and **a default is not a reading**. The distinction matters
-        wherever a default is not a safe answer.
+    def _canonical(self, key: str) -> str:
+        """A retired consent key resolves to the sense that absorbed it."""
+        from shani_chronoa import settings_file
 
-        `egress.privacy_mode_enabled()` is the case: its alarm has to fail
-        TOWARD privacy mode being on, because a broken settings store would
-        otherwise quietly disarm the invariant the audit log exists to defend -
-        a false alarm is a log line, and a missed breach is a user who
-        believes nothing left. Before `privacy-mode`'s default moved to `false`
-        (2026-10-19) that direction was reached *by accident*, because the
-        Python fallback happened to be `True`; with the fallback now `False`, a
-        machine whose schema was never compiled read as "privacy mode off" and
-        the alarm never fired at all.
-
-        So the reader asks the question it actually has: could this setting be
-        read, or is this a default standing in for one?
-        """
-        return self._settings is not None and key in self._valid_keys
+        for old, successors in settings_file._retired_map().items():
+            if key == old and successors[0] in self._valid_keys:
+                return successors[0]
+        return key
 
     def get_bool(self, key: str, default: bool = False) -> bool:
-        """Get a boolean configuration value (schema type "b").
+        """Boolean value from the layers, with the one-key consent grant honoured."""
+        from shani_chronoa import settings_file
 
-        A per-turn grant may open exactly one consent key, and only for the
-        process it was granted to. `SHANI_CHRONOA_CONSENT_GRANT` names a single
-        key - the one gating the tool the user just said yes to - and only that
-        key reads as open. Every other key, and every other process, sees the
-        stored value untouched.
-
-        The scope is the point. `get_bool` has 35 callers, and the same
-        `sense_allowed` that gates a web search is read by the scheduler, the
-        senses and the settings window. A grant that flipped a boolean outright
-        would leave a background sense running and a settings checkbox that
-        disagrees with what the process is doing - a UI that lies is worse than
-        a feature that is missing. Naming one key confines it to the tool call
-        the user actually approved.
-        """
+        key = self._canonical(key)
         if granted_consent_key() == key and key in self._valid_keys:
             logger.info("Consent key %s opened for this call by user grant", key)
             return True
-        if self._settings is None or key not in self._valid_keys:
+        if key not in self._valid_keys:
             return default
-        value = self._settings.get_value(key)
-        if value.get_type_string() == "b":
-            return value.get_boolean()
-        return default
+        value = settings_file.get(key, default)
+        return value if isinstance(value, bool) else default
 
     def get_double(self, key: str, default: float = 0.0) -> float:
-        """Get a number configuration value (schema type "d")."""
-        if self._settings is None or key not in self._valid_keys:
+        """Number value from the layers."""
+        from shani_chronoa import settings_file
+
+        if key not in self._valid_keys:
             return default
-        value = self._settings.get_value(key)
-        return value.get_double() if value.get_type_string() == "d" else default
+        value = settings_file.get(key, default)
+        return value if isinstance(value, (int, float)) else default
 
     def set(self, key: str, value: str, record: bool = True) -> None:
-        """Set a configuration value. Boolean keys accept "true"/"false" strings.
+        """Write one value into the person's layer, atomically.
 
-        The value is never logged (API keys in particular must not leak into
-        logs) and never passed through a subprocess - Gio.Settings writes
-        directly to the backend.
-
-        `record` journals the change in the undo ring (`undo_ring.py`) so a
-        settings change can be put back like a file edit can. A restore passes
-        `record=False`: journaling the restore itself would make "undo" a new
-        change and the ring would grow by one entry for every entry it spent.
-        Secret keys are never journalled.
+        Secrets go to the keyring when one exists; the value is never logged
+        or passed through a subprocess. Booleans and numbers are validated
+        against the shipped table before the write.
         """
-        if self._settings is None or key not in self._valid_keys:
-            logger.error("Unknown or unavailable setting key: %s", key)
-            return
+        from shani_chronoa import settings_file, settings_table
+
+        if key not in self._valid_keys:
+            # A retired consent key still grants the sense that absorbed it.
+            for old, successors in settings_file._retired_map().items():
+                if key == old and successors[0] in self._valid_keys:
+                    key = successors[0]
+                    break
+            else:
+                logger.error("Unknown or unavailable setting key: %s", key)
+                return
         if _is_secret(key) and self._secret_set(key, value):
             logger.debug("Set %s (keyring)", key)
             return
-        current = self._settings.get_value(key)
-        kind = current.get_type_string()
-        before = (str(current.get_boolean()).lower() if kind == "b"
-                  else str(current.get_double()) if kind == "d"
-                  else current.get_string())
-        if kind == "b":
-            self._settings.set_boolean(key, value == "true")
-        elif kind == "d":
+        kind = str(settings_table.kind(key)).lower()
+        before = settings_file.get(key, settings_table.default_for(key))
+        if kind in ("b", "bool"):
+            if str(value).strip().lower() not in ("true", "false"):
+                logger.error("Setting %s needs true or false", key)
+                return
+            written = str(value).strip().lower() == "true"
+        elif kind in ("d", "i", "number", "int"):
             try:
                 number = float(value)
             except (TypeError, ValueError):
                 logger.error("Setting %s needs a number", key)
                 return
-            low, high = {"speech-rate": (0.5, 2.0), "end-of-speech-pause": (0.5, 3.0),
-                         "sandbox-command-memory-mb": (512, 65536),
-                         "sandbox-command-timeout": (60, 7200),
-                         "sandbox-command-cores": (1, 256)}.get(key, (-1e9, 1e9))
-            self._settings.set_double(key, min(high, max(low, number)))
+            low, high = {
+                "speech-rate": (0.5, 2.0),
+                "end-of-speech-pause": (0.5, 3.0),
+                "sandbox-command-memory-mb": (512, 65536),
+                "sandbox-command-timeout": (60, 7200),
+                "sandbox-command-cores": (1, 256),
+            }.get(key, (-1e9, 1e9))
+            written = min(high, max(low, number))
         else:
-            self._settings.set_string(key, value)
+            written = str(value)
+        try:
+            settings_file.set_value(key, written)
+        except (KeyError, OSError, ValueError) as exc:
+            logger.error("Could not write %s: %s", key, exc)
+            return
         if record:
             try:
                 from shani_chronoa import undo_ring
-                undo_ring.record_setting(key, before, str(value))
+
+                undo_ring.record_setting(key, str(before), str(written))
             except Exception:  # noqa: BLE001 - journaling must never fail a set
                 logger.debug("could not journal setting %s", key, exc_info=True)
         logger.debug("Set %s", key)
@@ -791,7 +802,8 @@ class ChronoaConfig:
             return f"there is no '{sense}' sense"
         aliases = _SENSE_CONSENT_ALIASES.get(sense, ())
         granted = self.get_bool(key, _default_on(sense, key)) or any(
-            self.get_bool(alias, False) for alias in aliases)
+            self.get_bool(alias, False) for alias in aliases
+        )
         if not granted:
             # Name the live key only. Retired aliases are honoured in the
             # check above but have no row in the settings window, so naming one
@@ -814,7 +826,8 @@ class ChronoaConfig:
             # makes the privacy-mode sentence below end without one either.
             return (
                 f"the {sense} sense is turned off. "
-                f"Switch on \u201c{gate_label(key)}\u201d in Settings to use it")
+                f"Switch on \u201c{gate_label(key)}\u201d in Settings to use it"
+            )
         if sense in _NETWORKED_SENSES and self.privacy_mode:
             return (
                 f"the {sense} sense needs privacy mode off because it reaches "
@@ -956,6 +969,7 @@ class ChronoaConfig:
         is the request every engine was sending before this setting existed.
         """
         from shani_chronoa.cloud_llm import thinking_level
+
         return thinking_level(self.get("thinking", "off"))
 
     @property
@@ -1096,9 +1110,11 @@ class ChronoaConfig:
         These are **not** secrets, so unlike the keys they skip the keyring and
         live in GSettings.
         """
-        return {"%s_model" % (provider,): self.get(key, "")
-                for provider, key in MODEL_SETTINGS.items()
-                if self.get(key, "").strip()}
+        return {
+            "%s_model" % (provider,): self.get(key, "")
+            for provider, key in MODEL_SETTINGS.items()
+            if self.get(key, "").strip()
+        }
 
     def set_cloud_model(self, provider: str, model: str) -> None:
         """Record which model this provider answers with. Blank means default."""
@@ -1128,9 +1144,15 @@ class ChronoaConfig:
 
 #: provider id -> the GSettings key that held its API key before (and without) a keyring
 API_KEY_SETTINGS = {
-    "llm7": "llm7-api-key", "kilo": "kilo-api-key", "blockrun": "blockrun-api-key", "openai": "openai-api-key",
-    "anthropic": "anthropic-api-key", "google": "google-api-key", "groq": "groq-api-key",
-    "opencode-zen": "opencode-zen-api-key", "openrouter": "openrouter-api-key",
+    "llm7": "llm7-api-key",
+    "kilo": "kilo-api-key",
+    "blockrun": "blockrun-api-key",
+    "openai": "openai-api-key",
+    "anthropic": "anthropic-api-key",
+    "google": "google-api-key",
+    "groq": "groq-api-key",
+    "opencode-zen": "opencode-zen-api-key",
+    "openrouter": "openrouter-api-key",
     "sarvam": "sarvam-api-key",
     # The custom endpoint's key, so it lands in the keyring like every other one
     # rather than being the single secret in this table that is only ever
@@ -1145,10 +1167,15 @@ API_KEY_SETTINGS = {
 #: search. A blank value means the provider's own `default_model`, so nothing
 #: here changes behaviour for anyone who has not chosen.
 MODEL_SETTINGS = {
-    "llm7": "llm7-model", "kilo": "kilo-model", "blockrun": "blockrun-model",
-    "openai": "openai-model", "anthropic": "anthropic-model",
-    "google": "google-model", "groq": "groq-model",
-    "opencode-zen": "opencode-zen-model", "openrouter": "openrouter-model",
+    "llm7": "llm7-model",
+    "kilo": "kilo-model",
+    "blockrun": "blockrun-model",
+    "openai": "openai-model",
+    "anthropic": "anthropic-model",
+    "google": "google-model",
+    "groq": "groq-model",
+    "opencode-zen": "opencode-zen-model",
+    "openrouter": "openrouter-model",
     "sarvam": "sarvam-model",
     # **Your own server, and the one this table was silently wrong about.**
     # `set_cloud_model` returns early on an id it does not name, and it did not

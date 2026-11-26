@@ -59,7 +59,7 @@ REPO = Path(__file__).resolve().parents[1]
 EXT = REPO / "usr/share/gnome-shell/extensions/chronoa-mascot@shani.dev"
 EXTENSION_JS = EXT / "extension.js"
 METADATA = EXT / "metadata.json"
-APPLICATION = REPO / "usr/lib/shani-chronoa/shani_chronoa/app/application.py"
+APPLICATION = REPO / "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/app/application.py"
 
 #: What `mascot_notch` actually calls over the bus. Kept as literals rather
 #: than derived from the client, because the whole claim is that the two agree -
@@ -1358,7 +1358,8 @@ print(repr(out["r"]))
 
     def _hosted(self, kind: str):
         import ast
-        lib = str(Path(mascot_notch.__file__).resolve().parents[1])
+        # The shim aliases the moved module, so derive the package root from the repo.
+        lib = str(REPO / "usr/lib/shani-chronoa")
         out = subprocess.run([sys.executable, "-c", self._SCRIPT, lib, kind],
                              capture_output=True, text=True, timeout=30)
         assert out.returncode == 0, out.stderr

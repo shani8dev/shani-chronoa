@@ -240,7 +240,7 @@ def test_the_stylesheet_gives_key_value_text_a_fixed_width_face():
 
     source = Path(StyleMixin.__module__.replace(".", "/"))
     css = (Path(__file__).resolve().parents[1] / "usr/lib/shani-chronoa/shani_chronoa"
-           / "gui/style.py").read_text()
+           / "ui_gtk/gui/style.py").read_text()
     assert ".key-value-text" in css, "the key-value value class is not styled"
     assert "font-family: monospace" in css, (
         "no fixed-width face anywhere in the stylesheet, so the table is "

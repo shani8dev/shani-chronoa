@@ -30,7 +30,7 @@ only reason "14 passed" means anything.
 
 TEST_FILE = "tests/test_cloud_key_in_its_own_row.py"
 
-_WIZ = "usr/lib/shani-chronoa/shani_chronoa/setup_wizard.py"
+_WIZ = "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/setup_wizard.py"
 
 MUTATIONS = [
     {

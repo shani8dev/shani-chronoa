@@ -127,7 +127,7 @@ class TestFindingInTheConversation:
 
     def test_the_window_wires_it_to_ctrl_f(self):
         """An action nobody registers is a shortcut that does nothing."""
-        source = (_REPO / "usr/lib/shani-chronoa/shani_chronoa/app/application.py").read_text()
+        source = (_REPO / "usr/lib/shani-chronoa/shani_chronoa/ui_gtk/app/application.py").read_text()
         assert "find-in-conversation" in source
         assert '"<Ctrl>f"' in source
 

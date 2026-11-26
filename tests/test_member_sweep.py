@@ -26,7 +26,7 @@ sys.path.insert(0, str(REPO / "tools"))
 import member_sweep  # noqa: E402
 
 
-def _package_copy(tmp_path, source="gui/window.py"):
+def _package_copy(tmp_path, source="ui_gtk/gui/window.py"):
     """A package tree with one file replaced or edited, preserving the layout."""
     import shutil
 
@@ -35,7 +35,7 @@ def _package_copy(tmp_path, source="gui/window.py"):
     return root
 
 
-def _missing(root, relative="gui/window.py"):
+def _missing(root, relative="ui_gtk/gui/window.py"):
     findings, _unresolved = member_sweep.sweep(root)
     return {label: set(names) for label, names, _chain, _ext in findings}
 
@@ -50,7 +50,7 @@ class TestTheSweepCanFindTheDefectItWasWrittenFor:
         fixture shaped like the bug, which is this repository's own rule.
         """
         root = _package_copy(tmp_path)
-        window = root / "gui/window.py"
+        window = root / "ui_gtk/gui/window.py"
         lines = window.read_text(encoding="utf-8").splitlines(keepends=True)
 
         start = next(n for n, line in enumerate(lines)
