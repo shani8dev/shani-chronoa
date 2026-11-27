@@ -10,7 +10,7 @@ import sys
 
 # Same path fix as usr/bin/shani-chronoa: the package lives at
 # usr/lib/shani-chronoa/shani_chronoa, one directory deeper than usr/bin.
-_USR_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_USR_DIR = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, os.path.join(_USR_DIR, "lib", "shani-chronoa"))
 
 from shani_chronoa.tui.cli import main
