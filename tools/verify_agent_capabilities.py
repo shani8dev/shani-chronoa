@@ -157,6 +157,11 @@ def _child() -> int:
         import select
 
         master, slave = pty.openpty()
+        import fcntl
+        import struct
+        import termios
+
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
         term = subprocess.Popen(
             [sys.executable, str(cli)],
             stdin=slave,
@@ -176,11 +181,32 @@ def _child() -> int:
                     screen += _os.read(master, 65536).decode("utf-8", "replace")
             _os.write(master, b"/settings get privacy-mode\n")
             deadline = time.monotonic() + 20
-            while screen.count("chronoa>") < 2 and time.monotonic() < deadline:
+            while (
+                "Privacy mode" not in screen
+                and "privacy mode" not in screen
+                and time.monotonic() < deadline
+            ):
                 ready, _, _ = select.select([master], [], [], 0.1)
                 if ready:
                     screen += _os.read(master, 65536).decode("utf-8", "replace")
             assert "Privacy mode" in screen or "privacy mode" in screen, screen
+
+            # Panes and overlays against the real engine, not just the stand-in.
+            def pump(seconds):
+                nonlocal screen
+                deadline = time.monotonic() + seconds
+                while time.monotonic() < deadline:
+                    ready, _, _ = select.select([master], [], [], 0.05)
+                    if ready:
+                        screen += _os.read(master, 65536).decode("utf-8", "replace")
+
+            _os.write(master, b"\t")  # focus the sidebar
+            pump(0.6)
+            assert "focus: sidebar" in screen, screen[-2000:]
+            for key in (b"\t", b"\x10", b"\x0f", b"\x12", b"\x03", b"\x1b"):
+                _os.write(master, key)
+                pump(0.2)
+            assert "focus:" in screen
             _os.write(master, b"/quit\n")
             term.wait(timeout=5)
             print("pty /settings get privacy-mode: ok")

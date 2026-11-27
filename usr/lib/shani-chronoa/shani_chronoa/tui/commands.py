@@ -174,3 +174,8 @@ def help_lines() -> list[str]:
         left = f"/{command.name} {command.usage}".rstrip()
         lines.append(f"{left} - {command.help}")
     return lines
+
+
+def palette_commands() -> "list[tuple[str, str]]":
+    """`(name, help)` pairs for the command palette, from the one command table."""
+    return [(name, command.help) for name, command in COMMANDS.items()]

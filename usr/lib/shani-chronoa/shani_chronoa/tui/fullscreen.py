@@ -97,8 +97,33 @@ class Screen:
         self._stream.write("".join(out))
         self._stream.flush()
 
-    def read_key(self) -> str:
-        """One key as an action name plus, for text, the characters typed."""
+    def commit(self, canvas, *, cursor=None, visible=True, force_rows=()):
+        """Differential paint from `tui.canvas`; the legacy `draw` stays intact."""
+        if not self._in_alternate:
+            return canvas
+        painted = canvas.commit(
+            self._stream,
+            getattr(self, "_previous", None),
+            cursor=cursor,
+            visible=visible,
+            force_rows=force_rows,
+        )
+        self._previous = painted
+        return painted
+
+    def on_resize(self) -> None:
+        """Forget the painted frame so the next commit redraws every row."""
+        self._previous = None
+
+    def read_key(self, timeout=None) -> str:
+        """One key, or `"idle"` when nothing arrived within `timeout`.
+
+        The multi-pane view polls with a short timeout so background panel
+        results can be drawn without waiting for a keystroke. The legacy
+        caller keeps the blocking default.
+        """
+        if timeout is not None and not select.select([self._fd], [], [], timeout)[0]:
+            return "idle"
         first = os.read(self._fd, 1)
         if not first:
             return "eof"
@@ -119,6 +144,8 @@ class Screen:
             if second != b"[":
                 return "escape"
             third = os.read(self._fd, 1)
+            if third == b"Z":
+                return "shift_tab"
             if third in (b"5", b"6") and select.select([self._fd], [], [], 0.01)[0]:
                 os.read(self._fd, 1)  # the trailing '~' of PgUp/PgDn
             return {
@@ -131,6 +158,12 @@ class Screen:
                 b"5": "pageup",
                 b"6": "pagedown",
             }.get(third, "escape")
+        if first == b"\x10":  # Ctrl+P: the palette
+            return "control:p"
+        if first == b"\x0f":  # Ctrl+O: the detail pane
+            return "control:o"
+        if first == b"\x12":  # Ctrl+R: refresh panels
+            return "control:r"
         if first[0] < 32:
             return "control"
         # The leading byte announces a UTF-8 character's width; read the rest
@@ -220,7 +253,26 @@ class LineEditor:
             common += " "
         self.value = self.value[:token_start] + common
         self.cursor = len(self.value)
+        self.matches = matches
+        self._match_index = 0
         return matches
+
+    def set(self, value: str) -> None:
+        """Prefill the input line from a sidebar row or the palette."""
+        self.value = str(value)
+        self.cursor = len(self.value)
+        self.matches = []
+        self._match_index = 0
+
+    def complete_next(self) -> "list[str]":
+        """Cycle a completion popup instead of committing its common prefix."""
+        if not getattr(self, "matches", None):
+            return self.complete()
+        token_start = max(self.value.rfind(" "), self.value.rfind("\t")) + 1
+        self._match_index = (self._match_index + 1) % len(self.matches)
+        self.value = self.value[:token_start] + self.matches[self._match_index] + " "
+        self.cursor = len(self.value)
+        return self.matches
 
 
 class Transcript:
@@ -229,6 +281,7 @@ class Transcript:
     def __init__(self, app) -> None:
         self.app = app
         self.lines: List[str] = []
+        self.marks: List[tuple] = []
         self._partial = ""
 
     def write(self, text: str) -> int:
@@ -259,6 +312,10 @@ class Transcript:
             self.lines.append(self._partial.rstrip("\r"))
             self._partial = ""
             self.app.dirty = True
+
+    def append_mark(self, kind: str, start: int, end: int) -> None:
+        """Record which transcript rows belong to a tool card or approval."""
+        self.marks.append((kind, start, end))
 
     def isatty(self) -> bool:
         return False

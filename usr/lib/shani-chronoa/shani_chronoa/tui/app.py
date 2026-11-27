@@ -230,6 +230,16 @@ class Interactive:
         else:
             print(f"Unknown command /{name}. Try /help.", file=self.out)
 
+    def confirm(self, prompt: str) -> bool:
+        """The line REPL asks on stdin; the full-screen view uses a modal."""
+        answer = input(prompt + " Continue? [y/N] ")
+        return answer.strip().lower() in ("y", "yes")
+
+    def secret(self, prompt: str) -> str:
+        import getpass
+
+        return getpass.getpass(prompt)
+
     def capability(self, method: str, args: list) -> None:
         """One additive Agent call: ask first when a person must say yes."""
         from shani_chronoa.agent_capabilities import METHODS
@@ -237,17 +247,15 @@ class Interactive:
         spec = METHODS[method]
         values = list(args)
         if method == "SettingsSet" and values and str(values[0]).endswith("-api-key"):
-            import getpass
-
-            values[1] = getpass.getpass("Secret (not shown): ")
+            values[1] = self.secret("Secret (not shown): ")
         if spec.confirm:
             if "confirm" not in spec.arg_names:
                 values.append(True)
             else:
-                answer = input(
-                    "This changes consent or sends data off this machine. Continue? [y/N] "
+                answer = self.confirm(
+                    "This changes consent or sends data off this machine."
                 )
-                if answer.strip().lower() not in ("y", "yes"):
+                if not answer:
                     print("Cancelled.", file=self.out)
                     return
                 values.append(True)
@@ -285,12 +293,11 @@ class Interactive:
 
 
 class FullScreen(Interactive):
-    """The same prompt loop in an alternate screen, like a coding-agent TUI.
+    """Multi-pane full-screen client, still a thin Agent client.
 
-    It inherits every command, approval and turn decision from `Interactive`.
-    Only the terminal layout and key reading change: the transcript is a
-    scrollback buffer, the input line is edited in raw mode, and a header
-    names the model that actually answers.
+    `FullScreenView` owns the layout, focus ring, palette, modals and paint;
+    this class keeps the inherited commands, turns and consent rules and the
+    attributes the existing tests read.
     """
 
     def __init__(
@@ -321,6 +328,11 @@ class FullScreen(Interactive):
         self.session = None
         self.model = "engine unavailable"
         self.state = "ready"
+        self.view = None
+        if self.screen.isatty:
+            from shani_chronoa.tui.view import FullScreenView
+
+            self.view = FullScreenView(self, self.screen, stream or sys.stdout)
 
     def _history_lines(self) -> list:
         path = history_path()
@@ -332,35 +344,34 @@ class FullScreen(Interactive):
         except OSError:
             return []
 
-    def _load_header(self) -> None:
-        """The model name arrives in the background; startup never waits on it."""
-
-        def fetch():
-            try:
-                status = self.client.inventory("status", timeout_ms=2000)
-                items = status.get("items") if isinstance(status, dict) else {}
-                if isinstance(items, dict) and items.get("llm_model"):
-                    self.model = str(items["llm_model"])
-                    self.dirty = True
-            except Exception:  # noqa: BLE001 - a header must never break a turn
-                self.model = "engine busy"
-
-        import threading
-
-        threading.Thread(target=fetch, daemon=True, name="chronoa-header").start()
-
     def _respond(self, event: dict) -> str:
-        # The chooser's own "choice [1]" line is surfaced by `Transcript`;
-        # no second copy of the options is drawn here.
+        if self.view is not None:
+            return self.view.show_approval(event)
         return super()._respond(event)
+
+    def confirm(self, prompt: str) -> bool:
+        if self.view is not None:
+            return self.view.confirm(prompt)
+        return super().confirm(prompt)
+
+    def secret(self, prompt: str) -> str:
+        if self.view is not None:
+            return self.view.secret(prompt)
+        return super().secret(prompt)
 
     def ask(self, text: str, options: Optional[dict] = None) -> dict:
         self.state = "thinking"
 
         def on_event(event):
+            if os.environ.get("CHRONOA_TUI_DEBUG"):
+                with open("/tmp/opencode/fs_actions.log", "a", encoding="utf-8") as log:
+                    log.write(
+                        f"EVENT {event.get('event')} {str(event.get('text'))[:60]!r}\n"
+                    )
             self.renderer.render_event(event)
-            if self.screen.isatty:
-                self.draw()  # streaming: repaint as each event lands
+            self.dirty = True
+            if self.view is not None:
+                self.view.draw()
 
         self.session = Session(self.client, on_event, self._respond)
         try:
@@ -381,66 +392,25 @@ class FullScreen(Interactive):
         return result
 
     def draw(self) -> None:
+        if self.view is not None:
+            self.view.draw()
+            return
         if not self.screen.isatty:
             return
         self.screen.draw(
-            [
-                f" Chronoa · {self.model} · {self.state}",
-                " /help commands · @file attach · /quit exit",
-            ],
+            [f" Chronoa · {self.model} · {self.state}"],
             self.transcript.lines,
             self.editor.value,
             self.editor.cursor,
             self.scroll,
         )
-        self.scroll = 0
         self.dirty = False
 
     def run(self) -> int:
-        if not self.screen.isatty:
+        if not self.screen.isatty or self.view is None:
             return super().run()
-        self._load_header()
         self.transcript.lines.append(BANNER)
-        self.screen.enter()
-        try:
-            while not self.stop:
-                if self.dirty:
-                    self.draw()
-                action = self.screen.read_key()
-                if action == "eof":
-                    break
-                if action == "enter":
-                    line = self.editor.take()
-                    self.scroll = 0
-                    if line.strip():
-                        self.transcript.lines.append(PROMPT_TEXT + line)
-                        self.handle(line)
-                elif action == "interrupt":
-                    turn = self.session.current_turn if self.session else ""
-                    if turn and self.client.cancel(turn):
-                        self.transcript.lines.append("Turn cancelled.")
-                    else:
-                        self.editor.value, self.editor.cursor = "", 0
-                elif action == "backspace":
-                    self.editor.backspace()
-                elif action.startswith("text:"):
-                    self.editor.insert(action[5:])
-                elif action in ("left", "right", "home", "end"):
-                    self.editor.move(action)
-                elif action in ("up", "down"):
-                    self.editor.recall(action)
-                elif action == "tab":
-                    matches = self.editor.complete()
-                    if len(matches) > 1:
-                        self.transcript.lines.append("  " + "  ".join(matches[:12]))
-                elif action == "pageup":
-                    self.scroll = min(len(self.transcript.lines), self.scroll + 10)
-                elif action == "pagedown":
-                    self.scroll = max(0, self.scroll - 10)
-                self.dirty = True
-        finally:
-            self.screen.exit()
-        return 0
+        return self.view.run()
 
 
 PROMPT_TEXT = "chronoa> "
