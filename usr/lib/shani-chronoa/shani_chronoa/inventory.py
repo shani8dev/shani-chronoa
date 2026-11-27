@@ -36,13 +36,18 @@ def _conversations(limit: int) -> list:
 def _models(limit: int) -> list:
     from shani_chronoa import model_choice
     from shani_chronoa.config import ChronoaConfig
+    from shani_chronoa.hardware_profile import HardwareProfile
 
     config = ChronoaConfig()
+    # Each task used to build its own HardwareProfile (twice: resolve plus
+    # explain). Detection is a few milliseconds and the hardware does not
+    # change between rows of one panel, so one probe serves the whole list.
+    profile = HardwareProfile()
     return [
         {
             "task": task,
-            "model": model_choice.resolve(task, config),
-            "why": model_choice.explain(task, config),
+            "model": model_choice.resolve(task, config, profile=profile),
+            "why": model_choice.explain(task, config, profile=profile),
         }
         for task in model_choice.tasks()[:limit]
     ]

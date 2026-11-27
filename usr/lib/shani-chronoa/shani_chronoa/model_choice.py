@@ -36,12 +36,21 @@ logger = logging.getLogger(__name__)
 
 # task -> (gsettings key or None, HardwareProfile method, what the job is)
 _TASKS: Dict[str, Tuple[Optional[str], str, str]] = {
-    "text": ("model", "get_model",
-             "chat and tool calling - this is the assistant itself"),
-    "vision": ("vision-model", "get_vision_model",
-               "describing what is on screen; needs a vision-capable model"),
-    "transcribe": (None, "get_whisper_model",
-                   "speech to text; a Whisper model, not a text model"),
+    "text": (
+        "model",
+        "get_model",
+        "chat and tool calling - this is the assistant itself",
+    ),
+    "vision": (
+        "vision-model",
+        "get_vision_model",
+        "describing what is on screen; needs a vision-capable model",
+    ),
+    "transcribe": (
+        None,
+        "get_whisper_model",
+        "speech to text; a Whisper model, not a text model",
+    ),
 }
 
 # Whisper is not an Ollama model, so recommending or pulling it through the
@@ -60,7 +69,11 @@ def describe(task: str) -> Optional[str]:
     return entry[2] if entry else None
 
 
-def resolve(task: str, config: Optional[ChronoaConfig] = None) -> Optional[str]:
+def resolve(
+    task: str,
+    config: Optional[ChronoaConfig] = None,
+    profile: Optional[HardwareProfile] = None,
+) -> Optional[str]:
     """The model Chronoa will use for `task`, and where that answer came from.
 
     Returns None for an unknown task rather than guessing: a typo in a task
@@ -80,7 +93,8 @@ def resolve(task: str, config: Optional[ChronoaConfig] = None) -> Optional[str]:
         if pinned:
             return pinned
 
-    profile = HardwareProfile()
+    if profile is None:
+        profile = HardwareProfile()
     getter: Callable[[], str] = getattr(profile, method, None)
     if getter is None:
         logger.debug("no hardware tier method %r for task %r", method, task)
@@ -89,7 +103,11 @@ def resolve(task: str, config: Optional[ChronoaConfig] = None) -> Optional[str]:
     return chosen or None
 
 
-def explain(task: str, config: Optional[ChronoaConfig] = None) -> str:
+def explain(
+    task: str,
+    config: Optional[ChronoaConfig] = None,
+    profile: Optional[HardwareProfile] = None,
+) -> str:
     """A human-readable answer for `task`, naming the source of the answer.
 
     The source matters as much as the model: "you set this" and "the hardware
@@ -112,7 +130,7 @@ def explain(task: str, config: Optional[ChronoaConfig] = None) -> str:
             return "\n".join(lines)
         lines.append(f"  model setting '{key}' is empty, so the hardware tier decides")
 
-    chosen = resolve(task, config=config)
+    chosen = resolve(task, config=config, profile=profile)
     if chosen is None:
         lines.append("  model: UNKNOWN - no pin and no tier default")
         return "\n".join(lines)

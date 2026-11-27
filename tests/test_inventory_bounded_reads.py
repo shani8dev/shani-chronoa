@@ -78,6 +78,23 @@ def test_egress_bound_keeps_the_last_valid_events(tmp_path, monkeypatch):
     assert len(egress.read_events()) == 10
 
 
+def test_models_section_probes_the_hardware_once(monkeypatch):
+    from shani_chronoa import hardware_profile
+
+    real = hardware_profile.HardwareProfile
+    probes = []
+
+    def counting_profile():
+        probes.append(1)
+        return real()
+
+    monkeypatch.setattr(hardware_profile, "HardwareProfile", counting_profile)
+    payload = inventory.describe("models", limit=5)
+
+    assert "error" not in payload
+    assert len(probes) == 1, f"hardware probed {len(probes)} times for one panel"
+
+
 def test_egress_tail_handles_no_final_newline_and_bad_middle_lines(
     tmp_path, monkeypatch
 ):
