@@ -29,6 +29,11 @@ _LINK_DEFAULT = "/usr/lib/shani-link"
 
 #: (package, directory containing it) for the chosen provider.
 _cached_provider = None
+#: The provider list depends only on these variables. Probing the filesystem
+#: again on every `module()` call was O(filesystem) per engine lookup; a skill
+#: asks for one module per call.
+_PROVIDER_ENV = ("SHANI_PHONE_PATH", "SHANI_LINK_PATH", "SHANI_LINK_PROVIDER")
+_provider_cache: dict = {}
 
 
 def _phone_candidates():
@@ -51,6 +56,10 @@ def _link_candidates():
 
 def _providers():
     """Installed providers as (package, path), in a deterministic order."""
+    env_key = tuple(os.environ.get(name) for name in _PROVIDER_ENV)
+    cached = _provider_cache.get(env_key)
+    if cached is not None:
+        return list(cached)
     found = (
         (
             "phone",
@@ -78,7 +87,10 @@ def _providers():
     installed = [(package, path) for package, path in found if path]
     forced = os.environ.get("SHANI_LINK_PROVIDER", "").strip()
     if forced:
-        return [(package, path) for package, path in installed if package == forced]
+        installed = [
+            (package, path) for package, path in installed if package == forced
+        ]
+    _provider_cache[env_key] = tuple(installed)
     return installed
 
 
@@ -86,6 +98,7 @@ def _reset():
     """Forget the chosen provider, so the next call re-reads the environment."""
     global _cached_provider
     _cached_provider = None
+    _provider_cache.clear()
 
 
 def ensure_path() -> bool:

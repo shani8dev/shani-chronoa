@@ -23,8 +23,7 @@ def _missing(ref, what: str) -> dict:
 def list_sessions(limit=100) -> list[dict]:
     """Conversations, most recently used first, capped at ``limit``."""
     try:
-        rows = conversation_store.list_sessions(_root())
-        return rows[: max(0, int(limit))]
+        return conversation_store.list_sessions(_root(), limit=limit)
     except Exception as exc:  # noqa: BLE001 - errors are data on this boundary
         return [{"error": f"conversations could not be listed: {exc}"}]
 

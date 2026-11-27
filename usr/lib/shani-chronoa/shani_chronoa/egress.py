@@ -126,6 +126,7 @@ def _egress_log() -> Path:
         return EGRESS_LOG
     return _egress_dir() / _LOG_NAME
 
+
 # Loopback and the RFC 8375 / `.local` / `.localhost` namespaces, plus the
 # literal default Ollama host. Anything else is treated as leaving the machine,
 # because the failure mode of guessing wrong here is the bad one.
@@ -238,7 +239,8 @@ def privacy_mode_enabled() -> bool:
         if not config.setting_readable("privacy-mode"):
             raise RuntimeError(
                 "the running schema does not declare privacy-mode, so the "
-                "setting cannot be read")
+                "setting cannot be read"
+            )
         return bool(config.privacy_mode)
     except Exception as exc:  # noqa: BLE001 - must not raise into a request path
         logger.warning(
@@ -375,7 +377,9 @@ def denied_reason(url: str) -> str:
     if address is not None:
         address = _unmapped(address)
         in_link_local = address in (
-            _LINK_LOCAL_V4 if isinstance(address, ipaddress.IPv4Address) else _LINK_LOCAL_V6
+            _LINK_LOCAL_V4
+            if isinstance(address, ipaddress.IPv4Address)
+            else _LINK_LOCAL_V6
         )
         if in_link_local:
             if address == _METADATA_ADDRESS:
@@ -487,9 +491,12 @@ def _light_skin(event: "Event") -> None:
         # A request is over in milliseconds; the light is a heartbeat rather
         # than a duration, kept just long enough to be seen at all. A flash that
         # never appears is the same as no indicator.
-        body.body.pulse("skin", f"{event.method} {where}"[:80],
-                        origin="user" if event.local else "network")
-    except Exception:                                   # noqa: BLE001
+        body.body.pulse(
+            "skin",
+            f"{event.method} {where}"[:80],
+            origin="user" if event.local else "network",
+        )
+    except Exception:  # noqa: BLE001
         # Never let an indicator break the request it is describing.
         pass
 
@@ -541,9 +548,13 @@ def record(
         # gate first, which raises `ConsentRequired` instead of downloading. A
         # search query, a page fetch and a cloud fallback have no way to set
         # either, so they are unaffected.
-        violation=bool(privacy_mode and not local
-                       and not (consented and purpose == "model-download"
-                                and is_model_host(event_host))),
+        violation=bool(
+            privacy_mode
+            and not local
+            and not (
+                consented and purpose == "model-download" and is_model_host(event_host)
+            )
+        ),
     )
     _light_skin(event)
     try:
@@ -585,17 +596,26 @@ def record(
 
 def read_events(limit: Optional[int] = None) -> list:
     """Read recorded events, newest last. A missing log is an empty one."""
+    from collections import deque
+
     try:
-        lines = _egress_log().read_text(encoding="utf-8").splitlines()
+        handle = _egress_log().open(encoding="utf-8")
     except OSError:
         return []
-    out = []
-    for line in lines:
-        try:
-            out.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
-    return out[-limit:] if limit else out
+    # A bounded receiver keeps only the last N *valid* records, so a panel that
+    # asks for eight rows never holds a thousand-event log in memory. Parsing
+    # still visits every line: malicious trailing content must not displace a
+    # real event that came before it.
+    cap = int(limit) if limit and int(limit) > 0 else None
+    out = deque(maxlen=cap) if cap else []
+    with handle:
+        for line in handle:
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            out.append(event)
+    return list(out)
 
 
 def summary() -> dict:

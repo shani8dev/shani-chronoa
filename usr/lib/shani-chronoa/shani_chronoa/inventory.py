@@ -28,7 +28,9 @@ LIMIT = 100
 def _conversations(limit: int) -> list:
     from shani_chronoa import conversation_store
 
-    return conversation_store.list_sessions(conversation_store.session_dir())[:limit]
+    return conversation_store.list_sessions(
+        conversation_store.session_dir(), limit=limit
+    )
 
 
 def _models(limit: int) -> list:
@@ -121,7 +123,7 @@ def _privacy(limit: int) -> dict:
             }
             for name in names[:limit]
         ],
-        "recent_egress": len(egress.read_events()[:limit]),
+        "recent_egress": len(egress.read_events(limit=limit)),
     }
 
 
@@ -138,7 +140,7 @@ def _memory(limit: int) -> list:
             "created_at": p.created_at,
             "metadata": p.metadata,
         }
-        for p in (store.durable() or [])[:limit]
+        for p in (store.durable(limit=limit) or [])
     ]
 
 

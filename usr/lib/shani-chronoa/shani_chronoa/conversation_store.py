@@ -58,6 +58,7 @@ def session_dir() -> Path:
     """The conversations directory, resolved now - never a constant captured at import."""
     return files.data_home() / "shani-chronoa" / "sessions"
 
+
 #: How much history is worth reading back. The in-memory cap is 40 messages;
 #: this is deliberately larger, because the transcript is a record rather than a
 #: working set - a month-old turn is not going into a prompt, but deleting it
@@ -159,7 +160,9 @@ def rewrite(messages: List[dict], path: Path) -> bool:
     Never raises, for the same reason `append` does not.
     """
     target = Path(path)
-    if any(not isinstance(m, dict) or m.get("role") not in _KNOWN_ROLES for m in messages):
+    if any(
+        not isinstance(m, dict) or m.get("role") not in _KNOWN_ROLES for m in messages
+    ):
         return False
     tmp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
     try:
@@ -270,8 +273,11 @@ def _read_index(root: Path) -> dict:
     if not isinstance(data, dict):
         data = {}
     known = data.get("sessions")
-    data["sessions"] = {k: v for k, v in (known or {}).items()
-                        if valid_id(k) and isinstance(v, dict)} if isinstance(known, dict) else {}
+    data["sessions"] = (
+        {k: v for k, v in (known or {}).items() if valid_id(k) and isinstance(v, dict)}
+        if isinstance(known, dict)
+        else {}
+    )
     if not valid_id(str(data.get("active") or "")):
         data["active"] = ""
     return data
@@ -298,11 +304,25 @@ def _migrate(root: Path, data: dict) -> bool:
     if not legacy.is_file():
         return False
     when = legacy.stat().st_mtime
-    sid = time.strftime("%Y%m%d-%H%M%S", time.localtime(when)) + "-" + secrets.token_hex(2)
+    sid = (
+        time.strftime("%Y%m%d-%H%M%S", time.localtime(when))
+        + "-"
+        + secrets.token_hex(2)
+    )
     os.replace(legacy, root / f"{sid}.jsonl")
-    first = next((m.get("content") for m in load(root / f"{sid}.jsonl") if m.get("role") == "user"), "")
-    data["sessions"][sid] = {"title": _title_from(first) or "Earlier conversation",
-                             "created": when, "updated": when}
+    first = next(
+        (
+            m.get("content")
+            for m in load(root / f"{sid}.jsonl")
+            if m.get("role") == "user"
+        ),
+        "",
+    )
+    data["sessions"][sid] = {
+        "title": _title_from(first) or "Earlier conversation",
+        "created": when,
+        "updated": when,
+    }
     data["active"] = data["active"] or sid
     return True
 
@@ -331,7 +351,11 @@ def active_path(root: Path) -> Path:
         changed = _migrate(root, data)
         if not data["active"] or data["active"] not in data["sessions"]:
             sid = _new_id()
-            data["sessions"][sid] = {"title": "", "created": time.time(), "updated": time.time()}
+            data["sessions"][sid] = {
+                "title": "",
+                "created": time.time(),
+                "updated": time.time(),
+            }
             data["active"] = sid
             changed = True
         if changed:
@@ -349,7 +373,11 @@ def new_session(root: Path) -> str:
         if current in data["sessions"] and not (root / f"{current}.jsonl").exists():
             return current
         sid = _new_id()
-        data["sessions"][sid] = {"title": "", "created": time.time(), "updated": time.time()}
+        data["sessions"][sid] = {
+            "title": "",
+            "created": time.time(),
+            "updated": time.time(),
+        }
         data["active"] = sid
         _write_index(root, data)
         return sid
@@ -363,10 +391,14 @@ def _resolve(data: dict, ref: str) -> str:
     low = ref.lower()
     if not low:
         return ""
-    exact = [k for k, v in data["sessions"].items() if (v.get("title") or "").lower() == low]
+    exact = [
+        k for k, v in data["sessions"].items() if (v.get("title") or "").lower() == low
+    ]
     if len(exact) == 1:
         return exact[0]
-    partial = [k for k, v in data["sessions"].items() if low in (v.get("title") or "").lower()]
+    partial = [
+        k for k, v in data["sessions"].items() if low in (v.get("title") or "").lower()
+    ]
     return partial[0] if len(partial) == 1 else ""
 
 
@@ -426,8 +458,12 @@ def checkpoint(root: Path, sid: str) -> bool:
         return False
     try:
         messages = load(source)
-        existing = sorted(root.glob(f"{sid}.ckpt.*.jsonl"),
-                          key=lambda p: int(p.stem.split(".")[-1]) if len(p.stem.split(".")) > 2 else 0)
+        existing = sorted(
+            root.glob(f"{sid}.ckpt.*.jsonl"),
+            key=lambda p: (
+                int(p.stem.split(".")[-1]) if len(p.stem.split(".")) > 2 else 0
+            ),
+        )
         n = (int(existing[-1].stem.split(".")[-1]) + 1) if existing else 1
         target = root / f"{sid}.ckpt.{n}.jsonl"
         tmp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
@@ -454,9 +490,12 @@ def revert(root: Path, sid: str, to_n: Optional[int] = None) -> bool:
     """
     root = Path(root)
     if to_n is None:
-        candidates = sorted(root.glob(f"{sid}.ckpt.*.jsonl"),
-                            key=lambda p: int(p.stem.split(".")[-1])
-                            if len(p.stem.split(".")) > 2 else 0)
+        candidates = sorted(
+            root.glob(f"{sid}.ckpt.*.jsonl"),
+            key=lambda p: (
+                int(p.stem.split(".")[-1]) if len(p.stem.split(".")) > 2 else 0
+            ),
+        )
         if not candidates:
             return False
         target = candidates[-1]
@@ -503,13 +542,18 @@ def delete(root: Path, ref: str) -> str:
             # not reappear in the app on its own. Claiming a full undo here would
             # be the confident wrong answer.
             from shani_chronoa import files as _files
+
             _moved, _why = _files.trash(path)
             if not _moved:
                 return ""
-        _purge_from_search(root, sid)  # deleted means gone from the search index too, now
+        _purge_from_search(
+            root, sid
+        )  # deleted means gone from the search index too, now
         del data["sessions"][sid]
         if data["active"] == sid:
-            rest = sorted(data["sessions"], key=lambda k: data["sessions"][k].get("updated", 0))
+            rest = sorted(
+                data["sessions"], key=lambda k: data["sessions"][k].get("updated", 0)
+            )
             data["active"] = rest[-1] if rest else ""
         _write_index(root, data)
         return sid
@@ -537,8 +581,12 @@ def fork(root: Path, ref: str, keep_user_turns: Optional[int] = None) -> str:
         for m in messages:
             append(m, root / f"{new}.jsonl")
         title = data["sessions"][sid].get("title") or "Conversation"
-        data["sessions"][new] = {"title": _title_from("Copy of " + title), "created": time.time(),
-                                 "updated": time.time(), "forked_from": sid}
+        data["sessions"][new] = {
+            "title": _title_from("Copy of " + title),
+            "created": time.time(),
+            "updated": time.time(),
+            "forked_from": sid,
+        }
         data["active"] = new
         _write_index(root, data)
         return new
@@ -563,7 +611,9 @@ def note_activity(path: Path, message: dict) -> None:
     try:
         with _locked(root):
             data = _read_index(root)
-            entry = data["sessions"].setdefault(path.stem, {"title": "", "created": time.time()})
+            entry = data["sessions"].setdefault(
+                path.stem, {"title": "", "created": time.time()}
+            )
             entry["updated"] = time.time()
             if not entry.get("title") and message.get("role") == "user":
                 entry["title"] = _title_from(message.get("content") or "")
@@ -572,24 +622,47 @@ def note_activity(path: Path, message: dict) -> None:
         logger.debug("Could not update the conversation index: %s", exc)
 
 
-def list_sessions(root: Path) -> List[dict]:
-    """Every conversation, most recently used first, with its message count."""
+def list_sessions(root: Path, limit: Optional[int] = None) -> List[dict]:
+    """Conversations, most recently used first, with their message counts.
+
+    `limit` bounds the work, not just the answer: the index is sorted once and
+    only the selected transcripts are read. A panel asking for ten rows used to
+    pay for parsing every message in every saved conversation.
+    """
     root = Path(root)
     data = index(root)
+    entries = sorted(
+        data["sessions"].items(),
+        key=lambda item: item[1].get("updated", 0),
+        reverse=True,
+    )
+    if limit is not None:
+        entries = entries[: max(0, int(limit))]
     out = []
-    for sid, meta in data["sessions"].items():
+    for sid, meta in entries:
         messages = load(root / f"{sid}.jsonl")
-        out.append({"id": sid, "title": meta.get("title") or "New conversation",
-                    "updated": meta.get("updated", 0), "created": meta.get("created", 0),
-                    "messages": sum(1 for m in messages if m.get("role") in ("user", "assistant")),
-                    "active": sid == data["active"], "forked_from": meta.get("forked_from", "")})
-    return sorted(out, key=lambda s: s["updated"], reverse=True)
+        out.append(
+            {
+                "id": sid,
+                "title": meta.get("title") or "New conversation",
+                "updated": meta.get("updated", 0),
+                "created": meta.get("created", 0),
+                "messages": sum(
+                    1 for m in messages if m.get("role") in ("user", "assistant")
+                ),
+                "active": sid == data["active"],
+                "forked_from": meta.get("forked_from", ""),
+            }
+        )
+    return out
 
 
 def _text_of(message: dict) -> str:
     content = message.get("content")
     if isinstance(content, list):  # multimodal parts
-        content = " ".join(str(p.get("text", "")) for p in content if isinstance(p, dict))
+        content = " ".join(
+            str(p.get("text", "")) for p in content if isinstance(p, dict)
+        )
     return str(content or "")
 
 
@@ -598,7 +671,7 @@ SEARCH_DB = "search.sqlite"
 
 def _set_sqlite_permissions(path: Path) -> None:
     """Set 0o600 permissions on SQLite database file and any WAL/SHM sidecars.
-    
+
     SQLite in WAL mode creates -wal and -shm sidecar files that need the same
     protection as the main database file.
     """
@@ -617,6 +690,7 @@ def _set_sqlite_permissions(path: Path) -> None:
 
 def _purge_from_search(root: Path, sid: str) -> None:
     import sqlite3
+
     path = Path(root) / SEARCH_DB
     if not path.exists():
         return
@@ -629,7 +703,9 @@ def _purge_from_search(root: Path, sid: str) -> None:
             except sqlite3.OperationalError:  # an index from before vectors existed
                 pass
     except sqlite3.Error as exc:
-        logger.warning("Could not remove a deleted conversation from the search index: %s", exc)
+        logger.warning(
+            "Could not remove a deleted conversation from the search index: %s", exc
+        )
     _set_sqlite_permissions(path)
 
 
@@ -643,14 +719,21 @@ def _search_db(root: Path):
     Returns None when this SQLite has no FTS5.
     """
     import sqlite3
+
     path = Path(root) / SEARCH_DB
     try:
         db = sqlite3.connect(path)
-        db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS msgs USING fts5(sid UNINDEXED, role UNINDEXED, text, "
-                   "tokenize='unicode61 remove_diacritics 2')")
-        db.execute("CREATE TABLE IF NOT EXISTS seen (sid TEXT PRIMARY KEY, offset INTEGER)")
+        db.execute(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS msgs USING fts5(sid UNINDEXED, role UNINDEXED, text, "
+            "tokenize='unicode61 remove_diacritics 2')"
+        )
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS seen (sid TEXT PRIMARY KEY, offset INTEGER)"
+        )
         # one embedding per msgs row, filled in as the embedding server allows (local_embed)
-        db.execute("CREATE TABLE IF NOT EXISTS vecs (id INTEGER PRIMARY KEY, sid TEXT, v BLOB)")
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS vecs (id INTEGER PRIMARY KEY, sid TEXT, v BLOB)"
+        )
     except sqlite3.Error as exc:
         logger.debug("No full-text index (%s); searching by scan", exc)
         return None
@@ -685,9 +768,19 @@ def _search_db(root: Path):
                 m = json.loads(line)
             except ValueError:
                 continue
-            if isinstance(m, dict) and m.get("role") in ("user", "assistant") and _text_of(m).strip():
-                db.execute("INSERT INTO msgs (sid, role, text) VALUES (?, ?, ?)", (sid, m["role"], _text_of(m)))
-        db.execute("INSERT OR REPLACE INTO seen (sid, offset) VALUES (?, ?)", (sid, offset + len(complete)))
+            if (
+                isinstance(m, dict)
+                and m.get("role") in ("user", "assistant")
+                and _text_of(m).strip()
+            ):
+                db.execute(
+                    "INSERT INTO msgs (sid, role, text) VALUES (?, ?, ?)",
+                    (sid, m["role"], _text_of(m)),
+                )
+        db.execute(
+            "INSERT OR REPLACE INTO seen (sid, offset) VALUES (?, ?)",
+            (sid, offset + len(complete)),
+        )
     db.commit()
     return db
 
@@ -701,28 +794,42 @@ MEANING_FLOOR = 0.55
 def _fill_vectors(db, embed) -> None:
     """Embed messages that have no vector yet, oldest first, up to EMBED_PER_SEARCH of them."""
     from shani_chronoa import local_embed
-    rows = db.execute("SELECT m.rowid, m.sid, m.text FROM msgs m LEFT JOIN vecs v ON v.id = m.rowid "
-                      "WHERE v.id IS NULL ORDER BY m.rowid LIMIT ?", (EMBED_PER_SEARCH,)).fetchall()
+
+    rows = db.execute(
+        "SELECT m.rowid, m.sid, m.text FROM msgs m LEFT JOIN vecs v ON v.id = m.rowid "
+        "WHERE v.id IS NULL ORDER BY m.rowid LIMIT ?",
+        (EMBED_PER_SEARCH,),
+    ).fetchall()
     for at in range(0, len(rows), EMBED_BATCH):
-        batch = rows[at:at + EMBED_BATCH]
+        batch = rows[at : at + EMBED_BATCH]
         vectors = embed([text for _id, _sid, text in batch], local_embed.DOCUMENT)
         if vectors is None:
             break
-        db.executemany("INSERT OR REPLACE INTO vecs (id, sid, v) VALUES (?, ?, ?)",
-                       [(rid, sid, local_embed.to_blob(vec)) for (rid, sid, _t), vec in zip(batch, vectors)])
+        db.executemany(
+            "INSERT OR REPLACE INTO vecs (id, sid, v) VALUES (?, ?, ?)",
+            [
+                (rid, sid, local_embed.to_blob(vec))
+                for (rid, sid, _t), vec in zip(batch, vectors)
+            ],
+        )
     db.commit()
 
 
-def _by_meaning(db, query: str, exclude: str, limit: int, embed) -> "list[tuple[int, float]]":
+def _by_meaning(
+    db, query: str, exclude: str, limit: int, embed
+) -> "list[tuple[int, float]]":
     """(msgs rowid, similarity) of the messages closest in meaning to `query`, best first."""
     from shani_chronoa import local_embed
+
     _fill_vectors(db, embed)
     asked = embed([query], local_embed.QUERY)
     if not asked:
         return []
     q = asked[0]
     scored = []
-    for rid, sid, blob in db.execute("SELECT id, sid, v FROM vecs WHERE sid != ?", (exclude,)):
+    for rid, sid, blob in db.execute(
+        "SELECT id, sid, v FROM vecs WHERE sid != ?", (exclude,)
+    ):
         score = local_embed.similarity(q, local_embed.from_blob(blob))
         if score >= MEANING_FLOOR:
             scored.append((rid, score))
@@ -730,7 +837,9 @@ def _by_meaning(db, query: str, exclude: str, limit: int, embed) -> "list[tuple[
     return scored[:limit]
 
 
-def search(root: Path, query: str, limit: int = 10, exclude: str = "", embed=None) -> List[dict]:
+def search(
+    root: Path, query: str, limit: int = 10, exclude: str = "", embed=None
+) -> List[dict]:
     """Messages (user and assistant) about `query`, best first.
 
     Words first (FTS5 bm25 over messages containing every word), and - when
@@ -746,14 +855,17 @@ def search(root: Path, query: str, limit: int = 10, exclude: str = "", embed=Non
     db = _search_db(root)
     if db is not None:
         import sqlite3
+
         if embed is None:
             from shani_chronoa import local_embed
+
             embed = local_embed.embed
         match = " ".join('"' + w.replace('"', "") + '"*' for w in words)
         try:
             by_words = db.execute(
                 "SELECT rowid FROM msgs WHERE msgs MATCH ? AND sid != ? ORDER BY bm25(msgs) LIMIT ?",
-                (match, exclude, limit * 2)).fetchall()
+                (match, exclude, limit * 2),
+            ).fetchall()
             by_meaning = _by_meaning(db, query, exclude, limit * 2, embed)
             fused: "dict[int, float]" = {}
             how: "dict[int, set]" = {}
@@ -774,19 +886,32 @@ def search(root: Path, query: str, limit: int = 10, exclude: str = "", embed=Non
                 how.setdefault(rid, set()).add("meaning")
             hits = []
             for rid in sorted(fused, key=lambda r: -fused[r])[:limit]:
-                row = db.execute("SELECT sid, role, text FROM msgs WHERE rowid = ?", (rid,)).fetchone()
+                row = db.execute(
+                    "SELECT sid, role, text FROM msgs WHERE rowid = ?", (rid,)
+                ).fetchone()
                 if not row or row[0] not in titles:
                     continue
                 sid, role, text = row
                 if "words" in how[rid]:
-                    snip = db.execute("SELECT snippet(msgs, 2, '', '', ' ... ', 24) FROM msgs "
-                                      "WHERE msgs MATCH ? AND rowid = ?", (match, rid)).fetchone()
+                    snip = db.execute(
+                        "SELECT snippet(msgs, 2, '', '', ' ... ', 24) FROM msgs "
+                        "WHERE msgs MATCH ? AND rowid = ?",
+                        (match, rid),
+                    ).fetchone()
                     snippet = snip[0] if snip else text[:200]
                 else:
                     snippet = text[:200]
-                hits.append({"id": sid, "title": titles.get(sid, "Conversation"), "role": role,
-                             "snippet": " ".join(snippet.split()),
-                             "match": "words and meaning" if len(how[rid]) == 2 else next(iter(how[rid]))})
+                hits.append(
+                    {
+                        "id": sid,
+                        "title": titles.get(sid, "Conversation"),
+                        "role": role,
+                        "snippet": " ".join(snippet.split()),
+                        "match": "words and meaning"
+                        if len(how[rid]) == 2
+                        else next(iter(how[rid])),
+                    }
+                )
             return hits
         except sqlite3.Error as exc:
             logger.debug("Full-text search failed (%s); scanning instead", exc)
@@ -803,8 +928,10 @@ def search(root: Path, query: str, limit: int = 10, exclude: str = "", embed=Non
             low = text.lower()
             if all(w in low for w in words):
                 at = low.find(words[0])
-                snippet = " ".join(text[max(0, at - 80): at + 160].split())
-                hits.append({"id": sid, "title": title, "role": m["role"], "snippet": snippet})
+                snippet = " ".join(text[max(0, at - 80) : at + 160].split())
+                hits.append(
+                    {"id": sid, "title": title, "role": m["role"], "snippet": snippet}
+                )
                 if len(hits) >= limit:
                     return hits
     return hits

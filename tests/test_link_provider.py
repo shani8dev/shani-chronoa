@@ -137,3 +137,29 @@ def test_failed_provider_does_not_poison_later_call(tmp_path, monkeypatch):
     assert link.module("moyoung").__name__ == "shani_link.moyoung"
     assert link.module("moyoung").__name__ == "shani_link.moyoung"
     assert link._cached_provider == ("shani_link", str(link_root))
+
+
+def test_provider_probe_is_cached_until_the_environment_changes(tmp_path, monkeypatch):
+    phone_root = _package(tmp_path, "phone")
+    monkeypatch.setenv("SHANI_PHONE_PATH", str(phone_root))
+    real_isdir = link.os.path.isdir
+    probes = []
+
+    def counting_isdir(path):
+        probes.append(path)
+        return real_isdir(path)
+
+    monkeypatch.setattr(link.os.path, "isdir", counting_isdir)
+
+    first = link._providers()
+    assert probes
+    probes.clear()
+    assert link._providers() == first
+    assert probes == [], "the same environment must not re-probe the filesystem"
+
+    monkeypatch.setenv("SHANI_LINK_PROVIDER", "shani_link")
+    assert all(package == "shani_link" for package, _path in link._providers())
+    assert probes, "an environment change must re-probe"
+
+    link._reset()
+    assert link._provider_cache == {}

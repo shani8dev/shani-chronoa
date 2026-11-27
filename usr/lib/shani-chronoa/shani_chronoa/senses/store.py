@@ -55,9 +55,7 @@ from shani_chronoa.senses import CONFIDENCE_UNSTATED, Percept
 
 logger = logging.getLogger(__name__)
 
-PERCEPT_DIR = Path(
-    files.data_home() / "shani-chronoa" / "percepts"
-)
+PERCEPT_DIR = Path(files.data_home() / "shani-chronoa" / "percepts")
 DURABLE_FILE = PERCEPT_DIR / "memory.jsonl"
 
 #: What the app is holding *right now*, published so a separate process can
@@ -178,11 +176,14 @@ def _light_memory(percept: "Percept") -> None:
     try:
         from shani_chronoa import body
 
-        activity = body.body.use("memory", "noting",
-                                 f"{percept.sense}: {percept.text}"[:80],
-                                 deadline=body.DEFAULT_DEADLINE["memory"])
+        activity = body.body.use(
+            "memory",
+            "noting",
+            f"{percept.sense}: {percept.text}"[:80],
+            deadline=body.DEFAULT_DEADLINE["memory"],
+        )
         body.body.done(activity)
-    except Exception:                                   # noqa: BLE001
+    except Exception:  # noqa: BLE001
         pass
 
 
@@ -215,7 +216,9 @@ class PerceptStore:
         self._transient: "deque[Percept]" = deque(maxlen=transient_capacity)
         self._durable: list[Percept] = []
         self._durable_capacity = (
-            _DURABLE_CAPACITY if durable_capacity is None else max(1, int(durable_capacity))
+            _DURABLE_CAPACITY
+            if durable_capacity is None
+            else max(1, int(durable_capacity))
         )
         self._loaded = False
 
@@ -255,7 +258,9 @@ class PerceptStore:
             # A store that cannot read its own file degrades to "no durable
             # percepts" rather than breaking startup - the same reasoning
             # as the skills loader skipping a broken user module.
-            logger.error("Failed to read durable percepts from %s: %s", self._durable_path, e)
+            logger.error(
+                "Failed to read durable percepts from %s: %s", self._durable_path, e
+            )
 
     def add(self, percept: Percept) -> None:
         """Record a percept in the tier its lifetime dictates.
@@ -312,8 +317,9 @@ class PerceptStore:
                 files.restrict_file(tmp)
                 os.replace(tmp, self._live_path)
         except OSError as e:
-            logger.debug("Could not publish the live percept view to %s: %s",
-                         self._live_path, e)
+            logger.debug(
+                "Could not publish the live percept view to %s: %s", self._live_path, e
+            )
 
     def extend(self, percepts: Iterable[Percept]) -> None:
         for percept in percepts:
@@ -341,9 +347,13 @@ class PerceptStore:
                 if not existed:
                     files.restrict_file(self._durable_path)
             except OSError as e:
-                logger.error("Failed to persist durable percept to %s: %s", self._durable_path, e)
+                logger.error(
+                    "Failed to persist durable percept to %s: %s", self._durable_path, e
+                )
 
-    def mark_accessed(self, percepts: Iterable[Percept], now: Optional[float] = None) -> int:
+    def mark_accessed(
+        self, percepts: Iterable[Percept], now: Optional[float] = None
+    ) -> int:
         """Record that these durable facts were actually used; return how many.
 
         Called by `memory.recall_report()` on the facts it is about to return,
@@ -394,7 +404,9 @@ class PerceptStore:
                     handle.write(json.dumps(_as_dict(percept)) + "\n")
             files.restrict_file(self._durable_path)
         except OSError as e:
-            logger.error("Failed to rewrite durable percepts to %s: %s", self._durable_path, e)
+            logger.error(
+                "Failed to rewrite durable percepts to %s: %s", self._durable_path, e
+            )
 
     def _evict_to_capacity(self) -> int:
         """Drop least-recently-recalled durable facts until the tier fits.
@@ -450,11 +462,17 @@ class PerceptStore:
             self._transient = deque(kept, maxlen=self._transient.maxlen)
             return live + list(self._transient)
 
-    def durable(self) -> list[Percept]:
-        """The persistent tier, oldest first."""
+    def durable(self, limit: Optional[int] = None) -> list[Percept]:
+        """The persistent tier, oldest first, optionally only its first `limit`.
+
+        The full read is still here for recall and history. A panel that draws a
+        handful of rows asks for a handful, so the copy it gets is that small.
+        """
         with _LOCK:
             self._ensure_loaded()
-            return list(self._durable)
+            if limit is None:
+                return list(self._durable)
+            return list(self._durable[: max(0, int(limit))])
 
     def clear_transient(self) -> None:
         """Drop every transient percept. Durable memories are untouched."""
