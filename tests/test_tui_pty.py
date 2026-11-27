@@ -48,6 +48,12 @@ class Terminal:
         env.pop("WAYLAND_DISPLAY", None)
         env.pop("DISPLAY", None)
         self.master, slave = pty.openpty()
+        # Full-screen mode needs a real window size; a bare pty reports 0x0.
+        import fcntl
+        import struct
+        import termios
+
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
         self.proc = subprocess.Popen(
             [sys.executable, str(LAUNCHER), *args],
             stdin=subprocess.PIPE if stdin_pipe else slave,
@@ -96,7 +102,7 @@ class Terminal:
 
 
 def test_interactive_turn_tool_approval_and_slash_command(bus):
-    term = Terminal(bus, [])
+    term = Terminal(bus, ["--simple"])
     try:
         term.until("Chronoa")
         term.write("hello\n")
@@ -118,7 +124,7 @@ def test_interactive_turn_tool_approval_and_slash_command(bus):
 
 
 def test_interactive_arrow_keys_pick_the_second_label(bus):
-    term = Terminal(bus, [])
+    term = Terminal(bus, ["--simple"])
     try:
         term.until("Chronoa")
         term.write("hello\n")
@@ -132,7 +138,7 @@ def test_interactive_arrow_keys_pick_the_second_label(bus):
 
 
 def test_interactive_ctrl_c_cancels_the_turn(bus):
-    term = Terminal(bus, [])
+    term = Terminal(bus, ["--simple"])
     try:
         term.until("Chronoa")
         term.write("slow\n")

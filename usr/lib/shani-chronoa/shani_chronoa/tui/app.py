@@ -282,3 +282,165 @@ class Interactive:
         if result["error"]:
             print(f"error: {result['error']}", file=self.out)
         return result
+
+
+class FullScreen(Interactive):
+    """The same prompt loop in an alternate screen, like a coding-agent TUI.
+
+    It inherits every command, approval and turn decision from `Interactive`.
+    Only the terminal layout and key reading change: the transcript is a
+    scrollback buffer, the input line is edited in raw mode, and a header
+    names the model that actually answers.
+    """
+
+    def __init__(
+        self, client, renderer=None, history: Optional[str] = None, stream=None
+    ):
+        from shani_chronoa.tui import fullscreen
+        from shani_chronoa.tui.render import Renderer
+
+        self.transcript = fullscreen.Transcript(self)
+        out = self.transcript
+        super().__init__(
+            client,
+            renderer or Renderer(stream=out, color=False),
+            history=history,
+            stream=out,
+        )
+        self.out = out
+        self.renderer._stream = out
+        self.screen = fullscreen.Screen(stream=stream or sys.stdout)
+        if not self.screen.isatty:
+            # A pipe is not a screen: fall back to the plain prompt rather
+            # than emitting escape codes into a log.
+            self.out = stream or sys.stdout
+            self.renderer._stream = self.out
+        self.editor = fullscreen.LineEditor(self._history_lines())
+        self.scroll = 0
+        self.dirty = True
+        self.session = None
+        self.model = "engine unavailable"
+        self.state = "ready"
+
+    def _history_lines(self) -> list:
+        path = history_path()
+        if not path or not os.path.isfile(path):
+            return []
+        try:
+            with open(path, encoding="utf-8") as handle:
+                return [line.rstrip("\n") for line in handle][-200:]
+        except OSError:
+            return []
+
+    def _load_header(self) -> None:
+        """The model name arrives in the background; startup never waits on it."""
+
+        def fetch():
+            try:
+                status = self.client.inventory("status", timeout_ms=2000)
+                items = status.get("items") if isinstance(status, dict) else {}
+                if isinstance(items, dict) and items.get("llm_model"):
+                    self.model = str(items["llm_model"])
+                    self.dirty = True
+            except Exception:  # noqa: BLE001 - a header must never break a turn
+                self.model = "engine busy"
+
+        import threading
+
+        threading.Thread(target=fetch, daemon=True, name="chronoa-header").start()
+
+    def _respond(self, event: dict) -> str:
+        # The chooser's own "choice [1]" line is surfaced by `Transcript`;
+        # no second copy of the options is drawn here.
+        return super()._respond(event)
+
+    def ask(self, text: str, options: Optional[dict] = None) -> dict:
+        self.state = "thinking"
+
+        def on_event(event):
+            self.renderer.render_event(event)
+            if self.screen.isatty:
+                self.draw()  # streaming: repaint as each event lands
+
+        self.session = Session(self.client, on_event, self._respond)
+        try:
+            result = self.session.run_turn(text, options)
+        except KeyboardInterrupt:
+            turn = self.session.current_turn
+            if turn and self.client.cancel(turn):
+                print("\nTurn cancelled.", file=self.out)
+            else:
+                print(
+                    "\nInterrupted. This engine has no way to stop that turn.",
+                    file=self.out,
+                )
+            result = {"reply": "", "error": "interrupted", "turn": turn, "events": []}
+        finally:
+            self.state = "ready"
+            self.session = None
+        return result
+
+    def draw(self) -> None:
+        if not self.screen.isatty:
+            return
+        self.screen.draw(
+            [
+                f" Chronoa · {self.model} · {self.state}",
+                " /help commands · @file attach · /quit exit",
+            ],
+            self.transcript.lines,
+            self.editor.value,
+            self.editor.cursor,
+            self.scroll,
+        )
+        self.scroll = 0
+        self.dirty = False
+
+    def run(self) -> int:
+        if not self.screen.isatty:
+            return super().run()
+        self._load_header()
+        self.transcript.lines.append(BANNER)
+        self.screen.enter()
+        try:
+            while not self.stop:
+                if self.dirty:
+                    self.draw()
+                action = self.screen.read_key()
+                if action == "eof":
+                    break
+                if action == "enter":
+                    line = self.editor.take()
+                    self.scroll = 0
+                    if line.strip():
+                        self.transcript.lines.append(PROMPT_TEXT + line)
+                        self.handle(line)
+                elif action == "interrupt":
+                    turn = self.session.current_turn if self.session else ""
+                    if turn and self.client.cancel(turn):
+                        self.transcript.lines.append("Turn cancelled.")
+                    else:
+                        self.editor.value, self.editor.cursor = "", 0
+                elif action == "backspace":
+                    self.editor.backspace()
+                elif action.startswith("text:"):
+                    self.editor.insert(action[5:])
+                elif action in ("left", "right", "home", "end"):
+                    self.editor.move(action)
+                elif action in ("up", "down"):
+                    self.editor.recall(action)
+                elif action == "tab":
+                    matches = self.editor.complete()
+                    if len(matches) > 1:
+                        self.transcript.lines.append("  " + "  ".join(matches[:12]))
+                elif action == "pageup":
+                    self.scroll = min(len(self.transcript.lines), self.scroll + 10)
+                elif action == "pagedown":
+                    self.scroll = max(0, self.scroll - 10)
+                self.dirty = True
+        finally:
+            self.screen.exit()
+        return 0
+
+
+PROMPT_TEXT = "chronoa> "

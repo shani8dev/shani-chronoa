@@ -56,6 +56,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="read a setting value or email details from stdin",
     )
     parser.add_argument(
+        "--simple",
+        action="store_true",
+        help="use the line-by-line prompt instead of the full-screen view",
+    )
+    parser.add_argument(
         "--no-color", action="store_true", help="never emit ANSI colour"
     )
 
@@ -209,7 +214,11 @@ def main(argv=None) -> int:
             return run_printed(client, args.question, jsonl=args.json, allow=args.allow)
         if args.command:
             return run_args(client, args)
-        return Interactive(client, Renderer(stream=sys.stdout)).run()
+        from shani_chronoa.tui.app import FullScreen
+
+        if args.simple:
+            return Interactive(client, Renderer(stream=sys.stdout)).run()
+        return FullScreen(client, stream=sys.stdout).run()
     except AgentError as exc:
         print(str(exc), file=sys.stderr)
         return 2

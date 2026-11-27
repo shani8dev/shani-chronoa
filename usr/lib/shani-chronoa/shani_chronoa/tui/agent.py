@@ -150,7 +150,9 @@ class AgentClient:
             return
         raise EngineUnavailable(START_HINT)
 
-    def call(self, method: str, signature: str, *args, reply: str):
+    def call(
+        self, method: str, signature: str, *args, reply: str, timeout_ms: int = 30000
+    ):
         """One method call; GLib.Error becomes AgentError with a stable message."""
         self.connect()
         try:
@@ -162,7 +164,7 @@ class AgentClient:
                 GLib.Variant(signature, tuple(args)),
                 GLib.VariantType(reply),
                 Gio.DBusCallFlags.NONE,
-                30000,
+                timeout_ms,
                 None,
             )
         except GLib.Error as exc:
@@ -185,8 +187,10 @@ class AgentClient:
     def cancel(self, turn_id: str) -> bool:
         return bool(self.call("Cancel", "(s)", str(turn_id), reply="(b)")[0])
 
-    def inventory(self, section: str) -> dict:
-        raw = self.call("Inventory", "(s)", section, reply="(s)")[0]
+    def inventory(self, section: str, *, timeout_ms: int = 30000) -> dict:
+        raw = self.call(
+            "Inventory", "(s)", section, reply="(s)", timeout_ms=timeout_ms
+        )[0]
         try:
             return json.loads(raw)
         except (TypeError, ValueError) as exc:
