@@ -60,6 +60,7 @@ that the URL it records is the last one it actually fetched.
 import ipaddress
 import json
 import logging
+import mmap
 import os
 import time
 from dataclasses import asdict, dataclass
@@ -594,28 +595,58 @@ def record(
     return event
 
 
+def _tail_events(cap: int) -> list:
+    """The last `cap` valid records, read backwards from the end of the log.
+
+    Walking backwards stops as soon as enough valid events are found, so a
+    panel asking for eight rows does not parse a thousand-event log. Invalid
+    trailing lines are skipped rather than counted, and scanning continues
+    past them - the limit counts events, not lines.
+    """
+    try:
+        handle = _egress_log().open("rb")
+    except OSError:
+        return []
+    with handle:
+        if not os.fstat(handle.fileno()).st_size:
+            return []
+        with mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as mapped:
+            end = len(mapped)
+            if mapped[end - 1 : end] == b"\n":
+                end -= 1
+            found = []
+            while end > 0 and len(found) < cap:
+                newline = mapped.rfind(b"\n", 0, end)
+                start = newline + 1 if newline >= 0 else 0
+                raw = mapped[start:end]
+                end = newline if newline >= 0 else 0
+                if not raw.strip():
+                    continue
+                try:
+                    found.append(json.loads(raw.decode("utf-8", "replace")))
+                except ValueError:
+                    continue
+    found.reverse()
+    return found
+
+
 def read_events(limit: Optional[int] = None) -> list:
     """Read recorded events, newest last. A missing log is an empty one."""
-    from collections import deque
-
+    cap = int(limit) if limit and int(limit) > 0 else None
+    if cap is not None:
+        return _tail_events(cap)
     try:
         handle = _egress_log().open(encoding="utf-8")
     except OSError:
         return []
-    # A bounded receiver keeps only the last N *valid* records, so a panel that
-    # asks for eight rows never holds a thousand-event log in memory. Parsing
-    # still visits every line: malicious trailing content must not displace a
-    # real event that came before it.
-    cap = int(limit) if limit and int(limit) > 0 else None
-    out = deque(maxlen=cap) if cap else []
+    out = []
     with handle:
         for line in handle:
             try:
-                event = json.loads(line)
+                out.append(json.loads(line))
             except json.JSONDecodeError:
                 continue
-            out.append(event)
-    return list(out)
+    return out
 
 
 def summary() -> dict:

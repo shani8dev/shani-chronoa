@@ -78,6 +78,29 @@ def test_egress_bound_keeps_the_last_valid_events(tmp_path, monkeypatch):
     assert len(egress.read_events()) == 10
 
 
+def test_egress_tail_handles_no_final_newline_and_bad_middle_lines(
+    tmp_path, monkeypatch
+):
+    log = tmp_path / "egress-no-newline.jsonl"
+    with log.open("w") as handle:
+        handle.write(json.dumps({"n": 0}) + "\n")
+        handle.write("bad middle line\n")
+        for i in range(1, 6):
+            suffix = "\n" if i < 5 else ""
+            handle.write(json.dumps({"n": i}) + suffix)
+    monkeypatch.setattr(egress, "EGRESS_LOG", log)
+    assert [e["n"] for e in egress.read_events(limit=2)] == [4, 5]
+    assert [e["n"] for e in egress.read_events(limit=99)] == list(range(6))
+    assert egress.read_events(limit=1) == [{"n": 5}]
+
+
+def test_egress_tail_returns_all_events_in_file_order(tmp_path, monkeypatch):
+    log = tmp_path / "egress-empty.jsonl"
+    log.write_text("")
+    monkeypatch.setattr(egress, "EGRESS_LOG", log)
+    assert egress.read_events(limit=5) == []
+
+
 def test_percept_store_durable_limit_copies_only_that_slice(tmp_path):
     from shani_chronoa.senses import Percept
 

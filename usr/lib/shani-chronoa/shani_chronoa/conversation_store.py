@@ -629,15 +629,17 @@ def list_sessions(root: Path, limit: Optional[int] = None) -> List[dict]:
     only the selected transcripts are read. A panel asking for ten rows used to
     pay for parsing every message in every saved conversation.
     """
+    import heapq
+
     root = Path(root)
     data = index(root)
-    entries = sorted(
-        data["sessions"].items(),
-        key=lambda item: item[1].get("updated", 0),
-        reverse=True,
-    )
-    if limit is not None:
-        entries = entries[: max(0, int(limit))]
+    key = lambda item: item[1].get("updated", 0)
+    if limit is None:
+        entries = sorted(data["sessions"].items(), key=key, reverse=True)
+    else:
+        # nlargest is O(sessions · log limit), not O(sessions · log sessions):
+        # a panel with ten rows does not sort a thousand-session index.
+        entries = heapq.nlargest(max(0, int(limit)), data["sessions"].items(), key=key)
     out = []
     for sid, meta in entries:
         messages = load(root / f"{sid}.jsonl")
